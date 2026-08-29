@@ -80,7 +80,7 @@ verilebilir); verilmezse `XDG_MUSIC_DIR`, sonra `~/Müzik` ve `~/Music` denenir.
 export TUNE_MUSIC_DIRS=~/Müzik
 
 tune provider list          # sağlayıcılar ve yetenekleri
-tune provider scan          # dizinleri tara, ne bulduğunu say
+tune provider scan          # dizinleri tara (bir kez; indeks kalıcı)
 tune provider test local    # ayakta mı, kaç parça görüyor
 
 tune play "radiohead"              # ilk eşleşmeyi çal
@@ -88,6 +88,11 @@ tune play "radiohead" --all        # eşleşenlerin hepsini kuyruğa al
 tune play "radiohead" --all --shuffle
 tune play "radiohead" --dry-run    # çalmadan kuyruğu göster
 ```
+
+Tarama indeksi kalıcıdır: `scan` bir kez çalışır, `play` diski taramaz.
+Sonraki taramalar artımlıdır — dosyanın damgası değişmediyse etiketleri
+yeniden okunmaz. Diskten sildiğin dosya katalogdan düşer ama **dinleme
+geçmişi kalır**; geçmiş ayrı bir tabloda ve hiç silinmiyor.
 
 Çalınan her parça bir `listen` kaydı üretir ve `stats` çıktısına girer —
 import edilmiş geçmişle aynı tabloda.

@@ -302,6 +302,9 @@ pub fn scan(report: &ScanReport) -> String {
     let _ = writeln!(out, "  görülen dosya : {}", s.files_seen);
     let _ = writeln!(out, "  ses dosyası   : {}", s.audio_files);
     let _ = writeln!(out, "  indekslenen   : {}", s.indexed);
+    if s.unchanged > 0 {
+        let _ = writeln!(out, "  değişmemiş    : {} (yeniden okunmadı)", s.unchanged);
+    }
     if s.tag_fallback > 0 {
         let _ = writeln!(out, "  etiketsiz     : {} (dosya adından)", s.tag_fallback);
     }
@@ -311,6 +314,13 @@ pub fn scan(report: &ScanReport) -> String {
     if s.unreadable_dirs > 0 {
         let _ = writeln!(out, "  atlanan dizin : {}", s.unreadable_dirs);
     }
+
+    let w = &report.write;
+    let _ = writeln!(
+        out,
+        "katalog: yeni {} · güncellenen {} · düşen {}",
+        w.inserted, w.updated, w.removed
+    );
     out
 }
 

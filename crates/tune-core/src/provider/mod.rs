@@ -194,17 +194,46 @@ pub trait Provider: Send + Sync {
         id: &'a ProviderTrackId,
     ) -> ProviderFuture<'a, Option<AudioSource>>;
 
-    /// Kataloğunu yeniden tarar/tazeler.
+    /// Kataloğunu tarar ve **kalıcı depoya yazılmaya hazır** satırlar üretir.
     ///
-    /// Varsayılan uygulama hiçbir şey yapmaz ve `None` döner: çoğu
-    /// sağlayıcının (uzak API, kumanda) taranacak yerel bir kataloğu yoktur.
-    /// Tarama yapabilen sağlayıcı bir [`ScanSummary`] döndürür.
+    /// `known` daha önce görülmüş `referans → damga` eşlemesi. Sağlayıcı
+    /// damgası değişmemiş öğelerin üstverisini yeniden okumaz ve
+    /// [`ScannedItem::track`] alanını `None` bırakır — çağıran o satırı
+    /// katalogda olduğu gibi korur. Büyük kütüphanede taramayı ucuzlatan şey
+    /// budur.
+    ///
+    /// Varsayılan uygulama `None` döner: çoğu sağlayıcının (uzak API,
+    /// kumanda) taranacak yerel bir kataloğu yoktur.
     ///
     /// Downcast yerine trait metodu: `Arc<dyn Provider>` üzerinden çağrılır
     /// ve eklentiler (Faz 2) bunu kendi yollarıyla uygulayabilir.
-    fn rescan<'a>(&'a self) -> ProviderFuture<'a, Option<ScanSummary>> {
+    fn scan_catalog<'a>(
+        &'a self,
+        known: &'a std::collections::HashMap<String, i64>,
+    ) -> ProviderFuture<'a, Option<CatalogScan>> {
+        let _ = known;
         Box::pin(std::future::ready(Ok(None)))
     }
+}
+
+/// Bir taramanın sonucu: satırlar + ne olduğunun özeti.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogScan {
+    pub tracks: Vec<ScannedItem>,
+    pub summary: ScanSummary,
+}
+
+/// Taramada görülen tek bir öğe.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScannedItem {
+    /// Sağlayıcının bu öğe için kimliği.
+    pub id: ProviderTrackId,
+    /// Değişiklik damgası (yerel dosyada mtime). Yoksa her tarama yeniden okur.
+    pub mtime_ms: Option<i64>,
+    /// Okunan üstveri. `None` ise öğe değişmemiş — katalogdaki hâli korunur.
+    pub track: Option<TrackRef>,
+    /// Üstveri etiketlerden mi geldi (dosya adından/tahminden değil).
+    pub from_tags: bool,
 }
 
 pub use local::ScanSummary;

@@ -246,10 +246,10 @@ async fn run(cli: &Cli) -> tune_core::Result<String> {
             shuffle,
             dry_run,
         } => {
-            // Tarama indeksi bellekte: aynı süreçte önce taramak gerekiyor.
-            // (Kalıcı indeks Faz 1.2'nin devamı — SQLite'a yazılacak.)
+            // Tarama **yapılmıyor**: indeks kalıcı (SQLite `provider_tracks`).
+            // Kullanıcı `tune provider scan` ile bir kez tarar; `play` yalnızca
+            // arar. Katalog boşsa hata kullanıcıyı taramaya yönlendirir.
             let registry = provider::default_registry(session.config())?;
-            session.scan_providers(&registry).await?;
 
             let options = session::PlayOptions {
                 query,

@@ -402,14 +402,30 @@ verebilsin diye.
 Dizin tarama, etiket okuma, izleme (watch), kütüphane indeksleme, SQLite FTS ile arama.
 
 **Yapıldı:** özyinelemeli dizin tarama, symphonia ile etiket okuma
-(sanatçı/başlık/albüm/ISRC/süre), etiket yoksa dosya adından türetme,
-bellek içi indeks ve arama. Tarama K9'a uygun özet döndürüyor:
-`files_seen / audio_files / indexed / tag_fallback / failed / unreadable_dirs`.
-Bozuk dosya taramayı düşürmüyor ama **sayılıyor**; okunamayan alt dizin de öyle.
+(sanatçı/başlık/albüm/ISRC/süre), etiket yoksa dosya adından türetme.
+Tarama K9'a uygun özet döndürüyor: `files_seen / audio_files / indexed /
+tag_fallback / failed / unreadable_dirs / unchanged`. Bozuk dosya taramayı
+düşürmüyor ama **sayılıyor**; okunamayan alt dizin de öyle.
 
-**Kalan:** (a) indeks bellekte — süreç kapanınca kayboluyor, SQLite'a yazılmalı;
-(b) dizin izleme (watch) yok; (c) arama FTS değil doğrusal tarama.
-Bunlar Faz 1'in devamı.
+**İndeks artık kalıcı** (şema v2, `provider_tracks` + FTS5). `tune play`
+tarama yapmıyor; kullanıcı bir kez `tune provider scan` der, sonraki
+çalmalar katalogdan okur. Arama da doğrusal değil FTS.
+
+Üç tasarım kararı:
+- **Katalog `tracks`/`listens`'tan ayrı tablo.** `tracks` "ne dinledin"
+  (ham olaylardan türer, asla silinmez), `provider_tracks` "ne çalabilirsin"
+  (kaynağın aynası, dosya silinince satır da gider). Birleştirmek, diskten
+  sildiğin bir dosyanın **geçmişini** de silmek olurdu — testle kilitli
+  (`dropping_a_file_from_the_catalog_never_touches_its_history`).
+- **Artımlı tarama mtime damgasıyla.** Damgası değişmemiş dosyanın etiketi
+  yeniden okunmuyor; taramanın pahalı kısmı buydu. Fixture dizininde ikinci
+  tarama 4/4 dosyayı `unchanged` sayıyor.
+- **`resolve_source` kök kontrolü `canonicalize` ile.** Eskiden bellek
+  indeksine bakılıyordu; indeks katalogda olduğu için artık yol, taranan
+  köklerin altında mı diye sınanıyor. `<kök>/../../etc/passwd` reddediliyor.
+
+**Kalan:** dizin izleme (watch) yok — değişiklikler `provider scan` ile
+alınıyor.
 
 ### 1.3 Subsonic / Jellyfin istemcisi — SIRADAKİ
 Subsonic API yaygın standart. Bu, ileride kendi sunucunun Subsonic uyumlu
@@ -476,17 +492,17 @@ hazır.
 
 ### 1.8 Faz 1 durum — çalan bir player var
 
-**141 test**, clippy ve fmt temiz. `tune play` uçtan uca çalışıyor.
+**154 test**, clippy ve fmt temiz. `tune play` uçtan uca çalışıyor.
 
 | Bölüm | Durum |
 |---|---|
 | 1.1 Provider trait | TAMAM |
-| 1.2 Yerel sağlayıcı | Kısmen — indeks bellekte, watch/FTS yok |
-| 1.3 Subsonic/Jellyfin | Açık — sıradaki |
+| 1.2 Yerel sağlayıcı | Kısmen — indeks kalıcı; watch yok |
+| 1.3 Subsonic/Jellyfin | Açık |
 | 1.4 Ses hattı | TAMAM |
 | 1.5 Kuyruk | Kısmen — gapless yok |
 | 1.6 Scrobbling | TAMAM |
-| 1.7 TUI | Açık |
+| 1.7 TUI | Açık — sıradaki |
 
 **Test fixture'ları üretildi (PLAN'ın Faz 1 ön koşulu):** `fixtures/audio/`
 altında `ffmpeg` ile üretilmiş sinüs tonları — telifsiz, toplam 84 KB.
@@ -497,9 +513,8 @@ kısmen aşıldı: ses hattı gerçek dosyalarla, gerçek aygıtta sınanıyor.
 **Ses aygıtı olmayan ortamda testler kendini atlıyor** (CI için). Atlama
 sessiz değil: nedenini `stderr`'e yazıyor.
 
-**Sıradaki iş** üç adaydan biri: (a) 1.2'nin kalanı — indeksi SQLite'a yazmak,
-her `play` çağrısında yeniden taramayı bitirmek; (b) 1.7 TUI; (c) 1.3 Subsonic.
-**Sor.**
+**Sıradaki iş: 1.7 TUI.** Çekirdek hazır — `PlaybackAnchor` ilerleme çubuğunu,
+`Queue` kuyruk görünümünü besler. Ondan sonra 1.3 (Subsonic) ya da gapless.
 
 ---
 

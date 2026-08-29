@@ -237,10 +237,111 @@ fn playing_a_local_file_records_a_listen_in_the_same_table_as_imports() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+/// İndeks kalıcı: `play` tarama yapmaz, bir kez taranmış katalogdan okur.
+#[test]
+fn the_catalog_persists_so_play_does_not_rescan() {
+    let dir = temp_dir("katalog");
+    let music = audio_fixtures();
+
+    // Bir kez tara.
+    let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["provider", "scan", "--json"]);
+    assert!(ok, "{stderr}");
+    let first: serde_json::Value = serde_json::from_str(&stdout).expect("JSON");
+    assert!(
+        first["write"]["inserted"].as_u64().unwrap_or(0) >= 3,
+        "ilk tarama katalog satırı yazmalı: {}",
+        first["write"]
+    );
+
+    // İkinci tarama: damgalar değişmedi, hiçbir dosya yeniden okunmamalı.
+    let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["provider", "scan", "--json"]);
+    assert!(ok, "{stderr}");
+    let second: serde_json::Value = serde_json::from_str(&stdout).expect("JSON");
+    assert_eq!(
+        second["write"]["inserted"],
+        serde_json::json!(0),
+        "değişmemiş dosyalar yeniden yazılmamalı"
+    );
+    assert!(
+        second["summary"]["unchanged"].as_u64().unwrap_or(0) >= 3,
+        "damga eşleşmesi sayılmalı: {}",
+        second["summary"]
+    );
+
+    // Asıl sınav: müzik dizini **verilmeden** arama çalışmalı.
+    // Katalog diskte olduğu için `play` taramaya ihtiyaç duymuyor.
+    let (stdout, stderr, ok) = run(&dir, &["play", "sinüs", "--dry-run", "--json"]);
+    assert!(ok, "katalog kalıcı olmalıydı: {stderr}");
+    let value: serde_json::Value = serde_json::from_str(&stdout).expect("JSON");
+    assert_eq!(
+        value["queued"].as_array().map(Vec::len),
+        Some(1),
+        "taranmış katalogdan bulunmalı"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Diskten silinen dosya katalogdan düşer ama **geçmişi** silinmez.
+#[test]
+fn a_deleted_file_leaves_the_catalog_but_keeps_its_history() {
+    let dir = temp_dir("silinen");
+    let music = temp_dir("silinen-muzik");
+    std::fs::copy(
+        audio_fixtures().join("etiketli.flac"),
+        music.join("etiketli.flac"),
+    )
+    .expect("fixture kopyalanmalı");
+
+    let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["provider", "scan"]);
+    assert!(ok, "{stderr}");
+
+    // Çal ki geçmişi olsun.
+    let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["play", "sinüs"]);
+    if !ok && stderr.contains("PLAYBACK_OUTPUT") {
+        eprintln!("ses çıkışı yok — test atlanıyor");
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&music).ok();
+        return;
+    }
+    assert!(ok, "{stderr}");
+
+    // Dosyayı sil ve yeniden tara.
+    std::fs::remove_file(music.join("etiketli.flac")).expect("silinmeli");
+    let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["provider", "scan", "--json"]);
+    assert!(ok, "{stderr}");
+    let value: serde_json::Value = serde_json::from_str(&stdout).expect("JSON");
+    assert_eq!(
+        value["write"]["removed"],
+        serde_json::json!(1),
+        "silinen dosya katalogdan düşmeli"
+    );
+
+    // Katalogda yok...
+    let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["play", "sinüs", "--dry-run"]);
+    assert!(!ok, "silinen dosya çalınabilir görünmemeli");
+    assert!(stderr.contains("PLAYBACK_RESOLVE"), "{stderr}");
+
+    // ...ama geçmiş duruyor. Diskten sildiğin dosya geçmişini silmez.
+    let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["stats"]);
+    assert!(ok, "{stderr}");
+    assert!(
+        stdout.contains("Test Sanatçı"),
+        "dinleme geçmişi korunmalı:\n{stdout}"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+    std::fs::remove_dir_all(&music).ok();
+}
+
 #[test]
 fn dry_run_queues_without_playing() {
     let dir = temp_dir("dryrun");
     let music = audio_fixtures();
+
+    // Katalog kalıcı; `play` taramıyor, önce bir kez taranmalı.
+    let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["provider", "scan"]);
+    assert!(ok, "{stderr}");
 
     let (stdout, stderr, ok) = run_with_music(
         &dir,

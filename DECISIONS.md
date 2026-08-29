@@ -407,3 +407,36 @@ gerçek dosyalarla, gerçek aygıtta sınanıyor.
 İki güvenlik kararı: `resolve_source` **indekste olmayan yolu reddediyor**
 (rastgele dosya okuma yüzeyi değil), indekslendikten sonra silinmiş dosya
 ise sessiz `None` değil açık hata veriyor.
+
+---
+
+## D-018 — Kalıcı sağlayıcı kataloğu (şema v2)
+**Tarih:** 2026-08-30
+**Soru:** Yerel indeks bellekteydi ve her `tune play` çağrısı diski baştan
+tarıyordu. Nereye yazılacak?
+**Karar:** SQLite'ta **ayrı bir tablo**: `provider_tracks` + FTS5. Şema v2
+olarak eklendi; v1 tabloları değişmedi.
+**Gerekçe (asıl karar bu):** `tracks`/`listens` ile katalog **farklı ömürlere
+sahip**. `tracks` "ne dinledin" — ham olaylardan türer ve K'ya göre asla
+silinmez. `provider_tracks` "ne çalabilirsin" — kaynağın aynasıdır, dosya
+silinince satır da gitmeli. Tek tabloda birleştirmek, diskten sildiğin bir
+dosyanın geçmişini de silmek olurdu; bu, projenin en temel vaadini
+(geçmiş sana ait) çiğnerdi.
+**Sonuç:**
+- `CatalogStore` trait'i `ListenStore`'dan ayrı.
+- `tune play` **tarama yapmıyor**; `tune provider scan` bir kez çalışır.
+- Artımlı tarama: `mtime_ms` damgası değişmemiş dosyanın etiketi yeniden
+  okunmuyor. `ScanSummary.unchanged` bunu sayıyor (K9).
+- `replace_catalog` kaynakta olmayan satırları düşürüyor ve kaç satır
+  düştüğünü raporluyor.
+- Göç var olan kurulumları bozmuyor: `migrating_a_v1_database_keeps_its_listens`
+  testi v1 veritabanını kurup v2'ye yükseltiyor ve dinlemelerin durduğunu
+  doğruluyor.
+
+**Yan etki — güvenlik.** `LocalProvider::resolve_source` eskiden bellek
+indeksinde arıyordu; indeks artık sağlayıcının görmediği bir tabloda.
+Yerine **kök kontrolü** kondu: yol `canonicalize` edilip taranan köklerin
+altında mı diye bakılıyor. `<kök>/../../etc/passwd` reddediliyor
+(`resolve_source_rejects_traversal_out_of_the_roots`). Çözülemeyen yol
+(silinmiş dosya) da reddediliyor — şüpheliyi kabul etmek bir dosya okuma
+açığı olurdu; kullanıcıya durumu Session anlatıyor.

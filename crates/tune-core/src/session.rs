@@ -15,7 +15,10 @@ use crate::error::{Error, ErrorKind, Result};
 use crate::identity::{MetadataLookup, OfflineLookup, Resolution, ResolveSummary, Resolver};
 use crate::ids::ProviderId;
 use crate::import::{self, ImportSummary};
-use crate::library::{ListenStore, SearchHit, SqliteLibrary, WriteSummary};
+use crate::library::{
+    CatalogStore, CatalogTrack, CatalogWriteSummary, ListenStore, SearchHit, SqliteLibrary,
+    WriteSummary,
+};
 use crate::model::{Listen, PlayRule, TrackRef};
 use crate::playback::QueueItem;
 use crate::provider::{ProviderHealth, ProviderInfo, ProviderRegistry, ScanSummary};
@@ -96,6 +99,8 @@ pub struct ScanReport {
     /// Taranan kök dizinler. Boşsa kullanıcı `TUNE_MUSIC_DIRS` vermemiş.
     pub dirs: Vec<std::path::PathBuf>,
     pub summary: ScanSummary,
+    /// Kalıcı kataloğa ne yazıldığı: eklenen, güncellenen, düşen satırlar.
+    pub write: CatalogWriteSummary,
     pub diag: DiagReport,
 }
 
@@ -471,49 +476,95 @@ impl Session {
     /// # Errors
     /// Kök dizin okunamazsa. Tek tek dosya hataları hata değildir; özette
     /// sayılır (K9).
-    pub async fn scan_providers(&self, registry: &ProviderRegistry) -> Result<ScanReport> {
+    pub async fn scan_providers(&mut self, registry: &ProviderRegistry) -> Result<ScanReport> {
         let mut rec = Recorder::start(
             "provider scan".to_owned(),
             Some(self.config.data_dir().to_path_buf()),
         );
 
-        // Her sağlayıcıya sorulur; taranacak kataloğu olmayan `None` döner.
-        // Downcast yok — eklentiler (Faz 2) de kendi taramasını verebilsin.
-        let result = async {
-            let mut total = crate::provider::ScanSummary::default();
-            let mut scanned = 0usize;
-            for provider in registry.all() {
-                if let Some(summary) = provider.rescan().await? {
-                    scanned += 1;
-                    total.files_seen += summary.files_seen;
-                    total.audio_files += summary.audio_files;
-                    total.indexed += summary.indexed;
-                    total.tag_fallback += summary.tag_fallback;
-                    total.failed += summary.failed;
-                    total.unreadable_dirs += summary.unreadable_dirs;
-                }
-            }
-            if scanned == 0 {
-                return Err(Error::new(
-                    Stage::ProviderCall,
-                    ErrorKind::NotFound {
-                        what: "taranabilir kataloğu olan sağlayıcı".to_owned(),
-                    },
-                ));
-            }
-            Ok(total)
-        }
-        .await;
+        let result = Self::scan_inner(&mut self.library, registry).await;
 
-        if let Ok(summary) = &result {
+        if let Ok((summary, write)) = &result {
             summary.record_into(&mut rec);
+            let n = |v: usize| i64::try_from(v).unwrap_or(i64::MAX);
+            rec.set("catalog.inserted", n(write.inserted));
+            rec.set("catalog.updated", n(write.updated));
+            rec.set("catalog.removed", n(write.removed));
+            rec.set("catalog.unchanged", n(write.unchanged));
         }
         let dirs = self.config.music_dirs();
-        self.finish(rec, result, move |summary, diag| ScanReport {
+        self.finish(rec, result, move |(summary, write), diag| ScanReport {
             dirs,
             summary,
+            write,
             diag,
         })
+    }
+
+    /// Taramayı yürütür ve sonucu **kalıcı kataloğa** yazar.
+    ///
+    /// Kütüphane ödünç alma çakışmasını önlemek için `&mut SqliteLibrary`
+    /// ayrı parametre; `self` üzerinden çağrılamıyordu.
+    async fn scan_inner(
+        library: &mut SqliteLibrary,
+        registry: &ProviderRegistry,
+    ) -> Result<(ScanSummary, CatalogWriteSummary)> {
+        let mut total = ScanSummary::default();
+        let mut write_total = CatalogWriteSummary::default();
+        let mut scanned = 0usize;
+
+        for provider in registry.all() {
+            let info = provider.info();
+            // Damgalar: değişmemiş dosyanın etiketi yeniden okunmasın.
+            let known = library.catalog_stamps(&info.id)?;
+
+            let Some(scan) = provider.scan_catalog(&known).await? else {
+                continue;
+            };
+            scanned += 1;
+            total.files_seen += scan.summary.files_seen;
+            total.audio_files += scan.summary.audio_files;
+            total.indexed += scan.summary.indexed;
+            total.tag_fallback += scan.summary.tag_fallback;
+            total.failed += scan.summary.failed;
+            total.unreadable_dirs += scan.summary.unreadable_dirs;
+            total.unchanged += scan.summary.unchanged;
+
+            // Değişmemiş satırların üstverisi taramadan gelmez; katalogdaki
+            // hâlini koruyoruz. Aksi halde her tarama onları silerdi.
+            let mut rows = Vec::with_capacity(scan.tracks.len());
+            for entry in scan.tracks {
+                match entry.track {
+                    Some(track) => rows.push(CatalogTrack {
+                        id: entry.id,
+                        track,
+                        from_tags: entry.from_tags,
+                        mtime_ms: entry.mtime_ms,
+                    }),
+                    None => {
+                        if let Some(existing) = library.catalog_get(&entry.id)? {
+                            rows.push(existing);
+                        }
+                    }
+                }
+            }
+
+            let write = library.replace_catalog(&info.id, &rows)?;
+            write_total.inserted += write.inserted;
+            write_total.updated += write.updated;
+            write_total.removed += write.removed;
+            write_total.unchanged += write.unchanged;
+        }
+
+        if scanned == 0 {
+            return Err(Error::new(
+                Stage::ProviderCall,
+                ErrorKind::NotFound {
+                    what: "taranabilir kataloğu olan sağlayıcı".to_owned(),
+                },
+            ));
+        }
+        Ok((total, write_total))
     }
 
     /// Aramayı çalınabilir bir kuyruğa çevirir.
@@ -530,26 +581,44 @@ impl Session {
         all: bool,
         limit: usize,
     ) -> Result<Vec<QueueItem>> {
-        let streamers = registry.with_capability(crate::provider::Capabilities::STREAM);
-        if streamers.is_empty() {
-            return Err(Error::new(
-                Stage::PlaybackResolve,
-                ErrorKind::NotFound {
-                    what: "ses akışı verebilen sağlayıcı".to_owned(),
-                },
-            ));
-        }
-
-        let mut items = Vec::new();
-        for provider in streamers {
-            let hits = provider.search(query, limit).await?;
-            items.extend(hits.into_iter().map(|hit| QueueItem {
+        // Önce **kalıcı katalog**: tarama bir kez yapılır, arama diske
+        // gitmeden FTS ile cevaplanır. Sağlayıcıya sormak yalnızca katalog
+        // boşsa gerekir (henüz taranmamış ya da uzak sağlayıcı).
+        let mut items: Vec<QueueItem> = self
+            .library
+            .search_catalog(query, limit)?
+            .into_iter()
+            .filter(|hit| {
+                // Katalogda duran ama artık çalınamayan sağlayıcıyı atla.
+                registry.get(&hit.id.provider).is_some_and(|provider| {
+                    provider
+                        .info()
+                        .capabilities
+                        .contains(crate::provider::Capabilities::STREAM)
+                })
+            })
+            .map(|hit| QueueItem {
                 id: hit.id,
                 track: hit.track,
-            }));
-            if !all && !items.is_empty() {
-                items.truncate(1);
-                break;
+            })
+            .collect();
+
+        if items.is_empty() {
+            let streamers = registry.with_capability(crate::provider::Capabilities::STREAM);
+            if streamers.is_empty() {
+                return Err(Error::new(
+                    Stage::PlaybackResolve,
+                    ErrorKind::NotFound {
+                        what: "ses akışı verebilen sağlayıcı".to_owned(),
+                    },
+                ));
+            }
+            for provider in streamers {
+                let hits = provider.search(query, limit).await?;
+                items.extend(hits.into_iter().map(|hit| QueueItem {
+                    id: hit.id,
+                    track: hit.track,
+                }));
             }
         }
 
@@ -562,6 +631,9 @@ impl Session {
                     ),
                 },
             ));
+        }
+        if !all {
+            items.truncate(1);
         }
         Ok(items)
     }

@@ -50,6 +50,11 @@ pub struct ScanSummary {
     pub failed: usize,
     /// Erişilemeyen alt dizinler (izin vb.).
     pub unreadable_dirs: usize,
+    /// Damgası değişmediği için yeniden okunmayan dosyalar.
+    ///
+    /// Taramanın hızlı olmasının sebebi bu sayıdır: ikinci taramada
+    /// neredeyse her dosya buraya düşer.
+    pub unchanged: usize,
 }
 
 impl ScanSummary {
@@ -62,6 +67,7 @@ impl ScanSummary {
         recorder.set("scan.tag_fallback", n(self.tag_fallback));
         recorder.set("scan.failed", n(self.failed));
         recorder.set("scan.unreadable_dirs", n(self.unreadable_dirs));
+        recorder.set("scan.unchanged", n(self.unchanged));
     }
 }
 
@@ -70,6 +76,19 @@ impl ScanSummary {
 struct IndexedFile {
     path: PathBuf,
     track: TrackRef,
+}
+
+/// Taramada görülen bir dosya — kalıcı kataloğa yazılmaya hazır.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScannedFile {
+    pub path: PathBuf,
+    /// Dosyanın son değişme zamanı (ms).
+    pub mtime_ms: Option<i64>,
+    /// Okunan üstveri. `None` ise dosya değişmemiş — çağıran katalogdaki
+    /// satırı olduğu gibi bırakmalı, yeniden okumaya gerek yok.
+    pub track: Option<TrackRef>,
+    /// Üstveri etiketlerden mi geldi (dosya adından değil).
+    pub from_tags: bool,
 }
 
 /// Yerel dosya sağlayıcı.
@@ -133,9 +152,55 @@ impl LocalProvider {
         Ok(self.last_scan.read().map_err(|_| poisoned())?.clone())
     }
 
+    /// Kök dizinleri tarar ve **kalıcı kataloğa yazılmaya hazır** satırlar üretir.
+    ///
+    /// `known` daha önce görülmüş `yol → mtime_ms` eşlemesi; damgası değişmemiş
+    /// dosyanın etiketleri **yeniden okunmaz**. Taramanın pahalı kısmı budur:
+    /// 10.000 dosyalık bir kütüphanede her seferinde hepsini çözmek dakikalar
+    /// alır, damga karşılaştırması saniyeler.
+    ///
+    /// Değişmemiş dosyalar için üstveri döndürülmez; çağıran o satırları
+    /// katalogda olduğu gibi bırakır. Bu yüzden dönüş `Option<TrackRef>`.
+    ///
+    /// # Errors
+    /// Kök dizin okunamazsa. Tek tek dosya hataları özette sayılır (K9).
+    pub fn scan_for_catalog(
+        &self,
+        known: &std::collections::HashMap<String, i64>,
+    ) -> Result<(Vec<ScannedFile>, ScanSummary)> {
+        let mut summary = ScanSummary::default();
+        let mut out = Vec::new();
+
+        for root in &self.roots {
+            scan_dir_for_catalog(root, known, &mut out, &mut summary)?;
+        }
+        out.sort_by(|a, b| a.path.cmp(&b.path));
+        summary.indexed = out.len();
+
+        let mut last = self.last_scan.write().map_err(|_| poisoned())?;
+        *last = summary.clone();
+        Ok((out, summary))
+    }
+
     /// Bir dosya yolundan sağlayıcı kimliği üretir.
     fn track_id(&self, path: &Path) -> ProviderTrackId {
         ProviderTrackId::new(self.id.clone(), path.to_string_lossy().into_owned())
+    }
+
+    /// Yol, taranan köklerden birinin altında mı?
+    ///
+    /// `canonicalize` ile sembolik bağ ve `..` çözülür; aksi halde
+    /// `~/Müzik/../../etc/passwd` gibi bir yol kontrolü atlatırdı.
+    /// Yol çözülemiyorsa (dosya yok) **reddedilir** — şüpheliyi kabul etmek
+    /// bir dosya okuma açığıdır.
+    fn is_within_roots(&self, path: &Path) -> bool {
+        let Ok(target) = path.canonicalize() else {
+            return false;
+        };
+        self.roots.iter().any(|root| {
+            root.canonicalize()
+                .is_ok_and(|root| target.starts_with(&root))
+        })
     }
 }
 
@@ -194,6 +259,94 @@ fn scan_dir(dir: &Path, out: &mut Vec<IndexedFile>, summary: &mut ScanSummary) -
                     summary.tag_fallback += 1;
                 }
                 out.push(IndexedFile { path, track });
+            }
+            Err(err) => {
+                summary.failed += 1;
+                tracing::warn!(
+                    dosya = %path.display(),
+                    hata = %err.chain_text(),
+                    "dosya okunamadı, atlanıyor"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Kalıcı katalog için tarar: değişmemiş dosyaların etiketlerini okumaz.
+fn scan_dir_for_catalog(
+    dir: &Path,
+    known: &std::collections::HashMap<String, i64>,
+    out: &mut Vec<ScannedFile>,
+    summary: &mut ScanSummary,
+) -> Result<()> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(source) => {
+            if out.is_empty() && summary.files_seen == 0 {
+                return Err(crate::error::io_err(Stage::ProviderCall, dir, source));
+            }
+            summary.unreadable_dirs += 1;
+            tracing::warn!(dizin = %dir.display(), hata = %source, "dizin okunamadı, atlanıyor");
+            return Ok(());
+        }
+    };
+
+    for entry in entries {
+        let Ok(entry) = entry else {
+            summary.failed += 1;
+            continue;
+        };
+        let path = entry.path();
+        let Ok(file_type) = entry.file_type() else {
+            summary.failed += 1;
+            continue;
+        };
+
+        if file_type.is_dir() {
+            scan_dir_for_catalog(&path, known, out, summary)?;
+            continue;
+        }
+        summary.files_seen += 1;
+
+        if !has_audio_extension(&path) {
+            continue;
+        }
+        summary.audio_files += 1;
+
+        let mtime_ms = entry
+            .metadata()
+            .ok()
+            .and_then(|meta| meta.modified().ok())
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .and_then(|since| i64::try_from(since.as_millis()).ok());
+
+        // Damga değişmediyse etiketi yeniden okuma — taramanın pahalı kısmı bu.
+        let reference = path.to_string_lossy().into_owned();
+        if let (Some(mtime), Some(previous)) = (mtime_ms, known.get(&reference)) {
+            if mtime == *previous {
+                summary.unchanged += 1;
+                out.push(ScannedFile {
+                    path,
+                    mtime_ms,
+                    track: None,
+                    from_tags: false,
+                });
+                continue;
+            }
+        }
+
+        match read_track(&path) {
+            Ok((track, from_tags)) => {
+                if !from_tags {
+                    summary.tag_fallback += 1;
+                }
+                out.push(ScannedFile {
+                    path,
+                    mtime_ms,
+                    track: Some(track),
+                    from_tags,
+                });
             }
             Err(err) => {
                 summary.failed += 1;
@@ -418,8 +571,23 @@ impl Provider for LocalProvider {
         })
     }
 
-    fn rescan<'a>(&'a self) -> ProviderFuture<'a, Option<ScanSummary>> {
-        Box::pin(async move { self.rescan_now().map(Some) })
+    fn scan_catalog<'a>(
+        &'a self,
+        known: &'a std::collections::HashMap<String, i64>,
+    ) -> ProviderFuture<'a, Option<super::CatalogScan>> {
+        Box::pin(async move {
+            let (files, summary) = self.scan_for_catalog(known)?;
+            let tracks = files
+                .into_iter()
+                .map(|file| super::ScannedItem {
+                    id: self.track_id(&file.path),
+                    mtime_ms: file.mtime_ms,
+                    track: file.track,
+                    from_tags: file.from_tags,
+                })
+                .collect();
+            Ok(Some(super::CatalogScan { tracks, summary }))
+        })
     }
 
     fn resolve_source<'a>(
@@ -431,10 +599,13 @@ impl Provider for LocalProvider {
                 return Ok(None);
             }
             let path = PathBuf::from(&id.id);
-            // İndekste olmayan bir yolu çalmayı reddet: `resolve_source`
-            // rastgele dosya okuma yüzeyi değil.
-            let index = self.index.read().map_err(|_| poisoned())?;
-            if !index.iter().any(|file| file.path == path) {
+            // Yolun taranan köklerin **altında** olduğunu doğrula.
+            //
+            // Eskiden bellek indeksine bakılıyordu; indeks artık kalıcı
+            // katalogda ve sağlayıcı onu görmüyor. Kök kontrolü aynı işi
+            // görür ve daha sağlamdır: `resolve_source` rastgele dosya
+            // okuma yüzeyi değil, `/etc/passwd` buradan çalınamaz.
+            if !self.is_within_roots(&path) {
                 return Ok(None);
             }
             if !path.is_file() {
@@ -744,7 +915,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_file_deleted_after_indexing_is_an_error_not_a_silent_none() {
+    async fn a_file_deleted_after_indexing_is_not_playable() {
         let dir = temp_dir("silinmis");
         copy_fixture(
             &dir,
@@ -758,15 +929,46 @@ mod tests {
 
         std::fs::remove_file(dir.join("Ortak Sanatci - Ortak Parca.ogg")).expect("silinmeli");
 
-        let err = provider
-            .resolve_source(&indexed[0].id)
-            .await
-            .expect_err("silinmiş dosya hata vermeli");
-        assert_eq!(err.stage(), Stage::PlaybackResolve);
+        // Silinmiş dosya `None` döner. Kök kontrolü `canonicalize`'a dayanıyor
+        // ve var olmayan yol çözülemez — şüpheliyi kabul etmemek, "hata
+        // mesajı daha güzel olsun" diye kontrolü gevşetmekten iyidir.
+        // Kullanıcıya durumu Session anlatır: "çalınabilir kaynak bulunamadı".
+        assert_eq!(
+            provider.resolve_source(&indexed[0].id).await.unwrap(),
+            None,
+            "silinmiş dosya çalınabilir görünmemeli"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn resolve_source_rejects_traversal_out_of_the_roots() {
+        // `<kök>/../../etc/passwd` gibi yollar kökün altında başlayıp dışına
+        // çıkar; `canonicalize` bunu çözer.
+        let dir = temp_dir("kacis");
+        copy_fixture(&dir, "etiketli.flac", "sarki.flac");
+        let provider = LocalProvider::new(vec![dir.clone()]);
+
+        let escaping = dir.join("..").join("..").join("etc").join("passwd");
+        let id = ProviderTrackId::new(
+            ProviderId::new("local"),
+            escaping.to_string_lossy().into_owned(),
+        );
+        assert_eq!(
+            provider.resolve_source(&id).await.unwrap(),
+            None,
+            "kök dışına çıkan yol reddedilmeli"
+        );
+
+        // Kökün altındaki gerçek dosya ise çalınabilir kalmalı.
+        let ok_id = ProviderTrackId::new(
+            ProviderId::new("local"),
+            dir.join("sarki.flac").to_string_lossy().into_owned(),
+        );
         assert!(
-            err.chain_text().contains("silinmiş"),
-            "{}",
-            err.chain_text()
+            provider.resolve_source(&ok_id).await.unwrap().is_some(),
+            "kökün altındaki dosya çalınabilmeli"
         );
 
         std::fs::remove_dir_all(&dir).ok();
