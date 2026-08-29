@@ -36,6 +36,12 @@ pub enum Stage {
     ProviderCall,
     /// Wrapped kartı üretimi veya yazımı.
     WrappedRender,
+    /// Çalınacak kaynağı bulma (sağlayıcıdan `AudioSource` alma).
+    PlaybackResolve,
+    /// Ses çözme (symphonia): kap açma, kod çözücü kurma.
+    PlaybackDecode,
+    /// Ses çıkışı (cpal): aygıt açma, akış kurma.
+    PlaybackOutput,
 }
 
 impl Stage {
@@ -54,6 +60,9 @@ impl Stage {
             Self::StatsCompute => "STATS_COMPUTE",
             Self::ProviderCall => "PROVIDER_CALL",
             Self::WrappedRender => "WRAPPED_RENDER",
+            Self::PlaybackResolve => "PLAYBACK_RESOLVE",
+            Self::PlaybackDecode => "PLAYBACK_DECODE",
+            Self::PlaybackOutput => "PLAYBACK_OUTPUT",
         }
     }
 }

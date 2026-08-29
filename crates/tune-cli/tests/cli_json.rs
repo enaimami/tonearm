@@ -38,17 +38,32 @@ fn temp_dir(label: &str) -> PathBuf {
 
 /// `tune` ikilisini çalıştırır; `(stdout, stderr, başarılı_mı)`.
 fn run(data_dir: &Path, args: &[&str]) -> (String, String, bool) {
-    let output = Command::new(env!("CARGO_BIN_EXE_tune"))
-        .arg("--data-dir")
-        .arg(data_dir)
-        .args(args)
-        .output()
-        .expect("tune ikilisi çalışmalı");
+    run_with_music(data_dir, None, args)
+}
+
+/// `TUNE_MUSIC_DIRS` ayarlayarak çalıştırır (yerel sağlayıcı testleri için).
+fn run_with_music(data_dir: &Path, music: Option<&Path>, args: &[&str]) -> (String, String, bool) {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_tune"));
+    command.arg("--data-dir").arg(data_dir).args(args);
+    match music {
+        Some(dir) => {
+            command.env("TUNE_MUSIC_DIRS", dir);
+        }
+        None => {
+            // Geliştiricinin kendi müzik dizini testlere sızmasın.
+            command.env("TUNE_MUSIC_DIRS", "/olmayan/dizin/tune-test");
+        }
+    }
+    let output = command.output().expect("tune ikilisi çalışmalı");
     (
         String::from_utf8_lossy(&output.stdout).into_owned(),
         String::from_utf8_lossy(&output.stderr).into_owned(),
         output.status.success(),
     )
+}
+
+fn audio_fixtures() -> PathBuf {
+    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/audio"))
 }
 
 /// Değişken alanları sabitler, böylece snapshot yalnızca anlamlı farkta kırılır.
@@ -179,6 +194,128 @@ fn wrapped_rejects_an_unknown_extension() {
     assert!(stderr.contains("ADIM: WRAPPED_RENDER"), "{stderr}");
     assert!(!bad.exists(), "hatalı biçimde dosya yazılmamalı");
 
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Faz 1'in bitti ölçütü: yerel dosya çalınıyor ve bir `listen` kaydı üretiyor.
+///
+/// Ses aygıtı yoksa test kendini atlar — susturmak değil, koşulun
+/// sağlanmadığını söyleyip geçmek.
+#[test]
+fn playing_a_local_file_records_a_listen_in_the_same_table_as_imports() {
+    let dir = temp_dir("play");
+    let music = audio_fixtures();
+
+    // Önce indeks: tarama ne bulduğunu saymalı.
+    let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["provider", "scan"]);
+    assert!(ok, "tarama başarısız: {stderr}");
+    assert!(stdout.contains("indekslenen"), "{stdout}");
+
+    // Sonra çal.
+    let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["play", "sinüs"]);
+    if !ok {
+        // Ses aygıtı olmayan ortamda çalma kurulamaz; bunu ayırt et.
+        if stderr.contains("PLAYBACK_OUTPUT") {
+            eprintln!("ses çıkışı yok — çalma testi atlanıyor:\n{stderr}");
+            std::fs::remove_dir_all(&dir).ok();
+            return;
+        }
+        panic!("çalma başarısız: {stderr}");
+    }
+    assert!(stdout.contains("kuyruğa alındı"), "{stdout}");
+    assert!(stdout.contains("kaydedilen dinleme: 1"), "{stdout}");
+
+    // §1.6'nın asıl iddiası: scrobble import verisiyle aynı tabloda.
+    let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["stats"]);
+    assert!(ok, "{stderr}");
+    assert!(
+        stdout.contains("Test Sanatçı"),
+        "çalınan parça istatistikte görünmeli:\n{stdout}"
+    );
+    assert!(stdout.contains("1 çalma"), "{stdout}");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn dry_run_queues_without_playing() {
+    let dir = temp_dir("dryrun");
+    let music = audio_fixtures();
+
+    let (stdout, stderr, ok) = run_with_music(
+        &dir,
+        Some(&music),
+        &["play", "sinüs", "--dry-run", "--json"],
+    );
+    assert!(ok, "{stderr}");
+
+    let value: serde_json::Value = serde_json::from_str(&stdout).expect("JSON");
+    assert_eq!(value["played"], serde_json::json!(false));
+    assert_eq!(value["listens_recorded"], serde_json::json!(0));
+    assert_eq!(
+        value["queued"].as_array().map(Vec::len),
+        Some(1),
+        "tek parça kuyruğa alınmalı"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn provider_commands_report_capabilities_and_scan_counts() {
+    let dir = temp_dir("provider");
+    let music = audio_fixtures();
+
+    let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["provider", "list"]);
+    assert!(ok, "{stderr}");
+    assert!(stdout.contains("local"), "{stdout}");
+    assert!(stdout.contains("STREAM"), "yetenekler görünmeli: {stdout}");
+    assert!(
+        !stdout.contains("CONTROL"),
+        "yerel sağlayıcı kumanda edilemez: {stdout}"
+    );
+
+    // Tarama K9'a uygun rapor vermeli: bozuk fixture sayılmalı, yutulmamalı.
+    let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["provider", "scan", "--json"]);
+    assert!(ok, "{stderr}");
+    let value: serde_json::Value = serde_json::from_str(&stdout).expect("JSON");
+    let summary = &value["summary"];
+    assert!(summary["audio_files"].as_u64().unwrap_or(0) >= 4);
+    assert_eq!(
+        summary["failed"],
+        serde_json::json!(1),
+        "bozuk.flac sayılmalı: {summary}"
+    );
+    assert!(summary["indexed"].as_u64().unwrap_or(0) >= 3, "{summary}");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn testing_an_unknown_provider_lists_the_known_ones() {
+    let dir = temp_dir("providertest");
+    let (_, stderr, ok) = run(&dir, &["provider", "test", "spotify"]);
+    assert!(!ok, "olmayan sağlayıcı başarısız olmalı");
+    assert!(stderr.contains("PROVIDER_CALL"), "{stderr}");
+    assert!(
+        stderr.contains("local"),
+        "kullanıcıya kayıtlı sağlayıcılar söylenmeli:\n{stderr}"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn playing_with_no_match_says_what_to_do() {
+    let dir = temp_dir("eslesmeyen");
+    let music = audio_fixtures();
+    let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["play", "boylebirsarkiyok"]);
+
+    assert!(!ok, "eşleşme yoksa başarısız olmalı");
+    assert!(stderr.contains("PLAYBACK_RESOLVE"), "{stderr}");
+    assert!(
+        stderr.contains("provider scan"),
+        "kullanıcıya ne yapacağı söylenmeli:\n{stderr}"
+    );
     std::fs::remove_dir_all(&dir).ok();
 }
 

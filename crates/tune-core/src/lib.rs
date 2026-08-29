@@ -14,6 +14,8 @@ pub mod ids;
 pub mod import;
 pub mod library;
 pub mod model;
+pub mod playback;
+pub mod provider;
 pub mod session;
 pub mod stats;
 pub mod wrapped;

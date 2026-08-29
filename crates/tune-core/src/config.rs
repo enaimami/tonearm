@@ -10,6 +10,9 @@ use crate::error::{Error, ErrorKind, Result};
 /// Veri dizinini elle vermek için ortam değişkeni (testler ve taşınabilir kurulum).
 pub const DATA_DIR_ENV: &str = "TUNE_DATA_DIR";
 
+/// Müzik dizinlerini elle vermek için ortam değişkeni (`:` ile ayrılmış).
+pub const MUSIC_DIRS_ENV: &str = "TUNE_MUSIC_DIRS";
+
 /// Çekirdeğin çalışması için gereken yollar.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -70,6 +73,36 @@ impl Config {
     #[must_use]
     pub fn last_run_path(&self) -> PathBuf {
         self.data_dir.join("last-run.json")
+    }
+
+    /// Yerel sağlayıcının tarayacağı müzik dizinleri.
+    ///
+    /// Sıra: `TUNE_MUSIC_DIRS` (`:` ile ayrılmış) → `XDG_MUSIC_DIR` →
+    /// `HOME/Müzik` → `HOME/Music`. Hiçbiri yoksa boş liste döner —
+    /// uydurma bir yol seçmek, kullanıcının müziğini "bulamadım" yerine
+    /// "yanlış yerde aradım" hatasına çevirir.
+    #[must_use]
+    pub fn music_dirs(&self) -> Vec<PathBuf> {
+        if let Some(raw) = non_empty_env(MUSIC_DIRS_ENV) {
+            return raw
+                .split(':')
+                .map(str::trim)
+                .filter(|part| !part.is_empty())
+                .map(PathBuf::from)
+                .collect();
+        }
+        if let Some(dir) = non_empty_env("XDG_MUSIC_DIR") {
+            return vec![PathBuf::from(dir)];
+        }
+        if let Some(home) = non_empty_env("HOME") {
+            let home = PathBuf::from(home);
+            // Türkçe ve İngilizce yerelin varsayılan adları.
+            return [home.join("Müzik"), home.join("Music")]
+                .into_iter()
+                .filter(|dir| dir.is_dir())
+                .collect();
+        }
+        Vec::new()
     }
 
     /// Veri dizinini oluşturur.

@@ -23,8 +23,12 @@ bağımsız kanonik kimliklere bağlar ve istatistikleri **senin** makinende ür
 
 ## Durum
 
-**Faz 0.5.** Bugün çalışan şey: export içe aktarma, kanonik kimlik çözümlemesi,
-istatistikler ve paylaşılabilir Wrapped kartı. Oynatma henüz yok (Faz 1).
+**Faz 1.** Bugün çalışan şey: export içe aktarma, kanonik kimlik çözümlemesi,
+istatistikler, paylaşılabilir Wrapped kartı ve **yerel dosya oynatma**.
+
+Faz 1'den itibaren scrobble'ı `tune` üretiyor: çaldığın parça import verinle
+aynı tabloya yazılıyor, geçmiş ve bugün tek bir zaman çizelgesi oluyor.
+Subsonic/Jellyfin ve TUI henüz yok.
 
 Ayrıntılı yol haritası: [`PLAN.md`](PLAN.md). Verilmiş kararlar ve gerekçeleri:
 [`DECISIONS.md`](DECISIONS.md).
@@ -67,6 +71,29 @@ tune library search radiohead
 tune diag
 ```
 
+### Oynatma
+
+Müzik dizinini `TUNE_MUSIC_DIRS` ile belirt (`:` ile ayırarak birden çok
+verilebilir); verilmezse `XDG_MUSIC_DIR`, sonra `~/Müzik` ve `~/Music` denenir.
+
+```bash
+export TUNE_MUSIC_DIRS=~/Müzik
+
+tune provider list          # sağlayıcılar ve yetenekleri
+tune provider scan          # dizinleri tara, ne bulduğunu say
+tune provider test local    # ayakta mı, kaç parça görüyor
+
+tune play "radiohead"              # ilk eşleşmeyi çal
+tune play "radiohead" --all        # eşleşenlerin hepsini kuyruğa al
+tune play "radiohead" --all --shuffle
+tune play "radiohead" --dry-run    # çalmadan kuyruğu göster
+```
+
+Çalınan her parça bir `listen` kaydı üretir ve `stats` çıktısına girer —
+import edilmiş geçmişle aynı tabloda.
+
+Desteklenen biçimler: FLAC, MP3, OGG, M4A/AAC, WAV.
+
 Her komut `--json` destekler:
 
 ```bash
@@ -93,6 +120,11 @@ ve eklentiler herhangi bir dilde yazılabilir.
 **Her başarısızlık hangi aşamada olduğunu söyler.** `ADIM: IDENTITY_RESOLVE`
 gibi. Kısmi başarı üreten her işlem özet döndürür: kaç kayıt geldi, kaçı hangi
 yolla çözüldü, kaçı çözülemedi. Sessizce yutulan veri yok.
+
+**Oynatma durumu bir çapadır, bildirim akışı değil.** Çekirdek
+`{parça, duvar_saati, pozisyon, hız, durum}` verir; arayüz aradaki zamanı
+kendi hesaplar. Aynı primitif ileride odalarda (birlikte dinleme) ağdan
+dağıtılacak — iki ayrı durum modeli tutulmuyor.
 
 ## Kanonik kimlik
 

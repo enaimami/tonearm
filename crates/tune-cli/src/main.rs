@@ -11,7 +11,9 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use tune_core::config::Config;
+use tune_core::ids::ProviderId;
 use tune_core::model::PlayRule;
+use tune_core::provider;
 use tune_core::session::{self, Session};
 use tune_core::stats::StatsQuery;
 use tune_core::wrapped::CardPreset;
@@ -100,8 +102,40 @@ enum Command {
         #[arg(long, default_value_t = CardFormat::Square, value_enum)]
         format: CardFormat,
     },
+    /// Sağlayıcı işlemleri.
+    Provider {
+        #[command(subcommand)]
+        command: ProviderCommand,
+    },
+    /// Yerel bir parçayı çal.
+    Play {
+        /// Çalınacak parçayı bulmak için arama metni.
+        query: String,
+        /// Eşleşen ilk parça yerine tümünü kuyruğa al.
+        #[arg(long)]
+        all: bool,
+        /// Kuyruğu karıştır.
+        #[arg(long)]
+        shuffle: bool,
+        /// Çalmayı beklemeden çık (yalnızca kuyruğu göster).
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Son çalıştırmanın tanı raporu.
     Diag,
+}
+
+#[derive(Debug, Subcommand)]
+enum ProviderCommand {
+    /// Kayıtlı sağlayıcıları listele.
+    List,
+    /// Bir sağlayıcıyı sına (ayakta mı, kaç parça görüyor).
+    Test {
+        /// Sağlayıcı adı (`local`).
+        name: String,
+    },
+    /// Yerel müzik dizinlerini yeniden tara.
+    Scan,
 }
 
 #[derive(Debug, Subcommand)]
@@ -187,6 +221,45 @@ async fn run(cli: &Cli) -> tune_core::Result<String> {
             let size = format.to_preset().size();
             let response = session.wrapped(query, size, out.as_deref())?;
             render(cli.json, &response, || output::wrapped(&response))
+        }
+        Command::Provider { command } => {
+            let registry = provider::default_registry(session.config())?;
+            match command {
+                ProviderCommand::List => {
+                    let report = session.providers(&registry)?;
+                    render(cli.json, &report, || output::provider_list(&report))
+                }
+                ProviderCommand::Test { name } => {
+                    let id = ProviderId::new(name.clone());
+                    let report = session.test_provider(&registry, &id).await?;
+                    render(cli.json, &report, || output::provider_test(&report))
+                }
+                ProviderCommand::Scan => {
+                    let report = session.scan_providers(&registry).await?;
+                    render(cli.json, &report, || output::scan(&report))
+                }
+            }
+        }
+        Command::Play {
+            query,
+            all,
+            shuffle,
+            dry_run,
+        } => {
+            // Tarama indeksi bellekte: aynı süreçte önce taramak gerekiyor.
+            // (Kalıcı indeks Faz 1.2'nin devamı — SQLite'a yazılacak.)
+            let registry = provider::default_registry(session.config())?;
+            session.scan_providers(&registry).await?;
+
+            let options = session::PlayOptions {
+                query,
+                all: *all,
+                shuffle: *shuffle,
+                dry_run: *dry_run,
+                ..session::PlayOptions::new(query)
+            };
+            let report = session.play(&registry, options).await?;
+            render(cli.json, &report, || output::play(&report))
         }
         Command::Diag => {
             let report = session.last_diag()?;

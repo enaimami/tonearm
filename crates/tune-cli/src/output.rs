@@ -5,7 +5,8 @@
 
 use tune_core::library::SearchHit;
 use tune_core::session::{
-    ImportReport, ResolveReport, SearchReport, StatsResponse, WrappedResponse,
+    ImportReport, PlayReport, ProviderListReport, ProviderTestReport, ResolveReport, ScanReport,
+    SearchReport, StatsResponse, WrappedResponse,
 };
 use tune_core::stats::StatsReport;
 
@@ -233,6 +234,109 @@ pub fn wrapped(response: &WrappedResponse) -> String {
             written.bytes,
             written.kind
         );
+    }
+    out
+}
+
+/// Sağlayıcı listesi.
+pub fn provider_list(report: &ProviderListReport) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    if report.providers.is_empty() {
+        let _ = writeln!(out, "kayıtlı sağlayıcı yok");
+        return out;
+    }
+    for info in &report.providers {
+        let _ = writeln!(
+            out,
+            "{:<10} {:<22} {}",
+            info.id,
+            truncate(&info.display_name, 22),
+            info.capabilities
+        );
+    }
+    out
+}
+
+/// Sağlayıcı sınaması.
+pub fn provider_test(report: &ProviderTestReport) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(out, "sağlayıcı : {}", report.info.id);
+    let _ = writeln!(out, "ad        : {}", report.info.display_name);
+    let _ = writeln!(out, "yetenek   : {}", report.info.capabilities);
+    let _ = writeln!(
+        out,
+        "durum     : {}",
+        if report.health.reachable {
+            "erişilebilir"
+        } else {
+            "ERİŞİLEMİYOR"
+        }
+    );
+    if let Some(count) = report.health.track_count {
+        let _ = writeln!(out, "parça     : {count}");
+    }
+    if let Some(detail) = &report.health.detail {
+        let _ = writeln!(out, "not       : {detail}");
+    }
+    out
+}
+
+/// Tarama özeti.
+pub fn scan(report: &ScanReport) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    if report.dirs.is_empty() {
+        let _ = writeln!(
+            out,
+            "müzik dizini bulunamadı — TUNE_MUSIC_DIRS ayarlayın\n\
+             (örnek: TUNE_MUSIC_DIRS=~/Müzik tune provider scan)"
+        );
+        return out;
+    }
+    for dir in &report.dirs {
+        let _ = writeln!(out, "tarandı: {}", dir.display());
+    }
+    let s = &report.summary;
+    let _ = writeln!(out, "  görülen dosya : {}", s.files_seen);
+    let _ = writeln!(out, "  ses dosyası   : {}", s.audio_files);
+    let _ = writeln!(out, "  indekslenen   : {}", s.indexed);
+    if s.tag_fallback > 0 {
+        let _ = writeln!(out, "  etiketsiz     : {} (dosya adından)", s.tag_fallback);
+    }
+    if s.failed > 0 {
+        let _ = writeln!(out, "  okunamayan    : {}", s.failed);
+    }
+    if s.unreadable_dirs > 0 {
+        let _ = writeln!(out, "  atlanan dizin : {}", s.unreadable_dirs);
+    }
+    out
+}
+
+/// Çalma sonucu.
+pub fn play(report: &PlayReport) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "{} parça kuyruğa alındı{}",
+        report.queued.len(),
+        if report.played { "" } else { " (çalınmadı)" }
+    );
+    for (index, item) in report.queued.iter().enumerate().take(10) {
+        let _ = writeln!(
+            out,
+            "  {:>2}. {}",
+            index + 1,
+            truncate(&item.track.display_name(), 56)
+        );
+    }
+    if report.queued.len() > 10 {
+        let _ = writeln!(out, "  … ve {} parça daha", report.queued.len() - 10);
+    }
+    if report.played {
+        let _ = writeln!(out, "kaydedilen dinleme: {}", report.listens_recorded);
     }
     out
 }

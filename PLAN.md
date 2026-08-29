@@ -378,35 +378,128 @@ Sonuçları:
    uygulamasının kimliği zayıf.
 
 > KARAR NOKTASI: Faz 0.5 sonrası sıra — önce Faz 1 (oynatma) mı, önce Faz 3 (GUI + tema) mi?
-> **Sor.** Bu, aralık penceresine ne yetişeceğini belirler.
+> **KAPANDI — D-014: önce Faz 1 (oynatma).** Oynatma bir taban; GUI ve tema
+> onun üstüne kurulur. D-003'ün dogfood kısıtı kabul edilmiş risk olarak
+> taşınıyor — telifsiz fixture'larla ve testle doğrulanacak.
 
-### 1.1 Provider trait tasarımı
+### 1.1 Provider trait tasarımı — TAMAM
 Yetenek bayrakları şart: `SEARCH | BROWSE | STREAM | CONTROL`.
 Hepsi aynı şeyi yapamaz — Spotify ileride yalnızca `CONTROL` olacak.
 Trait'i tek tip varsayarsan soyutlama ilk uzak oynatıcıda çöker.
 
-> KARAR NOKTASI: Trait imzalarını yazmadan önce sun. K7 nedeniyle geri dönüşü pahalı.
+> KARAR NOKTASI: Trait imzalarını yazmadan önce sun. **KAPANDI — D-015:**
+> durum çapa ile açılır (`PlaybackAnchor`), observer/callback yok.
 
-### 1.2 Yerel dosya sağlayıcı
+**Uygulandı.** `provider::Provider` trait'i `Arc<dyn>` uyumlu (K7): kutulanmış
+future döndürür, generic/lifetime/closure taşımaz. `Capabilities` bit maskesi
+`uniffi` için `u32`. Yeteneği olmayan bir çağrı **açık hata** döndürür
+(`ErrorKind::Unsupported`), sessiz boş liste değil — "yapamıyorum" ile
+"sonuç yok" farklı şeylerdir (K9). `rescan` trait'e varsayılan uygulamalı
+metot olarak kondu: downcast yerine, eklentiler (Faz 2) de kendi taramasını
+verebilsin diye.
+
+### 1.2 Yerel dosya sağlayıcı — KISMEN TAMAM
 Dizin tarama, etiket okuma, izleme (watch), kütüphane indeksleme, SQLite FTS ile arama.
 
-### 1.3 Subsonic / Jellyfin istemcisi
+**Yapıldı:** özyinelemeli dizin tarama, symphonia ile etiket okuma
+(sanatçı/başlık/albüm/ISRC/süre), etiket yoksa dosya adından türetme,
+bellek içi indeks ve arama. Tarama K9'a uygun özet döndürüyor:
+`files_seen / audio_files / indexed / tag_fallback / failed / unreadable_dirs`.
+Bozuk dosya taramayı düşürmüyor ama **sayılıyor**; okunamayan alt dizin de öyle.
+
+**Kalan:** (a) indeks bellekte — süreç kapanınca kayboluyor, SQLite'a yazılmalı;
+(b) dizin izleme (watch) yok; (c) arama FTS değil doğrusal tarama.
+Bunlar Faz 1'in devamı.
+
+### 1.3 Subsonic / Jellyfin istemcisi — SIRADAKİ
 Subsonic API yaygın standart. Bu, ileride kendi sunucunun Subsonic uyumlu
 konuşması ihtimalini de açık tutar.
 
-### 1.4 Oynatma hattı
+`AudioSource::HttpStream` varyantı bugünden var ama çalınmıyor: `Player`
+açık bir "Faz 1.3'te gelecek" hatası döndürüyor (K10 — sessizce hiçbir şey
+yapmıyor değil).
+
+### 1.4 Oynatma hattı — TAMAM
 `symphonia` (çözme) + `cpal` (çıkış). Saf Rust, harici bağımlılık yok.
 Video kapsam dışı — gerekirse ayrı sağlayıcı olarak tartışılır.
 
-### 1.5 Kuyruk ve oynatma durumu
+**Uygulandı (D-016).** Çözme arka plan iş parçacığında, çıkış cpal geri
+çağrısında; aralarında halka tamponu var ve **ses geri çağrısı hiç bloklanmıyor**
+(kilit alınamazsa sessizlik yazılıyor — cızırtı yerine boşluk).
+
+İki tasarım kararı kayda değer:
+1. **Pozisyon çıkışa verilmiş kareden hesaplanıyor**, çözülmüş kareden değil.
+   Aradaki fark bir tampon dolusu zamandır; çözülene bakmak ilerleme çubuğunu
+   sesin önüne düşürürdü.
+2. **`Buffering` ayrı bir durum.** `Paused` kullanıcının kararı, `Buffering`
+   hattın beklemesi; ikisini birleştirmek kullanıcıya yanlış şey söyler.
+
+Yeniden örnekleme en yakın komşu (mono→stereo kopyalama dahil). Kaliteli
+resampling gerekirse ayrıca ölçülür — Faz 1'in hedefi doğru ses üretmekti.
+
+### 1.5 Kuyruk ve oynatma durumu — KISMEN TAMAM
 Kuyruk, tekrar, karıştırma, gapless. Durum çekirdekte tutulur, CLI yalnızca gösterir.
 
-### 1.6 Scrobbling
+**Yapıldı:** kuyruk, `RepeatMode::{Off,All,One}`, karıştırma. Durum çekirdekte;
+CLI yalnızca gösteriyor.
+
+İki ince nokta testle kilitli:
+- **Karıştırma sırayı bozmaz**, ayrı bir çalma sırası tutar. Kapatınca kullanıcı
+  listesini kaybetmez; açarken çalan parça **altından çekilmez**, başta kalır.
+- **`RepeatMode::One` yalnızca doğal bitişte tekrar eder.** Kullanıcı "sonraki"
+  derse tekrar kipinde de ilerler — yoksa tuş bozukmuş gibi görünür.
+  Ayrım `Queue::next` ile `advance_after_finish` arasında.
+
+**Kalan:** gapless geçiş yok (parça bitince yeni motor kuruluyor, aralarında
+kısa boşluk var).
+
+### 1.6 Scrobbling — TAMAM
 Her çalma bir `listen` kaydı. Faz 0'daki import verisiyle aynı tabloya yazılır —
 geçmiş ve bugün tek bir zaman çizelgesi olur.
 
-### 1.7 CLI oynatıcı arayüzü
+**Uygulandı ve uçtan uca doğrulandı.** `tune play` ile çalınan parça
+`stats` ve `library search` çıktısında görünüyor; CLI testi bunu kilitliyor
+(`playing_a_local_file_records_a_listen_in_the_same_table_as_imports`).
+
+Süre olarak **çıkışa verilen ses** yazılıyor, geçen duvar saati değil —
+duraklatılan süre dinlenmiş sayılmaz. Eşik D-008'deki tek `PlayRule`;
+burada ikinci bir yorum yok.
+
+### 1.7 CLI oynatıcı arayüzü — AÇIK
 `ratatui` ile TUI. Bu, GUI'nin prototipi değil; çekirdeğin tam kullanılabilir olduğunun kanıtı.
+
+Bugün `tune play <sorgu>` var: arar, çalar, biter, scrobble yazar. TUI (kuyruk
+görünümü, ilerleme çubuğu, tuşlar) henüz yok — `PlaybackAnchor` onu beslemeye
+hazır.
+
+---
+
+### 1.8 Faz 1 durum — çalan bir player var
+
+**141 test**, clippy ve fmt temiz. `tune play` uçtan uca çalışıyor.
+
+| Bölüm | Durum |
+|---|---|
+| 1.1 Provider trait | TAMAM |
+| 1.2 Yerel sağlayıcı | Kısmen — indeks bellekte, watch/FTS yok |
+| 1.3 Subsonic/Jellyfin | Açık — sıradaki |
+| 1.4 Ses hattı | TAMAM |
+| 1.5 Kuyruk | Kısmen — gapless yok |
+| 1.6 Scrobbling | TAMAM |
+| 1.7 TUI | Açık |
+
+**Test fixture'ları üretildi (PLAN'ın Faz 1 ön koşulu):** `fixtures/audio/`
+altında `ffmpeg` ile üretilmiş sinüs tonları — telifsiz, toplam 84 KB.
+FLAC (etiketli), MP3 (etiketli), OGG (etiketsiz), alt dizinde etiketsiz FLAC
+ve kasten bozuk bir dosya. D-003'ün "dogfood edilemez" kısıtı böylece
+kısmen aşıldı: ses hattı gerçek dosyalarla, gerçek aygıtta sınanıyor.
+
+**Ses aygıtı olmayan ortamda testler kendini atlıyor** (CI için). Atlama
+sessiz değil: nedenini `stderr`'e yazıyor.
+
+**Sıradaki iş** üç adaydan biri: (a) 1.2'nin kalanı — indeksi SQLite'a yazmak,
+her `play` çağrısında yeniden taramayı bitirmek; (b) 1.7 TUI; (c) 1.3 Subsonic.
+**Sor.**
 
 ---
 

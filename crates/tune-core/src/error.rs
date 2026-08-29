@@ -98,6 +98,20 @@ pub enum ErrorKind {
 
     #[error("kart üretilemedi: {detail}")]
     CardRender { detail: String },
+
+    /// Sağlayıcı bu yeteneğe sahip değil.
+    ///
+    /// "Yapamıyorum" ile "sonuç yok" farklı şeylerdir; ikincisi boş liste,
+    /// birincisi bu hata (K9).
+    #[error("{provider} bunu yapamıyor: {what} (yetenekleri: {capabilities})")]
+    Unsupported {
+        provider: String,
+        what: String,
+        capabilities: String,
+    },
+
+    #[error("ses hattı hatası: {detail}")]
+    Audio { detail: String },
 }
 
 /// Çekirdek sonuç tipi.

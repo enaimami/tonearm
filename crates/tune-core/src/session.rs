@@ -13,9 +13,12 @@ use crate::config::Config;
 use crate::diag::{DiagReport, Recorder, Stage};
 use crate::error::{Error, ErrorKind, Result};
 use crate::identity::{MetadataLookup, OfflineLookup, Resolution, ResolveSummary, Resolver};
+use crate::ids::ProviderId;
 use crate::import::{self, ImportSummary};
 use crate::library::{ListenStore, SearchHit, SqliteLibrary, WriteSummary};
-use crate::model::{PlayRule, TrackRef};
+use crate::model::{Listen, PlayRule, TrackRef};
+use crate::playback::QueueItem;
+use crate::provider::{ProviderHealth, ProviderInfo, ProviderRegistry, ScanSummary};
 use crate::stats::{self, StatsQuery, StatsReport};
 use crate::wrapped::{self, CardSize, WrappedData};
 
@@ -70,6 +73,75 @@ pub struct WrittenCard {
     pub path: std::path::PathBuf,
     pub bytes: u64,
     pub kind: wrapped::CardFileKind,
+}
+
+/// Kayıtlı sağlayıcıların listesi.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderListReport {
+    pub providers: Vec<ProviderInfo>,
+    pub diag: DiagReport,
+}
+
+/// Bir sağlayıcının sınama sonucu.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderTestReport {
+    pub info: ProviderInfo,
+    pub health: ProviderHealth,
+    pub diag: DiagReport,
+}
+
+/// Tarama sonucu.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScanReport {
+    /// Taranan kök dizinler. Boşsa kullanıcı `TUNE_MUSIC_DIRS` vermemiş.
+    pub dirs: Vec<std::path::PathBuf>,
+    pub summary: ScanSummary,
+    pub diag: DiagReport,
+}
+
+/// Çalma seçenekleri.
+///
+/// Ayrı bir struct: `uniffi` için de tek bir record olarak geçer ve yeni
+/// seçenek eklemek çağıranların imzasını kırmaz.
+#[derive(Debug, Clone, Copy)]
+pub struct PlayOptions<'a> {
+    /// Aranacak metin.
+    pub query: &'a str,
+    /// Eşleşen tüm parçalar kuyruğa alınsın mı (false: yalnızca ilki).
+    pub all: bool,
+    /// Kuyruk karıştırılsın mı.
+    pub shuffle: bool,
+    /// Çalmadan yalnızca kuyruğu göster.
+    pub dry_run: bool,
+    /// Aramadan en fazla kaç sonuç alınacağı.
+    pub limit: usize,
+}
+
+impl<'a> PlayOptions<'a> {
+    /// Varsayılan seçeneklerle: ilk eşleşmeyi çal.
+    #[must_use]
+    pub fn new(query: &'a str) -> Self {
+        Self {
+            query,
+            all: false,
+            shuffle: false,
+            dry_run: false,
+            limit: 100,
+        }
+    }
+}
+
+/// Bir çalma komutunun sonucu.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlayReport {
+    pub query: String,
+    /// Kuyruğa alınan parçalar.
+    pub queued: Vec<QueueItem>,
+    /// Çalma sonunda üretilen dinleme kayıtları (§1.6).
+    pub listens_recorded: usize,
+    /// Gerçekten çalındı mı (`--dry-run` ile false).
+    pub played: bool,
+    pub diag: DiagReport,
 }
 
 /// Açık bir kütüphane üzerinde çalışan oturum.
@@ -314,6 +386,287 @@ impl Session {
             written,
             diag,
         })
+    }
+
+    /// Sağlayıcıları listeler.
+    ///
+    /// # Errors
+    /// Şu an hata üretmiyor; imza sağlayıcılar ağa taşındığında (Faz 2)
+    /// değişmesin diye `Result`.
+    pub fn providers(&self, registry: &ProviderRegistry) -> Result<ProviderListReport> {
+        let mut rec = Recorder::start(
+            "provider list".to_owned(),
+            Some(self.config.data_dir().to_path_buf()),
+        );
+        rec.set(
+            "provider.count",
+            i64::try_from(registry.len()).unwrap_or(i64::MAX),
+        );
+        let result = Ok(registry.list());
+        self.finish(rec, result, |providers, diag| ProviderListReport {
+            providers,
+            diag,
+        })
+    }
+
+    /// Bir sağlayıcıyı sınar: ayakta mı, kaç parça görüyor.
+    ///
+    /// # Errors
+    /// Sağlayıcı kayıtlı değilse ya da sağlık sorgusu hata verirse.
+    pub async fn test_provider(
+        &self,
+        registry: &ProviderRegistry,
+        id: &ProviderId,
+    ) -> Result<ProviderTestReport> {
+        let mut rec = Recorder::start(
+            format!("provider test {id}"),
+            Some(self.config.data_dir().to_path_buf()),
+        );
+
+        let result = async {
+            let provider = registry.get(id).ok_or_else(|| {
+                Error::new(
+                    Stage::ProviderCall,
+                    ErrorKind::NotFound {
+                        what: format!(
+                            "sağlayıcı: {id} (kayıtlı olanlar: {})",
+                            registry
+                                .list()
+                                .iter()
+                                .map(|info| info.id.to_string())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ),
+                    },
+                )
+            })?;
+            let info = provider.info();
+            let health = provider.health().await?;
+            Ok((info, health))
+        }
+        .await;
+
+        if let Ok((_, health)) = &result {
+            rec.set("provider.reachable", i64::from(health.reachable));
+            if let Some(count) = health.track_count {
+                rec.set(
+                    "provider.track_count",
+                    i64::try_from(count).unwrap_or(i64::MAX),
+                );
+            }
+            if let Some(detail) = &health.detail {
+                rec.note(detail.clone());
+            }
+        }
+
+        self.finish(rec, result, |(info, health), diag| ProviderTestReport {
+            info,
+            health,
+            diag,
+        })
+    }
+
+    /// Yerel müzik dizinlerini tarar ve indeksi tazeler.
+    ///
+    /// # Errors
+    /// Kök dizin okunamazsa. Tek tek dosya hataları hata değildir; özette
+    /// sayılır (K9).
+    pub async fn scan_providers(&self, registry: &ProviderRegistry) -> Result<ScanReport> {
+        let mut rec = Recorder::start(
+            "provider scan".to_owned(),
+            Some(self.config.data_dir().to_path_buf()),
+        );
+
+        // Her sağlayıcıya sorulur; taranacak kataloğu olmayan `None` döner.
+        // Downcast yok — eklentiler (Faz 2) de kendi taramasını verebilsin.
+        let result = async {
+            let mut total = crate::provider::ScanSummary::default();
+            let mut scanned = 0usize;
+            for provider in registry.all() {
+                if let Some(summary) = provider.rescan().await? {
+                    scanned += 1;
+                    total.files_seen += summary.files_seen;
+                    total.audio_files += summary.audio_files;
+                    total.indexed += summary.indexed;
+                    total.tag_fallback += summary.tag_fallback;
+                    total.failed += summary.failed;
+                    total.unreadable_dirs += summary.unreadable_dirs;
+                }
+            }
+            if scanned == 0 {
+                return Err(Error::new(
+                    Stage::ProviderCall,
+                    ErrorKind::NotFound {
+                        what: "taranabilir kataloğu olan sağlayıcı".to_owned(),
+                    },
+                ));
+            }
+            Ok(total)
+        }
+        .await;
+
+        if let Ok(summary) = &result {
+            summary.record_into(&mut rec);
+        }
+        let dirs = self.config.music_dirs();
+        self.finish(rec, result, move |summary, diag| ScanReport {
+            dirs,
+            summary,
+            diag,
+        })
+    }
+
+    /// Aramayı çalınabilir bir kuyruğa çevirir.
+    ///
+    /// `all` false ise yalnızca ilk eşleşme alınır. Sonuç boşsa **hata**
+    /// döner: "çaldım ama ses yok" durumundan iyidir.
+    ///
+    /// # Errors
+    /// Sağlayıcı yoksa, arama hata verirse ya da hiç eşleşme yoksa.
+    pub async fn queue_from_search(
+        &self,
+        registry: &ProviderRegistry,
+        query: &str,
+        all: bool,
+        limit: usize,
+    ) -> Result<Vec<QueueItem>> {
+        let streamers = registry.with_capability(crate::provider::Capabilities::STREAM);
+        if streamers.is_empty() {
+            return Err(Error::new(
+                Stage::PlaybackResolve,
+                ErrorKind::NotFound {
+                    what: "ses akışı verebilen sağlayıcı".to_owned(),
+                },
+            ));
+        }
+
+        let mut items = Vec::new();
+        for provider in streamers {
+            let hits = provider.search(query, limit).await?;
+            items.extend(hits.into_iter().map(|hit| QueueItem {
+                id: hit.id,
+                track: hit.track,
+            }));
+            if !all && !items.is_empty() {
+                items.truncate(1);
+                break;
+            }
+        }
+
+        if items.is_empty() {
+            return Err(Error::new(
+                Stage::PlaybackResolve,
+                ErrorKind::NotFound {
+                    what: format!(
+                        "{query:?} ile eşleşen parça (indeks boşsa: `tune provider scan`)"
+                    ),
+                },
+            ));
+        }
+        Ok(items)
+    }
+
+    /// Arar, kuyruğa alır, çalar ve dinleme kayıtlarını yazar.
+    ///
+    /// Çalma bitene kadar bekler — CLI'nin bir döngü yazmasına gerek kalmasın
+    /// diye akışın tamamı burada (Altın Kural). GUI ileride bunun yerine
+    /// [`Session::queue_from_search`] + kendi `Player`'ıyla kendi döngüsünü
+    /// kurar; ikisi de aynı çekirdek parçalarını kullanır.
+    ///
+    /// # Errors
+    /// Eşleşme yoksa, sağlayıcı çalamıyorsa ya da ses hattı kurulamazsa.
+    pub async fn play(
+        &mut self,
+        registry: &ProviderRegistry,
+        options: PlayOptions<'_>,
+    ) -> Result<PlayReport> {
+        let mut rec = Recorder::start(
+            format!("play {:?}", options.query),
+            Some(self.config.data_dir().to_path_buf()),
+        );
+
+        let result = async {
+            let items = self
+                .queue_from_search(registry, options.query, options.all, options.limit)
+                .await?;
+
+            let mut player = crate::playback::Player::new(registry.clone());
+            if options.shuffle {
+                player.queue_mut().set_shuffle(true);
+            }
+
+            if options.dry_run {
+                player.queue_mut().replace(items.clone());
+                return Ok((items, Vec::new(), false));
+            }
+
+            player.play_items(items.clone()).await?;
+
+            // Kuyruk bitene kadar sür. Yoklama aralığı çapadan bağımsız:
+            // pozisyon tüketici tarafında hesaplanır (D-015), burada
+            // yalnızca "parça bitti mi" sorulur.
+            //
+            // Uyku `std::thread::sleep`: çekirdek bir async çalışma zamanı
+            // seçmez (PLAN konvansiyonu), `tokio::time` burada kullanılamaz.
+            // Ses zaten kendi iş parçacığında çaldığı için bu bekleme sesi
+            // kesmiyor; yalnızca bu çağrı bloklanıyor.
+            loop {
+                player.tick().await?;
+                if player.state() == crate::playback::PlayState::Stopped {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            player.stop();
+
+            let listens = player.take_listens();
+            Ok((items, listens, true))
+        }
+        .await;
+
+        let report = match result {
+            Ok((items, listens, played)) => {
+                // Scrobble'lar burada yazılır: import verisiyle aynı tabloya (§1.6).
+                let written = self.record_listens(&listens)?;
+                rec.set(
+                    "play.queued",
+                    i64::try_from(items.len()).unwrap_or(i64::MAX),
+                );
+                rec.set(
+                    "play.listens_recorded",
+                    i64::try_from(written.inserted).unwrap_or(i64::MAX),
+                );
+                Ok((items, written.inserted, played))
+            }
+            Err(err) => Err(err),
+        };
+
+        let query = options.query.to_owned();
+        self.finish(
+            rec,
+            report,
+            move |(queued, listens_recorded, played), diag| PlayReport {
+                query,
+                queued,
+                listens_recorded,
+                played,
+                diag,
+            },
+        )
+    }
+
+    /// Çalınan parçaların dinleme kayıtlarını kütüphaneye yazar (§1.6).
+    ///
+    /// Import verisiyle **aynı tabloya** yazılır: geçmiş ve bugün tek bir
+    /// zaman çizelgesi olur.
+    ///
+    /// # Errors
+    /// Yazma başarısız olursa.
+    pub fn record_listens(&mut self, listens: &[Listen]) -> Result<WriteSummary> {
+        if listens.is_empty() {
+            return Ok(WriteSummary::default());
+        }
+        self.library.insert_listens(listens)
     }
 
     /// Son çalıştırmanın tanı raporu.

@@ -294,3 +294,116 @@ etmediği için `0.0.1-beta` yazıldı — aynı anlam, geçerli semver.
 **Sonuç:** Sürüm alanı `workspace.package`'ta tek yerde; iki crate de oradan
 alıyor. Snapshot testleri `tune_version`'ı zaten değişken sayıp normalize
 ettiği için sürüm artışı testleri kırmıyor — sonraki artışlarda da kırmayacak.
+
+---
+
+## D-014 — Faz 0.5 sonrası sıra: önce oynatma
+**Tarih:** 2026-08-29
+**Soru:** Faz 1 (oynatma) mı önce gelecek, Faz 3 (GUI + tema) mi? (PLAN Faz 1 karar noktası)
+**Karar:** **Önce Faz 1 — oynatma.** Kullanıcının gerekçesi: "önce bir player'ı
+halledelim ki üstüne bir şeyler kurabilelim."
+**Gerekçe:** Oynatma bir *taban*; GUI ve tema onun üstüne kurulur. Tersi sırada
+GUI'nin göstereceği canlı bir durum (çalan parça, kuyruk, pozisyon) olmaz ve
+tema sistemi boşluğu süslemiş olur. Ayrıca Faz 1'den itibaren scrobble'ı
+`tune` üretmeye başlar — geçmiş artık hiçbir sağlayıcıda oluşmaz, ki projenin
+asıl iddiası bu.
+**Kabul edilen risk:** D-003 gereği geliştiricinin yerel arşivi yok, bu faz
+**dogfood edilemez**. Karşılığında telifsiz fixture'larla ve testle doğrulanır;
+aralık Wrapped penceresine GUI yetişmeyebilir.
+**Sonuç:** Faz 3 (GUI + tema) Faz 1'den sonraya kaldı. Faz 1'in ilk işi §1.1
+provider trait tasarımı — imzalar **yazılmadan önce sunulur** (K7: geri dönüşü
+pahalı).
+
+---
+
+## D-015 — Oynatma durumunun dış yüzeyi: çapa + yoklama
+**Tarih:** 2026-08-29
+**Soru:** Çalma durumu GUI/mobil/TUI'ye nasıl açılacak? (PLAN §1.1, K7 gereği
+imzalar yazılmadan önce soruldu)
+**Karar:** **Çapa + yoklama.** `Player::anchor()` bir `PlaybackAnchor` döndürür;
+tüketici pozisyonu kendisi hesaplar: `pos = position_ms + (now - wall_time) * rate`.
+Observer/callback yok, sürekli pozisyon bildirimi yok.
+**Gerekçe:** Üç şey aynı yere çıkıyor. (1) PLAN 3.2 zaten bunu istiyor:
+"oynatma pozisyonu webview'de çapadan tahmin edilir, sürekli çekirdekten
+sorulmaz" — saniyede yüzlerce IPC mesajı takılma demek. (2) Faz 4'ün oda
+senkron primitifi (`anchor`) **birebir aynı şey**; bugün yazılan tip yarın
+odalarda tekrar kullanılır, iki ayrı durum modeli tutulmaz. (3) `uniffi` için
+düz bir record en güvenli yol — callback interface de desteklenir ama
+pozisyon için kullanılırsa mobilde köprü trafiği doğurur.
+**Sonuç:** Çekirdek `PlaybackAnchor { track, wall_time, position_ms, rate, state }`
+tipini dışa açar. Ayrık olaylar (parça bitti → `listen` üretimi) çekirdeğin
+içinde halledilir, tüketiciye olay akışı olarak sızmaz.
+**Not:** Bir sonraki oturumda "olay kaçırma" sorunu çıkarsa (örneğin GUI
+parçanın bittiğini geç fark ederse) `drain_events()` **eklenebilir** — çapa
+yüzeyi bozulmadan yanına konur. Bugün eklemiyoruz: K10, gerekmeden yazma.
+
+
+**Uygulandı (2026-08-29).** `PlaybackAnchor { track, wall_time, position_ms,
+rate, state, duration_ms }` — `uniffi` için düz record. `position_at(now)`
+formülü çekirdekte duruyor ki GUI/TUI/mobil üç kez yazmasın. `rate` alanı
+bugün 1.0 ya da 0.0; Faz 4'ün sürüklenme düzeltmesi (PLAN 4.4) onu 1.001
+gibi değerlere çekince yüzey değişmeyecek.
+
+`PlayState`'e **`Buffering`** eklendi (ilk tasarımda yoktu): `Paused`
+kullanıcının kararı, `Buffering` hattın beklemesi. İkisini birleştirmek
+kullanıcıya "duraklattın" demek olurdu, oysa duraklatmadı.
+
+Not: D-015'in "olay kaçırma çıkarsa `drain_events()` eklenebilir" maddesi
+hâlâ geçerli ve hâlâ gereksiz — parça bitişi çekirdeğin içinde
+(`Player::tick`) hallediliyor, tüketiciye olay akışı sızmıyor.
+
+---
+
+## D-016 — Ses hattı: symphonia + cpal, elle
+**Tarih:** 2026-08-29
+**Soru:** `rodio` (symphonia+cpal'i sarar, kuyruk/mixer/gapless hazır) mı,
+yoksa PLAN §1.4'ün yazdığı gibi elle mi?
+**Karar:** **symphonia (çözme) + cpal (çıkış), elle.** PLAN'ın yazdığı yol.
+**Gerekçe:** Faz 4'te odaların sürüklenme düzeltmesi çalma hızını %0.1
+oynatmayı gerektiriyor (PLAN 4.4); buna ancak hatta hakimsen ulaşırsın.
+`rodio`'nun verdiğiyle sınırlı kalmak, sonradan onu sökmek anlamına gelirdi.
+Bağımlılık ağacı da küçük kalır (K7/mobil).
+**Kabul edilen maliyet:** Resampling, format dönüşümü ve gapless bizim işimiz —
+Faz 1 daha uzun sürecek.
+
+**Uygulandı (2026-08-29).** Çözme arka plan iş parçacığında, çıkış cpal geri
+çağrısında; aralarında halka tamponu. Ses geri çağrısı **hiç bloklanmıyor** —
+kilit alınamazsa sessizlik yazılıyor, beklenmiyor (bloklamak cızırtı üretir).
+
+Pozisyon **çıkışa verilmiş kareden** hesaplanıyor, çözülmüş kareden değil:
+aradaki fark bir tampon dolusu zamandır ve çözülene bakmak ilerleme çubuğunu
+sesin önüne düşürürdü. Gerçek dosyayla ölçüldü: 1 sn'lik fixture 96ms/100ms
+adımlarla ilerledi, 999ms'de bitti.
+
+Yeniden örnekleme en yakın komşu (mono→stereo kopyalama dahil). Faz 1'in
+hedefi doğru ses üretmekti; kaliteli resampling gerekirse ayrıca ölçülür.
+`audio` feature'ı kapalıyken kuyruk ve çapa yine derleniyor, yalnızca ses
+çıkışı düşüyor — sunucu/mobil derlemeleri ALSA'ya bağlanmıyor.
+
+---
+
+## D-017 — İlk sağlayıcı: yerel dosya
+**Tarih:** 2026-08-29
+**Soru:** Faz 1'de önce yerel dosya sağlayıcı mı (§1.2), Subsonic/Jellyfin mi (§1.3)?
+**Karar:** **Yerel dosya.**
+**Gerekçe:** D-003 "hangi ortam gerçekten test edilebiliyorsa o önce gelmeli"
+diyor. Bu makinede `ffmpeg`, `flac` ve `lame` kurulu — telifsiz test
+fixture'ları (FLAC/MP3/OGG + bozuk etiketli örnekler) üretilebilir, yani
+D-003'ün dogfood kısıtı kısmen aşılır. Subsonic istemcisinin de kullanacağı
+çözme/çıkış hattı önce yerelde kurulmuş olur.
+**Sonuç:** §1.3 (Subsonic/Jellyfin) yerel sağlayıcı çalıştıktan sonra.
+Kullanıcının elinde çalışan bir Subsonic/Jellyfin sunucusu **yok** varsayılıyor;
+varsa sıra yeniden değerlendirilir.
+
+**Uygulandı (2026-08-29).** `LocalProvider`: özyinelemeli tarama, symphonia
+ile etiket okuma, etiket yoksa dosya adından türetme. `SEARCH|BROWSE|STREAM`
+— `CONTROL` yok.
+
+Fixture'lar üretildi (`fixtures/audio/`, 84 KB): `ffmpeg` sinüs tonları,
+telifsiz. Etiketli FLAC/MP3, etiketsiz OGG, alt dizinde etiketsiz FLAC ve
+kasten bozuk bir dosya. D-003'ün kısıtı böylece kısmen aşıldı — ses hattı
+gerçek dosyalarla, gerçek aygıtta sınanıyor.
+
+İki güvenlik kararı: `resolve_source` **indekste olmayan yolu reddediyor**
+(rastgele dosya okuma yüzeyi değil), indekslendikten sonra silinmiş dosya
+ise sessiz `None` değil açık hata veriyor.

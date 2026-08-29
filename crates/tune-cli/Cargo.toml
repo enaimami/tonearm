@@ -18,8 +18,9 @@ serde_json = "1.0.151"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-# D-011: CLI `--out *.png` için PNG rasterizasyonunu açar.
-tune-core = { workspace = true, features = ["render-png"] }
+# D-011: `--out *.png` için PNG rasterizasyonu.
+# D-016: `tune play` için ses hattı (symphonia + cpal).
+tune-core = { workspace = true, features = ["render-png", "audio"] }
 
 [lints]
 workspace = true
