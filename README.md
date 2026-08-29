@@ -28,7 +28,7 @@ istatistikler, paylaşılabilir Wrapped kartı ve **yerel dosya oynatma**.
 
 Faz 1'den itibaren scrobble'ı `tune` üretiyor: çaldığın parça import verinle
 aynı tabloya yazılıyor, geçmiş ve bugün tek bir zaman çizelgesi oluyor.
-Subsonic/Jellyfin ve TUI henüz yok.
+Terminal arayüzü (`--tui`) var. Subsonic/Jellyfin henüz yok.
 
 Ayrıntılı yol haritası: [`PLAN.md`](PLAN.md). Verilmiş kararlar ve gerekçeleri:
 [`DECISIONS.md`](DECISIONS.md).
@@ -87,7 +87,20 @@ tune play "radiohead"              # ilk eşleşmeyi çal
 tune play "radiohead" --all        # eşleşenlerin hepsini kuyruğa al
 tune play "radiohead" --all --shuffle
 tune play "radiohead" --dry-run    # çalmadan kuyruğu göster
+tune play "radiohead" --all --tui  # terminal arayüzü
 ```
+
+`--tui` kuyruğu, ilerleme çubuğunu ve çalan parçayı gösterir:
+
+| tuş | ne yapar |
+|---|---|
+| boşluk / `p` | duraklat–sürdür |
+| `n` / `b` | sonraki / önceki parça |
+| `↑` `↓` (ya da `k` `j`) | kuyrukta seçim |
+| `enter` | seçili parçayı çal |
+| `s` | karıştır |
+| `r` | tekrar kipi (kapalı → tümü → tek) |
+| `q` / `Esc` | çık |
 
 Tarama indeksi kalıcıdır: `scan` bir kez çalışır, `play` diski taramaz.
 Sonraki taramalar artımlıdır — dosyanın damgası değişmediyse etiketleri

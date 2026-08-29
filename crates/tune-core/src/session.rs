@@ -727,6 +727,35 @@ impl Session {
         )
     }
 
+    /// Bir arama sonucundan hazır bir [`crate::playback::Player`] kurar.
+    ///
+    /// `Session::play`'den farkı: **beklemez**. Çağıran kendi döngüsünü
+    /// yürütür (TUI çizim döngüsü, GUI zamanlayıcısı), `tick()` çağırır ve
+    /// biten dinlemeleri [`Session::record_listens`] ile yazar.
+    ///
+    /// # Errors
+    /// Eşleşme yoksa ya da ilk parça çalınamazsa.
+    pub async fn player_from_search(
+        &self,
+        registry: &ProviderRegistry,
+        options: PlayOptions<'_>,
+    ) -> Result<crate::playback::Player> {
+        let items = self
+            .queue_from_search(registry, options.query, options.all, options.limit)
+            .await?;
+
+        let mut player = crate::playback::Player::new(registry.clone());
+        if options.shuffle {
+            player.queue_mut().set_shuffle(true);
+        }
+        if options.dry_run {
+            player.queue_mut().replace(items);
+        } else {
+            player.play_items(items).await?;
+        }
+        Ok(player)
+    }
+
     /// Çalınan parçaların dinleme kayıtlarını kütüphaneye yazar (§1.6).
     ///
     /// Import verisiyle **aynı tabloya** yazılır: geçmiş ve bugün tek bir

@@ -5,6 +5,7 @@
 //! Bir özelliği buradan silsen çekirdek onu hâlâ sunar.
 
 mod output;
+mod tui;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -120,6 +121,9 @@ enum Command {
         /// Çalmayı beklemeden çık (yalnızca kuyruğu göster).
         #[arg(long)]
         dry_run: bool,
+        /// Terminal arayüzünü aç (kuyruk, ilerleme, tuş kumandası).
+        #[arg(long)]
+        tui: bool,
     },
     /// Son çalıştırmanın tanı raporu.
     Diag,
@@ -245,6 +249,7 @@ async fn run(cli: &Cli) -> tune_core::Result<String> {
             all,
             shuffle,
             dry_run,
+            tui: use_tui,
         } => {
             // Tarama **yapılmıyor**: indeks kalıcı (SQLite `provider_tracks`).
             // Kullanıcı `tune provider scan` ile bir kez tarar; `play` yalnızca
@@ -258,6 +263,16 @@ async fn run(cli: &Cli) -> tune_core::Result<String> {
                 dry_run: *dry_run,
                 ..session::PlayOptions::new(query)
             };
+
+            if *use_tui {
+                // TUI kendi döngüsünü yürütür; çekirdek beklemez.
+                let player = session.player_from_search(&registry, options).await?;
+                let recorded = tui::run(&mut session, player)
+                    .await
+                    .map_err(|err| anyhow_to_core(&err))?;
+                return Ok(format!("kaydedilen dinleme: {recorded}\n"));
+            }
+
             let report = session.play(&registry, options).await?;
             render(cli.json, &report, || output::play(&report))
         }
@@ -273,6 +288,20 @@ async fn run(cli: &Cli) -> tune_core::Result<String> {
             }
         }
     }
+}
+
+/// TUI'den gelen terminal/G-Ç hatasını çekirdek hata tipine sarar.
+///
+/// TUI bir sunum katmanı ve `anyhow` kullanabiliyor (konvansiyon: CLI'de
+/// serbest); ama `run` çekirdek hata tipi döndürüyor. Aşama
+/// [`Stage::PlaybackOutput`]: kullanıcının gördüğü yüzey bozulmuş demek.
+fn anyhow_to_core(err: &anyhow::Error) -> tune_core::Error {
+    tune_core::Error::new(
+        tune_core::diag::Stage::PlaybackOutput,
+        tune_core::ErrorKind::Audio {
+            detail: format!("terminal arayüzü: {err}"),
+        },
+    )
 }
 
 /// `--json` verildiyse veriyi seri hâle getirir, yoksa insan biçimini kullanır.

@@ -312,6 +312,33 @@ impl Player {
         Ok(true)
     }
 
+    /// Kuyrukta belirli bir konuma atlayıp çalar.
+    ///
+    /// TUI/GUI'nin "listeden seç" davranışı. Konum geçersizse `false` döner
+    /// ve çalan parça bozulmaz.
+    ///
+    /// # Errors
+    /// Seçilen parça çalınamazsa.
+    pub async fn jump_to(&mut self, position: usize) -> Result<bool> {
+        if !self.queue.jump_to(position) {
+            return Ok(false);
+        }
+        self.start_current().await?;
+        Ok(true)
+    }
+
+    /// Duraklatılmışsa sürdürür, çalıyorsa duraklatır.
+    ///
+    /// Tek tuşla kumanda eden arayüzler için; durum mantığı burada dursun ki
+    /// TUI ve GUI aynı kararı iki kez vermesin.
+    pub fn toggle_pause(&self) {
+        match self.state() {
+            PlayState::Playing | PlayState::Buffering => self.pause(),
+            PlayState::Paused => self.resume(),
+            PlayState::Stopped => {}
+        }
+    }
+
     /// Parça doğal olarak bittiyse sıradakine geçer.
     ///
     /// Çağıranın (TUI döngüsü, GUI zamanlayıcı) düzenli çağırması beklenir.

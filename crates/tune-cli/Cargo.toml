@@ -12,7 +12,10 @@ name = "tune"
 path = "src/main.rs"
 
 [dependencies]
+anyhow = "1.0.104"
 clap = { version = "4.6.6", features = ["derive"] }
+crossterm = "0.29"
+ratatui = "0.30"
 serde = "1.0.229"
 serde_json = "1.0.151"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros"] }

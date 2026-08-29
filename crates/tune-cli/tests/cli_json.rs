@@ -420,6 +420,29 @@ fn playing_with_no_match_says_what_to_do() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+/// TUI gerçek bir terminal ister; olmayan ortamda **aşamayı söyleyerek** düşmeli.
+///
+/// Sessizce metin kipine düşmek daha kötü olurdu: kullanıcı `--tui` yazdığını
+/// bilir, arayüzün neden açılmadığını da bilmeli.
+#[test]
+fn the_tui_refuses_to_start_without_a_terminal() {
+    let dir = temp_dir("tui");
+    let music = audio_fixtures();
+    let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["provider", "scan"]);
+    assert!(ok, "{stderr}");
+
+    // Test süreci bir tty'ye bağlı değil.
+    let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["play", "sinüs", "--tui"]);
+    assert!(!ok, "terminalsiz TUI başarısız olmalı");
+    assert!(stderr.contains("PLAYBACK_OUTPUT"), "{stderr}");
+    assert!(
+        stderr.contains("terminal arayüzü"),
+        "hata neyin başarısız olduğunu söylemeli:\n{stderr}"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 #[test]
 fn human_output_names_the_stage_on_failure() {
     let dir = temp_dir("hata");

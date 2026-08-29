@@ -481,28 +481,46 @@ Süre olarak **çıkışa verilen ses** yazılıyor, geçen duvar saati değil �
 duraklatılan süre dinlenmiş sayılmaz. Eşik D-008'deki tek `PlayRule`;
 burada ikinci bir yorum yok.
 
-### 1.7 CLI oynatıcı arayüzü — AÇIK
+### 1.7 CLI oynatıcı arayüzü — TAMAM
 `ratatui` ile TUI. Bu, GUI'nin prototipi değil; çekirdeğin tam kullanılabilir olduğunun kanıtı.
 
-Bugün `tune play <sorgu>` var: arar, çalar, biter, scrobble yazar. TUI (kuyruk
-görünümü, ilerleme çubuğu, tuşlar) henüz yok — `PlaybackAnchor` onu beslemeye
-hazır.
+**Uygulandı:** `tune play <sorgu> --tui`. Çalan parça + durum, ilerleme çubuğu,
+kuyruk (çalan `▸` ile işaretli), tekrar/karıştırma göstergesi, tuş yardımı.
+Tuşlar: boşluk duraklat, `n`/`b` sonraki/önceki, `↑↓`/`jk` seçim, `enter` seçileni
+çal, `s` karıştır, `r` tekrar kipi, `q`/`Esc`/`Ctrl+C` çık.
+
+**Altın Kural'ın sınavını geçti.** TUI'de karar veren tek satır yok: tuş →
+eylem eşlemesi (`action_for`) ve eylem → çekirdek çağrısı (`apply`) ayrı, ikisi
+de yalnızca iletiyor. "Duraklat mı sürdür mü" kararı bile çekirdekte
+(`Player::toggle_pause`) — TUI ve GUI aynı kararı iki kez vermesin diye.
+
+Pozisyon **yoklanmıyor**: TUI kendi çizim hızında `anchor.position_now()`
+çağırıyor, formül çekirdekte (D-015). Bu, PLAN 3.2'nin GUI için istediği
+davranışın aynısı — yani TUI o tasarımın çalıştığının kanıtı oldu.
+
+İki ayrıntı:
+- `TerminalGuard` `Drop` ile ham kipi geri veriyor: panik olsa bile
+  kullanıcının terminali bozuk kalmıyor.
+- Çekirdekten gelen hata TUI'yi **düşürmüyor**; alt satırda gösteriliyor ve
+  döngü sürüyor. Terminal hiç açılamazsa `ADIM: PLAYBACK_OUTPUT` ile düşüyor
+  (testle kilitli) — sessizce metin kipine kaçmıyor.
 
 ---
 
 ### 1.8 Faz 1 durum — çalan bir player var
 
-**154 test**, clippy ve fmt temiz. `tune play` uçtan uca çalışıyor.
+**159 test**, clippy ve fmt temiz. `tune play` ve `tune play --tui` uçtan uca
+çalışıyor.
 
 | Bölüm | Durum |
 |---|---|
 | 1.1 Provider trait | TAMAM |
 | 1.2 Yerel sağlayıcı | Kısmen — indeks kalıcı; watch yok |
-| 1.3 Subsonic/Jellyfin | Açık |
+| 1.3 Subsonic/Jellyfin | Açık — sıradaki |
 | 1.4 Ses hattı | TAMAM |
 | 1.5 Kuyruk | Kısmen — gapless yok |
 | 1.6 Scrobbling | TAMAM |
-| 1.7 TUI | Açık — sıradaki |
+| 1.7 TUI | TAMAM |
 
 **Test fixture'ları üretildi (PLAN'ın Faz 1 ön koşulu):** `fixtures/audio/`
 altında `ffmpeg` ile üretilmiş sinüs tonları — telifsiz, toplam 84 KB.
@@ -513,8 +531,11 @@ kısmen aşıldı: ses hattı gerçek dosyalarla, gerçek aygıtta sınanıyor.
 **Ses aygıtı olmayan ortamda testler kendini atlıyor** (CI için). Atlama
 sessiz değil: nedenini `stderr`'e yazıyor.
 
-**Sıradaki iş: 1.7 TUI.** Çekirdek hazır — `PlaybackAnchor` ilerleme çubuğunu,
-`Queue` kuyruk görünümünü besler. Ondan sonra 1.3 (Subsonic) ya da gapless.
+**Faz 1'in çekirdeği tamam.** Kalan üç iş, hiçbiri bloklayıcı değil:
+1.3 (Subsonic/Jellyfin — uzak kaynak), gapless geçiş, dizin izleme (watch).
+
+Faz 1'in bitti ölçütü ("yerel ve uzak kaynaktan çalıyor") **uzak kaynak
+gelmeden karşılanmış sayılmaz**; 1.3 yapılmadan Faz 2'ye geçilmemeli.
 
 ---
 
