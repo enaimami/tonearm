@@ -1,0 +1,277 @@
+# DECISIONS.md — Karar Defteri
+
+Her cevaplanan soru buraya yazılır. Aynı soru iki kez sorulmaz.
+Bir şeye karar vermeden önce bu dosyayı oku.
+
+---
+
+## D-001 — Mobil hedefte mi?
+**Tarih:** 2026-08-28
+**Karar:** Evet. Uygulama sonraki fazlarda, ama **API tasarımı bugünden mobile uyumlu olacak.**
+**Gerekçe:** Sonradan eklemek çekirdek API'sinin baştan yazılması demek.
+**Sonuç:** Değişmez Kural K7 bağlayıcıdır. `uniffi` ile ifade edilemeyen public imza kabul edilmez.
+
+---
+
+## D-002 — Kişisel araç mı, yayınlanacak ürün mü?
+**Tarih:** 2026-08-28
+**Karar:** Yayınlanacak. Etrafında topluluk hedefleniyor.
+**Sonuç:**
+- Faz 4 (odalar, sunucu) kapsam dahilinde.
+- Lisans kararı gerekli (bkz. D-005, açık).
+- Spotify konusunda K4 katı uygulanır — kişisel kullanım muafiyeti yok.
+- Public repo hijyeni gerekli: README, CONTRIBUTING, davranış kuralları, sürüm notları.
+
+---
+
+## D-003 — Yerel müzik arşivi var mı?
+**Tarih:** 2026-08-28
+**Karar:** Hayır. Test için fixture üretilebilir.
+**Sonuç:**
+- Faz 1 (oynatma) geliştirici tarafından **dogfood edilemez**. Bu, faz sırasını etkiler (bkz. D-004).
+- Faz 1 başladığında önce küçük, telifsiz test fixture'ları üretilecek
+  (Creative Commons / public domain kayıtlar, kısa süreli).
+
+---
+
+## D-004 — Wrapped ve topluluk hedefi, faz sırası
+**Tarih:** 2026-08-28
+**Karar:** Wrapped açık bir hedef. Aralık sezonu takvimi belirliyor.
+**Sonuç:**
+- **Yeni Faz 0.5 eklendi:** paylaşılabilir Wrapped kartı üretimi.
+- Gerekçe: Faz 0'ın çıktısı terminal metni. Terminal metni yayılmaz. Topluluk
+  hedefi paylaşılabilir bir görsel artefakt gerektiriyor ve o şu an planda yoktu.
+- Faz 0.5 çekirdekte yaşar (GUI ve mobil aynı üreticiyi kullanacak), CLI'den sürülür.
+
+---
+
+## D-005 — Lisans
+**Tarih:** 2026-08-29 · **Durum:** KAPANDI — **MIT OR Apache-2.0**
+**Karar:** MIT OR Apache-2.0. Cargo.toml'deki yer tutucu gerçek karara dönüştü.
+**Gerekçe:** Rust ekosistemi standardı; benimsemeyi maksimize eder. Eklentiler alt
+süreç + JSON-RPC konuştuğu için (K5) çekirdeğin lisansı eklenti yazarlarını yasal
+olarak neredeyse bağlamıyor — copyleft'in asıl faydası burada gerçekleşmiyor.
+**Sonuç:**
+- Faz 0.5.4'te `LICENSE-MIT` ve `LICENSE-APACHE` dosyaları repo köküne konur.
+- Faz 4'ün sunucu bileşeni ayrı crate/repo olursa orada AGPL **ayrıca**
+  değerlendirilir — bu karar yalnızca çekirdek/CLI için.
+
+---
+
+## D-006 — `MetadataLookup` generic'i (rapor Bulgu 3)
+**Tarih:** 2026-08-28 · **Durum:** UYGULANDI (2026-08-28)
+**Karar:** D-001 gereği bu **bugün bir K7 ihlalidir** ve düzeltilecek.
+**Mevcut durum:** `Session::import_archive<L: MetadataLookup>` ve
+`Session::resolve_track<L: MetadataLookup>` generic parametre taşıyor. `uniffi` generic ifade edemez.
+**Yön:** Generic yerine `Arc<dyn MetadataLookup>`. `uniffi` bunu **callback interface**
+olarak modelleyebilir (`#[uniffi::export(with_foreign)]`), yani yabancı dilde (Kotlin/Swift)
+uygulanan bir trait olarak geçer.
+**Not:** K7'nin ilk yazımı "trait object yok" diyordu; bu fazla katıydı ve düzeltildi.
+`Arc<dyn Trait>` uniffi'nin desteklediği yoldur. Yasak olan **generic** ve **lifetime**.
+
+**Uygulama:** `MetadataLookup`, `dyn` uyumlu olabilmek için `-> impl Future`
+yerine `LookupFuture<'a, T> = Pin<Box<dyn Future<..> + Send + 'a>>` döndürüyor
+(`async-trait` makrosunun elle yazılmış hâli — yeni bağımlılık eklenmedi).
+Trait'e `Send + Sync` eklendi. `Resolver<L>` de generic'ini bıraktı:
+`Resolver { lookup: Arc<dyn MetadataLookup> }`. `session::default_lookup()`
+artık somut `OfflineLookup` değil `Arc<dyn MetadataLookup>` döndürüyor, böylece
+kaynak değiştiğinde çağıran imza görmüyor. Çekirdeğin dışa açık yüzeyinde
+generic parametre kalmadı.
+
+---
+
+## D-007 — `diag` hata zincirinde tekrar eden ilk satır (rapor Bulgu 1)
+**Tarih:** 2026-08-28 · **Durum:** UYGULANDI (2026-08-28)
+**Karar:** Hata, düzeltilecek.
+**Sebep:** `diag/mod.rs:233` zinciri `err.to_string()` ile başlatıyor. `crate::Error`'ın
+Display'i `#[error("ADIM: {stage}")]` olduğu için `error_chain[0]`, `failed_at`'ten zaten
+basılan başlığın kopyası oluyor.
+**Düzeltme:** Zincir `err`'in kendisinden değil, `err.source()`'tan başlasın.
+`error_chain` yalnızca gerçek nedenleri içersin.
+
+**Uygulama:** `diag::error_chain` boş `Vec` ile başlayıp `err.source()`'tan
+yürüyor. `error_chain_does_not_repeat_the_stage_header` testi hem zincirin
+`"ADIM:"` ile başlayan satır içermediğini hem de `render()` çıktısında başlığın
+tam olarak bir kez geçtiğini doğruluyor.
+
+---
+
+## D-008 — "çalma" etiketinin iki anlamı (rapor Bulgu 2)
+**Tarih:** 2026-08-28 · **Durum:** UYGULANDI (2026-08-28)
+**Karar:** Etiket değil, **kavram** düzeltilecek.
+**Sebep:** `library search` ham dinlemeyi sayıyor (eşik yok), `stats` ise `min_ms_played`
+(30 sn) eşiğinin üstündekileri. Aynı fixture'da "18 çalma" ve "9 çalma" çıkıyor.
+**Düzeltme:** Çekirdekte tek bir paylaşılan kavram tanımlanır:
+- `play_count` → eşiği geçen, "sayılan" çalma (scrobble konvansiyonu: ≥30 sn veya parçanın yarısı)
+- `listen_events` → ham olay sayısı, yalnızca `diag` ve hata ayıklamada görünür
+Her iki yüzey de aynı hesabı çağırır; SQL iki yerde ayrı yazılmaz. Bu, aynı hatanın
+tekrar doğmasını engeller.
+
+**Uygulama:** Kural `model::PlayRule` içinde tek yerde tanımlı; `PlayRule::counts`
+scrobble konvansiyonunu uyguluyor (≥ eşik **veya** parçanın yarısı — yarım-parça
+kolu yalnızca süre biliniyorsa çalışır). `StatsQuery::play_rule()` ve
+`ListenStore::search(.., rule)` aynı örneği kullanıyor. SQL tarafı elle yazılmıyor:
+`library::play_predicate_sql(rule)` kuralı tek bir yerde SQLite ifadesine çeviriyor
+ve `sql_play_rule_agrees_with_rust` testi gerçek SQLite üzerinde 11 kenar durumda
+Rust ile SQL'in aynı cevabı verdiğini kilitliyor.
+
+**Adlandırma:** `SearchHit.plays` → `SearchHit.play_count`. Ham olay sayısı
+kullanıcı yüzeyinden çıktı; `SearchOutcome.listen_events` olarak yalnızca tanı
+sayaçlarına yazılıyor (`search.play_count`, `search.listen_events`).
+`tune library search` de `stats` gibi `--min-ms` alıyor ki iki yüzey aynı eşikle
+sürülebilsin.
+
+**Ölçülen etki:** `spotify_extended_mini` fixture'ında `Creep` satırı
+`plays: 18` iken `play_count: 9` oldu — `stats`'ın saydığıyla birebir aynı.
+
+---
+
+## D-009 — Kimlik doğruluk kümesi yetersiz
+**Tarih:** 2026-08-28 · **Durum:** UYGULANDI (2026-08-28)
+**Karar:** 15/15 = %100 geçerli bir sinyal değil. Küme zor vakalarla büyütülecek.
+**Gerekçe:** CLAUDE.md bu sayıyı "projenin en önemli metriği" olarak tanımlıyor.
+Kolay bir kümede %100, ölçüm yapılmadığı anlamına gelir.
+**Eklenmesi gereken vaka sınıfları:**
+- Remaster / Deluxe / Anniversary sürümleri (aynı kayıt sayılmalı)
+- Live kayıtlar (stüdyo versiyonundan **ayrı** olmalı)
+- Cover'lar (eşleşme**meli** — negatif vaka)
+- `feat.` / `ft.` / `with` varyasyonları
+- Sanatçı adında Türkçe karakter ve transliterasyon (Müslüm Gürses / Muslum Gurses)
+- Klasik müzik: besteci ve icracı ayrımı
+- Aynı ada sahip farklı sanatçılar
+- Uzun/kısa (radio edit) versiyonlar
+**Hedef:** en az 60 vaka, en az 15'i negatif (eşleşmemesi gereken).
+
+**Uygulama:** Küme 15 vakadan **69 vakaya** çıkarıldı; 21'i negatif (eşleşmemesi
+gereken). Her vaka bir `class` etiketi taşıyor ve test toplam oranın yanında
+**sınıf bazında** kırılım da basıyor — toplam oran tek bir sınıftaki çöküşü
+gizleyebiliyor. Testin kendisi de kümeyi koruyor: 60 vakadan ve 15 negatiften
+aşağı düşerse başarısız oluyor.
+
+Şema iki alanla genişledi: `class` ve `expect_method`. İkincisi "katalogda
+olmayan ISRC yine de otoritedir, ama MBID'e değil ISRC kimliğine bağlanır"
+gibi vakaları ifade edebilmek için gerekliydi.
+
+**İlk ölçüm (küme büyüdü, algoritma eski): 62/69 = %89.9.** Yani D-009 haklıydı —
+15/15 = %100 ölçüm yapılmadığı anlamına geliyormuş. Hatalar dağınık değil, iki
+gerçek kusurda toplandı:
+
+1. **`live` sınıfı 1/4.** `normalize::strip_edition_suffixes` "live"i atılabilir
+   bir sürüm eki sayıyordu; `Creep (Live at Glastonbury)` stüdyo kaydına
+   **%100 güvenle** bağlanıyordu. Bu, D-009'un açıkça yasakladığı davranıştı.
+2. **`cover` 3/5, `remix` 1/2.** Başlık ağırlığı (0.6) tek başına eşiğe
+   dayanabiliyordu: `The Rock Tribute Band - Karma Police` 0.90 güvenle
+   Radiohead kaydına bağlanıyordu.
+
+**Düzeltmeler:**
+- Etiketler ikiye ayrıldı. `REISSUE_MARKERS` (remaster, deluxe, mono, radio edit…)
+  *aynı kaydın* yeniden yayımıdır, atılır. `VARIANT_MARKERS` (live, remix,
+  acoustic, karaoke, demo, unplugged, cover, instrumental, reprise) *başka bir
+  kayıttır*, atılmaz. `(Live Version)` gibi ikisini birden içeren ekte varyant
+  kazanır.
+- `fuzzy::similarity` metin benzerliğinin üstüne iki ayrık kural aldı:
+  **varyant uyuşmazlığı** (bir tarafta `live` var diğerinde yok → ×0.5) ve
+  **sanatçı tabanı** (`ARTIST_MIN_SIMILARITY = 0.7`; altındaysa ×0.5).
+  Ceza uyuşmazlıkta, varlıkta değil: iki canlı kayıt birbirine ceza almaz.
+
+**Son ölçüm: 68/69 = %98.6.** Sınıf bazında yalnızca `radio_edit` 2/3 — o vaka
+bir kusur değil, cevaplanmamış bir soruydu; D-010 ile karara bağlandı ve küme
+**69/69 = %100**'e ulaştı. Test eşiği %90 → %95 → **%97**.
+
+> Bu %100, D-009'un eleştirdiği %100 değil: küme 69 vaka, 22'si negatif ve
+> `live` / `cover` / `classical` / `same_title` sınıfları algoritmanın gerçekten
+> düştüğü yerlerdi. Yine de tek bir kümede %100, kümenin tükendiği anlamına
+> gelir: ağ ve gerçek MusicBrainz verisi geldiğinde yeni hata sınıfları
+> eklenmeli — kural aynı, önce vakayı yaz, testin düştüğünü gör.
+
+---
+
+## D-010 — Radio edit orijinaliyle aynı kayıt sayılmalı mı?
+**Tarih:** 2026-08-28
+**Karar:** **Hayır — ayrı kayıt (Seçenek B).** Kanonik kimlik kayıt (recording)
+düzeyindedir; MusicBrainz de radio edit'i ayrı bir recording kabul eder.
+**Gerekçe:** Süre cezası, kimlik zincirinin canlı kayıt ve cover yakalayan en
+güçlü sinyali; D-009'da `live` sınıfını 1/4'ten 4/4'e çıkaran şeyin parçası.
+Onu, ölçemediğimiz bir kullanıcı rahatlığı için gevşetmek kazanılmış doğruluğu
+harcamak olurdu. "Aynı şarkının farklı kayıtlarını tek satır göster" ayrı bir
+katmandır (work / release-group gruplaması) ve MusicBrainz verisi geldiğinde
+doğru yerde çözülür — Faz 0'ın işi kimliği *doğru* kurmak.
+**Sonuç:** Kod değişmedi; `Underworld - Born Slippy .NUXX - Radio Edit` vakası
+`expect_mbid: null` olarak yeniden etiketlendi. **Doğruluk 69/69 = %100**,
+negatif vaka 22. Test eşiği %95 → **%97** (tek vakalık gerileme testi düşürür).
+
+**Kayda değer nüans:** Kümedeki diğer iki radio/extended edit vakası pozitif
+kaldı, çünkü süreleri bilinmiyor. Etiketleme "bu şarkı ne", değil "bu kanıtla
+zincir ne yapmalı" sorusunu kodluyor: süre farkı bir edit'i kanıtlıyorsa
+eşleşme reddedilir, kanıt yoksa zincir bulanık güvenle en iyi tahminini verir.
+Bu ayrım kasıtlıdır; ağ ve gerçek süre verisi geldiğinde yeniden ölçülmeli.
+
+**Bağlam:** D-009 kümesindeki tek başarısız vaka:
+`Underworld - Born Slippy .NUXX - Radio Edit` (240 sn) katalogdaki 570 sn'lik
+kayda bağlanmıyor. Sebep, kusur değil kuralların çatışması: "radio edit" bir
+yeniden yayım eki sayılıp atılıyor (başlık birebir eşleşiyor), ama 330 sn'lik
+süre farkı `DURATION_MISMATCH_MS` cezasını tetikleyip skoru 0.88'in altına
+indiriyor. Süre farkı küçük olan radio edit'ler (örn. `Aerodynamic (Radio Edit)`,
+süre bilinmiyor) eşleşiyor.
+
+**Seçenek A — radio edit orijinaliyle birleşsin.** Kullanıcı "aynı şarkıyı
+dinledim" der; istatistikte tek satır görmek ister. Uygulaması: süre cezası
+başlıklardan biri bir uzunluk eki taşıyorsa gevşetilir.
+*Artı:* kullanıcı sezgisine uyar, Wrapped'da parça sayısı bölünmez.
+*Eksi:* süre cezası kimlik zincirinin canlı kayıt/cover yakalayan en güçlü
+sinyali; gevşetmek D-009'da yeni kazanılan `live` ve `cover` sınıflarını
+riske atar.
+
+**Seçenek B — ayrı kayıt sayılsın (bugünkü davranış).** MusicBrainz de radio
+edit'i ayrı bir *recording* kabul eder; kanonik kimliğimiz kayıt düzeyinde.
+Vakanın etiketi `expect_mbid: null` olarak düzeltilir ve oran 69/69 olur.
+*Artı:* kimlik zinciri kayıt düzeyinde tutarlı kalır, hiçbir sinyal gevşemez.
+*Eksi:* aynı şarkı istatistikte iki satır olabilir.
+
+**Seçilen: B.**
+
+---
+
+## D-011 — Wrapped kartı rasterizasyonu
+**Tarih:** 2026-08-29
+**Soru:** `tune wrapped --out kart.png` PNG'yi nasıl üretecek? (PLAN 0.5.3 karar noktası)
+**Karar:** **resvg, opsiyonel `render-png` feature'ı arkasında.** Çekirdek her zaman
+SVG üretir; PNG dönüşümü yalnızca feature açıkken derlenir. CLI feature'ı açar,
+mobil bağlamalar açmaz.
+**Gerekçe:** Bağımlılık ağacı küçük kalmalı (K7/mobil); resvg ağacı (tiny-skia,
+fontdb, rustybuzz) büyük. Feature kapalıyken ağaç hiç büyümüyor, açıkken bitti
+ölçütü (`--out kart.png`) karşılanıyor. SVG her zaman üretiliyor olduğu için
+GUI/mobil istemezse PNG üretmeden kartı alabilir.
+**Sonuç:**
+- `tune-core` → `resvg = { version = "0.48", optional = true }`,
+  `[features] render-png = ["dep:resvg"]`.
+- `tune-cli` tune-core'yu `render-png` ile açar.
+- Feature-gated kod `wrapped/png.rs` içinde; `render_svg` koşulsuz.
+
+**Uygulandı (2026-08-29).** `wrapped::write_card` uzantıya bakıp biçime karar
+veriyor: `.svg` koşulsuz çalışır, `.png` feature kapalıysa "bu derlemede yok,
+SVG kullanın" diye **açıkça** hata verir — sessizce yanlış biçim yazmaz.
+Rasterizasyon `usvg` + `tiny-skia` üzerinden; `usvg::Options::default()` boş
+bir fontdb ile geldiği için sistem fontları elle yükleniyor ve sans-serif
+somut bir aileye bağlanıyor (yoksa metin hiç çizilmiyordu).
+
+**Ölçülen etki:** ağaç feature kapalıyken **56 crate**, açıkken **114**.
+Kararın gerekçesi doğrulandı: 58 crate'lik fark mobil bağlamaların dışında kalıyor.
+
+## D-012 — Wrapped kartı tasarımı
+**Tarih:** 2026-08-29
+**Soru:** Kart, tema sisteminin (Faz 3) önizlemesi mi, sabit tasarım mı? (PLAN 0.5.3 karar noktası)
+**Karar:** **Sabit tasarım, isimli iç sabitlerle.** Renkler ve ölçüler isimli sabitlerde
+toplanır ama dışarıya sürümlü bir token sözleşmesi açılmaz.
+**Gerekçe:** Tema token seti yayınlanınca geriye dönük uyumluluk borcu doğar
+(PLAN 3.3 — Spicetify dersi). Token seti tasarlanmadan sözleşme doğurmak, Faz 3'ü
+plansız öne çekmek olur. Sabitlerin isimli toplanması, ileride token'lara taşımayı
+küçük bir iş yapar.
+**Sonuç:** Ölçüler parametre (`CardSize`), renkler/boşluklar modül içi isimli
+sabitler (`palette`, `metrics`). Faz 3'te tema API'si tasarlanırken bunlar token
+setine taşınır.
+
+**Uygulandı (2026-08-29).** `palette` beş renk (zemin, metin, soluk, vurgu,
+bar rayı), `metrics` on ölçü. İkisi de `wrapped/svg.rs` içinde `mod`, dışa
+açık değil — yani bugün kimse bu isimlere bağımlı olamaz ve Faz 3'te token
+setine taşımak geriye dönük uyumluluk borcu doğurmaz. Kararın amacı buydu.

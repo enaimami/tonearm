@@ -1,0 +1,26 @@
+{
+  "command": "<değişken>",
+  "counters": {
+    "stats.listens_in_scope": 20,
+    "stats.out_of_scope": 40,
+    "stats.plays": 17,
+    "stats.skipped_short": 3,
+    "stats.unique_artists": 5,
+    "stats.unique_tracks": 6,
+    "stats.without_canonical_id": 0,
+    "wrapped.discoveries": 0,
+    "wrapped.hours": 17,
+    "wrapped.timeline_years": 1
+  },
+  "env": {
+    "arch": "<değişken>",
+    "data_dir": "<değişken>",
+    "os": "<değişken>",
+    "tune_version": "<değişken>"
+  },
+  "error_chain": [],
+  "failed_at": null,
+  "finished_at": "<değişken>",
+  "notes": [],
+  "started_at": "<değişken>"
+}

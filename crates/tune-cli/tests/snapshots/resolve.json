@@ -1,0 +1,30 @@
+{
+  "artist": "Radiohead",
+  "diag": {
+    "command": "<değişken>",
+    "counters": {
+      "identity.confidence_pct": 20
+    },
+    "env": {
+      "arch": "<değişken>",
+      "data_dir": "<değişken>",
+      "os": "<değişken>",
+      "tune_version": "<değişken>"
+    },
+    "error_chain": [],
+    "failed_at": null,
+    "finished_at": "<değişken>",
+    "notes": [
+      "yöntem: local_key"
+    ],
+    "started_at": "<değişken>"
+  },
+  "query": "Radiohead - Creep",
+  "resolution": {
+    "canonical_id": "local:b51521e93103eefa",
+    "confidence": 0.2,
+    "matched": null,
+    "method": "local_key"
+  },
+  "title": "Creep"
+}

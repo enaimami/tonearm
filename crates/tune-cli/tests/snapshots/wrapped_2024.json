@@ -1,0 +1,69 @@
+{
+  "data": {
+    "archive_end_year": 2024,
+    "archive_start_year": 2023,
+    "by_year": [
+      {
+        "ms_played": 4078000,
+        "plays": 17,
+        "year": 2024
+      }
+    ],
+    "discoveries": [],
+    "first_listen": "2024-02-03T02:15:00Z",
+    "plays": 17,
+    "top_album": {
+      "album": "Dummy",
+      "artist": "Portishead",
+      "ms_played": 909000,
+      "plays": 3
+    },
+    "top_artist": {
+      "artist": "Radiohead",
+      "ms_played": 1497000,
+      "plays": 6,
+      "unique_tracks": 2
+    },
+    "top_track": {
+      "artist": "Portishead",
+      "canonical_id": "local:1604c3da783c7daa",
+      "ms_played": 909000,
+      "plays": 3,
+      "title": "Roads"
+    },
+    "total_ms_played": 4078000,
+    "unique_artists": 5,
+    "unique_tracks": 6,
+    "year": 2024
+  },
+  "diag": {
+    "command": "<değişken>",
+    "counters": {
+      "stats.listens_in_scope": 20,
+      "stats.out_of_scope": 40,
+      "stats.plays": 17,
+      "stats.skipped_short": 3,
+      "stats.unique_artists": 5,
+      "stats.unique_tracks": 6,
+      "stats.without_canonical_id": 0,
+      "wrapped.discoveries": 0,
+      "wrapped.hours": 17,
+      "wrapped.timeline_years": 1
+    },
+    "env": {
+      "arch": "<değişken>",
+      "data_dir": "<değişken>",
+      "os": "<değişken>",
+      "tune_version": "<değişken>"
+    },
+    "error_chain": [],
+    "failed_at": null,
+    "finished_at": "<değişken>",
+    "notes": [],
+    "started_at": "<değişken>"
+  },
+  "size": {
+    "height": 1080,
+    "width": 1080
+  }
+}

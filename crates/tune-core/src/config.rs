@@ -1,0 +1,105 @@
+//! Veri dizini ve yapılandırma.
+//!
+//! Yol çözümlemesi çekirdekte: CLI, GUI ve mobil aynı dizini bulmalı.
+
+use std::path::{Path, PathBuf};
+
+use crate::diag::Stage;
+use crate::error::{Error, ErrorKind, Result};
+
+/// Veri dizinini elle vermek için ortam değişkeni (testler ve taşınabilir kurulum).
+pub const DATA_DIR_ENV: &str = "TUNE_DATA_DIR";
+
+/// Çekirdeğin çalışması için gereken yollar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Config {
+    data_dir: PathBuf,
+}
+
+impl Config {
+    /// Verilen dizini kullanır.
+    #[must_use]
+    pub fn with_data_dir(data_dir: impl Into<PathBuf>) -> Self {
+        Self {
+            data_dir: data_dir.into(),
+        }
+    }
+
+    /// Veri dizinini ortamdan bulur.
+    ///
+    /// Sıra: `TUNE_DATA_DIR` → `XDG_DATA_HOME/tune` → `HOME/.local/share/tune`.
+    ///
+    /// # Errors
+    /// Hiçbiri bulunamazsa — sessizce geçici dizine düşmek, kullanıcının
+    /// geçmişini fark ettirmeden kaybetmek demektir.
+    pub fn discover() -> Result<Self> {
+        if let Some(dir) = non_empty_env(DATA_DIR_ENV) {
+            return Ok(Self::with_data_dir(dir));
+        }
+        if let Some(dir) = non_empty_env("XDG_DATA_HOME") {
+            return Ok(Self::with_data_dir(PathBuf::from(dir).join("tune")));
+        }
+        if let Some(home) = non_empty_env("HOME") {
+            return Ok(Self::with_data_dir(
+                PathBuf::from(home).join(".local/share/tune"),
+            ));
+        }
+        Err(Error::new(
+            Stage::ConfigLoad,
+            ErrorKind::NotFound {
+                what: format!(
+                    "veri dizini — {DATA_DIR_ENV}, XDG_DATA_HOME ya da HOME değişkenlerinden hiçbiri tanımlı değil"
+                ),
+            },
+        ))
+    }
+
+    /// Veri dizini.
+    #[must_use]
+    pub fn data_dir(&self) -> &Path {
+        &self.data_dir
+    }
+
+    /// Kütüphane veritabanı.
+    #[must_use]
+    pub fn database_path(&self) -> PathBuf {
+        self.data_dir.join("library.db")
+    }
+
+    /// Son çalıştırmanın tanı raporu.
+    #[must_use]
+    pub fn last_run_path(&self) -> PathBuf {
+        self.data_dir.join("last-run.json")
+    }
+
+    /// Veri dizinini oluşturur.
+    ///
+    /// # Errors
+    /// Dizin oluşturulamazsa.
+    pub fn ensure_data_dir(&self) -> Result<()> {
+        std::fs::create_dir_all(&self.data_dir)
+            .map_err(|source| crate::error::io_err(Stage::ConfigLoad, &self.data_dir, source))
+    }
+}
+
+fn non_empty_env(key: &str) -> Option<String> {
+    std::env::var(key).ok().filter(|v| !v.trim().is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paths_hang_off_the_data_dir() {
+        let config = Config::with_data_dir("/veri/tune");
+        assert_eq!(
+            config.database_path(),
+            PathBuf::from("/veri/tune/library.db")
+        );
+        assert_eq!(
+            config.last_run_path(),
+            PathBuf::from("/veri/tune/last-run.json")
+        );
+    }
+}

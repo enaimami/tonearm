@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = ["crates/tune-core", "crates/tune-cli"]
+exclude = ["spike"]
+
+[workspace.package]
+# D-005: lisans MIT OR Apache-2.0 olarak karara bağlandı.
+version = "0.0.1-beta"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+tune-core = { path = "crates/tune-core" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+# Altın Kural ve tanılama kültürünün derleyici tarafından zorlanan kısmı.
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
