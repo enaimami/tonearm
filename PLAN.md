@@ -309,7 +309,7 @@ Faz 0.5 muhtemelen ilk public sürüm olacak — repo o gün hazır olmalı.
 
 ---
 
-### 0.5.5 Faz 0.5 durum — 0.5.1–0.5.3 TAMAM, 0.5.4 AÇIK
+### 0.5.5 Faz 0.5 durum — TAMAM (`v0.0.1-beta`)
 
 Kart üreticisi çekirdekte (`wrapped/`), CLI yalnızca sürüyor. Üç kapı temiz
 (**87 test**, clippy, fmt).
@@ -324,8 +324,12 @@ Kart üreticisi çekirdekte (`wrapped/`), CLI yalnızca sürüyor. Üç kapı te
       çizelgesi, ilk dinleme tarihi, yıllara göre bar grafiği. Alt bilgi
       arşivin yaşını basıyor ("1 Ocak 2023'dan beri (2 yıl)") — sağlayıcının
       12 aylık Wrapped'ının yapamadığı şey burada görünür.
-- [ ] **0.5.4** — Yayın hijyeni: README, LICENSE-MIT, LICENSE-APACHE,
-      CONTRIBUTING, sürüm etiketleme. **Sıradaki iş.**
+- [x] **0.5.4** — Yayın hijyeni tamam. README (ne/neden/nasıl + örnek kart),
+      `LICENSE-MIT` + `LICENSE-APACHE` (D-005), CONTRIBUTING (üç kapı,
+      Altın Kural, değişmez kurallar, doğruluk kümesi yordamı).
+      Repo `git init` edildi ve ilk commit atıldı; sürüm `0.0.0` → **`0.0.1-beta`**,
+      `v0.0.1-beta` etiketi Faz 0.5 kapanışına konuldu.
+      `target/`, `spike/`, `tmp/` commit dışında; fixture'lar sentetik.
 
 **D-011 ölçüldü:** `render-png` kapalıyken bağımlılık ağacı **56 crate**,
 açıkken **114**. Yani kararın gerekçesi (mobil binary boyutu, K7) gerçek:
@@ -345,6 +349,10 @@ sonra bar yüksekliği kısılıyor. `content_never_spills_past_the_card` ve
 `a_long_archive_still_fits_the_square_card` testleri çizilen en alt `y`
 koordinatını ölçüp kart yüksekliğiyle karşılaştırıyor — taşma sessizce
 geri gelemez.
+
+**Faz 0.5 kapandı.** Sıradaki iş bir karar: Faz 1 (oynatma) mı önce gelecek,
+Faz 3 (GUI + tema) mi — aşağıdaki Faz 1 karar noktası. Bu, aralık Wrapped
+penceresine ne yetişeceğini belirliyor ve **cevaplanmadan kod yazılmaz.**
 
 ---
 

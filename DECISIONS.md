@@ -56,6 +56,11 @@ olarak neredeyse bağlamıyor — copyleft'in asıl faydası burada gerçekleşm
 - Faz 4'ün sunucu bileşeni ayrı crate/repo olursa orada AGPL **ayrıca**
   değerlendirilir — bu karar yalnızca çekirdek/CLI için.
 
+**Uygulandı (2026-08-29).** Her iki lisans dosyası repo kökünde; MIT'te telif
+sahibi `enaimami`. `CONTRIBUTING.md` katkının çift lisans altında yayımlanmayı
+kabul ettiğini söylüyor. Cargo.toml'deki `license` alanı zaten doğruydu, artık
+yer tutucu değil karar.
+
 ---
 
 ## D-006 — `MetadataLookup` generic'i (rapor Bulgu 3)
@@ -275,3 +280,17 @@ setine taşınır.
 bar rayı), `metrics` on ölçü. İkisi de `wrapped/svg.rs` içinde `mod`, dışa
 açık değil — yani bugün kimse bu isimlere bağımlı olamaz ve Faz 3'te token
 setine taşımak geriye dönük uyumluluk borcu doğurmaz. Kararın amacı buydu.
+
+---
+
+## D-013 — Sürüm numarası ve telif sahibi
+**Tarih:** 2026-08-29
+**Soru:** İlk public sürüm hangi numarayı taşıyacak, LICENSE-MIT'te telif kime ait?
+**Karar:** Sürüm **`0.0.1-beta`**, telif sahibi **`enaimami`** (mahlas).
+Repo `git init` edildi, ilk commit kullanıcının adı ve e-postasıyla atıldı,
+`v0.0.1-beta` etiketi Faz 0.5 kapanışına kondu.
+**Not:** Kullanıcı "0.0.1 Beta" dedi; Cargo semver'i boşluklu biçimi kabul
+etmediği için `0.0.1-beta` yazıldı — aynı anlam, geçerli semver.
+**Sonuç:** Sürüm alanı `workspace.package`'ta tek yerde; iki crate de oradan
+alıyor. Snapshot testleri `tune_version`'ı zaten değişken sayıp normalize
+ettiği için sürüm artışı testleri kırmıyor — sonraki artışlarda da kırmayacak.
