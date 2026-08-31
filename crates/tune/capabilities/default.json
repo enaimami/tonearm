@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Ana pencere: olay dinleme ve sürükle-bırak. Dosya sistemi, kabuk ve ağ izni yok — hepsi çekirdekte, Rust tarafında.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

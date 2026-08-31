@@ -5,6 +5,10 @@
 *.sqlite
 .env
 
+# Tauri'nin `build.rs` sırasında ürettiği ACL şemaları — türetilmiş dosya,
+# her derlemede yeniden yazılıyor.
+crates/tune/gen/
+
 # spike/ atılabilir prototipler; çıktıları versiyonlanmaz
 spike/**/__pycache__/
 spike/**/.venv/

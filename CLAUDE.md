@@ -71,7 +71,10 @@ tune/
 │   │   ├── playback/     # symphonia + cpal (Faz 1)
 │   │   ├── sync/         # çapa protokolü (Faz 3)
 │   │   └── diag/         # tanılama, aşağıya bak
-│   └── tune-cli/         # ince kabuk
+│   ├── tune-cli/         # ince kabuk (ikili adı: `tune`)
+│   └── tune/             # Tauri masaüstü kabuğu (ikili adı: `tune-desktop`)
+│       ├── src/          # main + env + state + core_thread + commands
+│       └── ui/           # düz statik webview — bundler yok, npm yok
 ├── spike/                # ATILABILIR prototipler (Python vb.) — workspace DIŞI
 └── fixtures/             # test verisi: kırpılmış export zip'leri, örnek JSON
 ```
@@ -85,6 +88,7 @@ Python'da dene; doğruluk tatmin edici olunca `identity/`'ye porta.
 
 ```bash
 cargo run -p tune-cli -- <alt-komut>
+cargo run -p tune            # masaüstü arayüzü
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all

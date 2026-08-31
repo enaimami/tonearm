@@ -159,7 +159,10 @@ tune/
 │   │   ├── playback/       # symphonia + cpal        (Faz 1)
 │   │   ├── sync/           # çapa protokolü          (Faz 4)
 │   │   └── diag/           # tanılama
-│   └── tune-cli/
+│   ├── tune-cli/           # ince CLI kabuğu
+│   └── tune/               # Tauri masaüstü kabuğu (Faz 3)
+│       ├── src/            # main + env + state + core_thread + commands
+│       └── ui/             # düz statik webview — bundler yok, npm yok
 ├── spike/                  # ATILABILIR prototipler — workspace DIŞI, CI DIŞI
 └── fixtures/               # kırpılmış export'lar, doğruluk kümesi
 ```
@@ -795,7 +798,7 @@ Suçlunun donanım değil motor olduğu **kontrol deneyiyle** ayrıldı: aynı m
 aynı sayfayı Firefox dört fazın dördünde de 58.8 fps çiziyor. Donanım tavanı
 olsaydı yerel Rust GUI'ye kaçmak da kurtarmazdı.
 
-### 3.2 IPC sözleşmesi
+### 3.2 IPC sözleşmesi — TAMAM
 ~~Webview ile çekirdek arasında saniyede yüzlerce mesaj = takılma.~~
 **D-028 bunu ölçtü ve doğrulamadı:** IPC gidiş-dönüş p95 **1 ms**, 30 Hz yoklama
 kare süresine **1 ms** ekliyor, köprü **~10.000 olay/sn** taşıyor. Toplu gönderim
@@ -844,11 +847,30 @@ katmanı iki tipi zamanla kaydırırdı ve kaymayı hiçbir şey yakalamazdı.
 | Durum | `anchor`, `queue` |
 | Tanılama | `diag` |
 
+Ayrıca `environment` var: veri dizini, veritabanı yolu, müzik dizinleri. Yeni
+bir "durum" tipi değil — hata mesajının yanında "hangi kütüphaneye baktım"
+sorusu cevapsız kalmasın diye (K9).
+
 **Olaylar** yalnızca **bir şey değiştiğinde** gönderilir, zamanlayıcıyla değil.
 GUI'nin Rust tarafı `LiveSession::tick()` döngüsünü sürer; `TickReport`
-`track_changed`, `listens_recorded`, `store_error` ya da `finished` taşıyorsa
-webview'e geçer, taşımıyorsa **hiçbir şey gönderilmez.** Aradaki sessizlikte
-pozisyon çapadan tahmin edilir.
+webview'e ancak şunlardan biri varsa geçer:
+
+- `track_changed`, `listens_recorded`, `store_error`, `finished`, **ya da**
+- **çapanın tahmine girdi olan kısmı değişmişse** — durum, hız, süre, parça
+  kimliği. `position_ms` bilerek listede yok: tahminin işi zaten o.
+
+Son madde **D-035**. İlk liste onsuz yazıldı ve arayüzü sessizce dondurdu:
+ses `Buffering` başlayıp `Playing`'e geçiyor, geçiş gönderilmediği için
+webview elindeki `Buffering` çapasıyla kalıyor ve `Buffering` ilerlemediği
+için ilerleme çubuğu 0:00'da donuyordu. Hiçbir hata görünmüyordu. Bu kuralda
+asıl risk fazla mesaj değil **eksik** mesajdır: fazlası ölçülür, eksiği iz
+bırakmaz.
+
+Aradaki sessizlikte pozisyon çapadan tahmin edilir.
+
+Uzun komutlar (`import`, `resolve`, `provider_scan`, `provider_test`,
+`server_add`, `play`) ayrıca `tune://busy` gönderir — bu da bir durum
+değişimi, zamanlayıcı değil.
 
 #### Sürümleme gerekmiyor — ve bunun bir sınırı var
 
@@ -869,15 +891,35 @@ etmediği yerde başlar — ilerleme çubuğu birkaç yüz milisaniye yalan söy
 kimse şikâyet etmez, sonra **Faz 4'te aynı formül oda senkronunu sürer.**
 
 `fixtures/anchor/position_cases.json` iki tarafın da okuduğu tek doğruluk
-kaynağı (12 vaka). Rust tarafını `tests/anchor_parity.rs` bağlıyor; JS tarafı
-GUI paketi yazıldığında aynı dosyayı okuyacak.
+kaynağı (12 vaka). Rust tarafını `tune-core/tests/anchor_parity.rs`, JS
+tarafını `tune/ui/anchor.js` + `tune/tests/anchor_parity.mjs` bağlıyor.
 
 Kümenin en değerli vakası yazılırken bulundu: `rate = 1.001` ile 100 sn'de
 çekirdek **100099 ms** diyor, 100100 değil — `100000 × 1.001` ikilik tabanda
 tam değil ve `as u64` kırpıyor. JS `Math.round` kullanırsa iki kopya tam
 buradan ayrılır. Doğru karşılık `Math.floor(gecen_ms * rate)`.
 
-Kalan iş: `tune` paketinin kendisi (henüz oluşturulmadı).
+JS koşumu `node` istiyor ve `node` yoksa test **atlanmıyor, düşüyor**.
+Atlanabilir olsaydı kurulu olmayan bir makinede yeşil yanıp hiçbir şey
+kanıtlamazdı — D-032'de tam bu yüzden bir test silinmişti.
+
+#### Paket — TAMAM
+
+`crates/tune/`: Tauri kabuğu, ikili adı `tune-desktop` (D-034). Rust tarafı
+`main.rs` + `env.rs` (D-031 ortam düzeltmesi) + `state.rs` + `core_thread.rs`
++ `commands.rs`; webview `ui/` altında düz statik dosya — bundler yok, npm
+yok, `frontendDist: "ui"`.
+
+**Çekirdek kendi iş parçacığında yaşıyor (D-034):** `Session` `Send` ama
+`Sync` değil ve `import_archive`'ın future'ı `Send` değil, Tauri ise komut
+future'larının `Send` olmasını istiyor. Kilit yerine kanal: komutlar çekirdek
+iş parçacığına bir kapanış gönderip cevabı bekliyor, tik döngüsü de aynı
+iş parçacığında. Çekirdek bunun için değişmedi.
+
+Doğrulandı: pencere açılıyor, `environment`/`queue`/`anchor` cevaplıyor,
+tarama ve arama sonuçları CLI'nin `--json` çıktısıyla aynı sayıları veriyor,
+yerel dosya çalıyor ve ilerleme çubuğu çapadan yürüyor. Hata yolu da
+görüldü — `ADIM: PLAYBACK_RESOLVE` aşamasıyla, tam zinciri katlanmış hâlde.
 
 ### 3.3 Tema API'si — sürümlenmiş sözleşme
 Spicetify'ın en büyük derdi: üst uygulama değişiyor, temalar bozuluyor.

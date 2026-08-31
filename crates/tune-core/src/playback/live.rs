@@ -96,6 +96,21 @@ impl LiveSession {
         self.player.anchor()
     }
 
+    /// Çalan oynatıcıyı yenisiyle değiştirir (yeni bir kuyruk başlatmak).
+    ///
+    /// **Eski oynatıcının biriken dinlemeleri alınır.** Doğrudan
+    /// `*live.player_mut() = yeni` yazmak eski oynatıcıyı `take_listens`
+    /// çağrılmadan düşürürdü: kullanıcı yeni bir arama yaptığı anda az önce
+    /// dinlediği parça sessizce kaybolurdu. Kayıtlar buradan `pending`'e
+    /// geçer, ilk `tick` onları yazar.
+    ///
+    /// Eski ses hattı kapanır — `Player` düşerken durur.
+    pub fn replace_player(&mut self, player: Player) {
+        self.player.stop();
+        self.pending.extend(self.player.take_listens());
+        self.player = player;
+    }
+
     /// Bir tur: oynatıcıyı ilerlet, biriken dinlemeleri **hemen** yaz.
     ///
     /// Yazma her turda yapılıyor, çıkışta değil. Saatlerce açık kalan bir
@@ -309,6 +324,34 @@ mod tests {
         assert_eq!(recorded, 1);
         assert!(error.is_none());
         assert!(pending.is_empty(), "yazılan kayıt tamponda kalmamalı");
+    }
+
+    /// Yeni bir kuyruk başlatmak, önceki turdan kalan kayıtları silmemeli.
+    ///
+    /// Bu testin **kapsamadığı** kısım bilerek yazılıyor: eski oynatıcının
+    /// kendi `pending_listens`'i buraya aktarılıyor mu? `Player`'ın alanı
+    /// özel ve dinleme üretmek gerçek bir ses hattı ister; o yol
+    /// `tests/playback_local.rs` ile sınanıyor. Burada sınanan, tamponun
+    /// değiştirme sırasında **atılmadığı**.
+    #[test]
+    fn replacing_the_player_swaps_the_queue_and_keeps_pending_listens() {
+        use crate::ids::ProviderTrackId;
+        use crate::playback::QueueItem;
+
+        let dir = temp_dir("degistir");
+        let mut live = live_at(&dir);
+        live.pending.push(listen("Önceki turdan kalan"));
+
+        let mut yeni = Player::new(ProviderRegistry::new());
+        yeni.queue_mut().replace(vec![QueueItem {
+            id: ProviderTrackId::new(ProviderId::new("yerel"), "1"),
+            track: TrackRef::new("Sanatçı", "Yeni kuyruk"),
+        }]);
+
+        live.replace_player(yeni);
+
+        assert_eq!(live.player().queue().len(), 1, "yeni kuyruk geçerli olmalı");
+        assert_eq!(live.pending_listens(), 1, "eski tampon atılmamalı");
     }
 
     #[test]

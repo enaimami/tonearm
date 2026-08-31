@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>tune</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <!-- Bu arayüz henüz tema sözleşmesi DEĞİL. §3.3 semantik token setini
+         tasarlayana kadar buradaki isimler iç ayrıntıdır; tema yazarına
+         hiçbir şey vaat edilmiyor. -->
+    <header class="ust">
+      <span class="marka">tune</span>
+      <form id="calForm" class="cal-form">
+        <input
+          id="calSorgu"
+          type="search"
+          placeholder="çal: sanatçı ya da parça"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <label class="onay"><input id="calTumu" type="checkbox" /> tümünü kuyruğa al</label>
+        <button type="submit">çal</button>
+      </form>
+      <span id="mesgul" class="mesgul" hidden></span>
+    </header>
+
+    <div class="govde">
+      <nav class="yan">
+        <button class="nav" data-sekme="calan" aria-current="true">çalan</button>
+        <button class="nav" data-sekme="kutuphane">kütüphane</button>
+        <button class="nav" data-sekme="istatistik">istatistik</button>
+        <button class="nav" data-sekme="saglayici">sağlayıcılar</button>
+        <button class="nav" data-sekme="tani">tanı</button>
+      </nav>
+
+      <main class="icerik">
+        <!-- ————————————————— çalan -->
+        <section id="sekme-calan" class="sekme">
+          <h2>kuyruk</h2>
+          <ol id="kuyruk" class="kuyruk"></ol>
+          <p id="kuyrukBos" class="bos">
+            Kuyruk boş. Üstteki kutuya bir şey yazıp <b>çal</b> deyin.
+            Hiç parça bulunamıyorsa önce <b>sağlayıcılar</b> sekmesinden tarama yapın.
+          </p>
+        </section>
+
+        <!-- ————————————————— kütüphane -->
+        <section id="sekme-kutuphane" class="sekme" hidden>
+          <h2>kütüphane araması</h2>
+          <form id="araForm" class="satir">
+            <input id="araSorgu" type="search" placeholder="sanatçı, parça, albüm" autocomplete="off" />
+            <button type="submit">ara</button>
+          </form>
+          <p class="ipucu">
+            Dinleme geçmişinde arar (içe aktarılan export + burada çalınanlar).
+            Sonuçtaki sayı, kayda değer dinleme sayısıdır.
+          </p>
+          <table id="araSonuc" class="tablo" hidden>
+            <thead>
+              <tr><th>parça</th><th>sanatçı</th><th class="sayi">dinleme</th><th></th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <p id="araBos" class="bos" hidden></p>
+        </section>
+
+        <!-- ————————————————— istatistik -->
+        <section id="sekme-istatistik" class="sekme" hidden>
+          <h2>istatistikler</h2>
+          <form id="istForm" class="satir">
+            <label>yıl <input id="istYil" type="number" min="1900" max="2999" placeholder="tümü" /></label>
+            <label>satır <input id="istTop" type="number" min="1" max="100" value="10" /></label>
+            <button type="submit">hesapla</button>
+          </form>
+          <div id="istOzet" class="ozet"></div>
+          <div class="ikili">
+            <div>
+              <h3>en çok dinlenen sanatçılar</h3>
+              <ol id="istSanatci" class="siralama"></ol>
+            </div>
+            <div>
+              <h3>en çok dinlenen parçalar</h3>
+              <ol id="istParca" class="siralama"></ol>
+            </div>
+          </div>
+        </section>
+
+        <!-- ————————————————— sağlayıcılar -->
+        <section id="sekme-saglayici" class="sekme" hidden>
+          <h2>sağlayıcılar</h2>
+          <div class="satir">
+            <button id="btnTara">tara</button>
+            <button id="btnTaraBayat">yalnızca değiştiyse tara</button>
+          </div>
+          <table id="saglayiciTablo" class="tablo">
+            <thead>
+              <tr><th>ad</th><th>yetenekler</th><th>durum</th><th></th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+
+          <h3>kayıtlı sunucular</h3>
+          <table id="sunucuTablo" class="tablo">
+            <thead>
+              <tr><th>ad</th><th>tür</th><th>adres</th><th>kullanıcı</th><th></th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+
+          <h3>sunucu ekle</h3>
+          <form id="sunucuForm" class="izgara">
+            <label>tür
+              <select id="sunucuTur">
+                <option value="subsonic">subsonic</option>
+                <option value="jellyfin">jellyfin</option>
+              </select>
+            </label>
+            <label>adres <input id="sunucuUrl" type="url" placeholder="https://muzik.ev" required /></label>
+            <label>kullanıcı <input id="sunucuKullanici" type="text" required /></label>
+            <label>parola <input id="sunucuParola" type="password" /></label>
+            <label>api anahtarı (jellyfin) <input id="sunucuAnahtar" type="password" /></label>
+            <label>ad (boşsa adresten türetilir) <input id="sunucuAd" type="text" /></label>
+            <label class="onay"><input id="sunucuDogrula" type="checkbox" checked /> kaydetmeden önce bağlan ve doğrula</label>
+            <button type="submit">ekle</button>
+          </form>
+        </section>
+
+        <!-- ————————————————— tanı -->
+        <section id="sekme-tani" class="sekme" hidden>
+          <h2>içe aktarma</h2>
+          <div id="birak" class="birak">
+            <p>Export arşivini (zip ya da açılmış dizin) buraya sürükleyin.</p>
+            <form id="ictForm" class="satir">
+              <input id="ictYol" type="text" placeholder="/yol/my_spotify_data.zip" />
+              <button type="submit">içe aktar</button>
+            </form>
+            <p class="ipucu">
+              İçe aktarma <b>API'den değil, veri export dosyalarından</b> yapılır —
+              taşınabilirlik hakkı hizmet şartlarıyla kısıtlanamaz.
+            </p>
+          </div>
+          <pre id="ictSonuc" class="blok" hidden></pre>
+
+          <h2>kimlik çözümlemesi</h2>
+          <form id="cozForm" class="satir">
+            <input id="cozSorgu" type="text" placeholder="Sanatçı - Başlık" />
+            <button type="submit">çözümle</button>
+          </form>
+          <pre id="cozSonuc" class="blok" hidden></pre>
+
+          <h2>ortam</h2>
+          <pre id="ortam" class="blok"></pre>
+
+          <h2>son çalıştırma</h2>
+          <button id="btnTani">tanı raporunu al</button>
+          <pre id="taniSonuc" class="blok" hidden></pre>
+        </section>
+      </main>
+    </div>
+
+    <!-- ————————————————— oynatıcı çubuğu -->
+    <footer class="oynatici">
+      <div class="kumanda">
+        <button id="btnOnceki" title="önceki">⏮</button>
+        <button id="btnDurdurOynat" title="duraklat / sürdür">⏯</button>
+        <button id="btnSonraki" title="sonraki">⏭</button>
+        <button id="btnDur" title="durdur">⏹</button>
+      </div>
+      <div class="simdi">
+        <div class="baslik"><span id="simdiDurum" class="durum">■</span> <span id="simdiAd">—</span></div>
+        <div class="cubuk"><div id="cubukDolu" class="dolu"></div></div>
+      </div>
+      <span id="sayac" class="sayac">0:00 / 0:00</span>
+      <div class="kumanda">
+        <button id="btnKaristir" title="karıştır">🔀</button>
+        <button id="btnTekrar" title="tekrar">🔁</button>
+      </div>
+    </footer>
+
+    <div id="uyarilar" class="uyarilar" aria-live="polite"></div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

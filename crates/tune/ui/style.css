@@ -1,0 +1,497 @@
+/* tune — masaüstü arayüzü.
+ *
+ * DİKKAT: burası **tema sözleşmesi değil**. §3.3 semantik token setini
+ * tasarlayana kadar buradaki değişken ve sınıf isimleri iç ayrıntıdır ve
+ * habersiz değişir. Sözleşme yayınlandığı gün geriye dönük uyumluluk borcu
+ * doğuyor (PLAN §3.3), o yüzden bugünden vaat verilmiyor.
+ *
+ * D-028'den gelen kural: yalnızca `transform` ve `opacity` canlandırılır.
+ * `height`, `box-shadow`, `filter`, `background-position` düzeltilmiş
+ * ortamda bile 58.8 → 47.6 fps götürüyor. İlerleme çubuğu bu yüzden
+ * `scaleX` ile çiziliyor, genişlikle değil.
+ */
+
+:root {
+  --arka: #12100e;
+  --arka2: #1b1815;
+  --cizgi: #2e2925;
+  --metin: #eae2d8;
+  --soluk: #9a8f83;
+  --vurgu: #ffb454;
+  --hata: #ff6b6b;
+  --iyi: #7bd88f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  background: var(--arka);
+  color: var(--metin);
+  font: 14px/1.5 system-ui, sans-serif;
+  overflow: hidden;
+}
+
+/* ————————————————— üst çubuk */
+
+.ust {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--cizgi);
+  background: var(--arka2);
+}
+
+.marka {
+  font-weight: 700;
+  color: var(--vurgu);
+  letter-spacing: 0.04em;
+}
+
+.cal-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.cal-form input[type="search"] {
+  flex: 1;
+  max-width: 460px;
+}
+
+.mesgul {
+  color: var(--vurgu);
+  font-size: 13px;
+}
+
+.mesgul::before {
+  content: "⋯ ";
+}
+
+/* ————————————————— gövde */
+
+.govde {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.yan {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 160px;
+  padding: 12px 8px;
+  border-right: 1px solid var(--cizgi);
+  background: var(--arka2);
+}
+
+.nav {
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  color: var(--soluk);
+  padding: 8px 10px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.nav:hover {
+  color: var(--metin);
+}
+
+.nav[aria-current="true"] {
+  background: #2a2420;
+  color: var(--vurgu);
+}
+
+.icerik {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 18px 22px 24px;
+}
+
+h2 {
+  font-size: 15px;
+  margin: 0 0 12px;
+  color: var(--soluk);
+  text-transform: lowercase;
+  letter-spacing: 0.06em;
+}
+
+h2 + h2,
+h3 {
+  margin-top: 26px;
+}
+
+h3 {
+  font-size: 13px;
+  color: var(--soluk);
+  margin-bottom: 8px;
+}
+
+/* ————————————————— ortak öğeler */
+
+input,
+select,
+button {
+  font: inherit;
+  color: var(--metin);
+  background: #221e1a;
+  border: 1px solid var(--cizgi);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+/* WebKitGTK `<select>`'i yerel olarak çiziyor ve arka planı yok sayıyor;
+ * `appearance: none` demeden koyu temada beyaz bir kutu kalıyor. */
+select {
+  appearance: none;
+  padding-right: 26px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--soluk) 50%),
+    linear-gradient(135deg, var(--soluk) 50%, transparent 50%);
+  background-position:
+    right 13px center,
+    right 8px center;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--vurgu);
+}
+
+.onay {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--soluk);
+  font-size: 13px;
+}
+
+.onay input {
+  padding: 0;
+}
+
+.satir {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.satir label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--soluk);
+}
+
+.satir input[type="number"] {
+  width: 90px;
+}
+
+.satir input[type="search"],
+.satir input[type="text"] {
+  min-width: 280px;
+}
+
+.izgara {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.izgara label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--soluk);
+  font-size: 13px;
+}
+
+.ipucu,
+.bos {
+  color: var(--soluk);
+  font-size: 13px;
+  max-width: 62ch;
+}
+
+.blok {
+  background: var(--arka2);
+  border: 1px solid var(--cizgi);
+  border-radius: 8px;
+  padding: 12px;
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  max-height: 340px;
+  overflow: auto;
+}
+
+/* ————————————————— tablolar ve listeler */
+
+.tablo {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 12px;
+}
+
+.tablo th,
+.tablo td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--cizgi);
+}
+
+.tablo th {
+  color: var(--soluk);
+  font-weight: 500;
+  font-size: 12px;
+}
+
+.tablo .sayi {
+  text-align: right;
+}
+
+.kuyruk {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.kuyruk li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.kuyruk li:hover {
+  background: #221e1a;
+}
+
+.kuyruk li.calan {
+  color: var(--vurgu);
+  font-weight: 600;
+}
+
+.kuyruk .no {
+  color: var(--soluk);
+  font-variant-numeric: tabular-nums;
+  min-width: 2.5ch;
+  text-align: right;
+}
+
+.siralama {
+  margin: 0;
+  padding-left: 22px;
+}
+
+.siralama li {
+  padding: 3px 0;
+}
+
+.siralama .sayi {
+  color: var(--soluk);
+  font-variant-numeric: tabular-nums;
+}
+
+.ozet {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.ozet div {
+  display: flex;
+  flex-direction: column;
+}
+
+.ozet .buyuk {
+  font-size: 22px;
+  color: var(--vurgu);
+  font-variant-numeric: tabular-nums;
+}
+
+.ozet .etiket {
+  color: var(--soluk);
+  font-size: 12px;
+}
+
+.ikili {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 24px;
+}
+
+.birak {
+  border: 1px dashed var(--cizgi);
+  border-radius: 10px;
+  padding: 14px;
+  transition: opacity 120ms linear;
+}
+
+.birak.uzerinde {
+  border-color: var(--vurgu);
+  opacity: 0.85;
+}
+
+/* ————————————————— oynatıcı çubuğu */
+
+.oynatici {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--cizgi);
+  background: var(--arka2);
+}
+
+.kumanda {
+  display: flex;
+  gap: 4px;
+}
+
+.kumanda button {
+  min-width: 38px;
+  padding: 5px 8px;
+}
+
+.kumanda button.acik {
+  color: var(--vurgu);
+  border-color: var(--vurgu);
+}
+
+.simdi {
+  flex: 1;
+  min-width: 0;
+}
+
+.simdi .baslik {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 5px;
+}
+
+.durum.playing {
+  color: var(--iyi);
+}
+
+.durum.paused {
+  color: var(--vurgu);
+}
+
+.durum.buffering {
+  color: #79c0ff;
+}
+
+.durum.stopped {
+  color: var(--soluk);
+}
+
+.cubuk {
+  height: 4px;
+  border-radius: 2px;
+  background: #2e2925;
+  overflow: hidden;
+}
+
+/* `scaleX` — genişlik değil (D-028). */
+.dolu {
+  height: 100%;
+  background: var(--vurgu);
+  transform: scaleX(0);
+  transform-origin: left center;
+  will-change: transform;
+}
+
+.sayac {
+  color: var(--soluk);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  min-width: 11ch;
+  text-align: right;
+}
+
+/* ————————————————— uyarılar */
+
+.uyarilar {
+  position: fixed;
+  right: 16px;
+  bottom: 84px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 44ch;
+  z-index: 10;
+}
+
+.uyari {
+  background: #241c1c;
+  border: 1px solid var(--hata);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.uyari .adim {
+  color: var(--hata);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.uyari details {
+  margin-top: 6px;
+}
+
+.uyari summary {
+  cursor: pointer;
+  color: var(--soluk);
+  font-size: 12px;
+}
+
+.uyari pre {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  font-size: 11px;
+  color: var(--soluk);
+}
+
+.uyari.bilgi {
+  border-color: var(--iyi);
+}
+
+.uyari.bilgi .adim {
+  color: var(--iyi);
+}

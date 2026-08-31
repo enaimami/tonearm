@@ -31,4 +31,4 @@ pub use anchor::{PlayState, PlaybackAnchor};
 pub use engine::AudioEngine;
 pub use live::{LiveSession, TickReport};
 pub use player::Player;
-pub use queue::{Queue, QueueItem, RepeatMode};
+pub use queue::{Queue, QueueItem, QueueView, RepeatMode};

@@ -1034,3 +1034,71 @@ Kümenin en değerli vakası bu ve daha JS yazılmadan bulundu.
 İkinci bir test kümenin kendisini koruyor: zor vakalar (Buffering, rate 0,
 saat geri atlaması, süreye kırpma) silinirse test kırılıyor. Doğruluk kümesi
 yalnızca kolay yolu kapsıyorsa kilit değildir.
+
+---
+
+## D-034 — GUI'de çekirdek kendi iş parçacığında yaşar
+**Tarih:** 2026-08-31
+**Soru:** `tune` paketi yazılırken çıktı: Tauri her async komutun future'ının
+`Send` olmasını istiyor. `LiveSession` bir `Mutex` arkasında paylaşılan durum
+olarak tutulabilir mi?
+**Karar:** **Hayır.** Çekirdek kendi iş parçacığına yerleşiyor; komutlar oraya
+bir kapanış gönderip `oneshot` ile cevabı bekliyor. Kilit yok.
+**Gerekçe:** Ölçülen kısıt, tercih değil:
+- `Session` **`Send` ama `Sync` değil** — SQLite bağlantısı `RefCell` taşıyor.
+  `Mutex<Core>` işe yaramıyor, çünkü kilidi bir `.await` üzerinden taşımak
+  `Core: Sync` istiyor.
+- `Session::import_archive`'ın döndürdüğü future zaten `Send` değil
+  (`Box<dyn ExportArchive>`). Kilit sorunu çözülse bile bu kalırdı.
+- Çözüm çekirdeği hareket ettirmemek: **hiçbir çekirdek tipi iş parçacığı
+  sınırını geçmiyor**, yalnızca iş kapanışları ve seri hâle getirilebilir
+  sonuçlar geçiyor. Çekirdek değişmedi — kısıt kabuğun tarafında karşılandı.
+**Sonuç:**
+- **Komut başına enum varyantı yok.** Kanal `Box<dyn FnOnce(&mut Core) -> ...>`
+  taşıyor; her komut kendi `oneshot`'ını kapatıyor. 23 varyantlık bir mesaj
+  tipi, D-033'ün reddettiği çevirmen katmanının başka bir kılığı olurdu.
+- **Tik döngüsü de aynı iş parçacığında.** `tokio::select!` ile iş kuyruğu ve
+  200 ms'lik zamanlayıcı yan yana; komutlarla `tick()` arasında yarış yok,
+  sıraya kanal koyuyor.
+- **Bilinen bedel:** uzun bir `import` sürerken oynatma kumandaları sırada
+  bekler. Görünmez kalmasın diye uzun komutlar `tune://busy` olayı gönderiyor
+  ve arayüz hangi işin sürdüğünü yazıyor (K9). Kabul edilebilir bulundu:
+  ses zaten kendi iş parçacığında çalmayı sürdürüyor.
+- **İkili adı `tune-desktop`.** Paket adı D-030'daki gibi `tune`, ama
+  `tune-cli` zaten `tune` adında bir ikili üretiyor ve aynı workspace'te iki
+  aynı adlı çıktı çakışıyor. CLI'nin adı kullanıcıya vaat edilmiş
+  (`tune import ...`), o yüzden değişen taraf GUI oldu.
+- **Hata zarfı var, veri zarfı yok.** `tune_core::Error` seri hâle
+  getirilemiyor (kaynak zinciri `dyn Error`); komutlar `{ stage, chain }`
+  döndürüyor — CLI'nin `stderr`'e bastığının aynısı. D-033'ün yasakladığı
+  şey veri tiplerinin ikizini yazmaktı; bu onun kapsamında değil.
+
+---
+
+## D-035 — Olay listesi eksikti: durum değişimi de gönderilmeli
+**Tarih:** 2026-08-31
+**Soru:** D-033 olayların yalnızca `track_changed` / `listens_recorded` /
+`store_error` / `finished` durumlarında gideceğini söylemişti. Bu liste
+yeterli mi?
+**Karar:** **Değil.** Çapanın **tahmine girdi olan** kısmı (durum, hız, süre,
+parça kimliği) değiştiğinde de gönderilmeli. Liste bu maddeyle genişledi.
+**Gerekçe — kural masa başında değil, çalıştırınca kırıldı.** İlk sürüm
+D-033'ün listesini birebir uyguladı ve arayüz **sessizce dondu**: `play`
+sonrası webview bir kez çapa alıyor, o an motor daha tamponu doldurmadığı
+için durum `Buffering`. Tampon dolunca motor `Playing`'e geçiyor ama bu
+geçiş "kayda değer" sayılmadığı için gönderilmiyor. Webview elindeki
+`Buffering` çapasıyla kalıyor ve `Buffering` ilerlemediği için ilerleme
+çubuğu 0:00'da donuyor. **Hiçbir hata görünmüyor** — ses çalıyor, arayüz
+çalmıyormuş gibi duruyor. Ekranda gerçek bir parça çalınana kadar fark
+edilmedi.
+**Sonuç:**
+- Kural şu şekilde ifade edildi: webview `position_ms + (now - wall_time) ×
+  rate` ile pozisyonu **kendisi yürütüyor**; o formülün girdisi ya da bağlamı
+  değiştiğinde tahmin yanlışa döner. `position_ms`'in kendisi bilerek listede
+  **yok** — tahminin işi zaten o.
+- Karar saf bir fonksiyona çıkarıldı (`core_thread::dikkate_deger`) ve
+  sınandı. Testlerden biri doğrudan bu hatayı kilitliyor:
+  `the_buffering_to_playing_transition_must_be_sent`.
+- **Genel ders:** "yalnızca değişince gönder" kuralında asıl risk fazla mesaj
+  değil, **eksik mesaj**. Fazlası performansa mal olur ve ölçülür; eksiği
+  arayüzü sessizce dondurur ve hiçbir yerde iz bırakmaz.

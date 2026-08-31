@@ -47,6 +47,21 @@ impl std::fmt::Display for RepeatMode {
     }
 }
 
+/// Kuyruğun okunabilir görünümü — **çalma sırasına göre**.
+///
+/// Kabukların (TUI, GUI) tek seferde alıp çizdiği şey. Ayrı bir "IPC tipi"
+/// değil: çekirdekte yaşıyor, `serde` ile olduğu gibi geçiyor ve TUI de
+/// aynısını kullanıyor (D-033).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueueView {
+    /// Öğeler, çalma sırasında.
+    pub items: Vec<QueueItem>,
+    /// `items` içindeki çalan konum. Kuyruk boşsa anlamsız.
+    pub position: usize,
+    pub repeat: RepeatMode,
+    pub shuffle: bool,
+}
+
 /// Çalma kuyruğu ve içindeki konum.
 ///
 /// Karıştırma **sırayı bozmaz**, ayrı bir çalma sırası tutar: karıştırmayı
@@ -105,6 +120,22 @@ impl Queue {
             .iter()
             .filter_map(|&index| self.items.get(index).cloned())
             .collect()
+    }
+
+    /// Kuyruğun dışarıya gösterilen hâli.
+    ///
+    /// `Queue`'nun kendisi kabuğa gönderilmiyor: içinde `order` ve
+    /// `rng_state` var, yani tüketici çalma sırasını **kendisi** kurmak
+    /// zorunda kalırdı — sıralama mantığının ikinci bir kopyası JS'te yaşardı.
+    /// Bu görünüm sırayı zaten uygulanmış verir.
+    #[must_use]
+    pub fn view(&self) -> QueueView {
+        QueueView {
+            items: self.items(),
+            position: self.position,
+            repeat: self.repeat,
+            shuffle: self.shuffle,
+        }
     }
 
     #[must_use]

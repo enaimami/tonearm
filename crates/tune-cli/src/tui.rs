@@ -111,15 +111,14 @@ pub async fn run(live: &mut LiveSession) -> anyhow::Result<usize> {
         // — Çiz.
         let player = live.player();
         let anchor = player.anchor();
-        let queue_items: Vec<String> = player
-            .queue()
-            .items()
+        // Kuyruğun görünümü çekirdekten tek parça geliyor: çalma sırası,
+        // konum, tekrar ve karıştırma aynı andan. GUI de aynı tipi alıyor.
+        let queue = player.queue().view();
+        let queue_items: Vec<String> = queue
+            .items
             .iter()
             .map(|item| item.track.display_name())
             .collect();
-        let position = player.queue().position();
-        let repeat = player.queue().repeat();
-        let shuffle = player.queue().shuffle();
         let title = player
             .current_track()
             .map(|track| track.display_name())
@@ -132,9 +131,9 @@ pub async fn run(live: &mut LiveSession) -> anyhow::Result<usize> {
                     anchor: &anchor,
                     title: &title,
                     queue: &queue_items,
-                    playing: position,
-                    repeat,
-                    shuffle,
+                    playing: queue.position,
+                    repeat: queue.repeat,
+                    shuffle: queue.shuffle,
                     error: last_error.as_deref(),
                 },
                 &mut selection,
