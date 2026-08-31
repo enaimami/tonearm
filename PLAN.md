@@ -810,6 +810,23 @@ performans değil:
 Yanlış gerekçeyle savunulan doğru tasarım ilk itirazda düşer; sözleşme bu
 düzeltilmiş gerekçeyle yazılacak.
 
+**Çekirdek tarafı hazır (D-032).** `playback::LiveSession` — `Player` ile
+`Session`'ı bağlar, tek `tick()` ilerletir + biriken dinlemeleri yazar +
+`TickReport` döndürür. Kabuk yalnızca döngüyü sürer. TUI buna geçirildi;
+GUI aynı tipi kullanacak, dans ikinci kez yazılmayacak.
+
+Yazma artık **her turda**, çıkışta değil: saatlerce açık kalan bir arayüzde
+çökme bütün oturumun geçmişini götürürdü. Yazılamayan kayıt atılmıyor, elde
+tutulup yeniden deneniyor; `store_error` ve `listens_pending` bunu görünür
+kılıyor (K9).
+
+**Paket düzeni (D-030):** üç paket — `tune-core`, `tune-cli`, `tune` (GUI).
+Bağımlılık tek yönlü: `tune-cli` ile `tune` birbirini hiç görmez. Biri
+diğerinden bir şey isterse o şey çekirdeğe aittir.
+
+Kalan iş: komut/olay listesi, sözleşme sürümlemesi, ve çapa tahmininin
+webview'deki kopyasının çekirdekten kaymamasını sağlamak.
+
 ### 3.3 Tema API'si — sürümlenmiş sözleşme
 Spicetify'ın en büyük derdi: üst uygulama değişiyor, temalar bozuluyor.
 Bunu yaşamamak için semantik token seti (CSS custom properties), taahhüt edilen

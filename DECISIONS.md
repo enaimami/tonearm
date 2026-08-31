@@ -894,3 +894,87 @@ kurarak **23.8 → 55.6 fps** (CSS fazı). Erkenmiş.
   sürücülerde gerekli mi, zararsız mı bilinmiyor. `GDK_BACKEND=x11` XWayland
   gerektirir; XWayland'sız saf Wayland kurulumunda ne olacağı denenmedi.
   Bu yüzden koşulsuz değil, "tanımlı değilse" kuruluyor: kaçış yolu açık kalıyor.
+
+---
+
+## D-030 — Paket düzeni: üç paket, tek yön
+**Tarih:** 2026-08-31
+**Soru:** GUI paketi nerede yaşasın — workspace içinde mi, ayrı workspace mi,
+ayrı depo mu?
+**Karar:** Aynı depo, aynı workspace, **üç paket**: `tune-core`, `tune-cli`,
+`tune` (GUI). Ayrı paket **gibi davranılır** ama ayrı depo olmak zorunda değil.
+**Gerekçe:** Ayrılabilirlik bir yapı özelliği, dosya düzeni değil. Önemli olan
+şu: `tune-cli` ve `tune`, `tune-core` olmadan **çalışamaz** — bütün baz işlemler
+orada (K1). Ayırmak istendiğinde ayrılabilmesi için bugünden bağımlılık yönünün
+tek yönlü olması yeterli.
+**Sonuç:**
+- Bağımlılık yönü: `tune-core` ← `tune-cli`, `tune-core` ← `tune`.
+  **`tune-cli` ile `tune` birbirini hiç görmez.** Biri diğerinden bir şey
+  isterse o şey çekirdeğe aittir — Altın Kural'ın paket düzeyindeki hâli.
+- Ayrı depo şimdilik hayır: çekirdek hâlâ hızla değişiyor, iki depoyu adımda
+  tutmak bu aşamada pahalı.
+- Bilinen bedel: `cargo test --workspace` Tauri ağacını da derleyecek.
+  Ölçüldü — Tauri'nin tam derlemesi ~70 sn, kilit dosyasında 431 crate.
+  Katlanılır; katlanılmaz olursa `default-members` ile ayrılır.
+
+---
+
+## D-031 — Ortam düzeltmesi `unsafe` olmadan: `exec`
+**Tarih:** 2026-08-31
+**Soru:** D-029'un açık pürüzü. `std::env::set_var` Rust 2024'te `unsafe`,
+workspace `unsafe_code = "forbid"` diyor ve `forbid` paket düzeyinde `allow` ile
+geçersiz kılınamaz. Kural mı gevşesin, paket mi lint devralımından çıksın?
+**Karar:** **Hiçbiri.** Ortam kurulup süreç `exec` ile kendini yeniden başlatıyor.
+`CommandExt::exec` güvenli bir çağrı; `set_var`'a hiç gerek kalmıyor.
+**Gerekçe:** Tek satır için workspace çapında bir güvenlik özelliğini gevşetmek
+orantısız. Paketi lint devralımından çıkarmak da diğer bütün kuralları
+kaybettirirdi. `forbid` üç pakette de bozulmadan kalıyor.
+**Sonuç:**
+- **Döngü koruması yapıdan geliyor, bayraktan değil:** yalnızca **eksik**
+  değişkenler kuruluyor; çocuğun gözünde eksik yok, o yüzden ikinci kez
+  `exec` etmiyor. Ayrı bir "zaten yeniden başlatıldı" bayrağı gerekmiyor.
+- `exec` süreç imajını değiştirir, PID korunur — masaüstü/servis
+  bütünleşmesi bozulmaz.
+- Doğrulandı: hiçbir dış değişken verilmeden CSS fazı **58.8 fps**, açılış
+  352 ms. Yeniden başlatmanın ölçülebilir bedeli yok.
+- `exec` yalnızca **başarısızsa** döner; o durumda düzeltmesiz devam edilip
+  sebep log'a yazılıyor — sessizce yavaş çalışmak yerine (K9).
+
+---
+
+## D-032 — `tick` döngüsü ve dinleme kaydı çekirdeğe taşındı
+**Tarih:** 2026-08-31
+**Soru:** Düzenli `tick()` ve biriken dinlemelerin depoya yazılması hangi
+katmanda yaşasın — her kabuk kendi mi bağlasın, çekirdek mi versin?
+**Karar:** **Çekirdek.** Yeni tip `playback::LiveSession`, `Player` ile
+`Session`'ı bağlar; tek `tick()` çağrısı ilerletir, yazar ve bir `TickReport`
+döndürür. TUI buna geçirildi.
+**Gerekçe:** K1'in testi: TUI aynı dansı bir kez yazdı (tick → take_listens →
+record_listens), GUI ikinci, mobil üçüncü kez yazacaktı. Dinlemeyi depoya
+yazmayı unutan bir kabuk **sessizce geçmiş kaybeder** — kaybı fark ettiren
+hiçbir şey yok.
+**Sonuç:**
+- **Davranış değişti: dinlemeler artık her turda yazılıyor, çıkışta değil.**
+  Eski hâlde `tui.rs` yalnızca döngü bittiğinde yazıyordu; CLI oturumu kısa
+  olduğu için sorun görünmüyordu, ama saatlerce açık kalacak bir arayüzde
+  çökme ya da `kill` bütün oturumun geçmişini götürürdü. Çoğu turda yazılacak
+  bir şey olmaz ve depoya hiç gidilmez.
+- **Yazma başarısız olursa kayıtlar atılmıyor, elde tutuluyor** ve sonraki
+  turda yeniden deneniyor. `take_listens` kayıtları oynatıcıdan çekip aldığı
+  için, tutulmasalar geri alınacakları bir yer yok.
+- **Depo hatası `tick`'i `Err` yapmıyor:** ses çalmaya devam ediyor, oturumu
+  düşürmek veri kaybını artırırdı. Ama sessiz de kalmıyor — `TickReport`
+  `store_error` ve `listens_pending` taşıyor, TUI ikisini de gösteriyor (K9).
+- **D-015 korundu:** observer/callback yok, kabuk döngüyü kendi sürüyor.
+  **K7 korundu:** kapanış parametresi, generic, ömür sızıntısı yok.
+- `track_changed`'in yakalamadığı durum bilerek yazıldı: `RepeatMode::One`
+  aynı parçayı baştan başlattığında ne parça ne konum değişir. Kabuk için
+  doğru olan da bu — baştan başladığını çapa, yeni dinlemeyi
+  `listens_recorded` söylüyor.
+- **Bir test kaldırıldı çünkü hiçbir şey kanıtlamıyordu.** "Depo yazamazsa
+  kayıt kaybolmaz" iddiasını gerçek bir bozuk depoyla sınamak denendi:
+  veri dizini salt-okunur yapıldı, ama SQLite açık dosya tanıtıcısıyla
+  yazmayı sürdürdü ve test **yeşil yanıp hiçbir şeyi sınamadı**. Karar saf
+  bir fonksiyona (`absorb`) çıkarıldı ve doğrudan sınandı. Koşulu
+  sağlanamayan yeşil test, testsizlikten kötüdür — çünkü kapsandığını
+  düşündürür.

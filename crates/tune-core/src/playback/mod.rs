@@ -22,11 +22,13 @@ pub mod engine;
 /// Hem ses hattı hem HTTP istemcisi açıkken derlenir.
 #[cfg(all(feature = "audio", feature = "http-client"))]
 pub mod http_source;
+pub mod live;
 pub mod player;
 pub mod queue;
 
 pub use anchor::{PlayState, PlaybackAnchor};
 #[cfg(feature = "audio")]
 pub use engine::AudioEngine;
+pub use live::{LiveSession, TickReport};
 pub use player::Player;
 pub use queue::{Queue, QueueItem, RepeatMode};

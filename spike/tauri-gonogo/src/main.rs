@@ -118,20 +118,43 @@ fn quit(app: AppHandle) {
 /// biri `GDK_BACKEND=wayland` verdiğinde ona karışmıyoruz.
 #[cfg(target_os = "linux")]
 fn ortami_duzelt() {
-    for (ad, deger) in [
+    use std::os::unix::process::CommandExt;
+
+    const DUZELTME: [(&str, &str); 2] = [
         ("GDK_BACKEND", "x11"),
         ("WEBKIT_DISABLE_DMABUF_RENDERER", "1"),
-    ] {
-        if std::env::var_os(ad).is_none() {
-            // Güvenli: main()'in ilk işi, henüz başka iş parçacığı yok.
-            // (Rust 2024'te set_var `unsafe` — gerçek GUI paketinde workspace'in
-            // `unsafe_code = "forbid"` kuralıyla çakışacak, bkz. D-029.)
-            unsafe { std::env::set_var(ad, deger) };
-            eprintln!("ORTAM: {ad}={deger} kuruldu");
-        } else {
-            eprintln!("ORTAM: {ad} zaten tanımlı, dokunulmadı");
-        }
+    ];
+
+    // Eksik olanları topla. Hiçbiri eksik değilse zaten düzeltilmiş bir
+    // süreçteyiz — ya kullanıcı kurdu ya da aşağıdaki exec'in çocuğuyuz.
+    // Döngü koruması bu: çocuğun gözünde eksik yok.
+    let eksik: Vec<_> = DUZELTME
+        .iter()
+        .filter(|(ad, _)| std::env::var_os(ad).is_none())
+        .collect();
+    if eksik.is_empty() {
+        eprintln!("ORTAM: düzeltme gerekmedi");
+        return;
     }
+
+    let Ok(kendi) = std::env::current_exe() else {
+        eprintln!("ORTAM: kendi yolum bulunamadı, düzeltme atlandı");
+        return;
+    };
+
+    // `set_var` Rust 2024'te `unsafe` ve workspace `unsafe_code = "forbid"`
+    // diyor — `forbid` paket düzeyinde `allow` ile geçersiz kılınamaz.
+    // `exec` güvenli bir çağrı: süreç imajını değiştirir, PID korunur,
+    // yeni ortam çocuğa doğar. Tek maliyeti bir kez yeniden başlama.
+    let mut komut = std::process::Command::new(kendi);
+    komut.args(std::env::args_os().skip(1));
+    for (ad, deger) in &eksik {
+        komut.env(ad, deger);
+        eprintln!("ORTAM: {ad}={deger} kurulup yeniden başlatılıyor");
+    }
+    // `exec` yalnızca **başarısızsa** döner.
+    let hata = komut.exec();
+    eprintln!("ORTAM: yeniden başlatılamadı ({hata}), düzeltmesiz devam");
 }
 
 #[cfg(not(target_os = "linux"))]

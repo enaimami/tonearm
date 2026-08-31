@@ -14,6 +14,7 @@ use clap::{Parser, Subcommand};
 use tune_core::config::Config;
 use tune_core::ids::ProviderId;
 use tune_core::model::PlayRule;
+use tune_core::playback::LiveSession;
 use tune_core::provider;
 use tune_core::session::{self, Session};
 use tune_core::stats::StatsQuery;
@@ -348,9 +349,11 @@ async fn run(cli: &Cli) -> tune_core::Result<String> {
             };
 
             if *use_tui {
-                // TUI kendi döngüsünü yürütür; çekirdek beklemez.
+                // TUI yalnızca döngüyü sürer; tick ve dinleme kaydı
+                // `LiveSession`'ın işi (çekirdekte, K1).
                 let player = session.player_from_search(&registry, options).await?;
-                let recorded = tui::run(&mut session, player)
+                let mut live = LiveSession::new(session, player);
+                let recorded = tui::run(&mut live)
                     .await
                     .map_err(|err| anyhow_to_core(&err))?;
                 return Ok(format!("kaydedilen dinleme: {recorded}\n"));

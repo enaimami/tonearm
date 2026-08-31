@@ -26,8 +26,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Gauge, List, ListItem, ListState, Paragraph};
 
-use tune_core::playback::{PlayState, PlaybackAnchor, Player, RepeatMode};
-use tune_core::session::Session;
+use tune_core::playback::{LiveSession, PlayState, PlaybackAnchor, Player, RepeatMode};
 
 /// Ekran ne sıklıkta tazelenecek. Ses hattından bağımsız: yalnızca çizim.
 const TICK: Duration = Duration::from_millis(200);
@@ -101,14 +100,16 @@ fn action_for(key: KeyEvent) -> Option<Action> {
 ///
 /// # Errors
 /// Terminal kurulamazsa ya da çekirdek bir hata döndürürse.
-pub async fn run(session: &mut Session, mut player: Player) -> anyhow::Result<usize> {
+pub async fn run(live: &mut LiveSession) -> anyhow::Result<usize> {
     let mut guard = TerminalGuard::enter()?;
     let mut selection = ListState::default();
-    selection.select(Some(player.queue().position()));
+    selection.select(Some(live.player().queue().position()));
     let mut last_error: Option<String> = None;
+    let mut recorded = 0usize;
 
     let result = loop {
         // — Çiz.
+        let player = live.player();
         let anchor = player.anchor();
         let queue_items: Vec<String> = player
             .queue()
@@ -162,7 +163,9 @@ pub async fn run(session: &mut Session, mut player: Player) -> anyhow::Result<us
                 quit = true;
                 break;
             }
-            if let Err(err) = apply(&mut player, action, &mut selection, queue_items.len()).await {
+            if let Err(err) =
+                apply(live.player_mut(), action, &mut selection, queue_items.len()).await
+            {
                 // Hata TUI'yi düşürmez: kullanıcıya gösterilir, döngü sürer.
                 last_error = Some(err.chain_text());
             } else {
@@ -173,23 +176,33 @@ pub async fn run(session: &mut Session, mut player: Player) -> anyhow::Result<us
             break Ok(());
         }
 
-        // — Parça bittiyse sıradakine geç.
-        if let Err(err) = player.tick().await {
-            last_error = Some(err.chain_text());
-        }
-        // Kuyruk tükendi ve ses durdu: iş bitti.
-        if player.state() == PlayState::Stopped && player.current_track().is_none() {
-            break Ok(());
+        // — Bir tur: parça bittiyse sıradakine geç, biriken dinlemeleri yaz.
+        match live.tick().await {
+            Ok(report) => {
+                recorded += report.listens_recorded;
+                // Depo yazamadıysa sessiz kalınmıyor: kayıtlar elde tutuldu
+                // ve sonraki turda yeniden denenecek, ama kullanıcı bilsin.
+                //
+                // Yalnızca hata **varsa** yazılıyor: koşulsuz atama, kullanıcının
+                // az önce bastığı tuşun hatasını bir sonraki turda silerdi.
+                if let Some(text) = report.store_error {
+                    last_error = Some(format!(
+                        "{text}\n  → {} dinleme elde tutuldu",
+                        report.listens_pending
+                    ));
+                }
+                if report.finished {
+                    break Ok(());
+                }
+            }
+            Err(err) => last_error = Some(err.chain_text()),
         }
     };
     let result: io::Result<()> = result;
     result?;
 
-    player.stop();
-    let listens = player.take_listens();
-    let count = listens.len();
-    session.record_listens(&listens)?;
-    Ok(count)
+    let summary = live.shutdown()?;
+    Ok(recorded + summary.inserted)
 }
 
 /// Bir eylemi çekirdek çağrısına çevirir.
