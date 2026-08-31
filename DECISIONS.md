@@ -538,3 +538,52 @@ katmanı da sınanıyor, yalnızca ayrıştırıcı değil. Uçtan uca test fixt
 FLAC'ını HTTP üzerinden servis edip çalıyor: `AudioSource::HttpStream`
 yolu gerçekten ses üretiyor (ses aygıtı yoksa test kendini atlıyor, nedenini
 `stderr`'e yazarak).
+
+### Doğrulama — 2026-08-31: YAPILDI
+
+Kararın istediği ikinci yarı tamamlandı. Docker'da iki gerçek sunucu kuruldu
+ve `tune` ikisine de bağlandı:
+
+| Sunucu | Sürüm | Sonuç |
+|---|---|---|
+| Navidrome (OpenSubsonic) | 0.63.2 | kayıt → doğrulama → arama → **akış** → scrobble |
+| Jellyfin | 10.11.11 | kayıt (parola→anahtar) → doğrulama → arama → **akış** → scrobble |
+
+Her iki sunucudan da fixture FLAC'ı gerçekten çalındı ve `tune stats`
+çıktısında göründü — Faz 1'in bitti ölçütünün ("yerel **ve uzak** kaynaktan
+çalıyor") uzak yarısı artık varsayım değil.
+
+Ayrıca sınanan yollar: yanlış parola (ikisinde de kayıt **yazılmadı**),
+Jellyfin `--api-key` (ağa çıkmadan kimlik), `provider list`'te uzak
+sağlayıcının görünmesi.
+
+**Sahte sunucunun gizlediği ve gerçeğin gösterdiği tek kusur:** kayıt
+doğrulaması başarısız olduğunda dıştaki cümle "sunucusuna **erişilemedi**"
+diyordu. Navidrome yanlış parolayı `HTTP 200 + status:"failed"` ile
+reddedince mesaj şuna dönüşüyordu: *"erişilemedi: … isteği reddetti: Wrong
+username or password"* — yani kendi içinde çelişiyor ve kullanıcıyı ağ
+hatası aramaya gönderiyordu. Sağlıksızlığın iki sebebi (ulaşılamadı /
+reddedildi) tek cümlede birleştirilemez; dıştaki metin artık yalnızca
+"**doğrulanamadı**" diyor, sebebi `detail` taşıyor (K9). Regresyon testle
+kilitli (`a_subsonic_failure_arrives_with_http_200_and_still_fails`).
+
+**Doğrulama yordamı** (tekrarlanabilir olsun diye):
+
+```bash
+docker run -d --name nav -p 14533:4533 \
+  -v "$PWD/fixtures/audio:/music:ro" -v nav-data:/data \
+  -e ND_DEVAUTOCREATEADMINPASSWORD=parola123 deluan/navidrome:latest
+
+TUNE_PASSWORD=parola123 tune provider add subsonic \
+  --url http://127.0.0.1:14533 --user admin --name nav
+tune provider test nav && tune play "Test" --all && tune stats
+```
+
+Jellyfin'de kurulum sihirbazı API'den geçiliyor (`/Startup/Configuration`,
+`/Startup/User`, `/Startup/RemoteAccess`, `/Startup/Complete`), sonra
+`/Library/VirtualFolders` ile `/music` kütüphane olarak ekleniyor.
+
+**Hâlâ sınanmayan:** HTTPS/TLS (ikisi de düz HTTP üzerinden koşuldu),
+ters vekil arkasındaki yönlendirme, sunucu tarafı transcode, büyük kütüphane
+(4-5 parça ile sınandı) ve Subsonic'in Navidrome dışındaki uygulamaları
+(Airsonic, Gonic, LMS).

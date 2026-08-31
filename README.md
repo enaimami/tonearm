@@ -31,10 +31,11 @@ Faz 1'den itibaren scrobble'ı `tune` üretiyor: çaldığın parça import veri
 aynı tabloya yazılıyor, geçmiş ve bugün tek bir zaman çizelgesi oluyor.
 Terminal arayüzü (`--tui`) var.
 
-> Uzak sağlayıcılar sahte bir sunucuya karşı uçtan uca test ediliyor ama
-> **gerçek bir Navidrome / Jellyfin kurulumunda henüz doğrulanmadı.** Denersen
-> ve bir şey tutmazsa `tune diag` çıktısıyla issue aç — tam olarak aradığımız
-> geri bildirim bu.
+> Uzak sağlayıcılar **Navidrome 0.63** ve **Jellyfin 10.11** üzerinde uçtan
+> uca doğrulandı (düz HTTP, küçük kütüphane). TLS, ters vekil arkası,
+> sunucu tarafı transcode ve Navidrome dışı Subsonic uygulamaları (Airsonic,
+> Gonic, LMS) henüz denenmedi — bir şey tutmazsa `tune diag` çıktısıyla issue
+> aç, tam olarak aradığımız geri bildirim bu.
 
 Ayrıntılı yol haritası: [`PLAN.md`](PLAN.md). Verilmiş kararlar ve gerekçeleri:
 [`DECISIONS.md`](DECISIONS.md).

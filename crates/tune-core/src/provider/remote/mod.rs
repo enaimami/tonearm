@@ -370,11 +370,17 @@ pub async fn prepare_server(
         let provider = provider_for(&server, Arc::clone(&http));
         let health = provider.health().await?;
         if !health.reachable {
+            // "erişilemedi" **demiyoruz**: sağlıksızlığın iki ayrı sebebi var
+            // ve ikisi de buradan geçiyor — sunucuya ulaşılamamış olabilir
+            // (`NETWORK_REQUEST`) ya da ulaşılıp kimlik reddedilmiş olabilir
+            // (`PROVIDER_CALL`, "Wrong username or password"). Dıştaki cümle
+            // birini seçerse yarı zaman yalan söyler; sebebi `detail`
+            // taşıyor, biz yalnızca doğrulamanın geçmediğini söylüyoruz (K9).
             return Err(Error::new(
                 Stage::ProviderCall,
-                ErrorKind::NotFound {
-                    what: format!(
-                        "{} sunucusuna erişilemedi: {}",
+                ErrorKind::InvalidInput {
+                    detail: format!(
+                        "{} doğrulanamadı: {}",
                         server.url,
                         health
                             .detail

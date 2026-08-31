@@ -383,12 +383,20 @@ async fn a_subsonic_failure_arrives_with_http_200_and_still_fails() {
         .await
         .expect_err("yanlış parola kaydı geçmemeli");
     let text = err.chain_text();
-    assert!(
-        text.contains("erişilemedi"),
-        "doğrulama sağlığa bakıyor: {text}"
-    );
+    assert!(text.contains("doğrulanamadı"), "{text}");
     assert!(text.contains("Wrong username or password"), "{text}");
     assert!(text.contains("40"), "hata kodu görünmeli: {text}");
+    // Sunucuya **ulaşıldı**, kimlik reddedildi. Dıştaki cümle "erişilemedi"
+    // derse kullanıcıyı ağ hatası aramaya gönderir; gerçek Navidrome'a karşı
+    // görülen kusur buydu.
+    assert!(
+        !text.contains("erişilemedi"),
+        "reddedilmek erişilememek değildir: {text}"
+    );
+    assert!(
+        text.contains("PROVIDER_CALL") && !text.contains("NETWORK_REQUEST"),
+        "aşama uygulama katmanını göstermeli: {text}"
+    );
 }
 
 /// Kapalı bir port bir **sağlık cevabıdır**, komutun çökmesi değil — ve

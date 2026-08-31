@@ -427,7 +427,7 @@ tarama yapmıyor; kullanıcı bir kez `tune provider scan` der, sonraki
 **Kalan:** dizin izleme (watch) yok — değişiklikler `provider scan` ile
 alınıyor.
 
-### 1.3 Subsonic / Jellyfin istemcisi — KOD TAMAM, GERÇEK SUNUCUDA DOĞRULANMADI
+### 1.3 Subsonic / Jellyfin istemcisi — TAMAM (gerçek sunucuda doğrulandı)
 Subsonic API yaygın standart. Bu, ileride kendi sunucunun Subsonic uyumlu
 konuşması ihtimalini de açık tutar.
 
@@ -471,18 +471,24 @@ hataya bıraktı (`http-client` kapalıysa: "bu derlemede yok", K9).
 - **Ulaşılamamak bir sağlık cevabıdır**, komutun hatası değil. `provider test`
   sebebi gösteriyor; `health()` `Err` döndürmüyor.
 
-**Doğrulanan ve doğrulanmayan.** `remote_http.rs`'in 10 testi gerçek soket
-üzerinden şunları kilitliyor: kaydın parolayı tele hiç çıkarmadığı, Jellyfin'in
-parolayı anahtara çevirdiği, 200+`failed` tuzağı, kapalı portun sebepli bir
-sağlık cevabı olduğu, akışın tam inip geriye arandığı ve **fixture FLAC'ının
-HTTP üzerinden gerçekten çalındığı** (ses aygıtı yoksa test kendini atlıyor,
+**Otomatik doğrulama.** `remote_http.rs`'in 10 testi gerçek soket üzerinden
+şunları kilitliyor: kaydın parolayı tele hiç çıkarmadığı, Jellyfin'in parolayı
+anahtara çevirdiği, 200+`failed` tuzağı, kapalı portun sebepli bir sağlık
+cevabı olduğu, akışın tam inip geriye arandığı ve **fixture FLAC'ının HTTP
+üzerinden gerçekten çalındığı** (ses aygıtı yoksa test kendini atlıyor,
 nedenini `stderr`'e yazarak).
 
-Sahte sunucu protokolün *bizim anladığımız hâlini* kilitler, doğru
-anladığımızı kanıtlamaz: yönlendirme, transcode, tarih biçimleri ve sürüm
-farkları görünmüyor. D-022 gereği **1.3 "gerçek sunucuda doğrulanmadı" diye
-işaretli kalıyor**; kapanışı kullanıcının Docker'da kuracağı Navidrome /
-Jellyfin denemesine bağlı.
+**Gerçek sunucu doğrulaması — 2026-08-31, YAPILDI.** Docker'da Navidrome
+0.63.2 ve Jellyfin 10.11.11 kuruldu; ikisinde de kayıt → doğrulama → arama →
+**akış** → scrobble zinciri uçtan uca çalıştı. Ayrıntı, yordam ve hâlâ
+sınanmayanlar (TLS, ters vekil, transcode, büyük kütüphane, Navidrome dışı
+Subsonic uygulamaları) **D-022'nin doğrulama bölümünde**.
+
+Gerçeğin gösterdiği tek kusur: doğrulama başarısız olduğunda dıştaki cümle
+"erişilemedi" diyordu, oysa sunucu erişilebilirdi ve parolayı reddetmişti.
+Artık "doğrulanamadı" diyor; sebebi `detail` taşıyor (K9). Sahte sunucu bunu
+gösteremezdi çünkü kusur protokolde değil, **iki farklı başarısızlığı tek
+cümlede birleştirmekteydi**.
 
 **CLI yüzeyi** (Altın Kural sınavı geçildi — kabukta karar yok):
 
@@ -640,7 +646,7 @@ davranışın aynısı — yani TUI o tasarımın çalıştığının kanıtı o
 |---|---|
 | 1.1 Provider trait | TAMAM |
 | 1.2 Yerel sağlayıcı | Kısmen — indeks kalıcı; watch yok |
-| 1.3 Subsonic/Jellyfin | Kod tamam — gerçek sunucuda doğrulanmadı (D-022) |
+| 1.3 Subsonic/Jellyfin | TAMAM — Navidrome + Jellyfin'de doğrulandı (D-022) |
 | 1.4 Ses hattı | TAMAM |
 | 1.5 Kuyruk | Kısmen — gapless yok |
 | 1.6 Scrobbling | TAMAM |
@@ -658,11 +664,10 @@ sessiz değil: nedenini `stderr`'e yazıyor.
 **Faz 1'in çekirdeği tamam.** Kalan iki iş, ikisi de bloklayıcı değil:
 gapless geçiş ve dizin izleme (watch).
 
-Faz 1'in bitti ölçütü ("yerel ve uzak kaynaktan çalıyor") **koda göre
-karşılandı**: uzak akış testte gerçek soketten inip gerçek aygıtta çalıyor.
-Ama D-022 gereği kalan tek doğrulama duruyor — **gerçek bir Navidrome /
-Jellyfin kurulumuna karşı bir kez koşturmak.** Faz 2'ye geçmeden önce
-yapılması gereken tek iş bu; yeni kod değil, bir deneme.
+**Faz 1'in bitti ölçütü karşılandı:** "yerel **ve uzak** kaynaktan çalıyor,
+her çalma bir `listen` kaydı üretiyor" — uzak yarısı 2026-08-31'de gerçek
+Navidrome ve gerçek Jellyfin üzerinde doğrulandı (D-022). Faz 2'ye geçişin
+önünde bloklayıcı bir iş kalmadı.
 
 **Faz 2'ye devredilen borç:** `keyring` kararı (D-021, kimlik bilgisi
 `servers.json`'da düz duruyor — token/anahtar, parola değil) eklenti izin
