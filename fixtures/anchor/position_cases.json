@@ -1,0 +1,181 @@
+{
+  "aciklama": [
+    "Çapadan pozisyon tahmininin doğruluk kümesi (PLAN §3.2).",
+    "",
+    "Neden var: pozisyon webview'de çekirdeğe sormadan tahmin ediliyor, yani",
+    "formülün ikinci bir kopyası JS'te yaşıyor. İki kopya zamanla kayar ve kayma",
+    "kimsenin fark etmediği bir yerde başlar — ilerleme çubuğu birkaç yüz",
+    "milisaniye yalan söyler, kimse şikâyet etmez, sonra Faz 4'te aynı formül",
+    "oda senkronunu sürer.",
+    "",
+    "Bu dosya iki tarafın da okuduğu tek doğruluk kaynağı. Rust tarafı:",
+    "crates/tune-core/src/playback/anchor.rs testleri. JS tarafı: GUI paketi",
+    "yazıldığında aynı dosyayı okuyacak.",
+    "",
+    "wall_time ve now RFC 3339. beklenen_ms tam sayı milisaniye."
+  ],
+  "vakalar": [
+    {
+      "ad": "çalarken zaman ilerler",
+      "capa": {
+        "track": "mbid:1",
+        "wall_time": "2026-08-31T12:00:00Z",
+        "position_ms": 10000,
+        "rate": 1.0,
+        "state": "playing",
+        "duration_ms": 240000
+      },
+      "now": "2026-08-31T12:00:05Z",
+      "beklenen_ms": 15000
+    },
+    {
+      "ad": "duraklatılmışken ilerlemez",
+      "capa": {
+        "track": "mbid:1",
+        "wall_time": "2026-08-31T12:00:00Z",
+        "position_ms": 10000,
+        "rate": 1.0,
+        "state": "paused",
+        "duration_ms": 240000
+      },
+      "now": "2026-08-31T12:00:05Z",
+      "beklenen_ms": 10000
+    },
+    {
+      "ad": "bekliyorken (buffering) ilerlemez — ses çıkmıyor, sayaç da yürümemeli",
+      "capa": {
+        "track": "mbid:1",
+        "wall_time": "2026-08-31T12:00:00Z",
+        "position_ms": 10000,
+        "rate": 1.0,
+        "state": "buffering",
+        "duration_ms": 240000
+      },
+      "now": "2026-08-31T12:00:05Z",
+      "beklenen_ms": 10000
+    },
+    {
+      "ad": "durmuşken pozisyon olduğu yerde kalır",
+      "capa": {
+        "track": null,
+        "wall_time": "2026-08-31T12:00:00Z",
+        "position_ms": 0,
+        "rate": 0.0,
+        "state": "stopped",
+        "duration_ms": null
+      },
+      "now": "2026-08-31T12:00:05Z",
+      "beklenen_ms": 0
+    },
+    {
+      "ad": "rate 0 ise çalıyor görünse de ilerlemez",
+      "capa": {
+        "track": "mbid:1",
+        "wall_time": "2026-08-31T12:00:00Z",
+        "position_ms": 10000,
+        "rate": 0.0,
+        "state": "playing",
+        "duration_ms": 240000
+      },
+      "now": "2026-08-31T12:00:05Z",
+      "beklenen_ms": 10000
+    },
+    {
+      "ad": "Faz 4 sürüklenme düzeltmesi: rate 1.001 — KIRPILIR, yuvarlanmaz",
+      "not": [
+        "100000 * 1.001 ikilik tabanda tam 100100 etmez, 100099.999… eder.",
+        "Çekirdek `as u64` ile kırpıyor: 100099. JS tarafı Math.round kullanırsa",
+        "100100 der ve iki kopya buradan ayrılır — kümedeki en değerli vaka bu.",
+        "JS karşılığı: Math.floor(gecen_ms * rate)."
+      ],
+      "capa": {
+        "track": "mbid:1",
+        "wall_time": "2026-08-31T12:00:00Z",
+        "position_ms": 0,
+        "rate": 1.001,
+        "state": "playing",
+        "duration_ms": 240000
+      },
+      "now": "2026-08-31T12:01:40Z",
+      "beklenen_ms": 100099
+    },
+    {
+      "ad": "saat geriye atlarsa pozisyon geri gitmez",
+      "capa": {
+        "track": "mbid:1",
+        "wall_time": "2026-08-31T12:00:10Z",
+        "position_ms": 10000,
+        "rate": 1.0,
+        "state": "playing",
+        "duration_ms": 240000
+      },
+      "now": "2026-08-31T12:00:00Z",
+      "beklenen_ms": 10000
+    },
+    {
+      "ad": "süreyi aşmaz",
+      "capa": {
+        "track": "mbid:1",
+        "wall_time": "2026-08-31T12:00:00Z",
+        "position_ms": 118000,
+        "rate": 1.0,
+        "state": "playing",
+        "duration_ms": 120000
+      },
+      "now": "2026-08-31T12:00:30Z",
+      "beklenen_ms": 120000
+    },
+    {
+      "ad": "süre bilinmiyorsa kırpılmaz",
+      "capa": {
+        "track": "mbid:1",
+        "wall_time": "2026-08-31T12:00:00Z",
+        "position_ms": 118000,
+        "rate": 1.0,
+        "state": "playing",
+        "duration_ms": null
+      },
+      "now": "2026-08-31T12:00:30Z",
+      "beklenen_ms": 148000
+    },
+    {
+      "ad": "aynı an: hiç ilerlememiş",
+      "capa": {
+        "track": "mbid:1",
+        "wall_time": "2026-08-31T12:00:00Z",
+        "position_ms": 7321,
+        "rate": 1.0,
+        "state": "playing",
+        "duration_ms": 240000
+      },
+      "now": "2026-08-31T12:00:00Z",
+      "beklenen_ms": 7321
+    },
+    {
+      "ad": "milisaniye altı yuvarlama: 1.5 sn * rate 1.0",
+      "capa": {
+        "track": "mbid:1",
+        "wall_time": "2026-08-31T12:00:00.000Z",
+        "position_ms": 0,
+        "rate": 1.0,
+        "state": "playing",
+        "duration_ms": 240000
+      },
+      "now": "2026-08-31T12:00:01.500Z",
+      "beklenen_ms": 1500
+    },
+    {
+      "ad": "yarım hız",
+      "capa": {
+        "track": "mbid:1",
+        "wall_time": "2026-08-31T12:00:00Z",
+        "position_ms": 0,
+        "rate": 0.5,
+        "state": "playing",
+        "duration_ms": 240000
+      },
+      "now": "2026-08-31T12:00:10Z",
+      "beklenen_ms": 5000
+    }
+  ]
+}

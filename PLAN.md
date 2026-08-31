@@ -824,8 +824,60 @@ kılıyor (K9).
 Bağımlılık tek yönlü: `tune-cli` ile `tune` birbirini hiç görmez. Biri
 diğerinden bir şey isterse o şey çekirdeğe aittir.
 
-Kalan iş: komut/olay listesi, sözleşme sürümlemesi, ve çapa tahmininin
-webview'deki kopyasının çekirdekten kaymamasını sağlamak.
+#### Sözleşmenin şekli
+
+**Sözleşme = çekirdeğin yüzeyi + serde.** Ayrı bir "IPC tipi" katmanı
+yazılmıyor: her komut zaten var olan bir çekirdek tipini döndürüyor. Çevirmen
+katmanı iki tipi zamanla kaydırırdı ve kaymayı hiçbir şey yakalamazdı.
+`--json` çıktısı bunu zaten kanıtlıyor — CLI ile GUI **aynı** veriyi alıyor.
+
+**Komutlar** CLI'nin alt komutlarıyla birebir örtüşüyor, çünkü ikisi de aynı
+çekirdeğin kabuğu:
+
+| Alan | Komutlar |
+|---|---|
+| Kütüphane | `search`, `stats`, `wrapped` |
+| İçe aktarma | `import` |
+| Kimlik | `resolve` |
+| Sağlayıcı | `providers`, `provider_test`, `provider_scan`, `servers_list`, `server_add`, `server_remove` |
+| Oynatma | `play`, `toggle_pause`, `stop`, `next`, `previous`, `jump_to`, `set_shuffle`, `set_repeat` |
+| Durum | `anchor`, `queue` |
+| Tanılama | `diag` |
+
+**Olaylar** yalnızca **bir şey değiştiğinde** gönderilir, zamanlayıcıyla değil.
+GUI'nin Rust tarafı `LiveSession::tick()` döngüsünü sürer; `TickReport`
+`track_changed`, `listens_recorded`, `store_error` ya da `finished` taşıyorsa
+webview'e geçer, taşımıyorsa **hiçbir şey gönderilmez.** Aradaki sessizlikte
+pozisyon çapadan tahmin edilir.
+
+#### Sürümleme gerekmiyor — ve bunun bir sınırı var
+
+§3.3'ün aksine burada **iki taraf da aynı ikilinin içinde**: webview varlıkları
+uygulamayla birlikte paketleniyor, bağımsız güncellenemiyor. Çalışma zamanında
+sürüm anlaşması yapmak, yalnızca kendisiyle konuşabilen bir sürece el sıkışma
+öğretmek olurdu.
+
+**Sınır şurada:** temalara (§3.3) IPC yüzeyi açılırsa sözleşme *dış* bir
+sözleşmeye dönüşür ve o gün sürümleme borcu doğar. §3.3 token setini
+tasarlarken bu soru cevaplanmalı — tema IPC çağırabilecek mi?
+
+#### Kayma koruması: paylaşılan doğruluk kümesi
+
+Pozisyon webview'de çekirdeğe sorulmadan tahmin ediliyor, yani formülün ikinci
+bir kopyası JS'te yaşıyor. İki kopya zamanla kayar ve kayma kimsenin fark
+etmediği yerde başlar — ilerleme çubuğu birkaç yüz milisaniye yalan söyler,
+kimse şikâyet etmez, sonra **Faz 4'te aynı formül oda senkronunu sürer.**
+
+`fixtures/anchor/position_cases.json` iki tarafın da okuduğu tek doğruluk
+kaynağı (12 vaka). Rust tarafını `tests/anchor_parity.rs` bağlıyor; JS tarafı
+GUI paketi yazıldığında aynı dosyayı okuyacak.
+
+Kümenin en değerli vakası yazılırken bulundu: `rate = 1.001` ile 100 sn'de
+çekirdek **100099 ms** diyor, 100100 değil — `100000 × 1.001` ikilik tabanda
+tam değil ve `as u64` kırpıyor. JS `Math.round` kullanırsa iki kopya tam
+buradan ayrılır. Doğru karşılık `Math.floor(gecen_ms * rate)`.
+
+Kalan iş: `tune` paketinin kendisi (henüz oluşturulmadı).
 
 ### 3.3 Tema API'si — sürümlenmiş sözleşme
 Spicetify'ın en büyük derdi: üst uygulama değişiyor, temalar bozuluyor.

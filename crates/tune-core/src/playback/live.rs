@@ -9,6 +9,8 @@
 //! her turda bir `TickReport` alır ve pozisyonu çapadan tahmin eder.
 //! **K7'ye sadık:** kapanış (closure) parametresi, generic, ömür sızıntısı yok.
 
+use serde::{Deserialize, Serialize};
+
 use crate::library::WriteSummary;
 use crate::model::Listen;
 use crate::playback::{PlayState, PlaybackAnchor, Player};
@@ -19,7 +21,10 @@ use crate::{Error, Result};
 ///
 /// Kabuk buna bakıp yeniden çizer. Pozisyon burada **yok**: o `anchor`'dan
 /// tahmin edilir, yoksa saniyede onlarca kez sorulması gerekirdi.
-#[derive(Debug, Clone)]
+///
+/// `Serialize`: GUI bunu webview'e olduğu gibi gönderiyor (§3.2).
+/// Ayrı bir "IPC tipi" yazılmıyor — çevirmen katmanı iki tipi kaydırırdı.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TickReport {
     /// Her zaman dolu. Kabuk pozisyonu bundan hesaplar
     /// (`PlaybackAnchor::position_at`).

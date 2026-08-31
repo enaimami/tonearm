@@ -978,3 +978,59 @@ hiçbir şey yok.
   bir fonksiyona (`absorb`) çıkarıldı ve doğrudan sınandı. Koşulu
   sağlanamayan yeşil test, testsizlikten kötüdür — çünkü kapsandığını
   düşündürür.
+
+---
+
+## D-033 — IPC sözleşmesi: çekirdeğin yüzeyi + serde, sürümleme yok
+**Tarih:** 2026-08-31
+**Soru:** §3.2 — webview ile çekirdek arasındaki sözleşme nasıl tanımlansın,
+nasıl sürümlensin, ve webview'deki çapa tahmininin çekirdekten kaymaması nasıl
+sağlansın?
+**Karar:** Ayrı bir IPC tipi katmanı **yok**. Her komut var olan bir çekirdek
+tipini döndürüyor, `serde` ile geçiyor. **Sürüm anlaşması yok.** Kayma
+`fixtures/anchor/position_cases.json` ile kilitleniyor.
+**Gerekçe:**
+- **Çevirmen katmanı iki tipi zamanla kaydırır** ve kaymayı hiçbir şey
+  yakalamaz. `--json` çıktısı zaten CLI ile GUI'nin aynı veriyi aldığını
+  kanıtlıyordu; ikinci bir şekil uydurmak o kanıtı bozardı.
+- **Sürümleme gereksiz çünkü iki taraf da aynı ikilinin içinde.** Webview
+  varlıkları uygulamayla paketleniyor, bağımsız güncellenemiyor. Çalışma
+  zamanında el sıkışma, yalnızca kendisiyle konuşabilen bir sürece el sıkışma
+  öğretmek olurdu. **§3.3'ün tema API'siyle karıştırılmamalı** — o dış bir
+  sözleşme ve sürümlenmek zorunda.
+**Sonuç:**
+- Komut listesi CLI'nin alt komutlarıyla birebir: `search`, `stats`, `wrapped`,
+  `import`, `resolve`, `providers`, `provider_test`, `provider_scan`,
+  `servers_list`, `server_add`, `server_remove`, `play`, `toggle_pause`,
+  `stop`, `next`, `previous`, `jump_to`, `set_shuffle`, `set_repeat`,
+  `anchor`, `queue`, `diag`.
+- **Olaylar yalnızca bir şey değiştiğinde gönderilir, zamanlayıcıyla değil.**
+  GUI'nin Rust tarafı `LiveSession::tick()` döngüsünü sürer; `TickReport`
+  `track_changed` / `listens_recorded` / `store_error` / `finished` taşıyorsa
+  webview'e geçer, taşımıyorsa hiçbir şey gönderilmez. Aradaki sessizlikte
+  pozisyon çapadan tahmin edilir. (D-028 saniyede 10.000 olay taşıyabildiğimizi
+  ölçmüştü — yani bu bir performans önlemi değil, gereksiz mesaj göndermeme
+  tercihi.)
+- `TickReport` `Serialize` kazandı.
+- **Açık bırakılan soru §3.3'e devredildi:** temalara IPC yüzeyi açılacak mı?
+  Açılırsa sözleşme *dış* sözleşmeye dönüşür ve sürümleme borcu o gün doğar.
+  Token seti tasarlanırken cevaplanmalı.
+
+**Kayma koruması ve orada bulunan şey.** Pozisyon webview'de çekirdeğe
+sorulmadan tahmin ediliyor, yani formülün ikinci bir kopyası JS'te yaşayacak.
+İki kopya zamanla kayar ve kayma kimsenin fark etmediği yerde başlar: ilerleme
+çubuğu birkaç yüz milisaniye yalan söyler, kimse şikâyet etmez, sonra **Faz 4'te
+aynı formül oda senkronunu sürer.** `fixtures/anchor/position_cases.json`
+(12 vaka) iki tarafın da okuduğu tek doğruluk kaynağı; Rust tarafını
+`tests/anchor_parity.rs` bağlıyor.
+
+Küme yazılırken bir vaka testi kırdı ve **hatalı olan beklenti çıktı, kod
+değil**: `rate = 1.001` ile 100 sn'de çekirdek 100100 değil **100099 ms**
+diyor — `100000 × 1.001` ikilik tabanda tam değil (100099.999…) ve `as u64`
+kırpıyor. JS `Math.round` kullansaydı 100100 derdi ve iki kopya tam buradan
+ayrılırdı. Doğru karşılık `Math.floor(gecen_ms * rate)`; fixture'da yazılı.
+Kümenin en değerli vakası bu ve daha JS yazılmadan bulundu.
+
+İkinci bir test kümenin kendisini koruyor: zor vakalar (Buffering, rate 0,
+saat geri atlaması, süreye kırpma) silinirse test kırılıyor. Doğruluk kümesi
+yalnızca kolay yolu kapsıyorsa kilit değildir.
