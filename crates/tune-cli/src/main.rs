@@ -139,7 +139,14 @@ enum ProviderCommand {
         name: String,
     },
     /// Yerel müzik dizinlerini yeniden tara.
-    Scan,
+    Scan {
+        /// Yalnızca dizinler son taramadan beri değiştiyse tara.
+        ///
+        /// Dizin damgalarına bakar; tam tarama yapmaz. Yerinde yeniden
+        /// etiketlenen dosyaları göremez — o durumda düz `scan` gerekir.
+        #[arg(long)]
+        if_stale: bool,
+    },
     /// Uzak bir sunucu kaydet (Subsonic ya da Jellyfin).
     ///
     /// Parola `TUNE_PASSWORD` ortam değişkeninden ya da sorulan istemden
@@ -268,8 +275,12 @@ async fn run(cli: &Cli) -> tune_core::Result<String> {
                     let report = session.test_provider(&registry, &id).await?;
                     render(cli.json, &report, || output::provider_test(&report))
                 }
-                ProviderCommand::Scan => {
-                    let report = session.scan_providers(&registry).await?;
+                ProviderCommand::Scan { if_stale } => {
+                    let report = if *if_stale {
+                        session.scan_providers_if_stale(&registry).await?
+                    } else {
+                        session.scan_providers(&registry).await?
+                    };
                     render(cli.json, &report, || output::scan(&report))
                 }
                 ProviderCommand::Add {

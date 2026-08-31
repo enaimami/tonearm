@@ -152,6 +152,41 @@ impl LocalProvider {
         Ok(self.last_scan.read().map_err(|_| poisoned())?.clone())
     }
 
+    /// Kök ağacındaki **en yeni dizin damgası** (D-025).
+    ///
+    /// Yalnızca dizinler geziliyor, dosyalar `stat` edilmiyor: soru "taramaya
+    /// değer mi", "ne değişti" değil. Bir dosya eklendiğinde/silindiğinde
+    /// bulunduğu dizinin mtime'ı değişir, bu yüzden ekleme ve silme buradan
+    /// görünür.
+    ///
+    /// **Görünmeyen:** dosyanın yerinde düzenlenmesi (yeniden etiketleme).
+    /// Dosya değişir ama dizin damgası değişmez. Bunu yakalamak her dosyayı
+    /// `stat` etmek demekti — yani zaten artımlı taramanın kendisi. Kullanıcı
+    /// etiketleri değiştirdiyse `tune provider scan` demeli; bunu bilmek,
+    /// bilmiyormuş gibi "değişmedi" demekten iyidir (K9).
+    ///
+    /// Okunamayan dizin **sessizce atlanmıyor**: sayılıyor ve okunamayan bir
+    /// dizin varsa "bilmiyorum" (`None`) dönülüyor — orada bir değişiklik
+    /// olabilir ve "değişmedi" demek onu gizlerdi.
+    ///
+    /// # Errors
+    /// Şu an hata üretmiyor; imza ileride değişmesin diye `Result`.
+    pub fn newest_dir_mtime_ms(&self) -> Result<Option<i64>> {
+        let mut newest: Option<i64> = None;
+        let mut unreadable = 0usize;
+        for root in &self.roots {
+            walk_dir_stamps(root, &mut newest, &mut unreadable);
+        }
+        if unreadable > 0 {
+            tracing::debug!(
+                unreadable,
+                "okunamayan dizin var; bayatlık sorusu cevaplanamadı"
+            );
+            return Ok(None);
+        }
+        Ok(newest)
+    }
+
     /// Kök dizinleri tarar ve **kalıcı kataloğa yazılmaya hazır** satırlar üretir.
     ///
     /// `known` daha önce görülmüş `yol → mtime_ms` eşlemesi; damgası değişmemiş
@@ -217,6 +252,37 @@ fn poisoned() -> Error {
 ///
 /// Alt dizin okunamazsa **durmaz**: sayar ve devam eder. Tek bir izin hatası
 /// yüzünden 10.000 dosyalık bir kütüphaneyi kaybetmek kabul edilemez.
+/// Dizin ağacını gezip en yeni dizin damgasını bulur (yalnızca dizinler).
+///
+/// Hata **yutulmuyor**: okunamayan her dizin sayılıyor ve çağıran bunu
+/// "bilmiyorum"a çeviriyor.
+fn walk_dir_stamps(dir: &Path, newest: &mut Option<i64>, unreadable: &mut usize) {
+    let stamp = std::fs::metadata(dir)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .and_then(|since| i64::try_from(since.as_millis()).ok());
+    match stamp {
+        Some(ms) => {
+            if newest.is_none_or(|current| ms > current) {
+                *newest = Some(ms);
+            }
+        }
+        None => *unreadable += 1,
+    }
+
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        *unreadable += 1;
+        return;
+    };
+    for entry in entries.flatten() {
+        // `file_type` sembolik bağı izlemiyor: bağ döngüsü taramayı asmasın.
+        if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            walk_dir_stamps(&entry.path(), newest, unreadable);
+        }
+    }
+}
+
 fn scan_dir(dir: &Path, out: &mut Vec<IndexedFile>, summary: &mut ScanSummary) -> Result<()> {
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
@@ -535,6 +601,11 @@ impl Provider for LocalProvider {
                 },
             })
         })
+    }
+
+    /// Dizin damgalarına bakarak cevaplıyor (D-025) — tam tarama yapmadan.
+    fn catalog_changed_since(&self, since_ms: i64) -> ProviderFuture<'_, Option<bool>> {
+        Box::pin(async move { Ok(self.newest_dir_mtime_ms()?.map(|newest| newest > since_ms)) })
     }
 
     fn search<'a>(

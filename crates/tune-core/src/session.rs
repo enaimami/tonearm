@@ -102,6 +102,11 @@ pub struct ScanReport {
     pub summary: ScanSummary,
     /// Kalıcı kataloğa ne yazıldığı: eklenen, güncellenen, düşen satırlar.
     pub write: CatalogWriteSummary,
+    /// Tarama gerçekten koştu mu. `--if-stale` atlamış olabilir (D-025).
+    pub scanned: bool,
+    /// Neden koştu ya da neden atlandı — tanıya ait (K9): "değişmedi" ile
+    /// "bakamadım" farklı şeylerdir.
+    pub reason: String,
     pub diag: DiagReport,
 }
 
@@ -692,6 +697,87 @@ impl Session {
             dirs,
             summary,
             write,
+            scanned: true,
+            reason: "istendi".to_owned(),
+            diag,
+        })
+    }
+
+    /// Yalnızca **bayatsa** tarar (D-025).
+    ///
+    /// Sağlayıcıya ucuz bir soru soruyor: katalog son taramadan beri değişmiş
+    /// olabilir mi? Yerel sağlayıcı dizin damgalarına bakıp cevaplıyor; tam
+    /// tarama yapılmıyor. Cevap "bilmiyorum" ise **tarıyoruz** — bilmediğimiz
+    /// için atlamak, kullanıcının eklediği dosyayı görünmez yapardı.
+    ///
+    /// Bu bir dizin izleme (watch) değil, tetiklenince bakan bir yoklama:
+    /// `notify` bağımlılığı eklenmedi, davranış her platformda aynı.
+    ///
+    /// # Errors
+    /// Bayatlık sorusu ya da tarama başarısız olursa.
+    pub async fn scan_providers_if_stale(
+        &mut self,
+        registry: &ProviderRegistry,
+    ) -> Result<ScanReport> {
+        let mut rec = Recorder::start(
+            "provider scan --if-stale".to_owned(),
+            Some(self.config.data_dir().to_path_buf()),
+        );
+
+        let mut reasons = Vec::new();
+        let mut stale = false;
+        for provider in registry.all() {
+            let id = provider.info().id;
+            let Some(last) = self.library.last_scanned_at_ms(&id)? else {
+                reasons.push(format!("{id}: hiç taranmadı"));
+                stale = true;
+                continue;
+            };
+            match provider.catalog_changed_since(last).await? {
+                Some(true) => {
+                    reasons.push(format!("{id}: değişmiş"));
+                    stale = true;
+                }
+                Some(false) => reasons.push(format!("{id}: değişmemiş")),
+                // "Bilmiyorum" atlamak için yeterli değil.
+                None => {
+                    reasons.push(format!("{id}: bilinmiyor"));
+                    stale = true;
+                }
+            }
+        }
+        let reason = reasons.join(", ");
+        rec.note(format!("bayatlık: {reason}"));
+
+        if !stale {
+            rec.set("scan.skipped", 1);
+            let dirs = self.config.music_dirs();
+            return self.finish(rec, Ok(()), move |(), diag| ScanReport {
+                dirs,
+                summary: ScanSummary::default(),
+                write: CatalogWriteSummary::default(),
+                scanned: false,
+                reason,
+                diag,
+            });
+        }
+
+        let result = Self::scan_inner(&mut self.library, registry).await;
+        if let Ok((summary, write)) = &result {
+            summary.record_into(&mut rec);
+            let n = |v: usize| i64::try_from(v).unwrap_or(i64::MAX);
+            rec.set("catalog.inserted", n(write.inserted));
+            rec.set("catalog.updated", n(write.updated));
+            rec.set("catalog.removed", n(write.removed));
+            rec.set("catalog.unchanged", n(write.unchanged));
+        }
+        let dirs = self.config.music_dirs();
+        self.finish(rec, result, move |(summary, write), diag| ScanReport {
+            dirs,
+            summary,
+            write,
+            scanned: true,
+            reason,
             diag,
         })
     }

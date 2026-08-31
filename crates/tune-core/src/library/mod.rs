@@ -174,6 +174,15 @@ pub trait CatalogStore {
         &self,
         provider: &ProviderId,
     ) -> Result<std::collections::HashMap<String, i64>>;
+
+    /// Bu sağlayıcının kataloğunun **en son ne zaman** tarandığı (ms).
+    ///
+    /// Hiç taranmamışsa `None` — sıfır değil: "hiç bakmadım" ile "1970'te
+    /// baktım" farklı şeyler ve ikincisi her şeyi bayat gösterirdi (D-025).
+    ///
+    /// # Errors
+    /// Sorgu başarısız olursa.
+    fn last_scanned_at_ms(&self, provider: &ProviderId) -> Result<Option<i64>>;
 }
 
 /// SQLite tabanlı kütüphane.
@@ -807,6 +816,18 @@ impl CatalogStore for SqliteLibrary {
             out.insert(reference, mtime);
         }
         Ok(out)
+    }
+
+    fn last_scanned_at_ms(&self, provider: &ProviderId) -> Result<Option<i64>> {
+        // `MIN` değil `MAX`: son taramanın zamanı aranıyor. Katalog boşsa
+        // toplam `NULL` döner ve bu "hiç taranmadı" demektir.
+        self.conn
+            .query_row(
+                "SELECT MAX(scanned_at) FROM provider_tracks WHERE provider = ?1",
+                [provider.as_str()],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .map_err(db_err(Stage::LibraryQuery))
     }
 }
 

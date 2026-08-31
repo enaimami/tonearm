@@ -673,3 +673,42 @@ kuralı değişmedi — ona verilen veri düzeldi. Testle kilitli
 **Yan düzeltme.** `play_file`/`play_http` kaynağı **aygıttan önce** açıyor:
 bozuk ya da olmayan dosya, ses çıkışı bulunmayan bir ortamda (CI) da
 `PLAYBACK_DECODE` demeli; "aygıt yok" hatası asıl sebebi gizlerdi.
+
+---
+
+## D-025 — Dizin izleme: bağımlılıksız bayatlık yoklaması
+**Tarih:** 2026-08-31
+**Soru:** Değişiklikler yalnızca elle `tune provider scan` ile alınıyor.
+Dizin izleme (watch) için `notify` crate'i eklensin mi?
+**Karar:** **Hayır — bağımlılık eklenmedi.** Yerine `tune provider scan
+--if-stale`: sağlayıcıya ucuz bir soru sorulup yalnızca gerekiyorsa taranıyor.
+**Gerekçe:** Tarama zaten artımlı (D-018, mtime damgası) ve pahalı kısmı olan
+etiket okuma değişmemiş dosyalarda atlanıyordu; eksik olan "taramaya değer mi"
+sorusuydu. `notify` çekirdek ağacını büyütür (K7, mobil binary boyutu) ve
+platform başına farklı davranır. Dizin damgaları her yerde aynı biçimde
+çalışıyor.
+**Sonuç:**
+- Soru trait'te: `Provider::catalog_changed_since(since_ms)` → `Option<bool>`.
+  Üç cevap üçü de farklı şey (K9): `Some(true)` değişmiş, `Some(false)`
+  değişmemiş, **`None` bilmiyorum**. Varsayılan `None` — uzak sağlayıcı ucuz
+  bir damga sunmuyor ve "değişmedi" demek yanlış olurdu. Yine downcast yerine
+  varsayılan trait metodu (`scan_catalog` ile aynı gerekçe): eklentiler
+  (Faz 2) kendi damgalarını verebilsin.
+- **"Bilmiyorum" tarama sebebidir.** Bilmediğimiz için atlamak, kullanıcının
+  eklediği dosyayı görünmez yapardı. Hiç taranmamış katalog da öyle.
+- Yerel sağlayıcı yalnızca **dizinleri** geziyor, dosyaları `stat` etmiyor:
+  soru "ne değişti" değil "taramaya değer mi". Okunamayan bir dizin varsa
+  cevap `None` — orada bir değişiklik olabilir.
+- **Görmediği şey açıkça yazılı:** dosyanın yerinde yeniden etiketlenmesi.
+  Dosya değişir, dizin damgası değişmez. Bunu yakalamak her dosyayı `stat`
+  etmek, yani zaten artımlı taramanın kendisi olurdu. O durumda düz
+  `tune provider scan` gerekiyor ve komut yardımı bunu söylüyor.
+- Şema **değişmedi**: "en son ne zaman tarandı" sorusu `provider_tracks
+  .scanned_at`'in `MAX`'ından geliyor. Hiç taranmamışsa `None` — sıfır değil;
+  "1970'te baktım" her şeyi bayat gösterirdi.
+- `ScanReport` iki alan kazandı: `scanned` (koştu mu) ve `reason` (neden).
+  Atlama **sessiz değil**: CLI "tarama atlandı (local: değişmemiş)" basıyor.
+
+Bu bir izleme (watch) değil, tetiklenince bakan bir yoklama. Gerçek zamanlı
+izleme gerekirse Faz 3'te GUI'nin olay döngüsüyle birlikte yeniden bakılır —
+orada zaten bir döngü olacak.

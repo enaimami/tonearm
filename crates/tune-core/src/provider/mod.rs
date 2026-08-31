@@ -213,6 +213,23 @@ pub trait Provider: Send + Sync {
         let _ = known;
         Box::pin(std::future::ready(Ok(None)))
     }
+
+    /// Katalog `since_ms`'ten beri değişmiş olabilir mi? (D-025)
+    ///
+    /// Tam taramadan **çok daha ucuz** olmalı; amacı "taramaya değer mi"
+    /// sorusunu cevaplamak. Üç ayrı cevap var ve üçü de farklı şeydir (K9):
+    ///
+    /// - `Some(true)` — değişmiş, taramaya değer.
+    /// - `Some(false)` — değişmemiş, tarama atlanabilir.
+    /// - `None` — **bilmiyorum.** Varsayılan bu; uzak sağlayıcı ucuz bir
+    ///   değişiklik damgası sunmuyor ve "değişmedi" demek yanlış olurdu.
+    ///
+    /// Yine downcast yerine trait metodu: eklentiler (Faz 2) kendi ucuz
+    /// damgalarını verebilsin.
+    fn catalog_changed_since(&self, since_ms: i64) -> ProviderFuture<'_, Option<bool>> {
+        let _ = since_ms;
+        Box::pin(std::future::ready(Ok(None)))
+    }
 }
 
 /// Bir taramanın sonucu: satırlar + ne olduğunun özeti.

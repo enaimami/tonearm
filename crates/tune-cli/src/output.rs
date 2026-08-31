@@ -299,6 +299,12 @@ pub fn scan(report: &ScanReport) -> String {
         );
         return out;
     }
+    if !report.scanned {
+        // Atlandığını **söylüyoruz**: sessizce hiçbir şey yapmamak,
+        // kullanıcıya taradığımızı düşündürürdü.
+        let _ = writeln!(out, "tarama atlandı ({})", report.reason);
+        return out;
+    }
     for dir in &report.dirs {
         let _ = writeln!(out, "tarandı: {}", dir.display());
     }

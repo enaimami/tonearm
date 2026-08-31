@@ -305,6 +305,76 @@ fn every_queued_track_produces_a_listen_that_stats_also_counts() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+/// `--if-stale` değişmemiş dizini taramaz, değişmişi tarar (D-025).
+///
+/// Bağımlılıksız yol: dizin damgalarına bakılıyor, `notify` yok.
+#[test]
+fn scanning_if_stale_skips_an_unchanged_library_and_notices_a_new_file() {
+    let dir = temp_dir("bayat");
+    let music = temp_dir("bayat-muzik");
+    std::fs::copy(
+        audio_fixtures().join("etiketli.flac"),
+        music.join("etiketli.flac"),
+    )
+    .expect("fixture kopyalanmalı");
+
+    // Hiç taranmamışken bayat sayılmalı: "bilmiyorum" atlamak için yeterli değil.
+    let (stdout, stderr, ok) =
+        run_with_music(&dir, Some(&music), &["provider", "scan", "--if-stale"]);
+    assert!(ok, "{stderr}");
+    assert!(stdout.contains("tarandı"), "ilk kez taranmalı:\n{stdout}");
+
+    // Hemen ardından: dizin değişmedi, tarama atlanmalı — ve bunu söylemeli.
+    let (stdout, stderr, ok) = run_with_music(
+        &dir,
+        Some(&music),
+        &["provider", "scan", "--if-stale", "--json"],
+    );
+    assert!(ok, "{stderr}");
+    let value: serde_json::Value = serde_json::from_str(&stdout).expect("JSON");
+    assert_eq!(
+        value["scanned"],
+        serde_json::json!(false),
+        "değişmemiş kütüphane yeniden taranmamalı: {value}"
+    );
+    assert!(
+        value["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("değişmemiş")),
+        "atlama sebebi söylenmeli: {value}"
+    );
+
+    // Yeni dosya: dizin damgası değişir, tarama koşmalı.
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    std::fs::copy(
+        audio_fixtures().join("Test Sanatci - Mp3 Parca.mp3"),
+        music.join("yeni.mp3"),
+    )
+    .expect("yeni dosya");
+
+    let (stdout, stderr, ok) = run_with_music(
+        &dir,
+        Some(&music),
+        &["provider", "scan", "--if-stale", "--json"],
+    );
+    assert!(ok, "{stderr}");
+    let value: serde_json::Value = serde_json::from_str(&stdout).expect("JSON");
+    assert_eq!(
+        value["scanned"],
+        serde_json::json!(true),
+        "yeni dosya taramayı tetiklemeli: {value}"
+    );
+    assert_eq!(
+        value["write"]["inserted"],
+        serde_json::json!(1),
+        "yeni dosya kataloğa girmeli: {}",
+        value["write"]
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+    std::fs::remove_dir_all(&music).ok();
+}
+
 /// İndeks kalıcı: `play` tarama yapmaz, bir kez taranmış katalogdan okur.
 #[test]
 fn the_catalog_persists_so_play_does_not_rescan() {
