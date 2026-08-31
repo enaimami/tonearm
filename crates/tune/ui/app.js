@@ -6,8 +6,10 @@
 //
 // Tek istisna bilerek konmuş: **pozisyon tahmini** (`anchor.js`). Formülün
 // ikinci kopyası olduğu biliniyor ve doğruluk kümesiyle kilitli (D-033).
+//
+// Tanımlayıcılar İngilizce (D-036); kullanıcıya görünen metin Türkçe.
 
-import { positionAt, saat } from "./anchor.js";
+import { positionAt, clock } from "./anchor.js";
 
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -18,285 +20,285 @@ const $ = (id) => document.getElementById(id);
 //
 // Burada tutulan **her şey çekirdekten geldi**. Kendi başına bir doğruluk
 // kaynağı değil, son cevabın kopyası: kuyruk, çapa, meşguliyet.
-let capa = null;
-let kuyruk = { items: [], position: 0, repeat: "off", shuffle: false };
+let anchor = null;
+let queue = { items: [], position: 0, repeat: "off", shuffle: false };
 
 // ————————————————————————————————————— hata ve bildirim
 
-function uyar(hata, bilgi = false) {
-  const kutu = document.createElement("div");
-  kutu.className = bilgi ? "uyari bilgi" : "uyari";
+function toast(err, info = false) {
+  const box = document.createElement("div");
+  box.className = info ? "toast info" : "toast";
 
-  if (bilgi) {
-    kutu.textContent = hata;
+  if (info) {
+    box.textContent = err;
   } else {
     // Aşama ayrı gösteriliyor: "nerede kırıldı" sorusu ilk bakışta
     // cevaplanmalı (K9). Tam zincir katlanmış duruyor ki panel dolmasın
     // ama kopyalanabilsin.
-    const adim = document.createElement("span");
-    adim.className = "adim";
-    adim.textContent = `ADIM: ${hata.stage ?? "BİLİNMİYOR"}`;
-    const ozet = document.createElement("div");
-    ozet.textContent = ilkSatir(hata.chain);
-    const ayrinti = document.createElement("details");
-    const baslik = document.createElement("summary");
-    baslik.textContent = "tam zincir";
-    const blok = document.createElement("pre");
-    blok.textContent = hata.chain ?? String(hata);
-    ayrinti.append(baslik, blok);
-    kutu.append(adim, ozet, ayrinti);
+    const stage = document.createElement("span");
+    stage.className = "stage";
+    stage.textContent = `ADIM: ${err.stage ?? "BİLİNMİYOR"}`;
+    const summary = document.createElement("div");
+    summary.textContent = firstLine(err.chain);
+    const details = document.createElement("details");
+    const label = document.createElement("summary");
+    label.textContent = "tam zincir";
+    const block = document.createElement("pre");
+    block.textContent = err.chain ?? String(err);
+    details.append(label, block);
+    box.append(stage, summary, details);
   }
 
-  $("uyarilar").append(kutu);
-  setTimeout(() => kutu.remove(), bilgi ? 6000 : 20000);
+  $("toasts").append(box);
+  setTimeout(() => box.remove(), info ? 6000 : 20000);
 }
 
-function ilkSatir(zincir) {
-  if (!zincir) return "bilinmeyen hata";
-  const satirlar = zincir.split("\n").filter((s) => s.trim() && !s.startsWith("ADIM:"));
-  return satirlar[0]?.trim() ?? zincir;
+function firstLine(chain) {
+  if (!chain) return "bilinmeyen hata";
+  const lines = chain.split("\n").filter((s) => s.trim() && !s.startsWith("ADIM:"));
+  return lines[0]?.trim() ?? chain;
 }
 
 /// Komutu çağırır; hata olursa gösterir ve `undefined` döner.
 ///
 /// Yutmuyor: her başarısızlık ekranda aşamasıyla görünüyor. `undefined`
 /// dönmesi çağıranın çizimi atlaması için — sessiz boş sonuç değil.
-async function cagir(komut, argumanlar = {}) {
+async function call(command, args = {}) {
   try {
-    return await invoke(komut, argumanlar);
-  } catch (hata) {
-    uyar(hata);
+    return await invoke(command, args);
+  } catch (err) {
+    toast(err);
     return undefined;
   }
 }
 
 // ————————————————————————————————————— sekmeler
 
-for (const dugme of document.querySelectorAll(".nav")) {
-  dugme.addEventListener("click", () => sekmeAc(dugme.dataset.sekme));
+for (const button of document.querySelectorAll(".nav")) {
+  button.addEventListener("click", () => openPanel(button.dataset.panel));
 }
 
-function sekmeAc(ad) {
-  for (const dugme of document.querySelectorAll(".nav")) {
-    dugme.setAttribute("aria-current", String(dugme.dataset.sekme === ad));
+function openPanel(name) {
+  for (const button of document.querySelectorAll(".nav")) {
+    button.setAttribute("aria-current", String(button.dataset.panel === name));
   }
-  for (const bolum of document.querySelectorAll(".sekme")) {
-    bolum.hidden = bolum.id !== `sekme-${ad}`;
+  for (const section of document.querySelectorAll(".panel")) {
+    section.hidden = section.id !== `panel-${name}`;
   }
-  if (ad === "saglayici") saglayicilariYenile();
+  if (name === "providers") refreshProviders();
 }
 
 // ————————————————————————————————————— oynatıcı çubuğu
 
-function kuyrugaYaz(gorunum) {
-  if (!gorunum) return;
-  kuyruk = gorunum;
+function renderQueue(view) {
+  if (!view) return;
+  queue = view;
 
-  const liste = $("kuyruk");
-  liste.replaceChildren();
-  for (const [sira, oge] of gorunum.items.entries()) {
-    const satir = document.createElement("li");
-    if (sira === gorunum.position) satir.classList.add("calan");
-    const no = document.createElement("span");
-    no.className = "no";
-    no.textContent = String(sira + 1);
-    const ad = document.createElement("span");
-    ad.textContent = parcaAdi(oge.track);
-    satir.append(no, ad);
+  const list = $("queue");
+  list.replaceChildren();
+  for (const [index, item] of view.items.entries()) {
+    const row = document.createElement("li");
+    if (index === view.position) row.classList.add("current");
+    const number = document.createElement("span");
+    number.className = "index";
+    number.textContent = String(index + 1);
+    const name = document.createElement("span");
+    name.textContent = trackName(item.track);
+    row.append(number, name);
     // Kuyrukta atlama kararı çekirdekte: burada yalnızca indeks iletiliyor.
-    satir.addEventListener("click", async () => kuyrugaYaz(await cagir("jump_to", { index: sira })));
-    liste.append(satir);
+    row.addEventListener("click", async () => renderQueue(await call("jump_to", { index })));
+    list.append(row);
   }
-  $("kuyrukBos").hidden = gorunum.items.length > 0;
+  $("queueEmpty").hidden = view.items.length > 0;
 
-  $("btnKaristir").classList.toggle("acik", gorunum.shuffle);
-  const tekrar = $("btnTekrar");
-  tekrar.classList.toggle("acik", gorunum.repeat !== "off");
-  tekrar.textContent = gorunum.repeat === "one" ? "🔂" : "🔁";
-  tekrar.title = `tekrar: ${gorunum.repeat}`;
+  $("btnShuffle").classList.toggle("on", view.shuffle);
+  const repeat = $("btnRepeat");
+  repeat.classList.toggle("on", view.repeat !== "off");
+  repeat.textContent = view.repeat === "one" ? "🔂" : "🔁";
+  repeat.title = `tekrar: ${view.repeat}`;
 
-  const calan = gorunum.items[gorunum.position];
-  $("simdiAd").textContent = calan ? parcaAdi(calan.track) : "—";
+  const current = view.items[view.position];
+  $("nowTitle").textContent = current ? trackName(current.track) : "—";
 }
 
-function parcaAdi(track) {
+function trackName(track) {
   // `TrackRef::display_name`'in karşılığı. Tek satır olduğu için burada
   // duruyor; büyüdüğü an çekirdeğe taşınmalı.
   return track.artist ? `${track.artist} — ${track.title}` : track.title;
 }
 
-const DURUM_ISARETI = { playing: "▶", paused: "⏸", buffering: "⋯", stopped: "■" };
+const STATE_MARK = { playing: "▶", paused: "⏸", buffering: "⋯", stopped: "■" };
 
-function capayiYaz(yeni) {
-  if (!yeni) return;
-  capa = yeni;
-  const isaret = $("simdiDurum");
-  isaret.textContent = DURUM_ISARETI[yeni.state] ?? "■";
-  isaret.className = `durum ${yeni.state}`;
-  ciz();
+function renderAnchor(next) {
+  if (!next) return;
+  anchor = next;
+  const mark = $("nowState");
+  mark.textContent = STATE_MARK[next.state] ?? "■";
+  mark.className = `state ${next.state}`;
+  draw();
 }
 
 // Çizim döngüsü: pozisyon **çekirdeğe sorulmuyor**, çapadan tahmin ediliyor
 // (D-015). IPC duraksarsa çubuk yürümeye devam eder.
-function ciz() {
-  if (!capa) return;
-  const pozisyon = positionAt(capa, Date.now());
-  const sure = capa.duration_ms ?? 0;
-  const oran = sure > 0 ? Math.min(pozisyon / sure, 1) : 0;
-  $("cubukDolu").style.transform = `scaleX(${oran})`;
-  $("sayac").textContent = `${saat(pozisyon)} / ${sure > 0 ? saat(sure) : "—:—"}`;
+function draw() {
+  if (!anchor) return;
+  const position = positionAt(anchor, Date.now());
+  const duration = anchor.duration_ms ?? 0;
+  const ratio = duration > 0 ? Math.min(position / duration, 1) : 0;
+  $("barFill").style.transform = `scaleX(${ratio})`;
+  $("timeLabel").textContent = `${clock(position)} / ${duration > 0 ? clock(duration) : "—:—"}`;
 }
 
-function cizimDongusu() {
-  ciz();
-  requestAnimationFrame(cizimDongusu);
+function drawLoop() {
+  draw();
+  requestAnimationFrame(drawLoop);
 }
 
-$("btnDurdurOynat").addEventListener("click", async () => capayiYaz(await cagir("toggle_pause")));
-$("btnDur").addEventListener("click", async () => {
-  capayiYaz(await cagir("stop"));
-  kuyrugaYaz(await cagir("queue"));
+$("btnPlayPause").addEventListener("click", async () => renderAnchor(await call("toggle_pause")));
+$("btnStop").addEventListener("click", async () => {
+  renderAnchor(await call("stop"));
+  renderQueue(await call("queue"));
 });
-$("btnSonraki").addEventListener("click", async () => {
-  kuyrugaYaz(await cagir("next"));
-  capayiYaz(await cagir("anchor"));
+$("btnNext").addEventListener("click", async () => {
+  renderQueue(await call("next"));
+  renderAnchor(await call("anchor"));
 });
-$("btnOnceki").addEventListener("click", async () => {
-  kuyrugaYaz(await cagir("previous"));
-  capayiYaz(await cagir("anchor"));
+$("btnPrev").addEventListener("click", async () => {
+  renderQueue(await call("previous"));
+  renderAnchor(await call("anchor"));
 });
-$("btnKaristir").addEventListener("click", async () =>
-  kuyrugaYaz(await cagir("set_shuffle", { on: !kuyruk.shuffle })),
+$("btnShuffle").addEventListener("click", async () =>
+  renderQueue(await call("set_shuffle", { on: !queue.shuffle })),
 );
-$("btnTekrar").addEventListener("click", async () => {
-  const sonraki = { off: "all", all: "one", one: "off" }[kuyruk.repeat] ?? "off";
-  kuyrugaYaz(await cagir("set_repeat", { mode: sonraki }));
+$("btnRepeat").addEventListener("click", async () => {
+  const nextMode = { off: "all", all: "one", one: "off" }[queue.repeat] ?? "off";
+  renderQueue(await call("set_repeat", { mode: nextMode }));
 });
 
 // ————————————————————————————————————— çal
 
-$("calForm").addEventListener("submit", async (olay) => {
-  olay.preventDefault();
-  const sorgu = $("calSorgu").value.trim();
-  if (!sorgu) return;
-  const gorunum = await cagir("play", {
-    query: sorgu,
-    all: $("calTumu").checked,
+$("playForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const query = $("playQuery").value.trim();
+  if (!query) return;
+  const view = await call("play", {
+    query,
+    all: $("playAll").checked,
     shuffle: false,
   });
-  if (!gorunum) return;
-  kuyrugaYaz(gorunum);
-  capayiYaz(await cagir("anchor"));
-  sekmeAc("calan");
+  if (!view) return;
+  renderQueue(view);
+  renderAnchor(await call("anchor"));
+  openPanel("now");
 });
 
 // ————————————————————————————————————— kütüphane araması
 
-$("araForm").addEventListener("submit", async (olay) => {
-  olay.preventDefault();
-  const sorgu = $("araSorgu").value.trim();
-  if (!sorgu) return;
-  const rapor = await cagir("search", { query: sorgu, limit: 50, minMs: null });
-  if (!rapor) return;
+$("searchForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const query = $("searchQuery").value.trim();
+  if (!query) return;
+  const report = await call("search", { query, limit: 50, minMs: null });
+  if (!report) return;
 
-  const tablo = $("araSonuc");
-  const govde = tablo.querySelector("tbody");
-  govde.replaceChildren();
-  for (const vurus of rapor.hits) {
-    const satir = document.createElement("tr");
-    satir.append(
-      hucre(vurus.title),
-      hucre(vurus.artist),
-      hucre(String(vurus.play_count), "sayi"),
-      hucreDugme("çal", async () => {
-        const gorunum = await cagir("play", {
-          query: `${vurus.artist} ${vurus.title}`,
+  const table = $("searchResult");
+  const tbody = table.querySelector("tbody");
+  tbody.replaceChildren();
+  for (const hit of report.hits) {
+    const row = document.createElement("tr");
+    row.append(
+      cell(hit.title),
+      cell(hit.artist),
+      cell(String(hit.play_count), "num"),
+      cellButton("çal", async () => {
+        const view = await call("play", {
+          query: `${hit.artist} ${hit.title}`,
           all: false,
           shuffle: false,
         });
-        if (!gorunum) return;
-        kuyrugaYaz(gorunum);
-        capayiYaz(await cagir("anchor"));
-        sekmeAc("calan");
+        if (!view) return;
+        renderQueue(view);
+        renderAnchor(await call("anchor"));
+        openPanel("now");
       }),
     );
-    govde.append(satir);
+    tbody.append(row);
   }
-  tablo.hidden = rapor.hits.length === 0;
-  $("araBos").hidden = rapor.hits.length > 0;
-  $("araBos").textContent = `"${rapor.query}" için kayıt bulunamadı.`;
+  table.hidden = report.hits.length === 0;
+  $("searchEmpty").hidden = report.hits.length > 0;
+  $("searchEmpty").textContent = `"${report.query}" için kayıt bulunamadı.`;
 });
 
-function hucre(metin, sinif) {
+function cell(text, className) {
   const td = document.createElement("td");
-  td.textContent = metin;
-  if (sinif) td.className = sinif;
+  td.textContent = text;
+  if (className) td.className = className;
   return td;
 }
 
-function hucreDugme(etiket, islev) {
+function cellButton(label, handler) {
   const td = document.createElement("td");
-  const dugme = document.createElement("button");
-  dugme.textContent = etiket;
-  dugme.addEventListener("click", islev);
-  td.append(dugme);
+  const button = document.createElement("button");
+  button.textContent = label;
+  button.addEventListener("click", handler);
+  td.append(button);
   return td;
 }
 
 // ————————————————————————————————————— istatistik
 
-$("istForm").addEventListener("submit", async (olay) => {
-  olay.preventDefault();
-  const yilMetni = $("istYil").value.trim();
-  const cevap = await cagir("stats", {
-    year: yilMetni ? Number(yilMetni) : null,
-    top: Number($("istTop").value) || 10,
+$("statsForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const yearText = $("statsYear").value.trim();
+  const response = await call("stats", {
+    year: yearText ? Number(yearText) : null,
+    top: Number($("statsTop").value) || 10,
     minMs: null,
   });
-  if (!cevap) return;
-  const r = cevap.report;
+  if (!response) return;
+  const r = response.report;
 
-  $("istOzet").replaceChildren(
-    kutu(String(r.plays), "sayılan dinleme"),
-    kutu(saatMetni(r.total_ms_played), "toplam süre"),
-    kutu(String(r.unique_artists), "sanatçı"),
-    kutu(String(r.unique_tracks), "parça"),
+  $("statsSummary").replaceChildren(
+    figure(String(r.plays), "sayılan dinleme"),
+    figure(hoursText(r.total_ms_played), "toplam süre"),
+    figure(String(r.unique_artists), "sanatçı"),
+    figure(String(r.unique_tracks), "parça"),
     // Kısmi başarı **her zaman** raporlanır: kaç kayıt eşiğin altında kaldı,
     // kaçı kanonik kimliksiz. Sessizce yutulmuyor.
-    kutu(String(r.skipped_short), "eşiğin altında"),
-    kutu(String(r.without_canonical_id), "kanonik kimliksiz"),
+    figure(String(r.skipped_short), "eşiğin altında"),
+    figure(String(r.without_canonical_id), "kanonik kimliksiz"),
   );
 
-  siralamaYaz($("istSanatci"), r.top_artists, (a) => [a.artist, `${a.plays}`]);
-  siralamaYaz($("istParca"), r.top_tracks, (t) => [`${t.artist} — ${t.title}`, `${t.plays}`]);
+  renderRanking($("statsArtists"), r.top_artists, (a) => [a.artist, `${a.plays}`]);
+  renderRanking($("statsTracks"), r.top_tracks, (t) => [`${t.artist} — ${t.title}`, `${t.plays}`]);
 });
 
-function kutu(buyuk, etiket) {
-  const dis = document.createElement("div");
+function figure(big, label) {
+  const wrap = document.createElement("div");
   const b = document.createElement("span");
-  b.className = "buyuk";
-  b.textContent = buyuk;
-  const e = document.createElement("span");
-  e.className = "etiket";
-  e.textContent = etiket;
-  dis.append(b, e);
-  return dis;
+  b.className = "big";
+  b.textContent = big;
+  const l = document.createElement("span");
+  l.className = "label";
+  l.textContent = label;
+  wrap.append(b, l);
+  return wrap;
 }
 
-function saatMetni(ms) {
+function hoursText(ms) {
   return `${(ms / 3600000).toFixed(1)} sa`;
 }
 
-function siralamaYaz(liste, kayitlar, bicim) {
-  liste.replaceChildren();
-  for (const kayit of kayitlar) {
-    const [ad, sayi] = bicim(kayit);
-    const satir = document.createElement("li");
-    const s = document.createElement("span");
-    s.className = "sayi";
-    s.textContent = ` · ${sayi}`;
-    satir.append(document.createTextNode(ad), s);
-    liste.append(satir);
+function renderRanking(list, entries, format) {
+  list.replaceChildren();
+  for (const entry of entries) {
+    const [name, count] = format(entry);
+    const row = document.createElement("li");
+    const c = document.createElement("span");
+    c.className = "num";
+    c.textContent = ` · ${count}`;
+    row.append(document.createTextNode(name), c);
+    list.append(row);
   }
 }
 
@@ -304,167 +306,167 @@ function siralamaYaz(liste, kayitlar, bicim) {
 
 // Yetenek bayrakları `Capabilities` bit maskesi olarak geliyor
 // (çekirdekteki sabitlerle aynı sıra).
-const YETENEKLER = [
+const CAPABILITIES = [
   [1 << 0, "ara"],
   [1 << 1, "gez"],
   [1 << 2, "çal"],
   [1 << 3, "kumanda"],
 ];
 
-async function saglayicilariYenile() {
-  const liste = await cagir("providers");
-  if (liste) {
-    const govde = $("saglayiciTablo").querySelector("tbody");
-    govde.replaceChildren();
-    for (const bilgi of liste.providers) {
-      const satir = document.createElement("tr");
-      const durum = hucre("—");
-      satir.append(
-        hucre(`${bilgi.display_name} (${bilgi.id})`),
-        hucre(yetenekMetni(bilgi.capabilities)),
-        durum,
-        hucreDugme("sına", async () => {
-          const rapor = await cagir("provider_test", { name: bilgi.id });
-          if (!rapor) {
-            durum.textContent = "hata (bkz. uyarı)";
+async function refreshProviders() {
+  const list = await call("providers");
+  if (list) {
+    const tbody = $("providerTable").querySelector("tbody");
+    tbody.replaceChildren();
+    for (const info of list.providers) {
+      const row = document.createElement("tr");
+      const status = cell("—");
+      row.append(
+        cell(`${info.display_name} (${info.id})`),
+        cell(capabilityText(info.capabilities)),
+        status,
+        cellButton("sına", async () => {
+          const report = await call("provider_test", { name: info.id });
+          if (!report) {
+            status.textContent = "hata (bkz. uyarı)";
             return;
           }
-          const sayi = rapor.health.track_count;
-          durum.textContent = rapor.health.reachable
-            ? `ayakta${sayi === null ? "" : ` · ${sayi} parça`}`
-            : `ulaşılamıyor — ${rapor.health.detail ?? "sebep bildirilmedi"}`;
+          const count = report.health.track_count;
+          status.textContent = report.health.reachable
+            ? `ayakta${count === null ? "" : ` · ${count} parça`}`
+            : `ulaşılamıyor — ${report.health.detail ?? "sebep bildirilmedi"}`;
         }),
       );
-      govde.append(satir);
+      tbody.append(row);
     }
   }
 
-  const sunucular = await cagir("servers_list");
-  if (!sunucular) return;
-  const govde = $("sunucuTablo").querySelector("tbody");
-  govde.replaceChildren();
-  for (const sunucu of sunucular.servers) {
-    const satir = document.createElement("tr");
-    satir.append(
-      hucre(sunucu.id),
-      hucre(sunucu.kind),
-      hucre(sunucu.url),
-      hucre(`${sunucu.username} (${sunucu.auth})`),
-      hucreDugme("sil", async () => {
-        const rapor = await cagir("server_remove", { name: sunucu.id });
-        if (rapor) {
-          uyar(`${rapor.id} silindi · kalan: ${rapor.remaining}`, true);
-          saglayicilariYenile();
+  const servers = await call("servers_list");
+  if (!servers) return;
+  const tbody = $("serverTable").querySelector("tbody");
+  tbody.replaceChildren();
+  for (const server of servers.servers) {
+    const row = document.createElement("tr");
+    row.append(
+      cell(server.id),
+      cell(server.kind),
+      cell(server.url),
+      cell(`${server.username} (${server.auth})`),
+      cellButton("sil", async () => {
+        const report = await call("server_remove", { name: server.id });
+        if (report) {
+          toast(`${report.id} silindi · kalan: ${report.remaining}`, true);
+          refreshProviders();
         }
       }),
     );
-    govde.append(satir);
+    tbody.append(row);
   }
 }
 
-function yetenekMetni(bitler) {
-  const adlar = YETENEKLER.filter(([bit]) => (bitler & bit) !== 0).map(([, ad]) => ad);
-  return adlar.length > 0 ? adlar.join(", ") : "yok";
+function capabilityText(bits) {
+  const names = CAPABILITIES.filter(([bit]) => (bits & bit) !== 0).map(([, name]) => name);
+  return names.length > 0 ? names.join(", ") : "yok";
 }
 
-$("btnTara").addEventListener("click", () => tara(false));
-$("btnTaraBayat").addEventListener("click", () => tara(true));
+$("btnScan").addEventListener("click", () => scan(false));
+$("btnScanStale").addEventListener("click", () => scan(true));
 
-async function tara(yalnizcaBayat) {
-  const rapor = await cagir("provider_scan", { ifStale: yalnizcaBayat });
-  if (!rapor) return;
+async function scan(onlyStale) {
+  const report = await call("provider_scan", { ifStale: onlyStale });
+  if (!report) return;
   // "Değişmedi" ile "bakamadım" farklı şeyler: çekirdeğin verdiği sebep
   // olduğu gibi gösteriliyor (K9).
-  uyar(
-    rapor.scanned
-      ? `tarandı · ${rapor.summary.indexed} parça (${rapor.summary.failed} okunamadı) · eklenen ${rapor.write.inserted}, güncellenen ${rapor.write.updated}, düşen ${rapor.write.removed} — ${rapor.reason}`
-      : `tarama atlandı — ${rapor.reason}`,
+  toast(
+    report.scanned
+      ? `tarandı · ${report.summary.indexed} parça (${report.summary.failed} okunamadı) · eklenen ${report.write.inserted}, güncellenen ${report.write.updated}, düşen ${report.write.removed} — ${report.reason}`
+      : `tarama atlandı — ${report.reason}`,
     true,
   );
-  saglayicilariYenile();
+  refreshProviders();
 }
 
-$("sunucuForm").addEventListener("submit", async (olay) => {
-  olay.preventDefault();
-  const anahtar = $("sunucuAnahtar").value.trim();
-  const ad = $("sunucuAd").value.trim();
-  const rapor = await cagir("server_add", {
-    kind: $("sunucuTur").value,
-    url: $("sunucuUrl").value.trim(),
-    user: $("sunucuKullanici").value.trim(),
-    password: $("sunucuParola").value || null,
-    apiKey: anahtar || null,
-    name: ad || null,
-    verify: $("sunucuDogrula").checked,
+$("serverForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const apiKey = $("serverApiKey").value.trim();
+  const name = $("serverName").value.trim();
+  const report = await call("server_add", {
+    kind: $("serverKind").value,
+    url: $("serverUrl").value.trim(),
+    user: $("serverUser").value.trim(),
+    password: $("serverPassword").value || null,
+    apiKey: apiKey || null,
+    name: name || null,
+    verify: $("serverVerify").checked,
   });
-  if (!rapor) return;
+  if (!report) return;
   // Parola formda kalmasın.
-  $("sunucuParola").value = "";
-  $("sunucuAnahtar").value = "";
-  const notlar = rapor.notes.length > 0 ? ` · ${rapor.notes.join(" · ")}` : "";
-  uyar(
-    `${rapor.server.id} eklendi${rapor.verified ? " (doğrulandı)" : " (doğrulanmadı)"}${notlar}`,
+  $("serverPassword").value = "";
+  $("serverApiKey").value = "";
+  const notes = report.notes.length > 0 ? ` · ${report.notes.join(" · ")}` : "";
+  toast(
+    `${report.server.id} eklendi${report.verified ? " (doğrulandı)" : " (doğrulanmadı)"}${notes}`,
     true,
   );
-  saglayicilariYenile();
+  refreshProviders();
 });
 
 // ————————————————————————————————————— içe aktarma, çözümleme, tanı
 
-$("ictForm").addEventListener("submit", async (olay) => {
-  olay.preventDefault();
-  const yol = $("ictYol").value.trim();
-  if (yol) iceAktar(yol);
+$("importForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const path = $("importPath").value.trim();
+  if (path) runImport(path);
 });
 
-async function iceAktar(yol) {
-  $("ictYol").value = yol;
-  const rapor = await cagir("import", { path: yol });
-  if (!rapor) return;
-  const blok = $("ictSonuc");
+async function runImport(path) {
+  $("importPath").value = path;
+  const report = await call("import", { path });
+  if (!report) return;
+  const block = $("importResult");
   // Eşleştirme gibi kısmi başarı üreten işlemler **her zaman** özet döndürür:
   // kaç kayıt geldi, kaçı ISRC ile, kaçı bulanık, kaçı eşleşmedi.
-  blok.textContent = JSON.stringify(
-    { import: rapor.import, identity: rapor.identity, write: rapor.write },
+  block.textContent = JSON.stringify(
+    { import: report.import, identity: report.identity, write: report.write },
     null,
     2,
   );
-  blok.hidden = false;
+  block.hidden = false;
 }
 
 // Sürükle-bırak: yol yazmak yerine arşivi pencereye bırakmak.
-const birakAlani = $("birak");
-listen("tauri://drag-enter", () => birakAlani.classList.add("uzerinde"));
-listen("tauri://drag-leave", () => birakAlani.classList.remove("uzerinde"));
-listen("tauri://drag-drop", (olay) => {
-  birakAlani.classList.remove("uzerinde");
-  const yol = olay.payload?.paths?.[0];
-  if (!yol) return;
-  sekmeAc("tani");
-  iceAktar(yol);
+const dropzone = $("dropzone");
+listen("tauri://drag-enter", () => dropzone.classList.add("over"));
+listen("tauri://drag-leave", () => dropzone.classList.remove("over"));
+listen("tauri://drag-drop", (event) => {
+  dropzone.classList.remove("over");
+  const path = event.payload?.paths?.[0];
+  if (!path) return;
+  openPanel("diag");
+  runImport(path);
 });
 
-$("cozForm").addEventListener("submit", async (olay) => {
-  olay.preventDefault();
-  const sorgu = $("cozSorgu").value.trim();
-  if (!sorgu) return;
-  const rapor = await cagir("resolve", { query: sorgu });
-  if (!rapor) return;
-  const blok = $("cozSonuc");
-  blok.textContent = JSON.stringify(rapor.resolution, null, 2);
-  blok.hidden = false;
+$("resolveForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const query = $("resolveQuery").value.trim();
+  if (!query) return;
+  const report = await call("resolve", { query });
+  if (!report) return;
+  const block = $("resolveResult");
+  block.textContent = JSON.stringify(report.resolution, null, 2);
+  block.hidden = false;
 });
 
-$("btnTani").addEventListener("click", async () => {
-  const rapor = await cagir("diag");
-  const blok = $("taniSonuc");
-  blok.textContent =
-    rapor === undefined
+$("btnDiag").addEventListener("click", async () => {
+  const report = await call("diag");
+  const block = $("diagResult");
+  block.textContent =
+    report === undefined
       ? ""
-      : rapor === null
+      : report === null
         ? "henüz çalıştırılmış bir komut yok"
-        : JSON.stringify(rapor, null, 2);
-  blok.hidden = rapor === undefined;
+        : JSON.stringify(report, null, 2);
+  block.hidden = report === undefined;
 });
 
 // ————————————————————————————————————— olaylar
@@ -473,44 +475,44 @@ $("btnTani").addEventListener("click", async () => {
 // sessizlikte pozisyon çapadan tahmin ediliyor; bu yüzden "hâlâ çalıyor"
 // diye bir mesaj yok.
 
-listen("tune://tick", async (olay) => {
-  const rapor = olay.payload;
-  capayiYaz(rapor.anchor);
-  if (rapor.track_changed || rapor.finished) {
-    kuyrugaYaz(await cagir("queue"));
+listen("tune://tick", async (event) => {
+  const report = event.payload;
+  renderAnchor(report.anchor);
+  if (report.track_changed || report.finished) {
+    renderQueue(await call("queue"));
   }
-  if (rapor.store_error) {
+  if (report.store_error) {
     // Kayıtlar atılmadı, elde tutuldu ve yeniden denenecek — ama kullanıcı
     // bilsin (K9).
-    uyar({
+    toast({
       stage: "LIBRARY_WRITE",
-      chain: `${rapor.store_error}\n  → ${rapor.listens_pending} dinleme elde tutuldu, sonraki turda yeniden denenecek`,
+      chain: `${report.store_error}\n  → ${report.listens_pending} dinleme elde tutuldu, sonraki turda yeniden denenecek`,
     });
   }
 });
 
-listen("tune://error", (olay) => uyar(olay.payload));
+listen("tune://error", (event) => toast(event.payload));
 
-listen("tune://busy", (olay) => {
-  const etiket = olay.payload;
-  const alan = $("mesgul");
-  alan.textContent = etiket ?? "";
-  alan.hidden = !etiket;
+listen("tune://busy", (event) => {
+  const label = event.payload;
+  const field = $("busy");
+  field.textContent = label ?? "";
+  field.hidden = !label;
 });
 
 // ————————————————————————————————————— açılış
 
-(async function baslat() {
-  const ortam = await cagir("environment");
-  if (ortam) {
-    $("ortam").textContent = [
-      `sürüm       : ${ortam.version}`,
-      `veri dizini : ${ortam.data_dir}`,
-      `veritabanı  : ${ortam.database}`,
-      `müzik       : ${ortam.music_dirs.length > 0 ? ortam.music_dirs.join(", ") : "tanımlı değil (TUNE_MUSIC_DIRS)"}`,
+(async function boot() {
+  const env = await call("environment");
+  if (env) {
+    $("envBlock").textContent = [
+      `sürüm       : ${env.version}`,
+      `veri dizini : ${env.data_dir}`,
+      `veritabanı  : ${env.database}`,
+      `müzik       : ${env.music_dirs.length > 0 ? env.music_dirs.join(", ") : "tanımlı değil (TUNE_MUSIC_DIRS)"}`,
     ].join("\n");
   }
-  kuyrugaYaz(await cagir("queue"));
-  capayiYaz(await cagir("anchor"));
-  requestAnimationFrame(cizimDongusu);
+  renderQueue(await call("queue"));
+  renderAnchor(await call("anchor"));
+  requestAnimationFrame(drawLoop);
 })();

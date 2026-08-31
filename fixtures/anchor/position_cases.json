@@ -1,5 +1,5 @@
 {
-  "aciklama": [
+  "description": [
     "Çapadan pozisyon tahmininin doğruluk kümesi (PLAN §3.2).",
     "",
     "Neden var: pozisyon webview'de çekirdeğe sormadan tahmin ediliyor, yani",
@@ -9,15 +9,18 @@
     "oda senkronunu sürer.",
     "",
     "Bu dosya iki tarafın da okuduğu tek doğruluk kaynağı. Rust tarafı:",
-    "crates/tune-core/src/playback/anchor.rs testleri. JS tarafı: GUI paketi",
-    "yazıldığında aynı dosyayı okuyacak.",
+    "crates/tune-core/tests/anchor_parity.rs. JS tarafı:",
+    "crates/tune/tests/anchor_parity.mjs (crates/tune/ui/anchor.js üzerinden).",
     "",
-    "wall_time ve now RFC 3339. beklenen_ms tam sayı milisaniye."
+    "Anahtarlar ve vaka adları İngilizce (D-036): bu dosya iki dilden okunuyor",
+    "ve kümeyi büyütecek kişi Türkçe bilmek zorunda değil.",
+    "",
+    "wall_time ve now RFC 3339. expected_ms tam sayı milisaniye."
   ],
-  "vakalar": [
+  "cases": [
     {
-      "ad": "çalarken zaman ilerler",
-      "capa": {
+      "name": "time advances while playing",
+      "anchor": {
         "track": "mbid:1",
         "wall_time": "2026-08-31T12:00:00Z",
         "position_ms": 10000,
@@ -26,11 +29,11 @@
         "duration_ms": 240000
       },
       "now": "2026-08-31T12:00:05Z",
-      "beklenen_ms": 15000
+      "expected_ms": 15000
     },
     {
-      "ad": "duraklatılmışken ilerlemez",
-      "capa": {
+      "name": "paused does not advance",
+      "anchor": {
         "track": "mbid:1",
         "wall_time": "2026-08-31T12:00:00Z",
         "position_ms": 10000,
@@ -39,11 +42,11 @@
         "duration_ms": 240000
       },
       "now": "2026-08-31T12:00:05Z",
-      "beklenen_ms": 10000
+      "expected_ms": 10000
     },
     {
-      "ad": "bekliyorken (buffering) ilerlemez — ses çıkmıyor, sayaç da yürümemeli",
-      "capa": {
+      "name": "buffering does not advance — no audio yet, so the counter must not run",
+      "anchor": {
         "track": "mbid:1",
         "wall_time": "2026-08-31T12:00:00Z",
         "position_ms": 10000,
@@ -52,11 +55,11 @@
         "duration_ms": 240000
       },
       "now": "2026-08-31T12:00:05Z",
-      "beklenen_ms": 10000
+      "expected_ms": 10000
     },
     {
-      "ad": "durmuşken pozisyon olduğu yerde kalır",
-      "capa": {
+      "name": "stopped keeps the position where it is",
+      "anchor": {
         "track": null,
         "wall_time": "2026-08-31T12:00:00Z",
         "position_ms": 0,
@@ -65,11 +68,11 @@
         "duration_ms": null
       },
       "now": "2026-08-31T12:00:05Z",
-      "beklenen_ms": 0
+      "expected_ms": 0
     },
     {
-      "ad": "rate 0 ise çalıyor görünse de ilerlemez",
-      "capa": {
+      "name": "rate 0 does not advance even when the state says playing",
+      "anchor": {
         "track": "mbid:1",
         "wall_time": "2026-08-31T12:00:00Z",
         "position_ms": 10000,
@@ -78,17 +81,17 @@
         "duration_ms": 240000
       },
       "now": "2026-08-31T12:00:05Z",
-      "beklenen_ms": 10000
+      "expected_ms": 10000
     },
     {
-      "ad": "Faz 4 sürüklenme düzeltmesi: rate 1.001 — KIRPILIR, yuvarlanmaz",
-      "not": [
+      "name": "phase 4 drift correction: rate 1.001 — TRUNCATED, not rounded",
+      "note": [
         "100000 * 1.001 ikilik tabanda tam 100100 etmez, 100099.999… eder.",
         "Çekirdek `as u64` ile kırpıyor: 100099. JS tarafı Math.round kullanırsa",
         "100100 der ve iki kopya buradan ayrılır — kümedeki en değerli vaka bu.",
-        "JS karşılığı: Math.floor(gecen_ms * rate)."
+        "JS karşılığı: Math.floor(elapsed_ms * rate)."
       ],
-      "capa": {
+      "anchor": {
         "track": "mbid:1",
         "wall_time": "2026-08-31T12:00:00Z",
         "position_ms": 0,
@@ -97,11 +100,11 @@
         "duration_ms": 240000
       },
       "now": "2026-08-31T12:01:40Z",
-      "beklenen_ms": 100099
+      "expected_ms": 100099
     },
     {
-      "ad": "saat geriye atlarsa pozisyon geri gitmez",
-      "capa": {
+      "name": "a backwards clock jump does not rewind the position",
+      "anchor": {
         "track": "mbid:1",
         "wall_time": "2026-08-31T12:00:10Z",
         "position_ms": 10000,
@@ -110,11 +113,11 @@
         "duration_ms": 240000
       },
       "now": "2026-08-31T12:00:00Z",
-      "beklenen_ms": 10000
+      "expected_ms": 10000
     },
     {
-      "ad": "süreyi aşmaz",
-      "capa": {
+      "name": "does not exceed the duration",
+      "anchor": {
         "track": "mbid:1",
         "wall_time": "2026-08-31T12:00:00Z",
         "position_ms": 118000,
@@ -123,11 +126,11 @@
         "duration_ms": 120000
       },
       "now": "2026-08-31T12:00:30Z",
-      "beklenen_ms": 120000
+      "expected_ms": 120000
     },
     {
-      "ad": "süre bilinmiyorsa kırpılmaz",
-      "capa": {
+      "name": "no clamping when the duration is unknown",
+      "anchor": {
         "track": "mbid:1",
         "wall_time": "2026-08-31T12:00:00Z",
         "position_ms": 118000,
@@ -136,11 +139,11 @@
         "duration_ms": null
       },
       "now": "2026-08-31T12:00:30Z",
-      "beklenen_ms": 148000
+      "expected_ms": 148000
     },
     {
-      "ad": "aynı an: hiç ilerlememiş",
-      "capa": {
+      "name": "same instant: nothing has advanced",
+      "anchor": {
         "track": "mbid:1",
         "wall_time": "2026-08-31T12:00:00Z",
         "position_ms": 7321,
@@ -149,11 +152,11 @@
         "duration_ms": 240000
       },
       "now": "2026-08-31T12:00:00Z",
-      "beklenen_ms": 7321
+      "expected_ms": 7321
     },
     {
-      "ad": "milisaniye altı yuvarlama: 1.5 sn * rate 1.0",
-      "capa": {
+      "name": "sub-second: 1.5 s at rate 1.0",
+      "anchor": {
         "track": "mbid:1",
         "wall_time": "2026-08-31T12:00:00.000Z",
         "position_ms": 0,
@@ -162,11 +165,11 @@
         "duration_ms": 240000
       },
       "now": "2026-08-31T12:00:01.500Z",
-      "beklenen_ms": 1500
+      "expected_ms": 1500
     },
     {
-      "ad": "yarım hız",
-      "capa": {
+      "name": "half speed",
+      "anchor": {
         "track": "mbid:1",
         "wall_time": "2026-08-31T12:00:00Z",
         "position_ms": 0,
@@ -175,7 +178,7 @@
         "duration_ms": 240000
       },
       "now": "2026-08-31T12:00:10Z",
-      "beklenen_ms": 5000
+      "expected_ms": 5000
     }
   ]
 }

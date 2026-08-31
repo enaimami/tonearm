@@ -19,15 +19,15 @@
 ///
 /// Çekirdek `Timestamp::as_millisecond()` diyor, yani milisaniye altını
 /// kırpıyor. `Date.parse` de öyle yapıyor.
-function duvarSaatiMs(wallTime) {
+function wallClockMs(wallTime) {
   return Date.parse(wallTime);
 }
 
-function sureyeKirp(pozisyon, durationMs) {
+function clampToDuration(position, durationMs) {
   if (durationMs === null || durationMs === undefined) {
-    return pozisyon;
+    return position;
   }
-  return Math.min(pozisyon, durationMs);
+  return Math.min(position, durationMs);
 }
 
 /// Verilen an için pozisyon (ms).
@@ -39,15 +39,15 @@ export function positionAt(anchor, nowMs) {
   // ses çıkmıyor, sayaç da yürümemeli — "duraklatıldı" demek kullanıcıyı
   // yanıltır ama sayacı yürütmek de yalan söyler.
   if (anchor.state !== "playing" || anchor.rate <= 0) {
-    return sureyeKirp(anchor.position_ms, anchor.duration_ms);
+    return clampToDuration(anchor.position_ms, anchor.duration_ms);
   }
-  const gecen = nowMs - duvarSaatiMs(anchor.wall_time);
+  const elapsed = nowMs - wallClockMs(anchor.wall_time);
   // Geriye giden saat pozisyonu geri sarmaz.
-  if (gecen <= 0) {
-    return sureyeKirp(anchor.position_ms, anchor.duration_ms);
+  if (elapsed <= 0) {
+    return clampToDuration(anchor.position_ms, anchor.duration_ms);
   }
-  const ilerleme = Math.floor(gecen * anchor.rate);
-  return sureyeKirp(anchor.position_ms + ilerleme, anchor.duration_ms);
+  const advanced = Math.floor(elapsed * anchor.rate);
+  return clampToDuration(anchor.position_ms + advanced, anchor.duration_ms);
 }
 
 /// Şu andaki pozisyon.
@@ -56,8 +56,8 @@ export function positionNow(anchor) {
 }
 
 /// Milisaniyeyi `3:07` biçimine çevirir.
-export function saat(ms) {
-  const saniye = Math.floor(ms / 1000);
-  const dakika = Math.floor(saniye / 60);
-  return `${dakika}:${String(saniye % 60).padStart(2, "0")}`;
+export function clock(ms) {
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
 }

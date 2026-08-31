@@ -231,7 +231,7 @@ fn playing_a_local_file_records_a_listen_in_the_same_table_as_imports() {
     assert!(stdout.contains("indekslenen"), "{stdout}");
 
     // Sonra çal.
-    let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["play", "sinüs"]);
+    let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["play", "sine"]);
     if !ok {
         // Ses aygıtı olmayan ortamda çalma kurulamaz; bunu ayırt et.
         if stderr.contains("PLAYBACK_OUTPUT") {
@@ -248,7 +248,7 @@ fn playing_a_local_file_records_a_listen_in_the_same_table_as_imports() {
     let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["stats"]);
     assert!(ok, "{stderr}");
     assert!(
-        stdout.contains("Test Sanatçı"),
+        stdout.contains("Test Artist"),
         "çalınan parça istatistikte görünmeli:\n{stdout}"
     );
     assert!(stdout.contains("1 çalma"), "{stdout}");
@@ -271,8 +271,10 @@ fn every_queued_track_produces_a_listen_that_stats_also_counts() {
     let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["provider", "scan"]);
     assert!(ok, "{stderr}");
 
-    // "Sanat" dört fixture'ın hepsiyle eşleşiyor (ikisi etiketsiz).
-    let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["play", "Sanat", "--all"]);
+    // "Artist" dört fixture'ın hepsiyle eşleşiyor: ikisinde etiket var
+    // (`Test Artist`), ikisi etiketsiz ve adından türüyor (`Other Artist`,
+    // üst dizinden `Dir Artist`).
+    let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["play", "Artist", "--all"]);
     if !ok {
         if stderr.contains("PLAYBACK_OUTPUT") {
             eprintln!("ses çıkışı yok — gapless testi atlanıyor:\n{stderr}");
@@ -313,8 +315,8 @@ fn scanning_if_stale_skips_an_unchanged_library_and_notices_a_new_file() {
     let dir = temp_dir("bayat");
     let music = temp_dir("bayat-muzik");
     std::fs::copy(
-        audio_fixtures().join("etiketli.flac"),
-        music.join("etiketli.flac"),
+        audio_fixtures().join("tagged.flac"),
+        music.join("tagged.flac"),
     )
     .expect("fixture kopyalanmalı");
 
@@ -347,7 +349,7 @@ fn scanning_if_stale_skips_an_unchanged_library_and_notices_a_new_file() {
     // Yeni dosya: dizin damgası değişir, tarama koşmalı.
     std::thread::sleep(std::time::Duration::from_millis(1100));
     std::fs::copy(
-        audio_fixtures().join("Test Sanatci - Mp3 Parca.mp3"),
+        audio_fixtures().join("Test Artist - Mp3 Track.mp3"),
         music.join("yeni.mp3"),
     )
     .expect("yeni dosya");
@@ -408,7 +410,7 @@ fn the_catalog_persists_so_play_does_not_rescan() {
 
     // Asıl sınav: müzik dizini **verilmeden** arama çalışmalı.
     // Katalog diskte olduğu için `play` taramaya ihtiyaç duymuyor.
-    let (stdout, stderr, ok) = run(&dir, &["play", "sinüs", "--dry-run", "--json"]);
+    let (stdout, stderr, ok) = run(&dir, &["play", "sine", "--dry-run", "--json"]);
     assert!(ok, "katalog kalıcı olmalıydı: {stderr}");
     let value: serde_json::Value = serde_json::from_str(&stdout).expect("JSON");
     assert_eq!(
@@ -426,8 +428,8 @@ fn a_deleted_file_leaves_the_catalog_but_keeps_its_history() {
     let dir = temp_dir("silinen");
     let music = temp_dir("silinen-muzik");
     std::fs::copy(
-        audio_fixtures().join("etiketli.flac"),
-        music.join("etiketli.flac"),
+        audio_fixtures().join("tagged.flac"),
+        music.join("tagged.flac"),
     )
     .expect("fixture kopyalanmalı");
 
@@ -435,7 +437,7 @@ fn a_deleted_file_leaves_the_catalog_but_keeps_its_history() {
     assert!(ok, "{stderr}");
 
     // Çal ki geçmişi olsun.
-    let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["play", "sinüs"]);
+    let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["play", "sine"]);
     if !ok && stderr.contains("PLAYBACK_OUTPUT") {
         eprintln!("ses çıkışı yok — test atlanıyor");
         std::fs::remove_dir_all(&dir).ok();
@@ -445,7 +447,7 @@ fn a_deleted_file_leaves_the_catalog_but_keeps_its_history() {
     assert!(ok, "{stderr}");
 
     // Dosyayı sil ve yeniden tara.
-    std::fs::remove_file(music.join("etiketli.flac")).expect("silinmeli");
+    std::fs::remove_file(music.join("tagged.flac")).expect("silinmeli");
     let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["provider", "scan", "--json"]);
     assert!(ok, "{stderr}");
     let value: serde_json::Value = serde_json::from_str(&stdout).expect("JSON");
@@ -456,7 +458,7 @@ fn a_deleted_file_leaves_the_catalog_but_keeps_its_history() {
     );
 
     // Katalogda yok...
-    let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["play", "sinüs", "--dry-run"]);
+    let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["play", "sine", "--dry-run"]);
     assert!(!ok, "silinen dosya çalınabilir görünmemeli");
     assert!(stderr.contains("PLAYBACK_RESOLVE"), "{stderr}");
 
@@ -464,7 +466,7 @@ fn a_deleted_file_leaves_the_catalog_but_keeps_its_history() {
     let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["stats"]);
     assert!(ok, "{stderr}");
     assert!(
-        stdout.contains("Test Sanatçı"),
+        stdout.contains("Test Artist"),
         "dinleme geçmişi korunmalı:\n{stdout}"
     );
 
@@ -481,11 +483,8 @@ fn dry_run_queues_without_playing() {
     let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["provider", "scan"]);
     assert!(ok, "{stderr}");
 
-    let (stdout, stderr, ok) = run_with_music(
-        &dir,
-        Some(&music),
-        &["play", "sinüs", "--dry-run", "--json"],
-    );
+    let (stdout, stderr, ok) =
+        run_with_music(&dir, Some(&music), &["play", "sine", "--dry-run", "--json"]);
     assert!(ok, "{stderr}");
 
     let value: serde_json::Value = serde_json::from_str(&stdout).expect("JSON");
@@ -523,7 +522,7 @@ fn provider_commands_report_capabilities_and_scan_counts() {
     assert_eq!(
         summary["failed"],
         serde_json::json!(1),
-        "bozuk.flac sayılmalı: {summary}"
+        "corrupt.flac sayılmalı: {summary}"
     );
     assert!(summary["indexed"].as_u64().unwrap_or(0) >= 3, "{summary}");
 
@@ -697,7 +696,7 @@ fn testing_an_unknown_provider_lists_the_known_ones() {
 fn playing_with_no_match_says_what_to_do() {
     let dir = temp_dir("eslesmeyen");
     let music = audio_fixtures();
-    let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["play", "boylebirsarkiyok"]);
+    let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["play", "nosuchtrackexists"]);
 
     assert!(!ok, "eşleşme yoksa başarısız olmalı");
     assert!(stderr.contains("PLAYBACK_RESOLVE"), "{stderr}");
@@ -720,7 +719,7 @@ fn the_tui_refuses_to_start_without_a_terminal() {
     assert!(ok, "{stderr}");
 
     // Test süreci bir tty'ye bağlı değil.
-    let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["play", "sinüs", "--tui"]);
+    let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["play", "sine", "--tui"]);
     assert!(!ok, "terminalsiz TUI başarısız olmalı");
     assert!(stderr.contains("PLAYBACK_OUTPUT"), "{stderr}");
     assert!(

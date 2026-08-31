@@ -5,6 +5,9 @@
  * habersiz değişir. Sözleşme yayınlandığı gün geriye dönük uyumluluk borcu
  * doğuyor (PLAN §3.3), o yüzden bugünden vaat verilmiyor.
  *
+ * İsimler yine de İngilizce (D-036) ve değişkenler bilerek `--tune-` ön eki
+ * **almadan** yazıldı: o ön ek vaadin kendisi olacak, onu §3.3 dağıtacak.
+ *
  * D-028'den gelen kural: yalnızca `transform` ve `opacity` canlandırılır.
  * `height`, `box-shadow`, `filter`, `background-position` düzeltilmiş
  * ortamda bile 58.8 → 47.6 fps götürüyor. İlerleme çubuğu bu yüzden
@@ -12,14 +15,14 @@
  */
 
 :root {
-  --arka: #12100e;
-  --arka2: #1b1815;
-  --cizgi: #2e2925;
-  --metin: #eae2d8;
-  --soluk: #9a8f83;
-  --vurgu: #ffb454;
-  --hata: #ff6b6b;
-  --iyi: #7bd88f;
+  --bg: #12100e;
+  --surface: #1b1815;
+  --border: #2e2925;
+  --text: #eae2d8;
+  --text-dim: #9a8f83;
+  --accent: #ffb454;
+  --error: #ff6b6b;
+  --ok: #7bd88f;
 }
 
 * {
@@ -35,66 +38,66 @@ body {
 body {
   display: flex;
   flex-direction: column;
-  background: var(--arka);
-  color: var(--metin);
+  background: var(--bg);
+  color: var(--text);
   font: 14px/1.5 system-ui, sans-serif;
   overflow: hidden;
 }
 
 /* ————————————————— üst çubuk */
 
-.ust {
+.topbar {
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 10px 14px;
-  border-bottom: 1px solid var(--cizgi);
-  background: var(--arka2);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
 }
 
-.marka {
+.brand {
   font-weight: 700;
-  color: var(--vurgu);
+  color: var(--accent);
   letter-spacing: 0.04em;
 }
 
-.cal-form {
+.play-form {
   display: flex;
   align-items: center;
   gap: 8px;
   flex: 1;
 }
 
-.cal-form input[type="search"] {
+.play-form input[type="search"] {
   flex: 1;
   max-width: 460px;
 }
 
-.mesgul {
-  color: var(--vurgu);
+.busy {
+  color: var(--accent);
   font-size: 13px;
 }
 
-.mesgul::before {
+.busy::before {
   content: "⋯ ";
 }
 
 /* ————————————————— gövde */
 
-.govde {
+.body {
   display: flex;
   flex: 1;
   min-height: 0;
 }
 
-.yan {
+.sidebar {
   display: flex;
   flex-direction: column;
   gap: 2px;
   width: 160px;
   padding: 12px 8px;
-  border-right: 1px solid var(--cizgi);
-  background: var(--arka2);
+  border-right: 1px solid var(--border);
+  background: var(--surface);
 }
 
 .nav {
@@ -102,22 +105,22 @@ body {
   background: none;
   border: 0;
   border-radius: 6px;
-  color: var(--soluk);
+  color: var(--text-dim);
   padding: 8px 10px;
   cursor: pointer;
   font: inherit;
 }
 
 .nav:hover {
-  color: var(--metin);
+  color: var(--text);
 }
 
 .nav[aria-current="true"] {
   background: #2a2420;
-  color: var(--vurgu);
+  color: var(--accent);
 }
 
-.icerik {
+.content {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
@@ -127,7 +130,7 @@ body {
 h2 {
   font-size: 15px;
   margin: 0 0 12px;
-  color: var(--soluk);
+  color: var(--text-dim);
   text-transform: lowercase;
   letter-spacing: 0.06em;
 }
@@ -139,7 +142,7 @@ h3 {
 
 h3 {
   font-size: 13px;
-  color: var(--soluk);
+  color: var(--text-dim);
   margin-bottom: 8px;
 }
 
@@ -149,9 +152,9 @@ input,
 select,
 button {
   font: inherit;
-  color: var(--metin);
+  color: var(--text);
   background: #221e1a;
-  border: 1px solid var(--cizgi);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 6px 10px;
 }
@@ -161,8 +164,8 @@ button {
 select {
   appearance: none;
   padding-right: 26px;
-  background-image: linear-gradient(45deg, transparent 50%, var(--soluk) 50%),
-    linear-gradient(135deg, var(--soluk) 50%, transparent 50%);
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-dim) 50%),
+    linear-gradient(135deg, var(--text-dim) 50%, transparent 50%);
   background-position:
     right 13px center,
     right 8px center;
@@ -175,22 +178,22 @@ button {
 }
 
 button:hover {
-  border-color: var(--vurgu);
+  border-color: var(--accent);
 }
 
-.onay {
+.check {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: var(--soluk);
+  color: var(--text-dim);
   font-size: 13px;
 }
 
-.onay input {
+.check input {
   padding: 0;
 }
 
-.satir {
+.row {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -198,47 +201,47 @@ button:hover {
   margin-bottom: 12px;
 }
 
-.satir label {
+.row label {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: var(--soluk);
+  color: var(--text-dim);
 }
 
-.satir input[type="number"] {
+.row input[type="number"] {
   width: 90px;
 }
 
-.satir input[type="search"],
-.satir input[type="text"] {
+.row input[type="search"],
+.row input[type="text"] {
   min-width: 280px;
 }
 
-.izgara {
+.grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 10px;
   align-items: end;
 }
 
-.izgara label {
+.grid label {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  color: var(--soluk);
+  color: var(--text-dim);
   font-size: 13px;
 }
 
-.ipucu,
-.bos {
-  color: var(--soluk);
+.hint,
+.empty {
+  color: var(--text-dim);
   font-size: 13px;
   max-width: 62ch;
 }
 
-.blok {
-  background: var(--arka2);
-  border: 1px solid var(--cizgi);
+.block {
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 12px;
   margin: 0 0 8px;
@@ -252,36 +255,36 @@ button:hover {
 
 /* ————————————————— tablolar ve listeler */
 
-.tablo {
+.table {
   width: 100%;
   border-collapse: collapse;
   margin-bottom: 12px;
 }
 
-.tablo th,
-.tablo td {
+.table th,
+.table td {
   text-align: left;
   padding: 6px 8px;
-  border-bottom: 1px solid var(--cizgi);
+  border-bottom: 1px solid var(--border);
 }
 
-.tablo th {
-  color: var(--soluk);
+.table th {
+  color: var(--text-dim);
   font-weight: 500;
   font-size: 12px;
 }
 
-.tablo .sayi {
+.table .num {
   text-align: right;
 }
 
-.kuyruk {
+.queue {
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
-.kuyruk li {
+.queue li {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -290,109 +293,109 @@ button:hover {
   cursor: pointer;
 }
 
-.kuyruk li:hover {
+.queue li:hover {
   background: #221e1a;
 }
 
-.kuyruk li.calan {
-  color: var(--vurgu);
+.queue li.current {
+  color: var(--accent);
   font-weight: 600;
 }
 
-.kuyruk .no {
-  color: var(--soluk);
+.queue .index {
+  color: var(--text-dim);
   font-variant-numeric: tabular-nums;
   min-width: 2.5ch;
   text-align: right;
 }
 
-.siralama {
+.ranking {
   margin: 0;
   padding-left: 22px;
 }
 
-.siralama li {
+.ranking li {
   padding: 3px 0;
 }
 
-.siralama .sayi {
-  color: var(--soluk);
+.ranking .num {
+  color: var(--text-dim);
   font-variant-numeric: tabular-nums;
 }
 
-.ozet {
+.summary {
   display: flex;
   gap: 24px;
   flex-wrap: wrap;
   margin-bottom: 18px;
 }
 
-.ozet div {
+.summary div {
   display: flex;
   flex-direction: column;
 }
 
-.ozet .buyuk {
+.summary .big {
   font-size: 22px;
-  color: var(--vurgu);
+  color: var(--accent);
   font-variant-numeric: tabular-nums;
 }
 
-.ozet .etiket {
-  color: var(--soluk);
+.summary .label {
+  color: var(--text-dim);
   font-size: 12px;
 }
 
-.ikili {
+.two-col {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 24px;
 }
 
-.birak {
-  border: 1px dashed var(--cizgi);
+.dropzone {
+  border: 1px dashed var(--border);
   border-radius: 10px;
   padding: 14px;
   transition: opacity 120ms linear;
 }
 
-.birak.uzerinde {
-  border-color: var(--vurgu);
+.dropzone.over {
+  border-color: var(--accent);
   opacity: 0.85;
 }
 
 /* ————————————————— oynatıcı çubuğu */
 
-.oynatici {
+.player {
   display: flex;
   align-items: center;
   gap: 14px;
   padding: 10px 16px;
-  border-top: 1px solid var(--cizgi);
-  background: var(--arka2);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
 }
 
-.kumanda {
+.controls {
   display: flex;
   gap: 4px;
 }
 
-.kumanda button {
+.controls button {
   min-width: 38px;
   padding: 5px 8px;
 }
 
-.kumanda button.acik {
-  color: var(--vurgu);
-  border-color: var(--vurgu);
+.controls button.on {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
-.simdi {
+.now {
   flex: 1;
   min-width: 0;
 }
 
-.simdi .baslik {
+.now .title {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -402,23 +405,23 @@ button:hover {
   margin-bottom: 5px;
 }
 
-.durum.playing {
-  color: var(--iyi);
+.state.playing {
+  color: var(--ok);
 }
 
-.durum.paused {
-  color: var(--vurgu);
+.state.paused {
+  color: var(--accent);
 }
 
-.durum.buffering {
+.state.buffering {
   color: #79c0ff;
 }
 
-.durum.stopped {
-  color: var(--soluk);
+.state.stopped {
+  color: var(--text-dim);
 }
 
-.cubuk {
+.bar {
   height: 4px;
   border-radius: 2px;
   background: #2e2925;
@@ -426,16 +429,16 @@ button:hover {
 }
 
 /* `scaleX` — genişlik değil (D-028). */
-.dolu {
+.fill {
   height: 100%;
-  background: var(--vurgu);
+  background: var(--accent);
   transform: scaleX(0);
   transform-origin: left center;
   will-change: transform;
 }
 
-.sayac {
-  color: var(--soluk);
+.time {
+  color: var(--text-dim);
   font-variant-numeric: tabular-nums;
   font-size: 13px;
   min-width: 11ch;
@@ -444,7 +447,7 @@ button:hover {
 
 /* ————————————————— uyarılar */
 
-.uyarilar {
+.toasts {
   position: fixed;
   right: 16px;
   bottom: 84px;
@@ -455,43 +458,43 @@ button:hover {
   z-index: 10;
 }
 
-.uyari {
+.toast {
   background: #241c1c;
-  border: 1px solid var(--hata);
+  border: 1px solid var(--error);
   border-radius: 8px;
   padding: 10px 12px;
   font-size: 13px;
 }
 
-.uyari .adim {
-  color: var(--hata);
+.toast .stage {
+  color: var(--error);
   font-family: ui-monospace, monospace;
   font-size: 11px;
   display: block;
   margin-bottom: 4px;
 }
 
-.uyari details {
+.toast details {
   margin-top: 6px;
 }
 
-.uyari summary {
+.toast summary {
   cursor: pointer;
-  color: var(--soluk);
+  color: var(--text-dim);
   font-size: 12px;
 }
 
-.uyari pre {
+.toast pre {
   margin: 6px 0 0;
   white-space: pre-wrap;
   font-size: 11px;
-  color: var(--soluk);
+  color: var(--text-dim);
 }
 
-.uyari.bilgi {
-  border-color: var(--iyi);
+.toast.info {
+  border-color: var(--ok);
 }
 
-.uyari.bilgi .adim {
-  color: var(--iyi);
+.toast.info .stage {
+  color: var(--ok);
 }

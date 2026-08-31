@@ -933,8 +933,19 @@ Düzeltilmiş ortamda bile `height` / `box-shadow` / `filter` /
 `opacity` hiç düşürmüyor. Tema yazarına bu söylenmezse fark **kullanıcının**
 makinesinde ortaya çıkar ve suçlanan tema değil uygulama olur.
 
+**Dil kapandı (D-036):** token adları — ve genel olarak bütün tanımlayıcılar —
+İngilizce. Tema seti bu projenin en dışa dönük yüzeyi; onu tüketen tanımadığımız
+bir tema yazarı. Yorum ve arayüz metni Türkçe kalır. Bu karar uygulanırken
+`crates/tune`, paylaşılan doğruluk kümesi ve ses fixture'ları da çevrildi.
+
 > KARAR NOKTASI: Token setini yazmadan önce sun. Bu bir kez yayınlandıktan sonra
 > geriye dönük uyumluluk borcu doğar.
+>
+> Cevaplanacak dört soru: (1) granülerlik — dar semantik küme mi, bölge
+> geçersiz kılmalı katmanlı küme mi; (2) seçici vaadi — `data-tune="..."`
+> öznitelikleri mi, sınıf adları mı, hiçbiri mi; (3) temaya IPC açılacak mı
+> (D-033 bunu buraya bıraktı: açılırsa sözleşme *dış* sözleşmeye döner ve o
+> gün sürümleme borcu doğar); (4) paket biçimi ve `api` sürüm alanı.
 
 ### 3.4 Referans temalar
 En az iki farklı temada tema API'sinin yeterli olduğunu kanıtla.

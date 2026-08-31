@@ -559,7 +559,7 @@ mod tests {
     fn item(provider: &str, id: &str) -> QueueItem {
         QueueItem {
             id: ProviderTrackId::new(ProviderId::new(provider), id),
-            track: TrackRef::new("Sanatçı", "Parça"),
+            track: TrackRef::new("Artist", "Track"),
         }
     }
 

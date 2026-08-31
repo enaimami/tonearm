@@ -3,14 +3,14 @@
 //! CI'da koşmaz (ses aygıtı gerektirir). Kullanım:
 //!
 //! ```bash
-//! cargo run -p tune-core --features audio --example calma_denemesi -- <dosya>
+//! cargo run -p tune-core --features audio --example playback_probe -- <dosya>
 //! ```
 
 fn main() {
     let path = std::env::args().nth(1).unwrap_or_else(|| {
         concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../fixtures/audio/etiketli.flac"
+            "/../../fixtures/audio/tagged.flac"
         )
         .to_owned()
     });

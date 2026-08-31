@@ -269,7 +269,7 @@ const SUBSONIC_SCAN: &str = r#"{"subsonic-response":{"status":"ok","version":"1.
     "scanStatus":{"scanning":false,"count":8123}}}"#;
 const SUBSONIC_SEARCH: &str = r#"{"subsonic-response":{"status":"ok","version":"1.16.1",
     "searchResult3":{"song":[
-    {"id":"a1","title":"Sinüs Parça","artist":"Test Sanatçı","album":"Fixture",
+    {"id":"a1","title":"Sine Track","artist":"Test Artist","album":"Fixture",
      "duration":3,"isrc":["TRABC2400001"]},
     {"title":"kimliksiz"}]}}}"#;
 
@@ -347,9 +347,9 @@ async fn a_registered_subsonic_server_searches_and_resolves_a_stream_url() {
         .expect("kayıt");
     let provider = remote::provider_for(&stored, client());
 
-    let hits = provider.search("sinüs", 10).await.expect("arama");
+    let hits = provider.search("sine", 10).await.expect("arama");
     assert_eq!(hits.len(), 1, "kimliksiz satır atlanmalı");
-    assert_eq!(hits[0].track.title, "Sinüs Parça");
+    assert_eq!(hits[0].track.title, "Sine Track");
     assert_eq!(hits[0].track.duration_ms, Some(3_000));
     assert_eq!(hits[0].id.id, "a1");
 
@@ -464,8 +464,8 @@ fn jellyfin_routes(req: &Req) -> Resp {
     }
     if req.path == format!("/Users/{JELLYFIN_USER}/Items") {
         return Resp::json(
-            r#"{"Items":[{"Id":"i1","Name":"Sinüs Parça","Album":"Fixture",
-                "AlbumArtist":"Test Sanatçı","RunTimeTicks":30000000}],
+            r#"{"Items":[{"Id":"i1","Name":"Sine Track","Album":"Fixture",
+                "AlbumArtist":"Test Artist","RunTimeTicks":30000000}],
                 "TotalRecordCount":4211}"#,
         );
     }
@@ -548,7 +548,7 @@ async fn a_jellyfin_server_that_rejects_the_key_is_not_reachable() {
         url: server.url(),
         username: "enai".to_owned(),
         auth: StoredAuth::ApiKey {
-            key: "yanlis-anahtar".to_owned(),
+            key: "wrong-key".to_owned(),
         },
         user_id: None,
     };
@@ -582,7 +582,7 @@ fn an_http_stream_downloads_completely_and_seeks_backwards() {
     use std::io::{Seek, SeekFrom};
     use tune_core::playback::http_source::HttpMediaSource;
 
-    let flac = std::fs::read(fixture("etiketli.flac")).expect("fixture okunmalı");
+    let flac = std::fs::read(fixture("tagged.flac")).expect("fixture okunmalı");
     let served = flac.clone();
     let server = FakeServer::start(move |req| match req.path.as_str() {
         "/ses.flac" => Resp::bytes("audio/flac", served.clone()),
@@ -648,7 +648,7 @@ fn an_http_stream_really_decodes_and_plays() {
         return;
     }
 
-    let flac = std::fs::read(fixture("etiketli.flac")).expect("fixture okunmalı");
+    let flac = std::fs::read(fixture("tagged.flac")).expect("fixture okunmalı");
     let server = FakeServer::start(move |req| match req.path.as_str() {
         // Uzantısız adres kasıtlı: Subsonic `/rest/stream?id=...` veriyor,
         // yani kap içerikten tanınmalı.

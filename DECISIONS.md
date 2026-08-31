@@ -1096,9 +1096,70 @@ edilmedi.
   rate` ile pozisyonu **kendisi yürütüyor**; o formülün girdisi ya da bağlamı
   değiştiğinde tahmin yanlışa döner. `position_ms`'in kendisi bilerek listede
   **yok** — tahminin işi zaten o.
-- Karar saf bir fonksiyona çıkarıldı (`core_thread::dikkate_deger`) ve
+- Karar saf bir fonksiyona çıkarıldı (`core_thread::worth_sending`) ve
   sınandı. Testlerden biri doğrudan bu hatayı kilitliyor:
   `the_buffering_to_playing_transition_must_be_sent`.
 - **Genel ders:** "yalnızca değişince gönder" kuralında asıl risk fazla mesaj
   değil, **eksik mesaj**. Fazlası performansa mal olur ve ölçülür; eksiği
   arayüzü sessizce dondurur ve hiçbir yerde iz bırakmaz.
+
+---
+
+## D-036 — İsimlendirme dili: dış yüzey İngilizce, iç Türkçe
+**Tarih:** 2026-08-31
+**Soru:** §3.3'ün tema token setini sunarken çıktı: token adları Türkçe mi
+olmalı? Ve arkasındaki asıl soru — bu projede hangi isim hangi dilde yazılır?
+
+**Karar:** Ayrım kod dili değil, **kimin okuduğu**.
+
+- **Tanımlayıcıların hepsi İngilizce.** Fonksiyon, tip, değişken, CSS sınıfı,
+  HTML id, JSON anahtarı, fixture dosya adı, tema token'ı.
+- **Yorum, doküman ve kullanıcıya görünen metin Türkçe kalır.** `PLAN.md`,
+  `DECISIONS.md`, doc comment'ler, CLI yardım metni, arayüz yazıları,
+  `ADIM:` ön eki. Bunlar yerelleştirme ekseni, isimlendirme ekseni değil.
+
+**Gerekçe:**
+- Çizgi zaten fiilen vardı, yazılı değildi: `tune-core`'un tamamı ve CLI alt
+  komutları İngilizceydi (`PlaybackAnchor`, `Queue::view`, `tune provider
+  scan`); Türkçe olan yalnızca GUI kabuğunun içiydi (`.ust`, `dikkate_deger`).
+  Yazılmayan kural altı ay sonra tutarsız uygulanır.
+- Tema token seti bu projenin **en dışa dönük** yüzeyi olacak — onu tüketen
+  benim yazdığım kod değil, tanımadığım bir tema yazarı. `--tune-yuzey`
+  demek tema yazarlığını Türkçe bilenlerle sınırlardı; hiçbir karşılığı
+  olmayan bir daraltma.
+- CSS'in kendi sözcükleri İngilizce; `background: var(--tune-arka2)` iki dili
+  tek satırda karıştırıyor ve okurken duraklatıyor.
+- Aksan sorunu ayrıca var: `sanatçı`/`sanatci` ikiliği bir dosya adında ya da
+  bir JSON anahtarında sessiz bir hata kaynağı.
+
+**Sonuç — bu kararla birlikte yapılan yeniden adlandırma:**
+- `crates/tune` (Rust): `duzelt→fixup`, `baslat→spawn`, `calis→run`,
+  `tur→run_tick`, `Onemli→Notable`, `dikkate_deger→worth_sending`,
+  `calistir→run_on_core`, `cekirdek_dustu→core_thread_gone`.
+  Tanı aşaması `ADIM: ORTAM_DUZELTME` → `ADIM: ENV_FIXUP` (çekirdeğin
+  `CONFIG_LOAD`/`IDENTITY_RESOLVE` sözlüğüyle aynı yazımda).
+- `crates/tune/ui`: bütün CSS sınıfları, HTML id'leri ve JS adları
+  (`.ust→.topbar`, `.uyari→.toast`, `capa→anchor`, `cagir→call`…).
+  CSS değişkenleri de İngilizce ama **`--tune-` ön eki bilerek yok**: o ön ek
+  vaadin kendisi ve onu §3.3 dağıtacak.
+- Paylaşılan doğruluk kümesi (`fixtures/anchor/position_cases.json`):
+  anahtarlar (`vakalar→cases`, `capa→anchor`, `beklenen_ms→expected_ms`) ve
+  vaka adları. Bu dosya iki dilden okunuyor ve kümeyi büyütecek kişinin
+  Türkçe bilmesi gerekmemeli. Rust tarafındaki `needle` listesi de çevrildi.
+- Ses fixture'ları: `etiketli.flac→tagged.flac`, `bozuk.flac→corrupt.flac`,
+  `Baska Sanatci - Ogg Parca.ogg→Other Artist - Ogg Track.ogg` vb.
+- `examples/calma_denemesi.rs→playback_probe.rs`.
+
+**Tek bilinçli istisna — gömülü etiketler.** `tagged.flac` ve mp3'ün
+etiketleri `Test Artist` oldu ama başlıklar `Sine 440 ünïcode` /
+`Mp3 Track ünïcode`. Aksanlar bir dil kalıntısı değil, **sınanan şeyin
+kendisi**: etiketler UTF-8 ve bu, o çözme yolunun tek kanıtı. Testte de
+böyle yazılı.
+
+**Yan ders — yeniden adlandırma bir testi gerçekten kırdı.** `cli_json`'ın
+gapless testi `play "Sanat" --all` diyordu ve dört fixture'ın hepsini
+yakalaması, ikisinin dosya adının ikisinin de etiketinin Türkçe olmasına
+dayanıyordu. Adlar çevrilince ortak belirteç kayboldu ve test 4 yerine 2
+parça gördü. Sorgu `"Artist"` oldu; fixture'lar artık `Test Artist`,
+`Other Artist`, `Dir Artist` — ortaklık **kasıtlı ve görünür**, dil
+kazasından türemiş değil.

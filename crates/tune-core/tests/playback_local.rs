@@ -54,7 +54,7 @@ fn engine_for(name: &str) -> Option<AudioEngine> {
 
 #[test]
 fn a_real_file_plays_and_the_position_advances() {
-    let Some(engine) = engine_for("etiketli.flac") else {
+    let Some(engine) = engine_for("tagged.flac") else {
         return;
     };
 
@@ -100,7 +100,7 @@ fn a_real_file_plays_and_the_position_advances() {
 
 #[test]
 fn pausing_freezes_the_position() {
-    let Some(engine) = engine_for("Test Sanatci - Mp3 Parca.mp3") else {
+    let Some(engine) = engine_for("Test Artist - Mp3 Track.mp3") else {
         return;
     };
 
@@ -154,8 +154,8 @@ fn two_tracks_play_back_to_back_without_the_output_ever_stopping() {
         }
     };
 
-    let first = local(&fixture("etiketli.flac"));
-    let second = local(&fixture("Test Sanatci - Mp3 Parca.mp3"));
+    let first = local(&fixture("tagged.flac"));
+    let second = local(&fixture("Test Artist - Mp3 Track.mp3"));
 
     let seq0 = engine.play_source(&first).expect("ilk parça açılmalı");
     // İkinci parça, birincisi **çalarken** sıraya giriyor: gapless'ın koşulu.
@@ -208,7 +208,7 @@ fn two_tracks_play_back_to_back_without_the_output_ever_stopping() {
 #[test]
 fn a_corrupt_file_fails_with_the_decode_stage() {
     // Ses aygıtı olmasa da çalışır: hata çözme aşamasında, çıkıştan önce.
-    let err = AudioEngine::play_file(&fixture("bozuk.flac")).expect_err("bozuk dosya açılmamalı");
+    let err = AudioEngine::play_file(&fixture("corrupt.flac")).expect_err("bozuk dosya açılmamalı");
     assert_eq!(err.stage(), tune_core::diag::Stage::PlaybackDecode);
 }
 

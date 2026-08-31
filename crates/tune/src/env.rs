@@ -17,7 +17,7 @@
 /// Kullanıcının kendi ayarı **ezilmiyor**: bilerek Wayland'da koşmak isteyen
 /// biri `GDK_BACKEND=wayland` verdiğinde ona karışmıyoruz.
 #[cfg(target_os = "linux")]
-const DUZELTME: [(&str, &str); 2] = [
+const FIXUP: [(&str, &str); 2] = [
     ("GDK_BACKEND", "x11"),
     ("WEBKIT_DISABLE_DMABUF_RENDERER", "1"),
 ];
@@ -28,38 +28,38 @@ const DUZELTME: [(&str, &str); 2] = [
 /// başlatma başarısız oldu. İkincisinde sessizce yavaş çalışmıyoruz — sebep
 /// yazılıyor (K9).
 #[cfg(target_os = "linux")]
-pub fn duzelt() {
+pub fn fixup() {
     use std::os::unix::process::CommandExt as _;
 
-    let eksik: Vec<_> = DUZELTME
+    let missing: Vec<_> = FIXUP
         .iter()
-        .filter(|(ad, _)| std::env::var_os(ad).is_none())
+        .filter(|(name, _)| std::env::var_os(name).is_none())
         .collect();
-    if eksik.is_empty() {
+    if missing.is_empty() {
         return;
     }
 
-    let Ok(kendi) = std::env::current_exe() else {
-        eprintln!("ADIM: ORTAM_DUZELTME — kendi yolum bulunamadı, düzeltme atlandı");
+    let Ok(exe) = std::env::current_exe() else {
+        eprintln!("ADIM: ENV_FIXUP — kendi yolum bulunamadı, düzeltme atlandı");
         return;
     };
 
-    let mut komut = std::process::Command::new(kendi);
-    komut.args(std::env::args_os().skip(1));
-    for (ad, deger) in &eksik {
-        komut.env(ad, deger);
+    let mut command = std::process::Command::new(exe);
+    command.args(std::env::args_os().skip(1));
+    for (name, value) in &missing {
+        command.env(name, value);
     }
-    let kurulan: Vec<&str> = eksik.iter().map(|(ad, _)| *ad).collect();
+    let applied: Vec<&str> = missing.iter().map(|(name, _)| *name).collect();
     eprintln!(
-        "ADIM: ORTAM_DUZELTME — {} kurulup yeniden başlatılıyor (D-028)",
-        kurulan.join(", ")
+        "ADIM: ENV_FIXUP — {} kurulup yeniden başlatılıyor (D-028)",
+        applied.join(", ")
     );
 
     // `exec` yalnızca **başarısızsa** döner.
-    let hata = komut.exec();
-    eprintln!("ADIM: ORTAM_DUZELTME — yeniden başlatılamadı ({hata}), düzeltmesiz devam");
+    let err = command.exec();
+    eprintln!("ADIM: ENV_FIXUP — yeniden başlatılamadı ({err}), düzeltmesiz devam");
 }
 
 /// Linux dışında düzeltilecek bir şey yok: ölçüm WebKitGTK'ya özgüydü.
 #[cfg(not(target_os = "linux"))]
-pub fn duzelt() {}
+pub fn fixup() {}

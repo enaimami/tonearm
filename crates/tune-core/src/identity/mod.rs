@@ -423,7 +423,8 @@ mod tests {
     #[tokio::test]
     async fn isrc_wins_the_chain() {
         let resolver = Resolver::new(Arc::new(catalog()));
-        let track = TrackRef::new("yanlış yazılmış sanatçı", "yanlış başlık")
+        // Üstveri kasten çöp: ISRC varsa zincir ona bakmadan bağlanmalı.
+        let track = TrackRef::new("misspelled artist", "wrong title")
             .with_isrc(Isrc::parse("GBAYE9200001"));
         let res = resolver.resolve(&track).await.unwrap();
         assert_eq!(res.method, ResolveMethod::Isrc);
@@ -464,7 +465,7 @@ mod tests {
         let tracks = vec![
             TrackRef::new("Radiohead", "Creep").with_duration_ms(Some(238_000)),
             TrackRef::new("Radiohead", "Creep").with_duration_ms(Some(238_000)),
-            TrackRef::new("Bilinmeyen", "Parça"),
+            TrackRef::new("Unknown", "Track"),
         ];
         let (resolutions, summary) = resolver.resolve_all(&tracks).await.unwrap();
         assert_eq!(resolutions.len(), 3);

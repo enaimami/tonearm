@@ -28,10 +28,10 @@ fn main() -> ExitCode {
     // İlk iş: ortam düzeltmesi. GDK `GDK_BACKEND`'i `gtk_init` sırasında,
     // WebKit `WEBKIT_DISABLE_DMABUF_RENDERER`'ı web süreci doğarken okur —
     // ikisi de Tauri kurulumundan sonra, yani buradan sonrası geç kalır.
-    env::duzelt();
+    env::fixup();
     init_tracing();
 
-    match calistir() {
+    match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(text) => {
             // Pencere hiç açılamadıysa gösterilecek bir yüzey yok; hata
@@ -43,7 +43,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn calistir() -> Result<(), String> {
+fn run() -> Result<(), String> {
     // Kütüphane pencereden **önce** açılıyor: veri dizini yoksa ya da
     // veritabanı bozuksa kullanıcı boş bir pencereye değil, aşamasını
     // söyleyen bir hataya baksın.
@@ -57,7 +57,7 @@ fn calistir() -> Result<(), String> {
         .setup(move |app| {
             // Çekirdek kendi iş parçacığına burada taşınıyor: `AppHandle`
             // ancak kurulumda var, olaylar da oradan gidiyor.
-            core_thread::baslat(core, jobs_rx, app.handle().clone())?;
+            core_thread::spawn(core, jobs_rx, app.handle().clone())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -94,7 +94,7 @@ fn calistir() -> Result<(), String> {
         .map_err(|err| format!("ADIM: PLAYBACK_OUTPUT\n  pencere açılamadı: {err}"))
 
     // `run` döndüğünde `AppState` düşer, kanal kapanır ve çekirdek iş
-    // parçacığı döngüden çıkıp kalan dinlemeleri yazar (`core_thread::calis`
+    // parçacığı döngüden çıkıp kalan dinlemeleri yazar (`core_thread::run`
     // sonundaki `shutdown`).
 }
 

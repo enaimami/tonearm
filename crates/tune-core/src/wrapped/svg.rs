@@ -715,8 +715,8 @@ mod tests {
         for year in 2008..=2026 {
             for index in 0..3 {
                 listens.push(listen(
-                    &format!("Sanatçı {year}-{index}"),
-                    "Parça",
+                    &format!("Artist {year}-{index}"),
+                    "Track",
                     &format!("{year}-0{}-01T10:00:00Z", index + 1),
                     200_000,
                 ));

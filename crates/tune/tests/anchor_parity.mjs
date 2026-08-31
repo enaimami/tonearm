@@ -13,30 +13,30 @@ import { fileURLToPath } from "node:url";
 
 import { positionAt } from "../ui/anchor.js";
 
-const burasi = dirname(fileURLToPath(import.meta.url));
-const kokDizin = join(burasi, "..", "..", "..");
-const kumeYolu = join(kokDizin, "fixtures", "anchor", "position_cases.json");
+const here = dirname(fileURLToPath(import.meta.url));
+const repoRoot = join(here, "..", "..", "..");
+const setPath = join(repoRoot, "fixtures", "anchor", "position_cases.json");
 
-const kume = JSON.parse(readFileSync(kumeYolu, "utf8"));
-const vakalar = kume.vakalar;
+const truthSet = JSON.parse(readFileSync(setPath, "utf8"));
+const cases = truthSet.cases;
 
-if (!Array.isArray(vakalar) || vakalar.length === 0) {
+if (!Array.isArray(cases) || cases.length === 0) {
   console.error("ADIM: ANCHOR_PARITY — doğruluk kümesi boş ya da okunamadı");
   process.exit(1);
 }
 
-const hatalar = [];
-for (const vaka of vakalar) {
-  const bulunan = positionAt(vaka.capa, Date.parse(vaka.now));
-  if (bulunan !== vaka.beklenen_ms) {
-    hatalar.push(`  ${vaka.ad}\n    beklenen ${vaka.beklenen_ms}, bulunan ${bulunan}`);
+const failures = [];
+for (const entry of cases) {
+  const got = positionAt(entry.anchor, Date.parse(entry.now));
+  if (got !== entry.expected_ms) {
+    failures.push(`  ${entry.name}\n    beklenen ${entry.expected_ms}, bulunan ${got}`);
   }
 }
 
-if (hatalar.length > 0) {
-  console.error(`ADIM: ANCHOR_PARITY — ${hatalar.length}/${vakalar.length} vaka kaydı:`);
-  console.error(hatalar.join("\n"));
+if (failures.length > 0) {
+  console.error(`ADIM: ANCHOR_PARITY — ${failures.length}/${cases.length} vaka kaydı:`);
+  console.error(failures.join("\n"));
   process.exit(1);
 }
 
-console.log(`${vakalar.length}/${vakalar.length} vaka geçti`);
+console.log(`${cases.length}/${cases.length} vaka geçti`);

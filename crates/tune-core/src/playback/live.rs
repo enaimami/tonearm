@@ -239,7 +239,7 @@ mod tests {
 
     fn listen(title: &str) -> Listen {
         Listen {
-            track: TrackRef::new("Sanatçı", title),
+            track: TrackRef::new("Artist", title),
             played_at: jiff::Timestamp::now(),
             ms_played: 200_000,
             source: ListenSource::Playback {
@@ -345,7 +345,7 @@ mod tests {
         let mut yeni = Player::new(ProviderRegistry::new());
         yeni.queue_mut().replace(vec![QueueItem {
             id: ProviderTrackId::new(ProviderId::new("yerel"), "1"),
-            track: TrackRef::new("Sanatçı", "Yeni kuyruk"),
+            track: TrackRef::new("Artist", "New queue"),
         }]);
 
         live.replace_player(yeni);

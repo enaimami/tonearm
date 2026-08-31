@@ -189,7 +189,7 @@ async fn unsupported_archive_fails_at_the_detect_stage() {
     let mut sess = Session::open(Config::with_data_dir(&dir)).unwrap();
     let bogus = dir.join("bogus");
     std::fs::create_dir_all(&bogus).unwrap();
-    std::fs::write(bogus.join("notlar.txt"), b"bu bir export degil").unwrap();
+    std::fs::write(bogus.join("notes.txt"), b"bu bir export degil").unwrap();
 
     let err = sess
         .import_archive(&bogus, session::default_lookup())
@@ -197,7 +197,7 @@ async fn unsupported_archive_fails_at_the_detect_stage() {
         .unwrap_err();
     assert_eq!(err.stage(), tune_core::diag::Stage::ImportDetect);
     assert!(
-        err.chain_text().contains("notlar.txt"),
+        err.chain_text().contains("notes.txt"),
         "{}",
         err.chain_text()
     );

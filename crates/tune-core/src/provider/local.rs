@@ -716,7 +716,7 @@ mod tests {
         dir
     }
 
-    /// Gerçek ses fixture'larının dizini (`ffmpeg` üretimi sinüs tonları).
+    /// Gerçek ses fixture'larının dizini (`ffmpeg` üretimi sinüs tonları, adları İngilizce — D-036).
     fn audio_fixtures() -> PathBuf {
         PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/audio"))
     }
@@ -741,11 +741,11 @@ mod tests {
 
     #[test]
     fn scan_counts_every_file_it_saw_and_skipped() {
-        let dir = temp_dir("tarama");
-        copy_fixture(&dir, "etiketli.flac", "etiketli.flac");
-        copy_fixture(&dir, "Test Sanatci - Mp3 Parca.mp3", "Alt/Parca.mp3");
-        write(&dir, "kapak.jpg", b"kapak");
-        write(&dir, "notlar.txt", b"not");
+        let dir = temp_dir("scan");
+        copy_fixture(&dir, "tagged.flac", "tagged.flac");
+        copy_fixture(&dir, "Test Artist - Mp3 Track.mp3", "Sub/Track.mp3");
+        write(&dir, "cover.jpg", b"cover");
+        write(&dir, "notes.txt", b"note");
 
         let provider = LocalProvider::new(vec![dir.clone()]);
         let summary = provider.rescan_now().expect("tarama");
@@ -765,9 +765,9 @@ mod tests {
     fn a_corrupt_file_is_counted_not_swallowed() {
         // Bozuk dosya taramayı düşürmemeli ama görünmez de olmamalı (K9).
         // Yalnızca `audio` açıkken anlamlı: bozukluğu çözücü fark eder.
-        let dir = temp_dir("bozuk");
-        copy_fixture(&dir, "etiketli.flac", "saglam.flac");
-        write(&dir, "bozuk.flac", b"bu bir ses dosyasi degil");
+        let dir = temp_dir("corrupt");
+        copy_fixture(&dir, "tagged.flac", "sound.flac");
+        write(&dir, "corrupt.flac", b"this is not an audio file");
 
         let provider = LocalProvider::new(vec![dir.clone()]);
         let summary = provider.rescan_now().expect("tarama sürmeli");
@@ -785,9 +785,9 @@ mod tests {
     #[cfg(not(feature = "audio"))]
     #[test]
     fn without_the_audio_feature_metadata_comes_from_filenames() {
-        let dir = temp_dir("featuresiz");
-        copy_fixture(&dir, "etiketli.flac", "Ad Soyad - Parça.flac");
-        write(&dir, "bozuk.flac", b"bu bir ses dosyasi degil");
+        let dir = temp_dir("no-audio-feature");
+        copy_fixture(&dir, "tagged.flac", "First Last - Track.flac");
+        write(&dir, "corrupt.flac", b"this is not an audio file");
 
         let provider = LocalProvider::new(vec![dir.clone()]);
         let summary = provider.rescan_now().expect("tarama");
@@ -805,9 +805,9 @@ mod tests {
     #[cfg(feature = "audio")]
     #[test]
     fn tags_are_read_from_the_file_not_guessed_from_its_name() {
-        let dir = temp_dir("etiket");
+        let dir = temp_dir("tags");
         // Dosya adı kasten yanıltıcı: etiketler kazanmalı.
-        copy_fixture(&dir, "etiketli.flac", "yanlis-ad.flac");
+        copy_fixture(&dir, "tagged.flac", "wrong-name.flac");
 
         let provider = LocalProvider::new(vec![dir.clone()]);
         let summary = provider.rescan_now().expect("tarama");
@@ -815,9 +815,12 @@ mod tests {
 
         let index = provider.index.read().unwrap();
         let track = &index[0].track;
-        assert_eq!(track.artist, "Test Sanatçı");
-        assert_eq!(track.title, "Sinüs 440");
-        assert_eq!(track.album.as_deref(), Some("Fixture Albümü"));
+        assert_eq!(track.artist, "Test Artist");
+        // Başlıktaki aksanlar **bilerek** duruyor: etiketler UTF-8 ve bu, o
+        // yolun tek kanıtı. Fixture'ın kendisi İngilizce (D-036), aksan bir
+        // dil kalıntısı değil, sınanan şeyin ta kendisi.
+        assert_eq!(track.title, "Sine 440 ünïcode");
+        assert_eq!(track.album.as_deref(), Some("Fixture Album"));
         // Süre kaptan okunmalı — bulanık eşleşmenin ayırt edici alanı (K6).
         let duration = track.duration_ms.expect("süre okunmalı");
         assert!(
@@ -832,11 +835,11 @@ mod tests {
     #[cfg(feature = "audio")]
     #[test]
     fn an_untagged_file_falls_back_to_its_name_and_is_counted() {
-        let dir = temp_dir("etiketsiz");
+        let dir = temp_dir("untagged");
         copy_fixture(
             &dir,
-            "Baska Sanatci - Ogg Parca.ogg",
-            "Baska Sanatci - Ogg Parca.ogg",
+            "Other Artist - Ogg Track.ogg",
+            "Other Artist - Ogg Track.ogg",
         );
 
         let provider = LocalProvider::new(vec![dir.clone()]);
@@ -848,8 +851,8 @@ mod tests {
         );
 
         let index = provider.index.read().unwrap();
-        assert_eq!(index[0].track.artist, "Baska Sanatci");
-        assert_eq!(index[0].track.title, "Ogg Parca");
+        assert_eq!(index[0].track.artist, "Other Artist");
+        assert_eq!(index[0].track.title, "Ogg Track");
 
         drop(index);
         std::fs::remove_dir_all(&dir).ok();
@@ -893,48 +896,48 @@ mod tests {
     #[cfg(feature = "audio")]
     #[tokio::test]
     async fn search_matches_tags_and_filename_derived_fields() {
-        let dir = temp_dir("arama");
-        copy_fixture(&dir, "etiketli.flac", "etiketli.flac");
+        let dir = temp_dir("search");
+        copy_fixture(&dir, "tagged.flac", "tagged.flac");
         copy_fixture(
             &dir,
-            "Baska Sanatci - Ogg Parca.ogg",
-            "Baska Sanatci - Ogg Parca.ogg",
+            "Other Artist - Ogg Track.ogg",
+            "Other Artist - Ogg Track.ogg",
         );
 
         let provider = LocalProvider::new(vec![dir.clone()]);
         provider.rescan_now().expect("tarama");
 
         // Etiketten gelen sanatçı.
-        let hits = provider.search("test sanatçı", 10).await.expect("arama");
+        let hits = provider.search("test artist", 10).await.expect("arama");
         assert_eq!(hits.len(), 1, "{hits:?}");
 
         // Dosya adından gelen sanatçı (ogg'de etiket yok).
-        let other = provider.search("baska", 10).await.expect("arama");
+        let other = provider.search("other", 10).await.expect("arama");
         assert_eq!(other.len(), 1, "{other:?}");
 
-        let none = provider.search("bulunmayan", 10).await.expect("arama");
+        let none = provider.search("nonexistent", 10).await.expect("arama");
         assert!(none.is_empty());
 
         std::fs::remove_dir_all(&dir).ok();
     }
 
     /// Arama, üstveri hangi yoldan gelirse gelsin dosya adı alanlarını bulmalı.
-    /// Bu test iki kipte de aynı: ad `Ortak Sanatci - Ortak Parca`.
+    /// Bu test iki kipte de aynı: ad `Common Artist - Common Track`.
     #[tokio::test]
     async fn search_finds_filename_derived_tracks_in_both_modes() {
-        let dir = temp_dir("arama-ortak");
+        let dir = temp_dir("search-common");
         copy_fixture(
             &dir,
-            "Baska Sanatci - Ogg Parca.ogg",
-            "Ortak Sanatci - Ortak Parca.ogg",
+            "Other Artist - Ogg Track.ogg",
+            "Common Artist - Common Track.ogg",
         );
 
         let provider = LocalProvider::new(vec![dir.clone()]);
         provider.rescan_now().expect("tarama");
 
-        let hits = provider.search("ortak sanatci", 10).await.expect("arama");
+        let hits = provider.search("common artist", 10).await.expect("arama");
         assert_eq!(hits.len(), 1, "{hits:?}");
-        assert!(provider.search("yok", 10).await.unwrap().is_empty());
+        assert!(provider.search("nothing", 10).await.unwrap().is_empty());
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -945,14 +948,14 @@ mod tests {
         for index in 0..4 {
             copy_fixture(
                 &dir,
-                "Baska Sanatci - Ogg Parca.ogg",
-                &format!("Ortak Sanatci - Parca {index}.ogg"),
+                "Other Artist - Ogg Track.ogg",
+                &format!("Common Artist - Track {index}.ogg"),
             );
         }
         let provider = LocalProvider::new(vec![dir.clone()]);
         provider.rescan_now().expect("tarama");
 
-        let hits = provider.search("ortak", 2).await.expect("arama");
+        let hits = provider.search("common", 2).await.expect("arama");
         assert_eq!(hits.len(), 2, "limit aşılmamalı");
 
         std::fs::remove_dir_all(&dir).ok();
@@ -960,18 +963,18 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_source_refuses_paths_outside_the_index() {
-        let dir = temp_dir("kaynak");
+        let dir = temp_dir("source");
         copy_fixture(
             &dir,
-            "Baska Sanatci - Ogg Parca.ogg",
-            "Ortak Sanatci - Ortak Parca.ogg",
+            "Other Artist - Ogg Track.ogg",
+            "Common Artist - Common Track.ogg",
         );
 
         let provider = LocalProvider::new(vec![dir.clone()]);
         provider.rescan_now().expect("tarama");
 
         // İndeksteki dosya çalınabilir.
-        let indexed = provider.search("ortak", 1).await.unwrap();
+        let indexed = provider.search("common", 1).await.unwrap();
         let source = provider
             .resolve_source(&indexed[0].id)
             .await
@@ -987,18 +990,18 @@ mod tests {
 
     #[tokio::test]
     async fn a_file_deleted_after_indexing_is_not_playable() {
-        let dir = temp_dir("silinmis");
+        let dir = temp_dir("deleted");
         copy_fixture(
             &dir,
-            "Baska Sanatci - Ogg Parca.ogg",
-            "Ortak Sanatci - Ortak Parca.ogg",
+            "Other Artist - Ogg Track.ogg",
+            "Common Artist - Common Track.ogg",
         );
 
         let provider = LocalProvider::new(vec![dir.clone()]);
         provider.rescan_now().expect("tarama");
-        let indexed = provider.search("ortak", 1).await.unwrap();
+        let indexed = provider.search("common", 1).await.unwrap();
 
-        std::fs::remove_file(dir.join("Ortak Sanatci - Ortak Parca.ogg")).expect("silinmeli");
+        std::fs::remove_file(dir.join("Common Artist - Common Track.ogg")).expect("silinmeli");
 
         // Silinmiş dosya `None` döner. Kök kontrolü `canonicalize`'a dayanıyor
         // ve var olmayan yol çözülemez — şüpheliyi kabul etmemek, "hata
@@ -1017,8 +1020,8 @@ mod tests {
     async fn resolve_source_rejects_traversal_out_of_the_roots() {
         // `<kök>/../../etc/passwd` gibi yollar kökün altında başlayıp dışına
         // çıkar; `canonicalize` bunu çözer.
-        let dir = temp_dir("kacis");
-        copy_fixture(&dir, "etiketli.flac", "sarki.flac");
+        let dir = temp_dir("escape");
+        copy_fixture(&dir, "tagged.flac", "song.flac");
         let provider = LocalProvider::new(vec![dir.clone()]);
 
         let escaping = dir.join("..").join("..").join("etc").join("passwd");
@@ -1035,7 +1038,7 @@ mod tests {
         // Kökün altındaki gerçek dosya ise çalınabilir kalmalı.
         let ok_id = ProviderTrackId::new(
             ProviderId::new("local"),
-            dir.join("sarki.flac").to_string_lossy().into_owned(),
+            dir.join("song.flac").to_string_lossy().into_owned(),
         );
         assert!(
             provider.resolve_source(&ok_id).await.unwrap().is_some(),

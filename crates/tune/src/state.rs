@@ -99,7 +99,7 @@ impl AppState {
     /// # Errors
     /// Çekirdek hata döndürürse, iş parçacığı düşmüşse ya da iş cevap
     /// vermeden bitmişse.
-    pub async fn calistir<T, F>(&self, is: F) -> CommandResult<T>
+    pub async fn run_on_core<T, F>(&self, task: F) -> CommandResult<T>
     where
         T: Send + 'static,
         F: for<'a> FnOnce(&'a mut Core) -> Pin<Box<dyn Future<Output = tune_core::Result<T>> + 'a>>
@@ -109,21 +109,21 @@ impl AppState {
         let (tx, rx) = oneshot::channel();
         let job: Job = Box::new(move |core| {
             Box::pin(async move {
-                let sonuc = is(core).await;
+                let result = task(core).await;
                 // Alıcı gitmişse komut iptal edilmiş demektir; iş yine de
                 // yapıldı ve çekirdeğin durumu tutarlı.
-                let _ = tx.send(sonuc);
+                let _ = tx.send(result);
             })
         });
-        self.jobs.send(job).map_err(|_| cekirdek_dustu())?;
+        self.jobs.send(job).map_err(|_| core_thread_gone())?;
         rx.await
-            .map_err(|_| cekirdek_dustu())?
+            .map_err(|_| core_thread_gone())?
             .map_err(CommandError::from)
     }
 }
 
 /// Çekirdek iş parçacığı kaybolduysa. Sessizce boş sonuç dönmüyoruz (K9).
-fn cekirdek_dustu() -> CommandError {
+fn core_thread_gone() -> CommandError {
     CommandError {
         stage: Stage::ConfigLoad,
         chain: "ADIM: CONFIG_LOAD\n  çekirdek iş parçacığı yanıt vermiyor".to_owned(),

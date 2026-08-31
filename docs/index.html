@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>tune — On yıllık müzik hafızanız. Yeniden sizin.</title>
+  <meta name="description" content="Sağlayıcıdan bağımsız dinleme kimliği. 10 yıllık müzik geçmişinizi geri alın, kendi arşivinizden veya sunucunuzdan çalın.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    /* APPLE STİLİ: Zarif Başkaldırı / Minimalist Space Black & Apple Pro Mavi */
+    :root {
+      --bg: #000000;
+      --bg-surface: #0f0f11;
+      --bg-card: #141417;
+      --bg-subtle: #1c1c21;
+      --border: #232328;
+      --border-hover: #383842;
+      --text: #f5f5f7;
+      --text-muted: #86868b;
+      --text-dim: #515158;
+      --accent: #2997ff;       /* Apple Pro Elektrik Mavisi */
+      --accent-glow: #60a5fa;
+      --accent-warm: #f5f5f7;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+      font-size: 17px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      letter-spacing: -0.011em;
+    }
+
+    .wrapper {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 32px;
+    }
+
+    /* Masthead */
+    header {
+      padding: 32px 0;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .brand-wrap {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand {
+      font-size: 1.25rem;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      color: #fff;
+      text-decoration: none;
+    }
+
+    .brand-pill {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--accent);
+      background: rgba(41, 151, 255, 0.1);
+      border: 1px solid rgba(41, 151, 255, 0.2);
+      padding: 2px 8px;
+      border-radius: 100px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    nav {
+      display: flex;
+      gap: 32px;
+      align-items: center;
+    }
+
+    nav a {
+      font-size: 0.9rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      text-decoration: none;
+      transition: color 0.15s;
+    }
+
+    nav a:hover {
+      color: #fff;
+    }
+
+    .btn-source {
+      color: #fff;
+      background: var(--bg-subtle);
+      border: 1px solid var(--border);
+      padding: 6px 14px;
+      border-radius: 100px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s;
+    }
+
+    .btn-source:hover {
+      background: #27272e;
+      border-color: #3f3f4a;
+    }
+
+    /* Hero / Manifesto */
+    .hero {
+      padding: 100px 0 60px;
+      text-align: center;
+      max-width: 960px;
+      margin: 0 auto;
+    }
+
+    .hero-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--accent);
+      margin-bottom: 24px;
+      letter-spacing: -0.01em;
+    }
+
+    .hero h1 {
+      font-size: clamp(3rem, 6vw, 4.8rem);
+      font-weight: 800;
+      line-height: 1.05;
+      letter-spacing: -0.035em;
+      color: #fff;
+      margin-bottom: 28px;
+    }
+
+    .hero h1 span.gradient {
+      background: linear-gradient(180deg, #ffffff 0%, #86868b 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .hero .lead {
+      font-size: 1.35rem;
+      line-height: 1.5;
+      color: var(--text-muted);
+      max-width: 760px;
+      margin: 0 auto 36px;
+      font-weight: 400;
+    }
+
+    .hero-cta {
+      display: flex;
+      justify-content: center;
+      gap: 16px;
+      align-items: center;
+    }
+
+    .btn-primary {
+      background: #fff;
+      color: #000;
+      padding: 12px 26px;
+      border-radius: 100px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      text-decoration: none;
+      transition: transform 0.15s, background-color 0.15s;
+    }
+
+    .btn-primary:hover {
+      background: #e5e5e7;
+      transform: scale(1.02);
+    }
+
+    .btn-secondary {
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.9rem;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      padding: 12px 20px;
+      border-radius: 100px;
+      text-decoration: none;
+    }
+
+    /* Vitrin / Grid */
+    .showcase-grid {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 40px;
+      align-items: center;
+      margin: 80px 0 100px;
+    }
+
+    .manifesto-panel {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 48px;
+    }
+
+    .manifesto-panel h2 {
+      font-size: 2.2rem;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      line-height: 1.2;
+      color: #fff;
+      margin-bottom: 20px;
+    }
+
+    .manifesto-panel p {
+      font-size: 1.05rem;
+      color: var(--text-muted);
+      line-height: 1.6;
+      margin-bottom: 24px;
+    }
+
+    .manifesto-panel p:last-child {
+      margin-bottom: 0;
+    }
+
+    .highlight-quote {
+      border-left: 2px solid var(--accent);
+      padding-left: 18px;
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 500;
+      margin-top: 24px;
+    }
+
+    .artifact-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 32px;
+      text-align: center;
+    }
+
+    .artifact-card img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 12px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.8);
+    }
+
+    .caption {
+      font-size: 0.85rem;
+      color: var(--text-dim);
+      margin-top: 18px;
+      text-align: center;
+    }
+
+    /* Kıyaslama Tablosu */
+    .section-header {
+      text-align: center;
+      max-width: 720px;
+      margin: 0 auto 50px;
+    }
+
+    .section-header h2 {
+      font-size: 2.5rem;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      color: #fff;
+      margin-bottom: 14px;
+    }
+
+    .section-header p {
+      font-size: 1.15rem;
+      color: var(--text-muted);
+    }
+
+    .compare-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      margin-bottom: 120px;
+    }
+
+    .compare-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 40px;
+    }
+
+    .compare-card.current {
+      background: #0d0d0f;
+    }
+
+    .compare-card.tune {
+      background: #0d121c;
+      border-color: rgba(41, 151, 255, 0.3);
+    }
+
+    .compare-card .tag {
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 12px;
+      display: block;
+    }
+
+    .compare-card.current .tag { color: var(--text-dim); }
+    .compare-card.tune .tag { color: var(--accent); }
+
+    .compare-card h3 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: #fff;
+      margin-bottom: 24px;
+    }
+
+    .compare-list {
+      list-style: none;
+    }
+
+    .compare-list li {
+      font-size: 0.98rem;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+      line-height: 1.5;
+      display: flex;
+      gap: 12px;
+    }
+
+    .compare-card.current .compare-list li::before {
+      content: "—";
+      color: var(--text-dim);
+      font-weight: 700;
+    }
+
+    .compare-card.tune .compare-list li {
+      color: #e4e4e7;
+    }
+
+    .compare-card.tune .compare-list li::before {
+      content: "✓";
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    /* Mühendislik İlkeleri (4'lü Grid) */
+    .principles-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 20px;
+      margin-bottom: 120px;
+    }
+
+    .principle-box {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 32px 24px;
+      transition: border-color 0.2s;
+    }
+
+    .principle-box:hover {
+      border-color: var(--border-hover);
+    }
+
+    .principle-box .num {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--accent);
+      margin-bottom: 16px;
+      display: block;
+    }
+
+    .principle-box h4 {
+      font-size: 1.15rem;
+      font-weight: 600;
+      color: #fff;
+      letter-spacing: -0.02em;
+      margin-bottom: 12px;
+      line-height: 1.3;
+    }
+
+    .principle-box p {
+      font-size: 0.92rem;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    /* Adımlar */
+    .steps-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      margin-bottom: 120px;
+    }
+
+    .step-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 32px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .step-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .step-num {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #fff;
+      background: var(--bg-subtle);
+      border: 1px solid var(--border);
+      padding: 4px 10px;
+      border-radius: 6px;
+    }
+
+    .step-header strong {
+      font-size: 1.15rem;
+      font-weight: 600;
+      color: #fff;
+      letter-spacing: -0.02em;
+    }
+
+    .step-card p {
+      font-size: 0.95rem;
+      color: var(--text-muted);
+      margin-bottom: 24px;
+    }
+
+    .terminal-block {
+      background: #000;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px 18px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.82rem;
+      overflow-x: auto;
+      margin-top: auto;
+    }
+
+    .terminal-block .cmd {
+      color: #fff;
+      font-weight: 600;
+    }
+
+    .terminal-block .comment {
+      color: var(--text-dim);
+    }
+
+    .terminal-block .output {
+      color: var(--text-muted);
+    }
+
+    /* SSS (Genişletilmiş 2 Kolonlu Kartlar) */
+    .faq-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 120px;
+    }
+
+    .faq-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 32px 28px;
+      transition: all 0.2s ease;
+    }
+
+    .faq-card:hover {
+      border-color: var(--border-hover);
+      background: #121215;
+    }
+
+    .faq-card h4 {
+      font-size: 1.15rem;
+      font-weight: 600;
+      color: #fff;
+      letter-spacing: -0.02em;
+      margin-bottom: 14px;
+      line-height: 1.35;
+    }
+
+    .faq-card p {
+      font-size: 0.95rem;
+      color: var(--text-muted);
+      line-height: 1.65;
+    }
+
+    .faq-card code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85em;
+      background: var(--bg-subtle);
+      border: 1px solid var(--border);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: #e4e4e7;
+    }
+
+    /* Footer */
+    footer {
+      padding: 48px 0;
+      border-top: 1px solid var(--border);
+      font-size: 0.85rem;
+      color: var(--text-dim);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    footer a {
+      color: var(--text-muted);
+      text-decoration: none;
+    }
+
+    footer a:hover {
+      color: #fff;
+    }
+
+    @media (max-width: 1024px) {
+      .showcase-grid { grid-template-columns: 1fr; }
+      .compare-grid { grid-template-columns: 1fr; }
+      .principles-grid { grid-template-columns: 1fr 1fr; }
+      .steps-grid { grid-template-columns: 1fr; }
+      .faq-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 640px) {
+      .wrapper { padding: 0 20px; }
+      .principles-grid { grid-template-columns: 1fr; }
+      header { flex-direction: column; gap: 16px; align-items: flex-start; }
+      nav { gap: 20px; }
+      .hero h1 { font-size: 2.8rem; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="wrapper">
+    
+    <header>
+      <div class="brand-wrap">
+        <a href="#" class="brand">tune</a>
+        <span class="brand-pill">v0.0.1-beta</span>
+      </div>
+      <nav>
+        <a href="#felsefe">Felsefe</a>
+        <a href="#karsilastirma">Karşılaştırma</a>
+        <a href="#baslangic">Hızlı Başlangıç</a>
+        <a href="#faq">Sıkça Sorulanlar</a>
+        <a href="https://github.com" target="_blank" class="btn-source">Kaynak Kod ↗</a>
+      </nav>
+    </header>
+
+    <main>
+
+      <!-- Hero -->
+      <section class="hero">
+        <div class="hero-tag">KİŞİSEL DİNLENME EGEMENLİĞİ</div>
+        <h1>On yıllık müzik hafızanız.<br><span class="gradient">Yeniden size ait.</span></h1>
+        
+        <p class="lead">
+          Abonelikler biter. Şirketler değişir. Fakat 10 yıl boyunca biriktirdiğiniz dinleme kimliği yalnızca size ait olmalıdır. tune, bu mülkiyeti geri vermek için tasarlandı.
+        </p>
+
+        <div class="hero-cta">
+          <a href="#baslangic" class="btn-primary">Hemen Başlayın</a>
+          <span class="btn-secondary">$ cargo build --release</span>
+        </div>
+      </section>
+
+      <!-- Felsefe & Vitrin Grid -->
+      <section id="felsefe" class="showcase-grid">
+        <div class="manifesto-panel">
+          <h2>Müzik dinleme kimliği, sesten bağımsızdır.</h2>
+          <p>
+            Müziğin nereden geldiği değişir — ister kendi yerel FLAC arşiviniz, ister evinizdeki Navidrome veya Jellyfin sunucunuz olsun. Üstteki dinleme geçmişiniz, çalma listeleriniz ve istatistikleriniz asla bir şirketin şartlarına kilitlenmemelidir.
+          </p>
+          <p>
+            Spotify'daki geçmişinizi yasal GDPR hakkınızla kurtarır, şarkıları evrensel MusicBrainz ve ISRC standartlarına bağlar ve kendi yerel SQLite veritabanınızda ömür boyu korur.
+          </p>
+          <div class="highlight-quote">
+            "Ürün ses akışı değil, dinleme kimliğinizdir."
+          </div>
+        </div>
+
+        <div class="artifact-card">
+          <img src="ornek-kart.svg" alt="tune tarafından üretilen arşiv Wrapped kartı">
+          <div class="caption">
+            tune tarafından doğrudan üretilen gerçek arşiv kartı. Yalnızca 12 ayı değil, tüm müzik ömrünüzü belgeler.
+          </div>
+        </div>
+      </section>
+
+      <!-- Karşılaştırma -->
+      <section id="karsilastirma">
+        <div class="section-header">
+          <h2>Geleneksel Servisler vs. tune</h2>
+          <p>Müzik dinleyicisine sunulan iki farklı dünya.</p>
+        </div>
+
+        <div class="compare-grid">
+          <div class="compare-card current">
+            <span class="tag">Şirket Odaklı Model</span>
+            <h3>Spotify / Apple Music</h3>
+            <ul class="compare-list">
+              <li>Dinleme geçmişiniz platformun sunucusunda rehindir; abonelik bittiğinde kaybolur.</li>
+              <li>Wrapped özetleri yılda sadece bir kez ve yalnızca son 12 ay için sunulur.</li>
+              <li>Yalnızca platformun izin verdiği DRM korumalı katalog dinlenebilir.</li>
+              <li>Dinleme verileriniz reklam ve kullanıcı profilleme için işlenir.</li>
+              <li>Şirket sözleşmeyi değiştirdiğinde tüm harici araçlar çalışmayı durdurur.</li>
+            </ul>
+          </div>
+
+          <div class="compare-card tune">
+            <span class="tag">Kullanıcı Odaklı Model</span>
+            <h3>tune (u-tune)</h3>
+            <ul class="compare-list">
+              <li>Veri tamamen sizin bilgisayarınızdaki SQLite veritabanındadır; ömür boyu silinmez.</li>
+              <li>İstediğiniz an, 5 yıllık veya 10 yıllık sınırsız Wrapped kartları üretilir.</li>
+              <li>Kendi yerel FLAC/MP3 arşiviniz ve Subsonic/Jellyfin sunucunuz tek elde birleşir.</li>
+              <li>Sıfır telemetri, sıfır gözetim. %100 çevrimdışı çalışabilirlik.</li>
+              <li>Kanonik kimlikler (ISRC / MBID) sayesinde hiçbir platforma bağımlı kalmaz.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- Mühendislik İlkeleri (4'lü Grid) -->
+      <section>
+        <div class="section-header">
+          <h2>Tavizsiz Mimari</h2>
+          <p>Kullanıcı haklarını ve donanım performansını merkeze alan mühendislik.</p>
+        </div>
+
+        <div class="principles-grid">
+          <div class="principle-box">
+            <span class="num">01 / GDPR</span>
+            <h4>Yasal Veri Taşınabilirliği</h4>
+            <p>API şartlarına bağımlı kalmadan, Avrupa Birliği GDPR hakkınızla aldığınız 10 yıllık akış zip dosyasını yerel olarak içe aktarır.</p>
+          </div>
+
+          <div class="principle-box">
+            <span class="num">02 / İDENTİTY</span>
+            <h4>Evrensel Kimlik Standartları</h4>
+            <p>Parçaları platform URI'larına değil; ISRC, MusicBrainz ID ve akustik parmak izlerine bağlar. Platformlar kapansa da veriniz korunur.</p>
+          </div>
+
+          <div class="principle-box">
+            <span class="num">03 / SCROBBLE</span>
+            <h4>Kişisel Scrobbler</h4>
+            <p>10 yıllık içe aktarılan verinizle, bugün çaldığınız şarkı aynı veritabanında buluşur. Geçmiş ve bugün tek zaman çizgisinde birleşir.</p>
+          </div>
+
+          <div class="principle-box">
+            <span class="num">04 / RUST</span>
+            <h4>Saf Rust Performansı</h4>
+            <p>Garbage collector duraklamaları olmadan sıfır takılmayla ses oynatma, düşük bellek tüketimi ve yüksek güvenlik.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Hızlı Başlangıç -->
+      <section id="baslangic">
+        <div class="section-header">
+          <h2>Hızlı Başlangıç</h2>
+          <p>4 basit adımda verinizi kurtarın ve kendi şartlarınızla dinleyin.</p>
+        </div>
+
+        <div class="steps-grid">
+          <div class="step-card">
+            <div>
+              <div class="step-header">
+                <span class="step-num">01</span>
+                <strong>Geçmişinizi Talep Edin</strong>
+              </div>
+              <p>Spotify hesabınızdan (*Hesap → Gizlilik → Genişletilmiş akış geçmişi*) veri paketinizi isteyin.</p>
+            </div>
+            <div class="terminal-block">
+              <span class="comment"># E-postanıza ulaşan arşivi indirin:</span><br>
+              <span class="output">my_spotify_data.zip</span>
+            </div>
+          </div>
+
+          <div class="step-card">
+            <div>
+              <div class="step-header">
+                <span class="step-num">02</span>
+                <strong>İçe Aktarın ve Analiz Edin</strong>
+              </div>
+              <p>Arşivi yerel SQLite veritabanına taşıyın ve dinleme istatistiklerinizi anında görün:</p>
+            </div>
+            <div class="terminal-block">
+              <span class="cmd">tune import</span> my_spotify_data.zip<br>
+              <span class="cmd">tune stats</span> --year 2024 --top 10
+            </div>
+          </div>
+
+          <div class="step-card">
+            <div>
+              <div class="step-header">
+                <span class="step-num">03</span>
+                <strong>Wrapped Kartınızı Üretin</strong>
+              </div>
+              <p>Sosyal medyada paylaşmak üzere dikey veya kare formatta kartınızı oluşturun:</p>
+            </div>
+            <div class="terminal-block">
+              <span class="cmd">tune wrapped</span> --year 2024 --format story --out story.png
+            </div>
+          </div>
+
+          <div class="step-card">
+            <div>
+              <div class="step-header">
+                <span class="step-num">04</span>
+                <strong>Özgürce Çalın</strong>
+              </div>
+              <p>Yerel müzik klasörlerinizi tarayın veya Navidrome/Jellyfin sunucunuzu bağlayın:</p>
+            </div>
+            <div class="terminal-block">
+              <span class="cmd">tune provider scan</span><br>
+              <span class="cmd">tune play</span> "Radiohead" --all --tui
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SSS (Genişletilmiş 10 Soru) -->
+      <section id="faq">
+        <div class="section-header">
+          <h2>Sıkça Sorulan Sorular</h2>
+          <p>tune hakkında aklınıza gelebilecek tüm teknik ve pratik sorular.</p>
+        </div>
+
+        <div class="faq-grid">
+          
+          <div class="faq-card">
+            <h4>Bu bir müzik korsanlığı veya MP3 indirme aracı mı?</h4>
+            <p><strong>Kesinlikle hayır.</strong> tune bir ses sağlayıcısı değil, bağımsız bir dinleme kimliği katmanıdır. Kendi yasal müzik arşivinizi (FLAC, MP3) veya kişisel medya sunucunuzu (Navidrome, Subsonic, Jellyfin) dinlerken geçmişinizi ve istatistiklerinizi şirketlerin tekelinden kurtarır.</p>
+          </div>
+
+          <div class="faq-card">
+            <h4>Spotify hesabımı kapatırsam dinleme geçmişim kaybolur mu?</h4>
+            <p><strong>Asla.</strong> tune ile verinizi bir kez içe aktardığınız andan itibaren tüm geçmişiniz bilgisayarınızdaki SQLite veritabanında yerel olarak mühürlenir. Spotify yarın kapansa veya aboneliğinizi iptal etseniz dahi 10 yıllık müzik hafızanız sizde kalır.</p>
+          </div>
+
+          <div class="faq-card">
+            <h4>Spotify şifremi veya API anahtarımı vermem gerekiyor mu?</h4>
+            <p><strong>Hayır.</strong> tune hiçbir şirketin API'sine bağlanmaz ve şifrenizi istemez. Avrupa Birliği GDPR veri taşınabilirliği kapsamında resmi olarak indirdiğiniz veri export zip dosyasını kendi bilgisayarınızda çevrimdışı olarak okur.</p>
+          </div>
+
+          <div class="faq-card">
+            <h4>Bilgisayarımdan bir müzik dosyasını silersem dinleme geçmişim silinir mi?</h4>
+            <p><strong>Hayır.</strong> tune mimarisinde "ne dinledin" (geçmiş tablosu) ile "şu an diskte ne çalabilirsin" (katalog) tamamen ayrı tutulur. Bir dosyayı silseniz dahi o parçanın geçmişteki dinleme kayıtları, scrobble'ları ve istatistikleri kalıcıdır.</p>
+          </div>
+
+          <div class="faq-card">
+            <h4>İnternet bağlantım olmadan çalışır mı?</h4>
+            <p><strong>Evet, %100 çevrimdışı çalışabilir.</strong> Veri içe aktarma, yerel kütüphane araması (SQLite FTS5), müzik çalma, terminal arayüzü ve Wrapped kartı üretimi harici hiçbir internet bağlantısına ihtiyaç duymaz.</p>
+          </div>
+
+          <div class="faq-card">
+            <h4>Kişisel Navidrome veya Jellyfin sunucumu nasıl bağlarım?</h4>
+            <p><code>tune provider add subsonic --url https://... --user adiniz</code> komutuyla kolayca kaydedebilirsiniz. Parolanız komut satırına yazılmaz (böylece kabuk geçmişine düşmez); istemden yankısız okunur veya token olarak diskte güvenle saklanır.</p>
+          </div>
+
+          <div class="faq-card">
+            <h4>Ses kalitesi nasıl? Hi-Res ve Kayıpsız (Lossless) destekliyor mu?</h4>
+            <p>tune, saf Rust ile yazılmış <code>symphonia</code> çözücüsü ve <code>cpal</code> ses çıkış hattını kullanır. FLAC, WAV, OGG, MP3 ve M4A dosyalarını doğrudan donanımınıza saf bit akışıyla iletir; herhangi bir kalite kaybı veya sıkıştırma uygulamaz.</p>
+          </div>
+
+          <div class="faq-card">
+            <h4>Etiketleri (ID3) bozuk veya eksik olan şarkılar nasıl eşleşiyor?</h4>
+            <p>tune katı bir <strong>Kanonik Kimlik Zinciri</strong> kullanır: Sırasıyla ISRC kodu, MusicBrainz ID, süre/sanatçı toleranslı bulanık eşleme ve ses parmak iziyle şarkıları çözümler. 69 farklı zorlu vaka üzerinde %98+ doğrulukla test edilmiştir.</p>
+          </div>
+
+          <div class="faq-card">
+            <h4>Birlikte Dinleme (Odalar / Rooms) özelliği nasıl çalışacak?</h4>
+            <p>Ses asla sunucudan röle edilmez (böylece telif riski ve sunucu masrafı oluşmaz). Odalardaki herkes müziği kendi yerel kaynağından çalar; ağ üzerinden yalnızca milisaniyelik bir zaman çapası (anchor) senkronlanır.</p>
+          </div>
+
+          <div class="faq-card">
+            <h4>Modern Masaüstü Arayüzü (GUI) ve Mobil Sürüm gelecek mi?</h4>
+            <p><strong>Evet.</strong> tune-core çekirdeği bugünden <code>uniffi</code> ile iOS/Android mobil bağlamalarına ve Tauri tabanlı masaüstü arayüzüne uyumlu olarak tasarlandı. Geliştiriciler ve kullanıcılar için CSS tabanlı topluluk temaları da yoldadır.</p>
+          </div>
+
+        </div>
+      </section>
+
+    </main>
+
+    <footer>
+      <div>tune · Saf Rust (2024 edition) ile inşa edilmiş özgür yazılım.</div>
+      <div>
+        <a href="LICENSE-MIT">MIT</a> / <a href="LICENSE-APACHE">Apache-2.0</a>
+      </div>
+    </footer>
+
+  </div>
+
+</body>
+</html>

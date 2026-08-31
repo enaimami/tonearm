@@ -135,6 +135,11 @@ kaç kayıt geldi, kaçı ISRC ile, kaçı bulanık, kaçı eşleşmedi.
 
 ## Kod konvansiyonları
 
+- **İsimlendirme dili (D-036): tanımlayıcılar İngilizce, yazı Türkçe.**
+  Fonksiyon, tip, değişken, CSS sınıfı, HTML id, JSON anahtarı, fixture dosya
+  adı, tema token'ı — hepsi İngilizce. Yorum, doküman, CLI yardım metni,
+  arayüz yazısı ve `ADIM:` çıktısı Türkçe. Ayrım kod dili değil, kimin
+  okuduğu: tanımlayıcıyı yabancı bir katkıcı okur, metni kullanıcı.
 - `tune-core` hataları `thiserror` ile tiplenmiş; `tune-cli` `anyhow` kullanabilir.
 - **`tune-core` içinde `unwrap()` / `expect()` / `panic!()` yok.** Testler hariç.
 - Genel API'de `async` — çalışma zamanını çağıran seçsin, çekirdek `#[tokio::main]` kurmasın.

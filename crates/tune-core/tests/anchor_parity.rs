@@ -18,15 +18,15 @@ use tune_core::playback::PlaybackAnchor;
 
 #[derive(serde::Deserialize)]
 struct Case {
-    ad: String,
-    capa: PlaybackAnchor,
+    name: String,
+    anchor: PlaybackAnchor,
     now: jiff::Timestamp,
-    beklenen_ms: u64,
+    expected_ms: u64,
 }
 
 #[derive(serde::Deserialize)]
 struct Cases {
-    vakalar: Vec<Case>,
+    cases: Vec<Case>,
 }
 
 fn cases() -> Cases {
@@ -43,18 +43,18 @@ fn cases() -> Cases {
 fn every_case_in_the_shared_truth_set_matches_the_core_formula() {
     let cases = cases();
     assert!(
-        cases.vakalar.len() >= 12,
+        cases.cases.len() >= 12,
         "doğruluk kümesi küçülmüş: {} vaka",
-        cases.vakalar.len()
+        cases.cases.len()
     );
 
     let mut failures = Vec::new();
-    for case in &cases.vakalar {
-        let got = case.capa.position_at(case.now);
-        if got != case.beklenen_ms {
+    for case in &cases.cases {
+        let got = case.anchor.position_at(case.now);
+        if got != case.expected_ms {
             failures.push(format!(
                 "  {}: beklenen {} ms, çıkan {} ms",
-                case.ad, case.beklenen_ms, got
+                case.name, case.expected_ms, got
             ));
         }
     }
@@ -65,7 +65,7 @@ fn every_case_in_the_shared_truth_set_matches_the_core_formula() {
         failures.is_empty(),
         "{} / {} vaka uymadı:\n{}",
         failures.len(),
-        cases.vakalar.len(),
+        cases.cases.len(),
         failures.join("\n")
     );
 }
@@ -75,20 +75,20 @@ fn every_case_in_the_shared_truth_set_matches_the_core_formula() {
 fn the_truth_set_covers_the_cases_that_actually_break_a_reimplementation() {
     let cases = cases();
     let all: String = cases
-        .vakalar
+        .cases
         .iter()
-        .map(|case| case.ad.as_str())
+        .map(|case| case.name.as_str())
         .collect::<Vec<_>>()
         .join("\n");
 
     for needle in [
-        "duraklat",   // ilerlememeli
-        "bekliyor",   // Buffering de ilerlememeli — kolayca atlanan durum
-        "rate 0",     // çalıyor görünüp ilerlemeyen hâl
-        "1.001",      // Faz 4 sürüklenme düzeltmesi
-        "geriye",     // saat geri atlarsa
-        "aşmaz",      // süreye kırpma
-        "bilinmiyor", // süre yoksa kırpma yok
+        "paused",    // ilerlememeli
+        "buffering", // Buffering de ilerlememeli — kolayca atlanan durum
+        "rate 0",    // çalıyor görünüp ilerlemeyen hâl
+        "1.001",     // Faz 4 sürüklenme düzeltmesi
+        "backwards", // saat geri atlarsa
+        "exceed",    // süreye kırpma
+        "unknown",   // süre yoksa kırpma yok
     ] {
         assert!(
             all.contains(needle),

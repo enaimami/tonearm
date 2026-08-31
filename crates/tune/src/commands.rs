@@ -9,7 +9,7 @@
 //! iletmek, sonucu geri vermek.
 //!
 //! Her komut gövdesi çekirdek iş parçacığında koşuyor ([`crate::state`]),
-//! o yüzden hepsi `state.calistir(...)` ile sarılı. Bu bir katman değil, bir
+//! o yüzden hepsi `state.run_on_core(...)` ile sarılı. Bu bir katman değil, bir
 //! adres: işin nerede yapılacağını söylüyor.
 //!
 //! **Uzun komutlar** (`import`, `resolve`, `provider_scan`, `provider_test`,
@@ -43,15 +43,15 @@ use crate::state::{AppState, CommandResult};
 pub const BUSY_EVENT: &str = "tune://busy";
 
 /// Uzun süren bir çekirdek çağrısını meşguliyet olayıyla sarar.
-async fn busy<T, F>(app: &AppHandle, ne: &str, is: F) -> tune_core::Result<T>
+async fn busy<T, F>(app: &AppHandle, what: &str, task: F) -> tune_core::Result<T>
 where
     F: Future<Output = tune_core::Result<T>>,
 {
-    let _ = app.emit(BUSY_EVENT, Some(ne));
-    let sonuc = is.await;
+    let _ = app.emit(BUSY_EVENT, Some(what));
+    let result = task.await;
     // Hata yolunda da kapanmalı: yoksa arayüz sonsuza kadar meşgul görünürdü.
     let _ = app.emit(BUSY_EVENT, None::<&str>);
-    sonuc
+    result
 }
 
 // ————————————————————————————————————— Kütüphane
@@ -64,7 +64,7 @@ pub async fn search(
     min_ms: Option<u64>,
 ) -> CommandResult<SearchReport> {
     state
-        .calistir(move |core| {
+        .run_on_core(move |core| {
             Box::pin(async move {
                 let rule = min_ms.map_or_else(PlayRule::default, PlayRule::new);
                 core.live.session().search(&query, limit, rule)
@@ -81,7 +81,7 @@ pub async fn stats(
     min_ms: Option<u64>,
 ) -> CommandResult<StatsResponse> {
     state
-        .calistir(move |core| {
+        .run_on_core(move |core| {
             Box::pin(async move {
                 let query = StatsQuery {
                     year,
@@ -103,7 +103,7 @@ pub async fn wrapped(
     out: Option<String>,
 ) -> CommandResult<WrappedResponse> {
     state
-        .calistir(move |core| {
+        .run_on_core(move |core| {
             Box::pin(async move {
                 let query = StatsQuery {
                     year,
@@ -131,7 +131,7 @@ pub async fn import(
     path: String,
 ) -> CommandResult<ImportReport> {
     state
-        .calistir(move |core| {
+        .run_on_core(move |core| {
             Box::pin(async move {
                 let path = std::path::PathBuf::from(path);
                 busy(
@@ -154,7 +154,7 @@ pub async fn resolve(
     query: String,
 ) -> CommandResult<ResolveReport> {
     state
-        .calistir(move |core| {
+        .run_on_core(move |core| {
             Box::pin(async move {
                 busy(
                     &app,
@@ -174,7 +174,7 @@ pub async fn resolve(
 #[tauri::command]
 pub async fn providers(state: State<'_, AppState>) -> CommandResult<ProviderListReport> {
     state
-        .calistir(move |core| {
+        .run_on_core(move |core| {
             Box::pin(async move { core.live.session().providers(&core.registry) })
         })
         .await
@@ -187,7 +187,7 @@ pub async fn provider_test(
     name: String,
 ) -> CommandResult<ProviderTestReport> {
     state
-        .calistir(move |core| {
+        .run_on_core(move |core| {
             Box::pin(async move {
                 let id = ProviderId::new(name);
                 busy(
@@ -208,21 +208,21 @@ pub async fn provider_scan(
     if_stale: bool,
 ) -> CommandResult<ScanReport> {
     state
-        .calistir(move |core| {
+        .run_on_core(move |core| {
             Box::pin(async move {
                 // Kayıt `Arc` taşıyor; klon ucuz ve `core`'u ikiye bölmekten
                 // (bir yanı `&mut Session`, öbürü `&ProviderRegistry`)
                 // okunaklı.
                 let registry = core.registry.clone();
                 let session = core.live.session_mut();
-                let is = async {
+                let task = async {
                     if if_stale {
                         session.scan_providers_if_stale(&registry).await
                     } else {
                         session.scan_providers(&registry).await
                     }
                 };
-                busy(&app, "kütüphane taranıyor", is).await
+                busy(&app, "kütüphane taranıyor", task).await
             })
         })
         .await
@@ -231,7 +231,7 @@ pub async fn provider_scan(
 #[tauri::command]
 pub async fn servers_list(state: State<'_, AppState>) -> CommandResult<ServerListReport> {
     state
-        .calistir(move |core| Box::pin(async move { core.live.session().list_servers() }))
+        .run_on_core(move |core| Box::pin(async move { core.live.session().list_servers() }))
         .await
 }
 
@@ -258,7 +258,7 @@ pub async fn server_add(
     verify: bool,
 ) -> CommandResult<ServerAddReport> {
     state
-        .calistir(move |core| {
+        .run_on_core(move |core| {
             Box::pin(async move {
                 let kind = ServerKind::parse(&kind)?;
                 // Ad önerisi çekirdekten: CLI de aynısını gösteriyor.
@@ -272,11 +272,11 @@ pub async fn server_add(
                     api_key,
                     verify,
                 };
-                let is = async {
+                let task = async {
                     let http = tune_core::net::default_http_client()?;
                     core.live.session_mut().add_server(spec, http).await
                 };
-                let report = busy(&app, "sunucu doğrulanıyor", is).await?;
+                let report = busy(&app, "sunucu doğrulanıyor", task).await?;
                 // Yeni sunucu hemen çalınabilir olsun: kayıt yenilenmezse
                 // uygulama kapanana kadar görünmezdi.
                 core.refresh_registry()?;
@@ -292,7 +292,7 @@ pub async fn server_remove(
     name: String,
 ) -> CommandResult<ServerRemoveReport> {
     state
-        .calistir(move |core| {
+        .run_on_core(move |core| {
             Box::pin(async move {
                 let report = core.live.session().remove_server(&ProviderId::new(name))?;
                 core.refresh_registry()?;
@@ -317,18 +317,18 @@ pub async fn play(
     shuffle: bool,
 ) -> CommandResult<QueueView> {
     state
-        .calistir(move |core| {
+        .run_on_core(move |core| {
             Box::pin(async move {
                 let options = PlayOptions {
                     all,
                     shuffle,
                     ..PlayOptions::new(&query)
                 };
-                let is = core
+                let task = core
                     .live
                     .session()
                     .player_from_search(&core.registry, options);
-                let player = busy(&app, "parça aranıyor", is).await?;
+                let player = busy(&app, "parça aranıyor", task).await?;
                 // Eski oynatıcının biriken dinlemeleri **alınıyor**, atılmıyor.
                 core.live.replace_player(player);
                 Ok(core.live.player().queue().view())
@@ -340,7 +340,7 @@ pub async fn play(
 #[tauri::command]
 pub async fn toggle_pause(state: State<'_, AppState>) -> CommandResult<PlaybackAnchor> {
     state
-        .calistir(move |core| {
+        .run_on_core(move |core| {
             Box::pin(async move {
                 // "Duraklat mı sürdür mü" kararı `Player::toggle_pause` içinde.
                 core.live.player().toggle_pause();
@@ -353,7 +353,7 @@ pub async fn toggle_pause(state: State<'_, AppState>) -> CommandResult<PlaybackA
 #[tauri::command]
 pub async fn stop(state: State<'_, AppState>) -> CommandResult<PlaybackAnchor> {
     state
-        .calistir(move |core| {
+        .run_on_core(move |core| {
             Box::pin(async move {
                 core.live.player_mut().stop();
                 Ok(core.live.anchor())
@@ -365,7 +365,7 @@ pub async fn stop(state: State<'_, AppState>) -> CommandResult<PlaybackAnchor> {
 #[tauri::command]
 pub async fn next(state: State<'_, AppState>) -> CommandResult<QueueView> {
     state
-        .calistir(move |core| {
+        .run_on_core(move |core| {
             Box::pin(async move {
                 core.live.player_mut().next().await?;
                 Ok(core.live.player().queue().view())
@@ -377,7 +377,7 @@ pub async fn next(state: State<'_, AppState>) -> CommandResult<QueueView> {
 #[tauri::command]
 pub async fn previous(state: State<'_, AppState>) -> CommandResult<QueueView> {
     state
-        .calistir(move |core| {
+        .run_on_core(move |core| {
             Box::pin(async move {
                 core.live.player_mut().previous().await?;
                 Ok(core.live.player().queue().view())
@@ -389,7 +389,7 @@ pub async fn previous(state: State<'_, AppState>) -> CommandResult<QueueView> {
 #[tauri::command]
 pub async fn jump_to(state: State<'_, AppState>, index: usize) -> CommandResult<QueueView> {
     state
-        .calistir(move |core| {
+        .run_on_core(move |core| {
             Box::pin(async move {
                 core.live.player_mut().jump_to(index).await?;
                 Ok(core.live.player().queue().view())
@@ -401,7 +401,7 @@ pub async fn jump_to(state: State<'_, AppState>, index: usize) -> CommandResult<
 #[tauri::command]
 pub async fn set_shuffle(state: State<'_, AppState>, on: bool) -> CommandResult<QueueView> {
     state
-        .calistir(move |core| {
+        .run_on_core(move |core| {
             Box::pin(async move {
                 core.live.player_mut().queue_mut().set_shuffle(on);
                 Ok(core.live.player().queue().view())
@@ -415,7 +415,7 @@ pub async fn set_shuffle(state: State<'_, AppState>, on: bool) -> CommandResult<
 #[tauri::command]
 pub async fn set_repeat(state: State<'_, AppState>, mode: RepeatMode) -> CommandResult<QueueView> {
     state
-        .calistir(move |core| {
+        .run_on_core(move |core| {
             Box::pin(async move {
                 core.live.player_mut().queue_mut().set_repeat(mode);
                 Ok(core.live.player().queue().view())
@@ -430,14 +430,14 @@ pub async fn set_repeat(state: State<'_, AppState>, mode: RepeatMode) -> Command
 #[tauri::command]
 pub async fn anchor(state: State<'_, AppState>) -> CommandResult<PlaybackAnchor> {
     state
-        .calistir(move |core| Box::pin(async move { Ok(core.live.anchor()) }))
+        .run_on_core(move |core| Box::pin(async move { Ok(core.live.anchor()) }))
         .await
 }
 
 #[tauri::command]
 pub async fn queue(state: State<'_, AppState>) -> CommandResult<QueueView> {
     state
-        .calistir(move |core| Box::pin(async move { Ok(core.live.player().queue().view()) }))
+        .run_on_core(move |core| Box::pin(async move { Ok(core.live.player().queue().view()) }))
         .await
 }
 
@@ -446,7 +446,7 @@ pub async fn diag(
     state: State<'_, AppState>,
 ) -> CommandResult<Option<tune_core::diag::DiagReport>> {
     state
-        .calistir(move |core| Box::pin(async move { core.live.session().last_diag() }))
+        .run_on_core(move |core| Box::pin(async move { core.live.session().last_diag() }))
         .await
 }
 
@@ -465,7 +465,7 @@ pub struct Environment {
 #[tauri::command]
 pub async fn environment(state: State<'_, AppState>) -> CommandResult<Environment> {
     state
-        .calistir(move |core| {
+        .run_on_core(move |core| {
             Box::pin(async move {
                 let config = core.live.session().config();
                 Ok(Environment {
