@@ -712,3 +712,185 @@ platform başına farklı davranır. Dizin damgaları her yerde aynı biçimde
 Bu bir izleme (watch) değil, tetiklenince bakan bir yoklama. Gerçek zamanlı
 izleme gerekirse Faz 3'te GUI'nin olay döngüsüyle birlikte yeniden bakılır —
 orada zaten bir döngü olacak.
+
+---
+
+## D-026 — DRM aşmak değişmez kural düzeyinde yasak
+**Tarih:** 2026-08-31
+**Soru:** Yayın platformları (Qobuz, Tidal, Deezer, Apple Music, YouTube Music,
+SoundCloud, Spotify, Amazon, Pandora, Idagio, Tencent) fazlarda adlandırılmamıştı.
+Hangileri desteklenebilir?
+**Karar:** Ayırıcı ölçüt "resmî API var mı" **değil**, **"ses DRM ile korunuyor mu"**.
+DRM'li bir akışı çözen kod bu projede yazılmaz — ve bu bir tercih değil, **ASLA
+YAPMA maddesi** (hem PLAN.md hem CLAUDE.md).
+**Gerekçe:** Koruma önlemi aşmak telif ihlalinden **ayrı** bir kanun maddesidir
+(DMCA §1201, EU 2001/29 m.6): eserin kendisine hakkın olsa bile ihlal sayılır.
+D-002 bunun yayınlanacak bir ürün olduğunu söylüyor, dolayısıyla kişisel kullanım
+muafiyeti yok — K4'ün Spotify için tek platformda yaptığı şeyin geneli.
+Kural olarak yazılmasının sebebi ayrı: gerekçe olarak kalsaydı her yeni platformda
+("Deezer'ı da ekleyelim") tartışma yeniden açılırdı.
+**Sonuç:**
+- Yeni bölüm **PLAN §2.5** ve genişletilmiş **EK — Yayın platformları**
+  (eski "EK — Spotify"nin yerine; Spotify içeriği `CONTROL` satırı olarak korundu).
+- Sınıflandırma: **akıtılabilir** SoundCloud / Qobuz / YouTube Music;
+  **yalnızca metadata** Tidal / Apple Music / Deezer; **yalnızca `CONTROL`**
+  Spotify; **kapalı** Amazon Music / Pandora / Idagio / Tencent.
+- **Deezer metadata tarafında resmî ve açık, akış tarafında şifreli** (Blowfish).
+  Bu onu Tidal'la aynı kutuya değil, çizginin öbür tarafına koyuyor.
+- **Apple Music'i eleyen hukuk değil teknik:** MusicKit resmî ve meşru, ama
+  çalma MusicKit çalışma zamanı istiyor — Linux'ta yok, WebKitGTK'da FairPlay yok.
+  Faz 6'nın iOS/macOS sürümünde `STREAM` açılabilir; satır o yüzden silinmedi.
+- **Pandora ve Idagio'yu model uyumsuzluğu da eliyor:** Pandora istasyon adresliyor,
+  biz parça. Idagio eser/bölüm/icra adresliyor — o `identity/` işi, sağlayıcı işi değil.
+- **Tencent listede kaldı ("kapalı" olarak).** K5'in gerekçesi tam bu: o bölgedeki
+  biri eklentiyi kendi yazar. Biz protokolü veriyoruz, listeyi değil.
+- **Hiçbiri çekirdeğe girmez.** Sebep yalnızca K5 değil: bu API'ler haber vermeden
+  bozulur ve bozulduğunda çalan müzik durmamalı, yalnızca o eklenti düşmeli.
+- EK'in başına "**bu API bilgileri doğrulanmadı**" uyarısı kondu — eklenti
+  yazılmadan önce ilgili satır yeniden sınanacak.
+
+Asıl bulgu tabloda değil altında: **çalabildiğimiz platform üç, dinleme kimliğini
+alabildiğimiz platform on.** İçe aktarma bu çizgiyi tanımıyor çünkü export bir
+yasal haktır, hizmet şartı onu kısıtlayamaz (K2). "Kapalı" satırlar bile geçmişi
+veriyor. Ürün de zaten ikincisiydi.
+
+---
+
+## D-027 — Faz 1'den sonra sıra: Faz 3 (GUI + tema)
+**Tarih:** 2026-08-31
+**Soru:** D-014 yalnızca "önce Faz 1" demişti, sonrasını bağlamamıştı.
+Sıra Faz 2 (eklenti sınırı) mı, Faz 3 (GUI + tema) mi?
+**Karar:** **Faz 3.** İlk iş §3.1 GO/NO-GO ölçümü.
+**Gerekçe:** PLAN'ın kendi uyarısı: "topluluk motoru burasıdır (D-002, D-004),
+geciktirilmesi pahalıdır." Tema ekosistemi bu projenin dağıtım kanalı; sonradan
+eklenecek bir süs değil.
+**Sonuç:**
+- §3.1 önce ölçüm, sonra karar: Tauri'de sanallaştırılmış liste + CSS animasyon +
+  IPC yükü, **Linux/WebKitGTK'da**. Ölçüm `spike/` içinde yapılır — workspace
+  dışı, atılabilir, çekirdeğe bağımlılık girmez.
+- Ölçüm kabul edilemez çıkarsa Dioxus/yerel Rust GUI tartışılır; bedeli CSS tema
+  ekosistemini kaybetmek. Karar ölçümden **sonra**, sayıyla verilir.
+- Faz 2 ertelendi, iptal edilmedi. Ona devredilen borçlar duruyor: keyring (D-021),
+  gerçek zamanlı izleme (D-025), TLS/ters vekil/transcode doğrulaması (D-022).
+- **Faz 2'nin referans eklentisi (§2.2) şimdiden SoundCloud olarak seçildi.**
+  Tek gerekçesi katalog değil: abonelik gerektirmeyen tek aday, yani CI'da ve
+  başkasının makinesinde çalışabilen tek aday. Qobuz'un katalogu daha temiz ama
+  abonelik olmadan ne geliştirilebilir ne test edilebilir; YouTube Music'in bakım
+  maliyeti (nsig, PO token) protokolü sınamaya çalışırken platformla boğuşmak
+  demek olurdu. Referans eklentinin işi protokolü kanıtlamak, katalog sunmak değil.
+
+---
+
+## D-028 — §3.1 GO/NO-GO: Tauri kabul edildi, ortam şartıyla
+**Tarih:** 2026-08-31
+**Soru:** PLAN §3.1 — Tauri, Linux/WebKitGTK'da 50.000 satırlık sanallaştırılmış
+liste + CSS animasyon + IPC yükü altında kabul edilebilir mi?
+**Karar:** **GO.** Ama Linux'ta `GDK_BACKEND=x11` ve
+`WEBKIT_DISABLE_DMABUF_RENDERER=1` ayarlanmadan **kabul edilemez**.
+
+**Ölçüm makinesi bilerek zayıf:** Intel HD 6000 (Broadwell GT3, 2015), 4 çekirdek,
+8 GB, Wayland, WebKitGTK 2.52.6, Tauri 2 (431 crate, 11 MB ikili).
+Eşikler `spike/tauri-gonogo/ESIKLER.md`'de **ölçümden önce** yazıldı; sayıları
+görüp eşik koymak ölçüm değil, kararı ölçüme uydurmak olurdu.
+
+**Sayılar (düzeltilmiş ortam, iki bağımsız koşum):**
+
+| Ölçü | GO eşiği | Sonuç |
+|---|---|---|
+| 50k kaydırma + disiplinli CSS, medyan kare | ≤ 18 ms | **17 / 17 ms** |
+| ” p95 | ≤ 25 ms | **21 / 22 ms** |
+| ” en kötü kare | ≤ 120 ms | **23 / 26 ms** |
+| IPC gidiş-dönüş p95 (1000 örnek) | ≤ 5 ms | **1 / 1 ms** |
+| 30 Hz IPC'nin kare maliyeti | ≤ 2 ms | **1 / 1 ms** |
+| Rust → JS olay akışı | ≥ 2000/sn | **10.417 / 11.765** |
+| Pencere görünene kadar | ≤ 1500 ms | **271 / 267 ms** |
+| RSS tepe (50k satır yüklü) | ≤ 250 MB | **185 / 183 MB** |
+| 50k kaydırma + **saf** CSS, medyan | ≤ 18 ms | 21 / 21 ms — SINIRDA |
+
+**Gerekçe ve dört bulgu:**
+
+1. **Sanallaştırılmış liste sorun değil.** 50.000 satır, düğüm havuzlu
+   sanallaştırma, sürekli kaydırma: 58.8 fps, sıfır takılan kare. Ölçümün en
+   kolay geçen kısmı buydu — korkulan yer burası değilmiş.
+
+2. **Varsayılan ortamda CSS animasyonu kare hızını 2.4× düşürüyor** (58.8 → 23.8).
+   Bu düzeltilmeseydi NO-GO olurdu.
+
+3. **Suçlu donanım değil, motorun yolu — kontrol deneyiyle ayrıldı.** Aynı
+   makinede, aynı sayfada, aynı GPU'da **Firefox 154 dört fazın dördünde de
+   58.8 fps** çiziyor (saf CSS dahil). Bu ayrım kararı belirledi: donanım tavanı
+   olsaydı PLAN'ın alternatifi (yerel Rust GUI) de kurtarmazdı, çünkü aynı GPU'ya
+   çarpardı. Kontrol koşulmasaydı yanlış karar verilirdi.
+   Kontrol ayrı bir sayfa değil, **aynı `index.html`** — farklı bir sayfa ölçen
+   kontrol karşılaştırılabilir olmazdı.
+
+4. **Tek değişkenli düzeltme yanıltıcıydı.** `WEBKIT_DISABLE_DMABUF_RENDERER=1`
+   **tek başına kaydırmayı kötüleştiriyor** (52.6 → 30.3 fps);
+   `GDK_BACKEND=x11` tek başına CSS fazını kurtarmıyor (23.8 → 26.3 fps).
+   Yalnızca ikisi birden işe yarıyor. Değişkenleri tek tek deneyip bırakan bir
+   araştırma "geçici çözüm yok" deyip NO-GO verirdi.
+
+**Sonuç:**
+- Faz 3 sürüyor; §3.2 (IPC sözleşmesi) sıradaki iş.
+- **Ortam düzeltmesi bir dağıtım işidir, kullanıcı işi değil.** Nasıl
+  uygulanacağı (uygulamanın kendisi mi ayarlasın, sarmalayıcı betik mi, sürücüye
+  göre koşullu mu) ayrı bir karar — açık.
+- **§3.2'nin korkusu bu ölçekte doğrulanmadı.** "Saniyede yüzlerce mesaj =
+  takılma" gerçekleşmedi: 30 Hz yoklama kareye 1 ms ekliyor, köprü ~10.000
+  olay/sn taşıyor. Toplu gönderim **performans için gerekli değil**.
+  Çapadan tahmin yine de doğru tasarım, ama gerekçesi değişti: (a) IPC
+  duraksarsa arayüz donmaz, (b) Faz 4'ün oda primitifi zaten aynı tip (D-015).
+  §3.2 bu düzeltilmiş gerekçeyle yazılacak — yanlış gerekçeyle savunulan doğru
+  tasarım ilk itirazda düşer.
+- **§3.3'e giren kısıt:** düzeltilmiş ortamda bile `height` / `box-shadow` /
+  `filter` / `background-position` animasyonları 58.8 → 47.6 fps götürüyor;
+  `transform` + `opacity` hiç düşürmüyor. Tema sözleşmesi hangi özelliklerin
+  canlandırılabileceğini **söylemek zorunda** — söylemezse fark kullanıcının
+  makinesinde ortaya çıkar.
+
+**Ölçülmeyen (bilerek yazılıyor):** tek makine ve tek sürücü (Mesa/Broadwell);
+Nvidia, AMD, yeni Intel denenmedi. `GDK_BACKEND=x11` XWayland gerektirir,
+XWayland'sız kurulum denenmedi. Yeniden boyutlandırma, çoklu pencere, yüksek DPI,
+4K ölçülmedi (piksel sayısı ~9× artar). WebKit `performance.now()`'u 1 ms'e
+yuvarladığı için ms altı ayrım yok.
+
+Ayrıntı ve tekrar üretme yordamı: `spike/tauri-gonogo/SONUC.md`.
+Spike atılabilir; kalması gereken sayılar burada.
+
+---
+
+## D-029 — Ortam düzeltmesini uygulamanın kendisi kurar
+**Tarih:** 2026-08-31
+**Soru:** D-028 Linux'ta `GDK_BACKEND=x11` + `WEBKIT_DISABLE_DMABUF_RENDERER=1`
+gerektiğini ölçtü. Bunu kim kuracak — uygulama mı, sarmalayıcı betik mi,
+kullanıcı mı?
+**Karar:** **Uygulamanın kendisi**, `main()`'in ilk işi olarak, yalnızca Linux'ta
+ve yalnızca **değişken tanımlı değilse**.
+**Gerekçe:** Kullanıcının bilmek zorunda olmadığı bir şey. Sarmalayıcı betik
+çözümü terminalden doğrudan ikiliyi çalıştıranı dışarıda bırakırdı; koşullu
+ölçüm (açılışta kare hesabı yapıp karar verme) açılışa gecikme ve webview
+yeniden başlatma titremesi eklerdi.
+
+**Doğrulandı, varsayılmadı.** Sorulacak soru vardı: GDK `GDK_BACKEND`'i
+`gtk_init` sırasında, WebKit `WEBKIT_DISABLE_DMABUF_RENDERER`'ı web süreci
+doğarken okur — ikisi de Tauri kurulumundan **sonra**. `main()`'in ilk satırı
+yeterince erken mi? Ölçüldü: hiçbir dış değişken verilmeden, uygulama kendi
+kurarak **23.8 → 55.6 fps** (CSS fazı). Erkenmiş.
+
+**Sonuç:**
+- Kullanıcının kendi ayarı **ezilmiyor**: bilerek `GDK_BACKEND=wayland` veren
+  birine karışılmıyor. Kurulan ya da atlanan her değişken log'a yazılıyor —
+  sessiz ortam değiştirme hata ayıklamayı imkânsız kılar (K9).
+- **Açık pürüz — `unsafe` çakışması.** Rust 2024'te `std::env::set_var` `unsafe`.
+  Workspace `[workspace.lints.rust] unsafe_code = "forbid"` diyor ve `forbid`
+  paket düzeyinde `allow` ile **geçersiz kılınamaz**; `tune-core` ve `tune-cli`
+  ikisi de `[lints] workspace = true` ile devralıyor. GUI paketi yazılırken üç
+  seçenek var: (a) workspace kuralını `deny`ye çevirmek (o zaman geçersiz
+  kılınabilir ama koruma zayıflar), (b) GUI paketini `lints.workspace = true`
+  demeden bırakmak (diğer kuralları da kaybeder), (c) `unsafe` hiç kullanmayıp
+  ortamı kurup **kendini yeniden çalıştırmak** (`exec`). Bu karar §3.2'de,
+  GUI paketi gerçekten açılırken verilecek — bugün paket yok.
+- **Bu düzeltme tek makinede ölçüldü** (Mesa / Broadwell / Wayland). Başka
+  sürücülerde gerekli mi, zararsız mı bilinmiyor. `GDK_BACKEND=x11` XWayland
+  gerektirir; XWayland'sız saf Wayland kurulumunda ne olacağı denenmedi.
+  Bu yüzden koşulsuz değil, "tanımlı değilse" kuruluyor: kaçış yolu açık kalıyor.

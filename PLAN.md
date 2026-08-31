@@ -723,9 +723,14 @@ Protokol sürümlenir; uyumsuz eklenti yüklenmez, hata mesajı verir.
 
 > KARAR NOKTASI: Eklenti izin modeli (ağ/dosya erişimi kısıtlanacak mı?). **Sor.**
 
-### 2.2 Referans eklenti
+### 2.2 Referans eklenti — SoundCloud (D-027)
 Rust olmayan bir dilde (Python) yazılmış bir sağlayıcı — protokolün gerçekten
 dil bağımsız olduğunun kanıtı.
+
+Platform seçimi katalog kalitesine göre değil **sınanabilirliğe** göre yapıldı:
+SoundCloud abonelik gerektirmeyen tek aday, yani CI'da ve başkasının makinesinde
+çalışabilen tek aday. Referans eklentinin işi protokolü kanıtlamak, katalog sunmak
+değil.
 
 ### 2.3 Kimlik çözümlemesi olgunlaşır
 AcoustID / Chromaprint parmak izi. Etiketleri bozuk yerel dosyalar için.
@@ -735,34 +740,87 @@ AcoustID / Chromaprint parmak izi. Etiketleri bozuk yerel dosyalar için.
 oradaki dersler geçerli: her torrent kendi dizinine, hazırlık için sabit `sleep` yerine
 gerçek hazır olma kontrolü, peer sayısı ve indirme hızı raporlanır.
 
+### 2.5 Yayın platformu eklentileri
+Hangi platformdan ses çalınabileceği API'nin varlığına değil **DRM'e** bağlı.
+Tam liste, gerekçeler ve hukuki çizgi: **EK — Yayın platformları**.
+
+Özet: SoundCloud / Qobuz / YouTube Music akıtılabilir; Tidal / Apple Music /
+Deezer yalnızca metadata verir; Spotify yalnızca `CONTROL` (K4);
+Amazon Music / Pandora / Idagio / Tencent kapalı.
+
+Hepsi eklenti — hiçbiri çekirdeğe girmez. Sebep yalnızca K5 değil: bu API'ler
+haber vermeden bozulur, ve bozulduğunda **çalan müzik durmamalı**, yalnızca o
+eklenti düşmeli.
+
+> KARAR NOKTASI: §2.2'nin referans eklentisi hangi platform olacak ve bu fazda
+> kaç tane yazılacak? **Sor.**
+
 ---
 
 # FAZ 3 — GUI ve Tema
 
-> **Sıra açık:** Faz 1'den önce mi sonra mı geleceği karara bağlı — bkz. Faz 1 karar noktası.
-> Topluluk motoru burasıdır (D-002, D-004), o yüzden geciktirilmesi pahalıdır.
+> **SIRADAKİ FAZ — D-027.** Faz 1 kapandıktan sonra Faz 2 yerine bu seçildi:
+> topluluk motoru burasıdır (D-002, D-004), geciktirilmesi pahalıdır.
+> Faz 2 ertelendi, iptal edilmedi.
 
 **Amaç:** Tauri masaüstü arayüzü + kullanıcıların yazabildiği tema sistemi.
 Tema ekosistemi bu projenin dağıtım kanalıdır, sonradan eklenecek bir süs değil.
 
-### 3.1 GO / NO-GO ölçümü — ÖNCE BU
+### 3.1 GO / NO-GO ölçümü — TAMAM (koşullu GO)
 Tauri'de 50.000 satırlık sanallaştırılmış liste + CSS animasyon + IPC yükü prototipi.
 **Linux'ta WebKitGTK ölç.** Hedef kitle Linux ağırlıklı ve WebKitGTK üç platformun
 en zayıfı.
 
 > KARAR NOKTASI: Ölçüm sonucunu sun. Kabul edilemezse Dioxus/yerel Rust GUI
-> tartışılır — ama o durumda CSS tema ekosistemi kaybedilir. **Sor.**
+> tartışılır — ama o durumda CSS tema ekosistemi kaybedilir.
+> **KAPANDI — D-028: GO, ortam şartıyla.**
+
+**Ölçüldü** (Intel HD 6000 / 2015, WebKitGTK 2.52.6, Tauri 2). Eşikler ölçümden
+önce yazıldı (`spike/tauri-gonogo/ESIKLER.md`). Sekiz ölçünün sekizi de GO;
+yalnızca "saf CSS" fazı sınırda.
+
+Üç şey buradan çıktı ve sonraki bölümleri bağlıyor:
+
+1. **Linux'ta `GDK_BACKEND=x11` + `WEBKIT_DISABLE_DMABUF_RENDERER=1` şart.**
+   Varsayılan ortamda kare hızı 2.4× düşüyor (58.8 → 23.8 fps). İkisi **birlikte**
+   gerekiyor; tek başına her biri işe yaramıyor, biri kaydırmayı kötüleştiriyor.
+   **D-029: uygulamanın kendisi kuruyor** — `main()`'in ilk işi, yalnızca Linux'ta,
+   yalnızca değişken tanımlı değilse. Doğrulandı: dış değişken olmadan 23.8 → 55.6 fps.
+   Açık pürüz: `set_var` Rust 2024'te `unsafe` ve workspace `unsafe_code = "forbid"`
+   diyor — GUI paketi açılırken çözülecek (D-029).
+2. **§3.2'nin gerekçesi değişti** — aşağıya bak.
+3. **§3.3 bir kısıt kazandı** — aşağıya bak.
+
+Suçlunun donanım değil motor olduğu **kontrol deneyiyle** ayrıldı: aynı makinede
+aynı sayfayı Firefox dört fazın dördünde de 58.8 fps çiziyor. Donanım tavanı
+olsaydı yerel Rust GUI'ye kaçmak da kurtarmazdı.
 
 ### 3.2 IPC sözleşmesi
-Webview ile çekirdek arasında saniyede yüzlerce mesaj = takılma.
-Toplu gönderim; oynatma pozisyonu webview'de **çapadan tahmin edilir**, sürekli
-çekirdekten sorulmaz.
+~~Webview ile çekirdek arasında saniyede yüzlerce mesaj = takılma.~~
+**D-028 bunu ölçtü ve doğrulamadı:** IPC gidiş-dönüş p95 **1 ms**, 30 Hz yoklama
+kare süresine **1 ms** ekliyor, köprü **~10.000 olay/sn** taşıyor. Toplu gönderim
+performans için gerekli değil.
+
+Oynatma pozisyonu webview'de yine **çapadan tahmin edilir** — ama gerekçesi
+performans değil:
+- IPC duraksarsa arayüz donmaz, tahmin yürümeye devam eder.
+- Faz 4'ün oda primitifi zaten aynı tip (D-015); iki ayrı pozisyon kavramı
+  tutulmaz.
+
+Yanlış gerekçeyle savunulan doğru tasarım ilk itirazda düşer; sözleşme bu
+düzeltilmiş gerekçeyle yazılacak.
 
 ### 3.3 Tema API'si — sürümlenmiş sözleşme
 Spicetify'ın en büyük derdi: üst uygulama değişiyor, temalar bozuluyor.
 Bunu yaşamamak için semantik token seti (CSS custom properties), taahhüt edilen
 slot isimleri ve **sürümlenmiş tema formatı** baştan tasarlanır.
 İçeride ne değişirse değişsin bu yüzey sabit kalır.
+
+**D-028'den gelen kısıt — sözleşme neyin canlandırılabileceğini de söylemeli.**
+Düzeltilmiş ortamda bile `height` / `box-shadow` / `filter` /
+`background-position` animasyonları 58.8 → 47.6 fps götürüyor; `transform` +
+`opacity` hiç düşürmüyor. Tema yazarına bu söylenmezse fark **kullanıcının**
+makinesinde ortaya çıkar ve suçlanan tema değil uygulama olur.
 
 > KARAR NOKTASI: Token setini yazmadan önce sun. Bu bir kez yayınlandıktan sonra
 > geriye dönük uyumluluk borcu doğar.
@@ -838,11 +896,56 @@ her commit'te sorar. Aksi halde ihlaller aylarca birikir ve toplu halde ortaya �
 
 ---
 
-# EK — Spotify
+# EK — Yayın platformları
 
-Ayrı depo, ayrı paket. Çekirdeğe asla girmez (K4).
-Yalnızca `CONTROL` yetenekli bir uzak oynatıcı olarak modellenir — metadata çekilmez,
-veritabanına yazılmaz. Kullanıcının geçmişi export yoluyla gelir (K2).
+"Hangi platformdan çalabiliriz" sorusunun cevabı burada durur.
+
+> **Buradaki API bilgileri doğrulanmadı.** Platformlar arayüzlerini haber vermeden
+> değiştirir. Bir eklenti yazılmadan önce ilgili satır yeniden sınanır — ASLA YAPMA
+> listesindeki "bilmediğin bir API şeklini varsayma" buraya da geçerli.
+
+## Ayırıcı çizgi teknik değil, hukuki
+
+Soru "resmî API var mı" değil. Soru: **ses DRM ile korunuyor mu?**
+
+- **DRM yok** → eklenti akışı doğrudan çözebilir. Belgelenmemiş bir API kullanmak
+  hizmet şartlarını ihlal edebilir; bu bir risk, ama ayrı bir suç değil.
+- **DRM var** (Widevine, FairPlay, Deezer'ın Blowfish'i) → akışı açmak bir
+  **teknolojik koruma önlemini aşmaktır.** Bu çoğu ülkede ayrı bir kanun maddesidir
+  (DMCA §1201, EU 2001/29 m.6) ve telif ihlalinden bağımsız olarak yasaktır.
+  **Bu projede yazılmaz.** D-002 gereği bu yayınlanacak bir üründür; kişisel kullanım
+  muafiyeti yoktur — K4'ün Spotify için dediğinin aynısı.
+
+DRM'li platformlar için geriye iki yol kalır: platformun **kendi** oynatıcısını
+sürmek (`CONTROL`), ya da yalnızca metadata almak.
+
+## Tablo
+
+| Platform | Yetenek | Gerekçe |
+|---|---|---|
+| **SoundCloud** | `SEARCH BROWSE STREAM` | DRM yok. Resmî API var ama anahtar başvurusu yıllardır kapalı/aralıklı; pratik yol yt-dlp. CLAUDE.md'nin K5 örneği zaten bu. Bazı parçalar (Go+, gizli) erişilemez — eklenti bunu **sayıp raporlar**, sessizce atlamaz (K9). |
+| **Qobuz** | `SEARCH BROWSE STREAM` | DRM yok; FLAC aboneye şifresiz iniyor. Resmî public API yok, tersine mühendislikle biliniyor. Abonelik şart. Hi-res katalog en temiz kaynak. |
+| **YouTube Music** | `SEARCH BROWSE STREAM` | DRM yok, yol yt-dlp. **Bakım maliyeti en yükseği:** YouTube aktif olarak zorlaştırıyor (nsig, PO token). Tam da bu yüzden eklenti — bozulduğunda çekirdek ayakta kalır. |
+| **Tidal** | `SEARCH BROWSE` | Resmî geliştirici API'si katalog/arama veriyor. Tam akış partner programına bağlı, yüksek kalite katmanları DRM'li. Tidal Connect sertifikalı cihaz programı, herkese açık değil. |
+| **Apple Music** | `SEARCH BROWSE` | MusicKit **resmî ve meşru** — developer token + user token ile katalog ve kullanıcının kütüphanesi alınır. Ama çalmak MusicKit çalışma zamanı ister: Linux'ta yok, WebKitGTK'da FairPlay yok. Faz 6'nın iOS/macOS sürümlerinde `STREAM` açılabilir. |
+| **Deezer** | `SEARCH BROWSE` | Public API metadata için resmî ve iyi. Akış Blowfish ile şifreli → koruma önlemi → çizginin öbür tarafı. |
+| **Spotify** | `CONTROL` | K4. Ayrı depo, ayrı paket; çekirdeğin bağımlılık ağacında görünmez. Web API'nin player uçları Premium ister. librespot ToS ihlali. Metadata çekilmez, veritabanına yazılmaz — geçmiş export yoluyla gelir (K2). |
+| **Amazon Music** | — | Public API yok, Widevine. Metadata bile alınamıyor. |
+| **Pandora** | — | 2011'den beri public API yok, ABD'ye kilitli. Ayrıca **model uyumsuz:** biz parça adresliyoruz, Pandora istasyon adresliyor. |
+| **Idagio** | — | Public API yok, DRM'li. Ayrıca veri modeli farklı (eser / bölüm / icra), parça değil. Klasik müzik kimliği kendi başına bir iş — sağlayıcı işi değil, `identity/` işi. |
+| **Tencent (QQ/Kugou/Kuwo)** | — | Anakara Çin'e kilitli; Çin telefonu ve ödeme yöntemi şart, akışlar şifreli. **Ama K5'in var oluş sebebi tam olarak bu:** o bölgedeki biri eklentiyi kendi yazabilir. Biz protokolü veririz, listeyi değil. |
+
+## İçe aktarma tarafı bu çizgiyi tanımıyor
+
+K2'nin bütün meselesi bu: **export bir yasal haktır, hizmet şartı onu kısıtlayamaz.**
+Tablonun "kapalı" satırları bile dinleme geçmişini verir.
+
+GDPR/CCPA kapsamında export veren: Spotify (yapıldı, §0.2), Apple, Google/YouTube
+(Takeout), Deezer, Qobuz, Tidal, SoundCloud, Amazon. Pandora ve Tencent daha zayıf —
+talep üzerine ve biçimleri belgelenmemiş.
+
+Yani: **çalabildiğimiz platform üç, dinleme kimliğini alabildiğimiz platform on.**
+Ürün ikincisiydi — CLAUDE.md'nin ilk cümlesi.
 
 ---
 
@@ -851,6 +954,9 @@ veritabanına yazılmaz. Kullanıcının geçmişi export yoluyla gelir (K2).
 - CLI'ye iş mantığı koyma
 - Sağlayıcı API'sinden geçmiş/kütüphane çekme — export kullan
 - Sunucudan ses akıtma
+- **DRM'li bir akışı çözen kod yazma** (D-026) — Widevine, FairPlay, Deezer'ın
+  Blowfish'i. Koruma önlemi aşmak telif ihlalinden ayrı bir kanun maddesidir;
+  D-002 gereği kişisel kullanım muafiyeti yok. Bkz. EK — Yayın platformları
 - Çekirdeğe Spotify bağımlılığı ekleme
 - Faz sınırını aşma ("ileride lazım olur" diye kod yazma)
 - Çekirdek API'sine `uniffi`'nin ifade edemeyeceği tip sızdırma

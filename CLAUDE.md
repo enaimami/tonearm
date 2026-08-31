@@ -173,6 +173,9 @@ Mobil (`uniffi`) daha sonra. İkisi de çekirdeği değiştirmeden gelmeli — g
 - CLI'ye iş mantığı koyma (Altın Kural).
 - Sağlayıcı API'sinden geçmiş/kütüphane çekmeye çalışma — export dosyası kullan.
 - Sunucudan ses akıtan bir tasarım önerme.
+- **DRM'li bir akışı çözen kod yazma** (Widevine, FairPlay, Deezer'ın Blowfish'i).
+  Koruma önlemi aşmak telif ihlalinden ayrı bir kanun maddesidir. Hangi platformun
+  hangi tarafta olduğu PLAN.md'nin "EK — Yayın platformları" bölümünde.
 - Çekirdeğe Spotify bağımlılığı ekleme.
 - Faz 3 gelmeden ağ servisi, hesap sistemi veya sunucu kodu yazma.
 - Çekirdek API'sine `uniffi`'nin ifade edemeyeceği tip sızdırma.

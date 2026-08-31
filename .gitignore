@@ -9,3 +9,10 @@
 spike/**/__pycache__/
 spike/**/.venv/
 spike/**/out/
+# Kökteki `/target` yalnızca kökü kapsıyor; spike'ın kendi derleme dizini
+# 1,2 GB ve tek `git add -A` uzaktaydı.
+spike/**/target/
+spike/**/Cargo.lock
+spike/**/report*.json
+spike/**/*.log
+spike/**/gen/

@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8" />
+<title>tune — GO/NO-GO</title>
+<style>
+  :root { --bg:#12111a; --fg:#e8e6f0; --dim:#8a86a0; --accent:#7c5cff; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:13px/1.4 system-ui, sans-serif; overflow:hidden; }
+  #wrap { display:grid; grid-template-rows:auto 1fr auto; height:100vh; }
+
+  /* İKİ AYRI CSS KÜMESİ ölçülüyor — "WebKitGTK yavaş" ile "bu CSS pahalı"
+     farklı iddialar ve §3.3'ün tema sözleşmesi tam bu farkı bilmek zorunda.
+
+     .anim-ok    → yalnızca transform ve opacity. Kompozitörde kalır,
+                   her karede layout/paint istemez.
+     .anim-saf   → tema yazarının içgüdüsel yazacağı şey: height,
+                   box-shadow, filter, background-position. Hepsi
+                   her karede layout ya da paint tetikler. */
+  header { padding:10px 14px; border-bottom:1px solid #262336;
+           background:linear-gradient(90deg,#1b1826,#2a2140,#1b1826);
+           background-size:300% 100%; }
+  .anim-saf header { animation: slide 6s linear infinite; }
+  @keyframes slide { to { background-position:300% 0; } }
+  .anim-ok header { animation: dim 6s linear infinite alternate; }
+  @keyframes dim { to { opacity:.72; } }
+
+  #eq { display:flex; gap:3px; align-items:flex-end; height:22px; margin-top:6px; }
+  #eq i { width:4px; background:var(--accent); border-radius:2px; height:20%;
+          transform-origin:bottom; }
+  .anim-saf #eq i { box-shadow:0 0 6px var(--accent);
+                    animation: bounce .9s ease-in-out infinite alternate; }
+  @keyframes bounce { to { height:100%; filter:hue-rotate(90deg); } }
+  .anim-ok #eq i { animation: bounce-t .9s ease-in-out infinite alternate; }
+  @keyframes bounce-t { to { transform: scaleY(5); } }
+
+  #list { overflow-y:scroll; position:relative; will-change:transform; }
+  #spacer { position:relative; }
+  .row { position:absolute; left:0; right:0; height:36px; display:flex;
+         align-items:center; gap:12px; padding:0 14px;
+         border-bottom:1px solid #1e1b2b; }
+  .row .t { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .row .a, .row .d { color:var(--dim); font-variant-numeric:tabular-nums; }
+  .row .a { width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .row .d { width:56px; text-align:right; }
+  .anim-ok .row:nth-child(3n) .t { animation: fade 2s ease-in-out infinite alternate; }
+  @keyframes fade { to { opacity:.55; } }
+  .anim-saf .row:nth-child(3n) .t { animation: glow 2s ease-in-out infinite alternate; }
+  @keyframes glow { to { text-shadow:0 0 8px var(--accent); color:#fff; } }
+
+  footer { padding:8px 14px; border-top:1px solid #262336; color:var(--dim);
+           font-variant-numeric:tabular-nums; white-space:pre; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <header>
+    <b>tune — WebKitGTK GO/NO-GO</b>
+    <div id="eq"></div>
+  </header>
+  <div id="list"><div id="spacer"></div></div>
+  <footer id="log">hazırlanıyor…</footer>
+</div>
+
+<script>
+const N        = 50000;   // PLAN §3.1: 50.000 satır
+const ROW_H    = 36;
+const OVERSCAN = 6;
+
+const listEl   = document.getElementById('list');
+const spacerEl = document.getElementById('spacer');
+const logEl    = document.getElementById('log');
+const wrapEl   = document.getElementById('wrap');
+const eqEl     = document.getElementById('eq');
+
+for (let i = 0; i < 24; i++) eqEl.appendChild(document.createElement('i'));
+
+// --- veri: 50k gerçek nesne (bellek de ölçüme dahil olsun) ---------------
+const rows = new Array(N);
+for (let i = 0; i < N; i++) {
+  rows[i] = { id:i, title:`Parça ${i} — uzunca bir başlık olabilir`,
+              artist:`Sanatçı ${i % 997}`, ms: 120000 + (i % 240000) };
+}
+spacerEl.style.height = (N * ROW_H) + 'px';
+
+// --- sanallaştırma: düğüm havuzu, innerHTML değil -------------------------
+const pool = [];
+function nodeFor(k) {
+  while (pool.length <= k) {
+    const el = document.createElement('div');
+    el.className = 'row';
+    el.innerHTML = '<span class="t"></span><span class="a"></span><span class="d"></span>';
+    spacerEl.appendChild(el);
+    pool.push({ el, t:el.children[0], a:el.children[1], d:el.children[2], idx:-1 });
+  }
+  return pool[k];
+}
+function mmss(ms) {
+  const s = Math.round(ms/1000);
+  return Math.floor(s/60) + ':' + String(s%60).padStart(2,'0');
+}
+let lastFirst = -1, lastCount = -1;
+function render() {
+  const h     = listEl.clientHeight;
+  const first = Math.max(0, Math.floor(listEl.scrollTop / ROW_H) - OVERSCAN);
+  const count = Math.min(N - first, Math.ceil(h / ROW_H) + OVERSCAN * 2);
+  if (first === lastFirst && count === lastCount) return;
+  lastFirst = first; lastCount = count;
+  for (let k = 0; k < count; k++) {
+    const n = nodeFor(k), i = first + k, r = rows[i];
+    if (n.idx !== i) {
+      n.t.textContent = r.title;
+      n.a.textContent = r.artist;
+      n.d.textContent = mmss(r.ms);
+      n.idx = i;
+    }
+    n.el.style.transform = `translateY(${i * ROW_H}px)`;
+    n.el.style.display = '';
+  }
+  for (let k = count; k < pool.length; k++) pool[k].el.style.display = 'none';
+}
+
+// --- ölçüm çekirdeği ------------------------------------------------------
+const pct = (arr, p) => arr.length ? arr.slice().sort((x,y)=>x-y)[
+  Math.min(arr.length-1, Math.floor(arr.length*p))] : 0;
+
+function phase(name, ms, opts = {}) {
+  return new Promise(res => {
+    // rAF durursa (pencere gizli/kısılmış) faz asla bitmez ve ölçüm asılı kalır.
+    // Bu koruma "ölçemedim"i sessiz beklemeden ayırıyor.
+    let done = false;
+    const finish = v => { if (!done) { done = true; clearTimeout(guard); res(v); } };
+    const guard = setTimeout(() => {
+      finish({ name, rAF_durdu: true, kare_sayisi: frames.length });
+    }, ms + 8000);
+    const frames = [];
+    let prev = performance.now(), t0 = prev, vel = opts.scroll ? 42 : 0, dir = 1;
+    let ipcTimer = null, ipcSent = 0, ipcDone = 0;
+    if (opts.ipcHz) {
+      ipcTimer = setInterval(async () => {
+        ipcSent++;
+        await window.__TAURI__.core.invoke('anchor', { track: 7, positionMs: ipcSent * 33 });
+        ipcDone++;
+      }, Math.round(1000 / opts.ipcHz));
+    }
+    function step(now) {
+      frames.push(now - prev); prev = now;
+      if (vel) {
+        let top = listEl.scrollTop + vel * dir;
+        const max = N * ROW_H - listEl.clientHeight;
+        if (top >= max) { top = max; dir = -1; } else if (top <= 0) { top = 0; dir = 1; }
+        listEl.scrollTop = top;
+        render();
+      }
+      if (now - t0 < ms) requestAnimationFrame(step);
+      else {
+        if (ipcTimer) clearInterval(ipcTimer);
+        frames.shift(); // ilk kare faz geçişini taşır
+        finish({ name,
+              fps_medyan:  +(1000 / pct(frames, .50)).toFixed(1),
+              kare_p50_ms: +pct(frames, .50).toFixed(2),
+              kare_p95_ms: +pct(frames, .95).toFixed(2),
+              kare_enkotu_ms: +Math.max(...frames).toFixed(2),
+              takilan_kare: frames.filter(f => f > 33.4).length,
+              kare_sayisi: frames.length,
+              ipc_gonderilen: ipcSent, ipc_tamamlanan: ipcDone });
+      }
+    }
+    requestAnimationFrame(step);
+  });
+}
+
+// Ekrana da yaz, run.log'a da: takılırsa hangi adımda takıldığı görünsün.
+const say = t => {
+  logEl.textContent = t;
+  if (window.__TAURI__) window.__TAURI__.core.invoke('mark', { msg: t });
+  else console.log('ADIM: ' + t);
+};
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// KONTROL KİPİ: aynı sayfa düz bir tarayıcıda da koşabilsin diye.
+// Tek kaynak, iki motor — ayrı bir kopya yazsaydım karşılaştırma anlamsız olurdu.
+// Tauri yoksa IPC fazları atlanır, rapor HTTP ile geri gönderilir.
+const TAURI = !!window.__TAURI__;
+
+async function run() {
+  const invoke = TAURI ? window.__TAURI__.core.invoke
+                       : async () => { throw new Error('kontrol kipi'); };
+  const listen = TAURI ? window.__TAURI__.event.listen : null;
+  const rapor = { motor: TAURI ? 'webkitgtk (tauri)' : 'kontrol tarayıcı',
+                  ajan: navigator.userAgent, satir: N, fazlar: [] };
+
+  // Rapor **artımlı** yazılıyor: sonraki adım asılırsa öncekilerin sayıları
+  // kaybolmasın. İlk koşumda tam bunu kaybettik.
+  const save = () => {
+    const json = JSON.stringify(rapor, null, 2);
+    return TAURI ? invoke('save_report', { json })
+                 : fetch('/report', { method:'POST', body: json }).catch(() => {});
+  };
+
+  render();
+  await sleep(600); // ilk boyama otursun
+
+  say('1/8 boşta…');
+  rapor.fazlar.push(await phase('bosta', 2000));
+  await save();
+
+  say('2/8 kaydırma…');
+  rapor.fazlar.push(await phase('kaydirma', 5000, { scroll:true }));
+  await save();
+
+  say('3/8 kaydırma + disiplinli CSS…');
+  wrapEl.className = 'anim-ok';
+  rapor.fazlar.push(await phase('kaydirma+css_disiplinli', 5000, { scroll:true }));
+  await save();
+
+  say('4/8 kaydırma + saf CSS…');
+  wrapEl.className = 'anim-saf';
+  rapor.fazlar.push(await phase('kaydirma+css_saf', 5000, { scroll:true }));
+  await save();
+
+  wrapEl.className = '';
+  await save();
+
+  // Kontrol kipinde IPC diye bir şey yok — burada duruluyor. Karşılaştırılan
+  // şey zaten motorun çizim tavanı, Tauri'nin köprüsü değil.
+  if (!TAURI) {
+    rapor.tamam = true;
+    say('kontrol koşumu bitti');
+    await save();
+    return;
+  }
+
+  say('5/8 kaydırma + disiplinli CSS + IPC 30 Hz…');
+  wrapEl.className = 'anim-ok';
+  rapor.fazlar.push(await phase('kaydirma+css_disiplinli+ipc30', 5000,
+                                { scroll:true, ipcHz:30 }));
+  wrapEl.className = '';
+  await save();
+
+  say('6/8 IPC gidiş-dönüş…');
+  const lat = [];
+  for (let i = 0; i < 1000; i++) {
+    const t = performance.now();
+    await invoke('ping', { seq: i });
+    lat.push(performance.now() - t);
+  }
+  rapor.ipc_gidis_donus_ms = { p50:+pct(lat,.50).toFixed(3), p95:+pct(lat,.95).toFixed(3),
+                               p99:+pct(lat,.99).toFixed(3), enkotu:+Math.max(...lat).toFixed(3),
+                               ornek: lat.length };
+  await save();
+
+  say('7/8 IPC yük (200 satır × 50)…');
+  const pay = [];
+  for (let i = 0; i < 50; i++) {
+    const t = performance.now();
+    const r = await invoke('page', { offset: i * 200, limit: 200 });
+    pay.push(performance.now() - t);
+    if (r.length !== 200) rapor.hata = 'sayfa boyu yanlış';
+  }
+  rapor.ipc_sayfa_200_ms = { p50:+pct(pay,.50).toFixed(2), p95:+pct(pay,.95).toFixed(2),
+                             enkotu:+Math.max(...pay).toFixed(2) };
+
+  rapor.ipc_sayfa_200_ms.toplam_satir = 50 * 200;
+  await save();
+
+  // Kademeli. İlk koşumda 10.000'lik tek atış ana iş parçacığını öyle doyurdu ki
+  // fazın kendi `setTimeout` zaman aşımı bile koşamadı — ölçüm asılı kaldı.
+  // Tavanı bulmak için küçükten büyüğe gidiliyor; her basamak ayrı yazılıyor.
+  rapor.olay_akisi = [];
+  for (const BURST of [100, 500, 2000]) {
+    say(`8/8 olay akışı ${BURST}…`);
+    // `listen` reddedilirse (yetenek izni yoksa) hata async executor içinde
+    // yutulur ve ölçüm sessizce asılır — ilk koşumda tam bu oldu. Artık patlıyor.
+    const un = await listen('tick', onTick);
+    let n = 0, t0 = 0, settle;
+    function onTick() {
+      if (n === 0) t0 = performance.now();
+      if (++n >= BURST) settle(performance.now() - t0);
+    }
+    const got = await new Promise(res => {
+      settle = res;
+      invoke('emit_burst', { count: BURST }).catch(e => res(-1));
+    });
+    un();
+    rapor.olay_akisi.push({ adet: BURST, ms: +got.toFixed(1),
+                            olay_sn: Math.round(BURST / (got / 1000)) });
+    await save();
+    await sleep(400); // kuyruk boşalsın, basamaklar birbirine karışmasın
+  }
+
+  if (performance.memory) rapor.js_heap_mb = +(performance.memory.usedJSHeapSize/1048576).toFixed(1);
+
+  rapor.tamam = true;
+  say('bitti');
+  await save();
+  await invoke('quit');
+}
+
+addEventListener('DOMContentLoaded', () => {
+  say('0/8 JS koşuyor, 50k satır kuruldu' + (TAURI ? '' : ' (KONTROL KİPİ)'));
+  run().catch(async e => {
+    // Hatayı yutma: hangi adımda patladığı run.log'da/konsolda görünsün.
+    say('HATA: ' + e);
+    if (TAURI) await window.__TAURI__.core.invoke('quit');
+  });
+});
+</script>
+</body>
+</html>
