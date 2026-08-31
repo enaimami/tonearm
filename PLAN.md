@@ -398,7 +398,7 @@ future döndürür, generic/lifetime/closure taşımaz. `Capabilities` bit maske
 metot olarak kondu: downcast yerine, eklentiler (Faz 2) de kendi taramasını
 verebilsin diye.
 
-### 1.2 Yerel dosya sağlayıcı — KISMEN TAMAM
+### 1.2 Yerel dosya sağlayıcı — TAMAM
 Dizin tarama, etiket okuma, izleme (watch), kütüphane indeksleme, SQLite FTS ile arama.
 
 **Yapıldı:** özyinelemeli dizin tarama, symphonia ile etiket okuma
@@ -424,8 +424,18 @@ tarama yapmıyor; kullanıcı bir kez `tune provider scan` der, sonraki
   indeksine bakılıyordu; indeks katalogda olduğu için artık yol, taranan
   köklerin altında mı diye sınanıyor. `<kök>/../../etc/passwd` reddediliyor.
 
-**Kalan:** dizin izleme (watch) yok — değişiklikler `provider scan` ile
-alınıyor.
+**Dizin izleme yerine bayatlık yoklaması (D-025).** `notify` bağımlılığı
+eklenmedi: `tune provider scan --if-stale` sağlayıcıya ucuz bir soru soruyor
+(`catalog_changed_since`) ve yalnızca gerekiyorsa tarıyor. Yerel sağlayıcı
+bunu **yalnızca dizinleri** gezerek cevaplıyor — dosyalar `stat` edilmiyor.
+
+Üç cevap üçü de farklı şey: değişmiş / değişmemiş / **bilmiyorum**.
+"Bilmiyorum" bir tarama sebebi, atlama sebebi değil.
+
+Görmediği şey açıkça yazılı: dosyanın **yerinde yeniden etiketlenmesi**
+(dosya değişir, dizin damgası değişmez). O durumda düz `provider scan`
+gerekiyor ve komut yardımı bunu söylüyor. Gerçek zamanlı izleme gerekirse
+Faz 3'te GUI'nin olay döngüsüyle birlikte yeniden bakılır.
 
 ### 1.3 Subsonic / Jellyfin istemcisi — TAMAM (gerçek sunucuda doğrulandı)
 Subsonic API yaygın standart. Bu, ileride kendi sunucunun Subsonic uyumlu
@@ -657,15 +667,15 @@ davranışın aynısı — yani TUI o tasarımın çalıştığının kanıtı o
 
 ---
 
-### 1.8 Faz 1 durum — yerel **ve** uzak kaynaktan çalıyor
+### 1.8 Faz 1 durum — KAPANDI
 
-**197 test**, clippy ve fmt temiz. `tune play` ve `tune play --tui` uçtan uca
-çalışıyor.
+**203 test**, clippy ve fmt temiz. `tune play` ve `tune play --tui` uçtan uca
+çalışıyor; yerel dosyadan da, Navidrome/Jellyfin'den de.
 
 | Bölüm | Durum |
 |---|---|
 | 1.1 Provider trait | TAMAM |
-| 1.2 Yerel sağlayıcı | Kısmen — indeks kalıcı; watch yok |
+| 1.2 Yerel sağlayıcı | TAMAM — indeks kalıcı; `--if-stale` (D-025) |
 | 1.3 Subsonic/Jellyfin | TAMAM — Navidrome + Jellyfin'de doğrulandı (D-022) |
 | 1.4 Ses hattı | TAMAM |
 | 1.5 Kuyruk | TAMAM — gapless dahil (D-024) |
@@ -681,13 +691,18 @@ kısmen aşıldı: ses hattı gerçek dosyalarla, gerçek aygıtta sınanıyor.
 **Ses aygıtı olmayan ortamda testler kendini atlıyor** (CI için). Atlama
 sessiz değil: nedenini `stderr`'e yazıyor.
 
-**Faz 1'in çekirdeği tamam.** Kalan iki iş, ikisi de bloklayıcı değil:
-gapless geçiş ve dizin izleme (watch).
-
 **Faz 1'in bitti ölçütü karşılandı:** "yerel **ve uzak** kaynaktan çalıyor,
 her çalma bir `listen` kaydı üretiyor" — uzak yarısı 2026-08-31'de gerçek
-Navidrome ve gerçek Jellyfin üzerinde doğrulandı (D-022). Faz 2'ye geçişin
-önünde bloklayıcı bir iş kalmadı.
+Navidrome ve gerçek Jellyfin üzerinde doğrulandı (D-022). Yedi bölümün
+yedisi de TAMAM; Faz 2'ye geçişin önünde bloklayıcı bir iş kalmadı.
+
+**Faz 2'ye devredilenler** (hiçbiri Faz 1'i eksik bırakmıyor):
+- `keyring` kararı (D-021) — kimlik bilgisi bugün `servers.json`'da `0600`
+  ile duruyor; eklenti izin modeliyle birlikte yeniden bakılacak.
+- Gerçek zamanlı dizin izleme (D-025) — bugün tetiklenince bakan bir yoklama
+  var; Faz 3'te GUI'nin olay döngüsü geldiğinde yeniden değerlendirilir.
+- TLS/ters vekil/transcode altında uzak sağlayıcı doğrulaması (D-022) —
+  kod bunları desteklemek üzere yazıldı ama denenmedi.
 
 **Faz 2'ye devredilen borç:** `keyring` kararı (D-021, kimlik bilgisi
 `servers.json`'da düz duruyor — token/anahtar, parola değil) eklenti izin
