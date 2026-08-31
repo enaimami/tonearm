@@ -583,7 +583,7 @@ Video kapsam dışı — gerekirse ayrı sağlayıcı olarak tartışılır.
 Yeniden örnekleme en yakın komşu (mono→stereo kopyalama dahil). Kaliteli
 resampling gerekirse ayrıca ölçülür — Faz 1'in hedefi doğru ses üretmekti.
 
-### 1.5 Kuyruk ve oynatma durumu — KISMEN TAMAM
+### 1.5 Kuyruk ve oynatma durumu — TAMAM
 Kuyruk, tekrar, karıştırma, gapless. Durum çekirdekte tutulur, CLI yalnızca gösterir.
 
 **Yapıldı:** kuyruk, `RepeatMode::{Off,All,One}`, karıştırma. Durum çekirdekte;
@@ -596,8 +596,28 @@ CLI yalnızca gösteriyor.
   derse tekrar kipinde de ilerler — yoksa tuş bozukmuş gibi görünür.
   Ayrım `Queue::next` ile `advance_after_finish` arasında.
 
-**Kalan:** gapless geçiş yok (parça bitince yeni motor kuruluyor, aralarında
-kısa boşluk var).
+**Gapless geldi (D-024).** cpal akışı ve halka tamponu parçalar arasında
+**açık kalıyor**; çözme iş parçacığı bir parça bitince sıradakini alıp aynı
+tampona yazmayı sürdürüyor. Eskiden her parça için yeni bir aygıt + yeni bir
+çözücü kuruluyordu, boşluk buydu.
+
+Pozisyon artık **dilimlerden** okunuyor: tampon birden çok parçanın örneklerini
+yan yana taşıdığı için tek bir sayaç yetmiyor. Her parça çıkış karesi cinsinden
+nerede başladığını biliyor; çalan parça, `frames_played`'in düştüğü dilim.
+Geçiş **duyulduğunda** ilerliyoruz — sıraya girmiş ama henüz çalınmamış parça
+"çalıyor" sayılmıyor, yoksa arayüz duyulmayan parçayı gösterirdi.
+
+Kullanıcı isteğiyle geçiş (`next`, `enter`) kasten gapless **değil**: motor
+yeniden kuruluyor. Önden okunmuş sesi çalmak, kullanıcının seçmediği parçayı
+duyurmak olurdu.
+
+Ölçüm: 4 fixture parçası (5 sn ses) uçtan uca 5.47 sn'de çalındı.
+
+**Bir tutarsızlık da bu sırada kapandı.** Etiketsiz dosyaların süresi katalogda
+bilinmediği için `PlayRule`'un "parçanın yarısı" kolu çalışmıyor, kural 30 sn
+eşiğine düşüyordu: baştan sona dinlenen 1 sn'lik parça scrobble üretmiyordu.
+Süre artık kaptan okunuyor ve hem kurala hem kayda giriyor — yoksa CLI "4
+dinleme kaydedildi" derken `stats` 2 gösteriyordu. Testle kilitli.
 
 ### 1.6 Scrobbling — TAMAM
 Her çalma bir `listen` kaydı. Faz 0'daki import verisiyle aynı tabloya yazılır —
@@ -648,7 +668,7 @@ davranışın aynısı — yani TUI o tasarımın çalıştığının kanıtı o
 | 1.2 Yerel sağlayıcı | Kısmen — indeks kalıcı; watch yok |
 | 1.3 Subsonic/Jellyfin | TAMAM — Navidrome + Jellyfin'de doğrulandı (D-022) |
 | 1.4 Ses hattı | TAMAM |
-| 1.5 Kuyruk | Kısmen — gapless yok |
+| 1.5 Kuyruk | TAMAM — gapless dahil (D-024) |
 | 1.6 Scrobbling | TAMAM |
 | 1.7 TUI | TAMAM |
 

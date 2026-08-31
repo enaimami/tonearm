@@ -13,6 +13,14 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use tune_core::playback::{AudioEngine, PlayState};
+use tune_core::provider::AudioSource;
+
+/// Yerel dosya kaynağı (kısayol).
+fn local(path: &std::path::Path) -> AudioSource {
+    AudioSource::LocalFile {
+        path: path.to_path_buf(),
+    }
+}
 
 fn fixture(name: &str) -> PathBuf {
     PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/audio")).join(name)
@@ -121,6 +129,79 @@ fn pausing_freezes_the_position() {
     assert!(
         engine.position_ms() > paused_at,
         "sürdürüldükten sonra ilerlemeli"
+    );
+}
+
+/// D-024'ün iddiası: iki parça arka arkaya çalarken **çıkış hiç durmuyor.**
+///
+/// Eski tasarımda her parça için yeni bir cpal akışı ve yeni bir çözücü
+/// kuruluyordu; boşluk buydu. Artık akış açık kalıyor ve sıradaki parçanın
+/// örnekleri bitenin arkasına ekleniyor.
+#[test]
+fn two_tracks_play_back_to_back_without_the_output_ever_stopping() {
+    if !has_output_device() {
+        eprintln!("ses çıkışı yok — gapless testi atlanıyor (bu bir başarısızlık değil)");
+        return;
+    }
+    let engine = match AudioEngine::open() {
+        Ok(engine) => engine,
+        Err(err) => {
+            eprintln!(
+                "ses aygıtı açılamadı, test atlanıyor:\n{}",
+                err.chain_text()
+            );
+            return;
+        }
+    };
+
+    let first = local(&fixture("etiketli.flac"));
+    let second = local(&fixture("Test Sanatci - Mp3 Parca.mp3"));
+
+    let seq0 = engine.play_source(&first).expect("ilk parça açılmalı");
+    // İkinci parça, birincisi **çalarken** sıraya giriyor: gapless'ın koşulu.
+    let seq1 = engine.enqueue(&second);
+    assert_ne!(seq0, seq1);
+
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut switched = false;
+    let mut stopped_before_switch = false;
+    while Instant::now() < deadline {
+        if engine.current_seq() == Some(seq1) {
+            switched = true;
+            break;
+        }
+        // Geçiş duyulmadan önce çıkış **durmuş** görünmemeli.
+        if engine.state() == PlayState::Stopped {
+            stopped_before_switch = true;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    assert!(
+        switched,
+        "ikinci parçaya geçilmeliydi (durum: {})",
+        engine.state()
+    );
+    assert!(
+        !stopped_before_switch,
+        "geçişte çıkış durdu — gapless bozuk"
+    );
+    assert!(
+        !engine.finished(),
+        "sırada parça varken motor bitmiş sayılmamalı"
+    );
+
+    // Biten parçanın scrobble'ı kendi uzunluğunu görmeli, çıkışın toplamını değil.
+    let played = engine.played_ms_of(seq0).expect("ilk dilim bilinmeli");
+    assert!(
+        (900..=1200).contains(&played),
+        "1 sn'lik parça tam çalınmalıydı: {played}ms"
+    );
+    // Yeni parçanın pozisyonu **baştan** sayılmalı.
+    assert!(
+        engine.position_ms() < 900,
+        "ikinci parça baştan başlamalı: {}ms",
+        engine.position_ms()
     );
 }
 

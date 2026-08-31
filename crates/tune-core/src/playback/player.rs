@@ -18,8 +18,6 @@ use crate::model::{Listen, ListenSource, PlayRule, TrackRef};
 use crate::provider::{AudioSource, Capabilities, Provider, ProviderRegistry};
 
 use super::anchor::{PlayState, PlaybackAnchor};
-#[cfg(feature = "audio")]
-use super::queue::RepeatMode;
 use super::queue::{Queue, QueueItem};
 
 /// Çalınmakta olan parçanın izleme kaydı.
@@ -33,6 +31,10 @@ struct NowPlaying {
     canonical_id: Option<CanonicalId>,
     started_at: jiff::Timestamp,
     provider: ProviderId,
+    /// Motordaki dilim numarası (D-024). Geçişin **duyulduğunu** buradan
+    /// anlıyoruz: motor başka bir dilime geçtiyse parça değişmiş demektir.
+    #[cfg(feature = "audio")]
+    seq: u64,
 }
 
 /// Oynatıcı.
@@ -48,6 +50,10 @@ pub struct Player {
     pending_listens: Vec<Listen>,
     #[cfg(feature = "audio")]
     engine: Option<super::engine::AudioEngine>,
+    /// Motora önden verilmiş sıradaki parça (D-024): dilim numarası + öğe.
+    /// Geçiş duyulunca `now_playing` bu olur.
+    #[cfg(feature = "audio")]
+    prefetched: Option<(u64, QueueItem)>,
 }
 
 impl std::fmt::Debug for Player {
@@ -71,6 +77,8 @@ impl Player {
             pending_listens: Vec::new(),
             #[cfg(feature = "audio")]
             engine: None,
+            #[cfg(feature = "audio")]
+            prefetched: None,
         }
     }
 
@@ -224,47 +232,32 @@ impl Player {
     fn start_source(&mut self, source: &AudioSource, item: QueueItem) -> Result<()> {
         #[cfg(feature = "audio")]
         {
-            let engine = match source {
-                AudioSource::LocalFile { path } => super::engine::AudioEngine::play_file(path)?,
-                #[cfg(feature = "http-client")]
-                AudioSource::HttpStream { url, headers } => {
-                    super::engine::AudioEngine::play_http(url, headers)?
-                }
-                #[cfg(not(feature = "http-client"))]
-                AudioSource::HttpStream { .. } => {
-                    // Yetenek yok değil, **bu derlemede** yok: kullanıcı
-                    // hangi kararın onu buraya getirdiğini görmeli (K9).
-                    return Err(Error::new(
-                        Stage::PlaybackResolve,
-                        ErrorKind::Unsupported {
-                            provider: item.id.provider.to_string(),
-                            what: "HTTP akışı (`http-client` feature'ı kapalı derleme)".to_owned(),
-                            capabilities: "STREAM".to_owned(),
-                        },
-                    ));
-                }
-            };
+            // Kullanıcı isteğiyle başlangıç: motoru **yeniden** kuruyoruz.
+            // Gapless yalnızca doğal geçiş içindir; kullanıcı tuşa bastığında
+            // önden okunmuş sesi çalmak yanlış parçayı duyurmak olurdu.
+            let engine = super::engine::AudioEngine::open()?;
+            let seq = engine.play_source(source)?;
             self.engine = Some(engine);
+            self.prefetched = None;
+
+            self.now_playing = Some(NowPlaying {
+                provider: item.id.provider.clone(),
+                canonical_id: None,
+                started_at: jiff::Timestamp::now(),
+                item,
+                seq,
+            });
+            Ok(())
         }
         #[cfg(not(feature = "audio"))]
         {
+            let _ = (source, item);
             Err(Error::new(
                 Stage::PlaybackOutput,
                 ErrorKind::Audio {
                     detail: "bu derlemede ses hattı yok (`audio` feature'ı kapalı)".to_owned(),
                 },
             ))
-        }
-
-        #[cfg(feature = "audio")]
-        {
-            self.now_playing = Some(NowPlaying {
-                provider: item.id.provider.clone(),
-                canonical_id: None,
-                started_at: jiff::Timestamp::now(),
-                item,
-            });
-            Ok(())
         }
     }
 
@@ -356,26 +349,90 @@ impl Player {
     pub async fn tick(&mut self) -> Result<()> {
         #[cfg(feature = "audio")]
         {
-            let finished = self.engine.as_ref().is_some_and(|e| e.finished());
-            if !finished {
+            let Some((current_seq, finished)) = self
+                .engine
+                .as_ref()
+                .map(|engine| (engine.current_seq(), engine.finished()))
+            else {
                 return Ok(());
+            };
+
+            // — 1. Geçiş **duyuldu** mu? Motor önden verdiğimiz dilime
+            // geçtiyse parça değişmiş demektir; ses hiç kesilmedi.
+            if let Some((seq, item)) = self.prefetched.clone()
+                && current_seq == Some(seq)
+            {
+                self.finish_current_listen();
+                self.queue.advance_after_finish();
+                self.now_playing = Some(NowPlaying {
+                    provider: item.id.provider.clone(),
+                    canonical_id: None,
+                    started_at: jiff::Timestamp::now(),
+                    item,
+                    seq,
+                });
+                self.prefetched = None;
             }
-            // Çözme hatası olduysa yut ma — tanıya taşınsın diye kaydı bırak.
-            if let Some(engine) = &self.engine {
-                if let Some(detail) = engine.take_error() {
+
+            // — 2. Çalacak bir şey kaldı mı?
+            if finished {
+                if let Some(engine) = &self.engine
+                    && let Some(detail) = engine.take_error()
+                {
+                    // Çözme hatasını yutma — tanıya taşınsın (K9).
                     tracing::warn!(hata = %detail, "çalma sırasında hata");
                 }
+                self.finish_current_listen();
+                // Önden okuma yapılamamışsa (sağlayıcı hatası, kuyruk sonunda
+                // sarma) eski yola düşüyoruz: motoru yeniden kur. Boşluk olur
+                // ama çalma durmaz.
+                if self.queue.advance_after_finish().is_some() {
+                    return self.start_current().await;
+                }
+                self.engine = None;
+                self.prefetched = None;
+                return Ok(());
             }
-            self.finish_current_listen();
-            if self.queue.repeat() == RepeatMode::One {
-                return self.start_current().await;
-            }
-            if self.queue.next().is_some() {
-                return self.start_current().await;
-            }
-            self.engine = None;
+
+            // — 3. Sıradakini önden çöz (gapless'ın olduğu yer).
+            self.prefetch_next().await;
         }
         Ok(())
+    }
+
+    /// Sıradaki parçayı, bugünkü hâlâ çalarken motora verir (D-024).
+    ///
+    /// Hata **çalmayı düşürmez**: önden okuma bir iyileştirmedir, geçiş
+    /// olmazsa `tick` eski yoldan devam eder. Ama hata sessiz de kalmaz.
+    #[cfg(feature = "audio")]
+    async fn prefetch_next(&mut self) {
+        if self.prefetched.is_some() {
+            return;
+        }
+        let Some(engine) = &self.engine else { return };
+        // Motorda hâlâ bekleyen iş varsa erken: tampon zaten dolu.
+        if engine.queued_len() > 0 {
+            return;
+        }
+        let Some(item) = self.queue.peek_after_finish().cloned() else {
+            return;
+        };
+
+        match self.resolve_source(&item.id).await {
+            Ok(source) => {
+                if let Some(engine) = &self.engine {
+                    let seq = engine.enqueue(&source);
+                    self.prefetched = Some((seq, item));
+                }
+            }
+            Err(err) => {
+                tracing::warn!(
+                    parca = item.track.display_name(),
+                    hata = %err.chain_text().replace('\n', " "),
+                    "sıradaki parça önden çözülemedi; geçişte boşluk olabilir"
+                );
+            }
+        }
     }
 
     /// Biriken dinleme kayıtlarını alır ve listeyi boşaltır.
@@ -396,15 +453,33 @@ impl Player {
             return;
         };
 
+        // Dilimin kendi süresi: geçiş olduysa çıkış artık sıradaki parçada
+        // ve `position_ms()` onu gösterir. Biten parçanın scrobble'ı kendi
+        // dilimini sormalı (D-024).
         #[cfg(feature = "audio")]
-        let ms_played = self.engine.as_ref().map_or(0, |e| e.position_ms());
+        let ms_played = self.engine.as_ref().map_or(0, |engine| {
+            engine
+                .played_ms_of(now_playing.seq)
+                .unwrap_or_else(|| engine.position_ms())
+        });
         #[cfg(not(feature = "audio"))]
         let ms_played = 0u64;
 
-        if !self
-            .rule
-            .counts(ms_played, now_playing.item.track.duration_ms)
-        {
+        // Süreyi önce **motordan** soruyoruz: katalog etiketten besleniyor ve
+        // etiketsiz dosyada `None` kalıyor. Süre bilinmeyince `PlayRule`'un
+        // "parçanın yarısı" kolu çalışamıyor, kural 30 sn eşiğine düşüyor ve
+        // baştan sona dinlenmiş kısa bir parça scrobble üretmiyordu (D-008'in
+        // kuralı değişmedi; ona verilen veri düzeldi).
+        #[cfg(feature = "audio")]
+        let duration_ms = self
+            .engine
+            .as_ref()
+            .and_then(|engine| engine.duration_of(now_playing.seq))
+            .or(now_playing.item.track.duration_ms);
+        #[cfg(not(feature = "audio"))]
+        let duration_ms = now_playing.item.track.duration_ms;
+
+        if !self.rule.counts(ms_played, duration_ms) {
             tracing::debug!(
                 parca = now_playing.item.track.display_name(),
                 ms_played,
@@ -413,8 +488,15 @@ impl Player {
             return;
         }
 
+        // Ölçülen süre kayda da giriyor. Yoksa buraya "kaydedildi" diye yazılan
+        // dinleme, `stats` kuralı yeniden uyguladığında elenirdi: CLI "4
+        // dinleme" der, istatistik 2 gösterirdi. Kaptan okunan süre etiketten
+        // gelenden daha güvenilir bir ölçüm.
+        let mut track = now_playing.item.track;
+        track.duration_ms = duration_ms;
+
         self.pending_listens.push(Listen {
-            track: now_playing.item.track,
+            track,
             played_at: now_playing.started_at,
             ms_played,
             source: ListenSource::Playback {
@@ -530,6 +612,8 @@ mod tests {
             canonical_id: None,
             started_at: jiff::Timestamp::UNIX_EPOCH,
             provider: ProviderId::new("local"),
+            #[cfg(feature = "audio")]
+            seq: 0,
         });
         player.finish_current_listen();
         assert!(

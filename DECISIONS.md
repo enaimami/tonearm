@@ -624,3 +624,52 @@ katmandan geldiği gövde okunmadan bilinemez, tahmin etmek yanlış tanı üret
 ortasına düşerse **panikler**. Sunucunun Türkçe (ya da herhangi bir çok
 baytlı) hata mesajı çekirdeği düşürebilirdi. Yerine sınıra hizalayan
 `net::clip` kondu, testle kilitli.
+
+---
+
+## D-024 — Gapless: tek çıkış, sırayla beslenen parçalar
+**Tarih:** 2026-08-31
+**Soru:** Parçalar arasındaki boşluk nasıl kapatılacak? Her parça için yeni
+bir `AudioEngine` (yeni cpal akışı + yeni çözücü) kuruluyordu; boşluk buydu.
+**Karar:** **Tek çıkış, sıralı besleme.** cpal akışı ve halka tamponu parçalar
+arasında **açık kalır**; çözme iş parçacığının ömrü motorun ömrü kadardır ve
+bir parça bitince kuyruktaki sıradakini alıp **aynı tampona** yazmayı sürdürür.
+**Gerekçe:** Değerlendirilen alternatif "iki motor, önceden hazırla" idi:
+mevcut yapı korunurdu ama aynı anda iki cpal akışı açık olmak zorundaydı ve
+bazı ALSA/WASAPI yapılandırmalarında ikincisi açılamaz — gapless **sessizce**
+çalışmazdı. Hedef kitle Linux ağırlıklı; sessizce bozulan bir özellik,
+olmayan bir özellikten kötüdür.
+**Sonuç:**
+- **Pozisyon muhasebesi dilimlere dayanıyor.** Tampon artık birden çok parçanın
+  örneklerini yan yana taşıdığı için pozisyon tek sayaçtan okunamaz. Her parça
+  bir `Span`: çıkış karesi cinsinden nerede başladığı, kaç kare yazdığı, süresi.
+  Çalan parça, `frames_played`'in düştüğü dilimdir.
+- `start_frame` sıraya girerken **bilinmiyor** (`None`): nerede başlayacağı
+  kendinden öncekinin kaç kare yazdığına bağlı ve o parça bitmeden belli olmaz.
+  Yalnızca **başlamış** dilimler "çalıyor" sayılır — yoksa geçiş erken duyurulur
+  ve arayüz henüz çalınmamış parçayı gösterir.
+- **Kullanıcı isteğiyle geçiş gapless değil.** `next`/`jump_to` motoru yeniden
+  kuruyor: önden okunmuş sesi çalmak, kullanıcının seçmediği parçayı duyurmak
+  olurdu. Gapless yalnızca doğal bitiş içindir.
+- **Önden okuma bir iyileştirme, bağımlılık değil.** Sıradaki parça açılamazsa
+  (sağlayıcı hatası) `tick` eski yola düşüyor: motoru yeniden kur. Boşluk olur,
+  çalma durmaz. Hata log'a düşer (K9).
+- `Queue::peek_after_finish` imleci **oynatmadan** sıradakini söylüyor. Kuyruk
+  sonunda `RepeatMode::All` ile sarmada `None` dönüyor: sarma karıştırmayı
+  yeniden üretiyor ve hangi parçanın geleceği imleç oynamadan bilinemez.
+  Bedeli tur başına bir boşluk; uydurulmuş bir parçayı önden çözmekten iyidir.
+- Ölçüm: 4 fixture parçası (toplam 5 sn ses) uçtan uca **5.47 sn**'de çalındı —
+  aradaki üç geçişin toplam maliyeti ölçülemeyecek kadar küçük.
+
+**Yan bulgu — scrobble tutarsızlığı düzeltildi.** Etiketsiz dosyaların süresi
+katalogda `None` olduğu için `PlayRule`'un "parçanın yarısı" kolu çalışamıyor,
+kural 30 sn eşiğine düşüyordu: baştan sona dinlenmiş 1 sn'lik bir parça
+scrobble üretmiyordu. Süre artık **kaptan** okunuyor (`AudioEngine::duration_of`)
+ve hem kurala hem **kayda** giriyor. Kayda da girmesi şart: yoksa CLI "4 dinleme
+kaydedildi" derken `stats` kuralı yeniden uygulayıp 2 gösteriyordu. D-008'in
+kuralı değişmedi — ona verilen veri düzeldi. Testle kilitli
+(`every_queued_track_produces_a_listen_that_stats_also_counts`).
+
+**Yan düzeltme.** `play_file`/`play_http` kaynağı **aygıttan önce** açıyor:
+bozuk ya da olmayan dosya, ses çıkışı bulunmayan bir ortamda (CI) da
+`PLAYBACK_DECODE` demeli; "aygıt yok" hatası asıl sebebi gizlerdi.

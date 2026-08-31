@@ -223,6 +223,30 @@ impl Queue {
         self.current()
     }
 
+    /// Doğal bitişte hangi parçanın geleceğini **imleci oynatmadan** söyler.
+    ///
+    /// Gapless önden okuması için (D-024): sıradaki parça, bugünkü parça hâlâ
+    /// çalarken çözülmeye başlanmalı. İmleç ancak geçiş **duyulduğunda**
+    /// ilerler, yoksa arayüz olmayan bir parçayı çalıyor gösterirdi.
+    ///
+    /// Kuyruğun sonunda `RepeatMode::All` ile başa sarma durumunda **`None`**
+    /// döner: sarma karıştırmayı yeniden üretiyor ([`Queue::reshuffle`]) ve
+    /// hangi parçanın geleceği imleç oynamadan bilinemez. Bedeli, tur başına
+    /// bir kez boşluk; uydurulmuş bir parçayı önden çözmekten iyidir.
+    #[must_use]
+    pub fn peek_after_finish(&self) -> Option<&QueueItem> {
+        if self.repeat == RepeatMode::One {
+            return self.current();
+        }
+        let next = self.position.checked_add(1)?;
+        if next >= self.order.len() {
+            return None;
+        }
+        self.order
+            .get(next)
+            .and_then(|index| self.items.get(*index))
+    }
+
     /// Parça **doğal olarak bittiğinde** sıradakini seçer.
     ///
     /// [`Queue::next`]'ten farkı: `RepeatMode::One` burada aynı parçayı

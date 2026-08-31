@@ -1,205 +1,210 @@
-# tune
+# tune (u-tune) 🎵
 
-> **Not:** `tune` bir yer tutucu isim. Proje adı henüz kesinleşmedi.
+> **Sağlayıcıdan bağımsız dinleme kimliği ve müzik katmanı.**  
+> Dinleme geçmişiniz, istatistikleriniz ve kütüphaneniz artık akış servislerinin tekelinde değil; tamamen **size** ait.
 
-Sağlayıcıdan bağımsız bir müzik dinleme katmanı.
-
-Ürün ses değil — **dinleme kimliği**. Geçmişin, istatistiklerin, çalma listelerin
-ve sosyal bağların sana ait olur; sağlayıcıya değil. Ses nereden gelirse gelsin
-(yerel dosya, Subsonic/Jellyfin, SoundCloud, torrent) üstteki katman aynı kalır.
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-MIT)
+[![Rust Version](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
+[![Status](https://img.shields.io/badge/status-v0.0.1--beta-success.svg)](PLAN.md)
 
 <p align="center">
-  <img src="docs/ornek-kart.svg" alt="Örnek Wrapped kartı" width="420">
+  <img src="docs/ornek-kart.svg" alt="tune tarafından üretilen örnek Wrapped kartı" width="460">
 </p>
 
-## Neden
+---
 
-Dinleme geçmişin bir sağlayıcının veritabanında yaşıyor. Aboneliğini bıraktığın
-gün on yıllık bir kayıt seninle gelmiyor. Yılda bir gösterilen "Wrapped" ise
-yalnızca son 12 ayı biliyor — çünkü daha fazlasını göstermek onun işine yaramıyor.
+## 💡 tune Nedir ve Neden Var?
 
-`tune` bu kaydı geri alır: veri export'unu içe aktarır, parçaları sağlayıcıdan
-bağımsız kanonik kimliklere bağlar ve istatistikleri **senin** makinende üretir.
+Yıllardır müzik dinliyorsunuz; ancak dinleme geçmişiniz, oluşturduğunuz çalma listeleri ve müzik zevkinizin istatistikleri abone olduğunuz platformların sunucularında kilitli tutuluyor. Aboneliğinizi sonlandırdığınız veya başka bir servise geçtiğiniz gün, 10 yıllık müzik geçmişiniz sizinle gelmiyor. Yılda bir kez sunulan "Wrapped" özetleri ise yalnızca son 12 ayı kapsıyor.
 
-## Durum
+**`tune` bu dinleme kaydını size geri verir:**
 
-**Faz 1.** Bugün çalışan şey: export içe aktarma, kanonik kimlik çözümlemesi,
-istatistikler, paylaşılabilir Wrapped kartı, **yerel dosya oynatma** ve
-**Subsonic / Jellyfin'den akış**.
+* **Ürün ses akışı değil, dinleme kimliğinizdir:** Müziğin nereden geldiği (yerel FLAC/MP3 dosyalarınız, Navidrome/Subsonic veya Jellyfin sunucunuz) değişse bile kimliğiniz, geçmişiniz ve istatistikleriniz tek bir çatı altında birleşir.
+* **Geçmiş ve Bugün Tek Zaman Çizelgesinde:** Spotify gibi platformlardan yasal GDPR hakkınızla aldığınız tüm geçmişinizi içe aktarır. `tune` üzerinden müzik dinledikçe yeni dinlemeleriniz de (scrobble) aynı yerel veritabanına eklenir.
+* **Tüm Yılların Wrapped Kartları:** Yalnızca son yılı değil, geçmiş tüm yıllarınızı veya arşivinizin tamamını kapsayan, sosyal medyada paylaşıma hazır yüksek kaliteli (PNG/SVG) Wrapped kartları üretir.
+* **%100 Yerel ve Güvenli:** Verileriniz harici bir sunucuya gönderilmez; bilgisayarınızdaki SQLite veritabanında saklanır.
 
-Faz 1'den itibaren scrobble'ı `tune` üretiyor: çaldığın parça import verinle
-aynı tabloya yazılıyor, geçmiş ve bugün tek bir zaman çizelgesi oluyor.
-Terminal arayüzü (`--tui`) var.
+---
 
-> Uzak sağlayıcılar **Navidrome 0.63** ve **Jellyfin 10.11** üzerinde uçtan
-> uca doğrulandı (düz HTTP, küçük kütüphane). TLS, ters vekil arkası,
-> sunucu tarafı transcode ve Navidrome dışı Subsonic uygulamaları (Airsonic,
-> Gonic, LMS) henüz denenmedi — bir şey tutmazsa `tune diag` çıktısıyla issue
-> aç, tam olarak aradığımız geri bildirim bu.
+## ✨ Öne Çıkan Özellikler
 
-Ayrıntılı yol haritası: [`PLAN.md`](PLAN.md). Verilmiş kararlar ve gerekçeleri:
-[`DECISIONS.md`](DECISIONS.md).
+- 📦 **Kolay Veri İçe Aktarma (Import):** Spotify genişletilmiş dinleme geçmişi (`Streaming_History_Audio_*.json`) zip arşivlerini doğrudan içe aktarın.
+- 🎯 **Akıllı Parça Çözümleme (Kanonik Kimlik):** Şarkıları platformlardan bağımsız kimliklerle (ISRC, MusicBrainz ID, bulanık başlık/sanatçı eşleştirme) eşler; farklı platformlardaki aynı parçaları tekilleştirir.
+- 📊 **Kapsamlı Dinleme İstatistikleri:** Yıl bazlı veya tüm zamanlar için en çok dinlenen sanatçılar, albümler, şarkılar, toplam dinleme süresi ve keşif zaman çizelgesi.
+- 🎨 **Sosyal Medyaya Hazır Wrapped Kartları:** Kare (1080×1080) veya Hikaye/Story (1080×1920) formatlarında görsel kart çıktısı (SVG ve PNG).
+- 🎧 **Yerel ve Uzak Müzik Oynatma:**
+  - **Yerel Arşiv:** FLAC, MP3, OGG, M4A/AAC ve WAV formatlarını otomatik tarar, etiketlerini okur ve indeksler.
+  - **Uzak Sunucular:** Subsonic / Navidrome ve Jellyfin sunucularınıza bağlanarak doğrudan akış (streaming) yapar.
+- 🖥️ **Zengin Terminal Arayüzü (TUI):** Tuş kısayollarıyla şarkı değiştirme, duraklatma, arama, kuyruk yönetimi, karıştırma (shuffle) ve tekrar (repeat) kipleri.
+- 🔒 **Güvenlik Odaklı Mimari:** Parolalar terminal geçmişine veya diske düz metin olarak kaydedilmez. Ses asla üçüncü taraf sunuculardan röle edilmez.
+- 🛠️ **Gelişmiş Tanılama (`tune diag`):** Bir sorun yaşandığında hatanın hangi aşamada olduğunu şeffafça gösterir; veri kaybını önler.
+- 🤖 **Tam JSON Desteği:** Tüm komutlar `--json` bayrağını destekler, böylece kendi betiklerinizle veya harici araçlarla kolayca entegre edilebilir.
 
-## Kurulum
+---
 
-Rust 1.85+ gerekiyor (edition 2024).
+## 🚀 Hızlı Başlangıç
+
+### 1. Kurulum
+
+Sisteminizde **Rust 1.85+** kurulu olmalıdır:
 
 ```bash
-git clone <depo-adresi> tune && cd tune
+# Depoyu klonlayın
+git clone https://github.com/kullanici-adi/tune.git && cd tune
+
+# Release modunda derleyin
 cargo build --release
-# ikili: target/release/tune
+
+# Çalıştırılabilir dosya: target/release/tune
+# İsteğe bağlı olarak PATH'inize ekleyebilirsiniz:
+cp target/release/tune ~/.local/bin/
 ```
 
-## Kullanım
+---
 
-Verini sağlayıcından iste — Spotify'da *Hesap → Gizlilik → Genişletilmiş
-akış geçmişi*. Bu bir **GDPR taşınabilirlik hakkı**; sağlayıcı geliştirici
-şartlarıyla kısıtlayamaz. Hazırlanması birkaç gün sürebilir.
+### 2. Adım Adım Kullanım
+
+#### Adım 1: Dinleme Geçmişinizi İçe Aktarın
+Spotify hesabınızdan (*Hesap → Gizlilik → Genişletilmiş akış geçmişi*) verilerinizi talep edin (GDPR veri hakkı). İndirdiğiniz zip dosyasını `tune`'a verin:
 
 ```bash
-# Export zip'ini (ya da açılmış dizini) içe aktar
 tune import my_spotify_data.zip
-
-# İstatistikler
-tune stats
-tune stats --year 2024 --top 20
-
-# Paylaşılabilir kart
-tune wrapped --year 2024 --out kart.png
-tune wrapped --format story --out story.png    # 1080×1920
-
-# Tek bir parçayı kimlik zincirinden geçir
-tune resolve "Radiohead - Creep"
-
-# Kütüphanede ara
-tune library search radiohead
-
-# Bir şey ters gittiyse
-tune diag
 ```
 
-### Oynatma
+#### Adım 2: İstatistiklerinizi İnceleyin
+```bash
+# Tüm zamanların istatistikleri
+tune stats
 
-Müzik dizinini `TUNE_MUSIC_DIRS` ile belirt (`:` ile ayırarak birden çok
-verilebilir); verilmezse `XDG_MUSIC_DIR`, sonra `~/Müzik` ve `~/Music` denenir.
+# Belirli bir yılın en çok dinlenen ilk 20 sanatçı/parçası
+tune stats --year 2024 --top 20
+```
+
+#### Adım 3: Paylaşılabilir Wrapped Kartınızı Üretin
+Sosyal medyada paylaşmak üzere şık bir kart oluşturun:
 
 ```bash
+# Kare formatında (1080x1080) PNG çıktısı
+tune wrapped --year 2024 --out 2024-wrapped.png
+
+# Hikaye / Story formatında (1080x1920) PNG çıktısı
+tune wrapped --year 2024 --format story --out 2024-story.png
+
+# Vektörel SVG olarak kaydetmek için
+tune wrapped --year 2024 --out 2024-wrapped.svg
+```
+
+---
+
+### 3. Müzik Dinleme ve Kütüphane Yönetimi
+
+#### Yerel Müzik Klasörlerini Kullanma
+Müzik klasörünüzü belirtin ve kütüphanenizi indeksleyin:
+
+```bash
+# Müzik klasörünüzü tanımlayın (varsayılan: ~/Music veya ~/Müzik)
 export TUNE_MUSIC_DIRS=~/Müzik
 
-tune provider list          # sağlayıcılar ve yetenekleri
-tune provider scan          # dizinleri tara (bir kez; indeks kalıcı)
-tune provider test local    # ayakta mı, kaç parça görüyor
+# Müzik dosyalarını bir kez tarayın (indeks kalıcıdır)
+tune provider scan
 
-tune play "radiohead"              # ilk eşleşmeyi çal
-tune play "radiohead" --all        # eşleşenlerin hepsini kuyruğa al
-tune play "radiohead" --all --shuffle
-tune play "radiohead" --dry-run    # çalmadan kuyruğu göster
-tune play "radiohead" --all --tui  # terminal arayüzü
+# Kütüphanenizde arama yapın
+tune library search "Pink Floyd"
+
+# Terminal arayüzü (TUI) ile müzik çalın
+tune play "Comfortably Numb" --tui
 ```
 
-### Uzak sunucular (Subsonic / Jellyfin)
+#### Uzak Sunucu Ekleme (Navidrome / Subsonic / Jellyfin)
+Kendi kişisel müzik sunucunuzu bağlayın:
 
 ```bash
-tune provider add subsonic --url https://muzik.ev --user adin --name ev
-tune provider add jellyfin --url https://jf.ev --user adin
-tune provider add jellyfin --url https://jf.ev --user adin --api-key ANAHTAR
+# Subsonic / Navidrome sunucusu ekleme:
+tune provider add subsonic --url https://muzik.sunucum.com --user kullaniciadi --name ev
 
-tune provider servers       # kayıtlılar (kimlik bilgisi gösterilmez)
-tune provider test ev       # ayakta mı, kaç parça görüyor
-tune provider remove ev
+# Jellyfin sunucusu ekleme:
+tune provider add jellyfin --url https://jf.sunucum.com --user kullaniciadi
+
+# Kayıtlı sunucuları listeleme ve durumunu test etme:
+tune provider servers
+tune provider test ev
+
+# Uzak sunucudaki bir şarkıyı arayıp çalma:
+tune play "Daft Punk" --all --tui
 ```
 
-Parola **argüman olarak alınmaz** — kabuk geçmişine ve `ps` çıktısına düşerdi.
-İstemden ya da `TUNE_PASSWORD` ortam değişkeninden okunur. Diskte de parola
-durmaz: Subsonic'te protokolün kendi salt/token'ı, Jellyfin'de bir erişim
-anahtarı saklanır (`servers.json`, unix'te `0600`).
+> 🔐 **Güvenlik Notu:** Parolanız komut satırına yazılmaz (böylece terminal geçmişine düşmez). Komutu çalıştırdığınızda yankısız olarak sorulur veya `TUNE_PASSWORD` ortam değişkeninden güvenle okunur.
 
-Kayıt sırasında sunucuya bağlanılıp kimlik doğrulanır; `--no-verify` ile
-atlanabilir. `--name` verilmezse ad adresten türetilir
-(`https://muzik.ev:4533` → `muzik`).
+---
 
-Ses **röle edilmez**: akışı senin makinen doğrudan sunucudan çeker.
+## ⌨️ Terminal Arayüzü (TUI) Kısayolları
 
-`--tui` kuyruğu, ilerleme çubuğunu ve çalan parçayı gösterir:
+`tune play "<arama>" --tui` komutunu çalıştırdığınızda açılan arayüzü aşağıdaki tuşlarla yönetebilirsiniz:
 
-| tuş | ne yapar |
-|---|---|
-| boşluk / `p` | duraklat–sürdür |
-| `n` / `b` | sonraki / önceki parça |
-| `↑` `↓` (ya da `k` `j`) | kuyrukta seçim |
-| `enter` | seçili parçayı çal |
-| `s` | karıştır |
-| `r` | tekrar kipi (kapalı → tümü → tek) |
-| `q` / `Esc` | çık |
+| Tuş | İşlev |
+| :--- | :--- |
+| <kbd>Boşluk</kbd> / <kbd>p</kbd> | Oynat / Duraklat |
+| <kbd>n</kbd> / <kbd>b</kbd> | Sonraki parça / Önceki parça |
+| <kbd>↑</kbd> <kbd>↓</kbd> veya <kbd>k</kbd> <kbd>j</kbd> | Çalma listesinde (kuyrukta) gezinme |
+| <kbd>Enter</kbd> | Seçili parçayı hemen çal |
+| <kbd>s</kbd> | Karıştırma modunu aç / kapat (Shuffle) |
+| <kbd>r</kbd> | Tekrar modunu değiştir (Kapalı → Tümü → Tek Parça) |
+| <kbd>q</kbd> / <kbd>Esc</kbd> | Oynatıcıdan çık |
 
-Tarama indeksi kalıcıdır: `scan` bir kez çalışır, `play` diski taramaz.
-Sonraki taramalar artımlıdır — dosyanın damgası değişmediyse etiketleri
-yeniden okunmaz. Diskten sildiğin dosya katalogdan düşer ama **dinleme
-geçmişi kalır**; geçmiş ayrı bir tabloda ve hiç silinmiyor.
+---
 
-Çalınan her parça bir `listen` kaydı üretir ve `stats` çıktısına girer —
-import edilmiş geçmişle aynı tabloda.
+## 📖 Komut Satırı Referansı
 
-Desteklenen biçimler: FLAC, MP3, OGG, M4A/AAC, WAV.
+| Komut | Açıklama | Örnek |
+| :--- | :--- | :--- |
+| `tune import <dosya>` | Veri export zip arşivini veya dizinini içe aktarır | `tune import export.zip` |
+| `tune stats` | Dinleme istatistiklerini listeler | `tune stats --year 2024 --top 15` |
+| `tune wrapped` | Paylaşılabilir görsel Wrapped kartı üretir | `tune wrapped --format story --out kart.png` |
+| `tune play <sorgu>` | Kütüphaneden parça arar ve çalar | `tune play "queen" --all --shuffle --tui` |
+| `tune library search <sorgu>` | Yerel ve uzak kütüphanede tam metin arama yapar | `tune library search "bohemian"` |
+| `tune provider list` | Mevcut müzik sağlayıcılarını listeler | `tune provider list` |
+| `tune provider scan` | Yerel müzik klasörlerini artımlı olarak tarar | `tune provider scan` |
+| `tune provider add` | Yeni bir Subsonic veya Jellyfin sunucusu ekler | `tune provider add subsonic --url https://...` |
+| `tune provider servers` | Kayıtlı uzak sunucuları listeler | `tune provider servers` |
+| `tune provider test <ad>` | Sağlayıcının bağlantısını ve parça sayısını sınar | `tune provider test local` |
+| `tune resolve <sorgu>` | Bir parçanın kanonik kimlik çözümlemesini test eder | `tune resolve "Daft Punk - Get Lucky"` |
+| `tune diag` | Son işlemin detaylı tanı ve hata raporunu görüntüler | `tune diag` |
 
-Her komut `--json` destekler:
+> 💡 **İpucu:** Herhangi bir komutun sonuna `--json` ekleyerek çıktıyı JSON formatında alabilir ve `jq` gibi araçlarla filtreleyebilirsiniz.
 
-```bash
-tune stats --year 2024 --json | jq '.report.top_artists[0]'
-```
+---
 
-## Tasarım kararları
+## 🗺️ Yol Haritası
 
-Bunlar tercih değil, projenin şekli:
+- [x] **Faz 0: Kimlik & İstatistik Katmanı** — Spotify export içe aktarma, SQLite depolama, istatistik motoru, kanonik kimlik eşleme.
+- [x] **Faz 0.5: Paylaşılabilir Wrapped** — SVG/PNG kart üretimi (Kare ve Dikey Hikaye şablonları).
+- [x] **Faz 1: Evrensel Oynatıcı** — Yerel dosya oynatma (FLAC, MP3 vb.), Subsonic/Jellyfin akışı, dahili scrobbling, TUI oynatıcı.
+- [ ] **Faz 2: Eklenti Ekosistemi** — JSON-RPC tabanlı çok dilli eklenti desteği, parmak iziyle şarkı tanıma (AcoustID).
+- [ ] **Faz 3: Modern Masaüstü Arayüzü (GUI) & Temalar** — Tauri tabanlı masaüstü uygulaması ve topluluk temaları.
+- [ ] **Faz 4: Senkronize Odalar (Birlikte Dinleme)** — Ses akışı röle edilmeden, zaman çapasıyla arkadaşlarınızla eş zamanlı müzik dinleme.
+- [ ] **Faz 5: Mobil Entegrasyon** — iOS ve Android için yerel istemciler (`uniffi`).
 
-**İçe aktarma export dosyalarından yapılır, API'den değil.** Sağlayıcı API'si
-geçmişi vermez, verse de şartları değiştirebilir. Export hakkı yasal ve kalıcıdır.
+---
 
-**Ses asla röle edilmez.** Birlikte dinleme (Faz 4) her istemcinin *kendi*
-kaynağından çaldığı, ağdan yalnızca bir zaman çapasının geçtiği bir tasarım.
+## 🤝 Katkıda Bulunma
 
-**Bütün mantık `tune-core` içinde.** CLI ince bir kabuk: argüman ayrıştırma,
-çekirdek çağrısı, çıktı biçimleme. Gelecek GUI ve mobil bağlamalar aynı
-çekirdeği çağıracak — kod üç kez yazılmasın diye.
+Katkılarınızı memnuniyetle karşılıyoruz!
+Detaylı geliştirici rehberi ve test yönergeleri için lütfen [`CONTRIBUTING.md`](CONTRIBUTING.md) dosyasına göz atın.
 
-**Sağlayıcı eklentileri alt süreç + JSON-RPC.** Eklenti çökerse çekirdek düşmez
-ve eklentiler herhangi bir dilde yazılabilir.
-
-**Her başarısızlık hangi aşamada olduğunu söyler.** `ADIM: IDENTITY_RESOLVE`
-gibi. Kısmi başarı üreten her işlem özet döndürür: kaç kayıt geldi, kaçı hangi
-yolla çözüldü, kaçı çözülemedi. Sessizce yutulan veri yok.
-
-**Oynatma durumu bir çapadır, bildirim akışı değil.** Çekirdek
-`{parça, duvar_saati, pozisyon, hız, durum}` verir; arayüz aradaki zamanı
-kendi hesaplar. Aynı primitif ileride odalarda (birlikte dinleme) ağdan
-dağıtılacak — iki ayrı durum modeli tutulmuyor.
-
-## Kanonik kimlik
-
-Bir parçayı sağlayıcıdan bağımsız kimliğe bağlama zinciri, bu sırayla:
-
-```
-ISRC → MusicBrainz ID → bulanık eşleşme (sanatçı+başlık+süre) → AcoustID parmak izi
-```
-
-Her adım bir güven skoru döndürür. Doğruluk `fixtures/identity/cases.json`
-içindeki elle etiketlenmiş vaka kümesiyle ölçülür — **69 vaka, 22'si negatif**
-(eşleşmemesi gereken). Bu sayı projenin en önemli metriği ve her değişiklikte
-ölçülüyor. Küme canlı kayıt, cover, remaster, klasik müzik, transliterasyon ve
-aynı adlı farklı sanatçı vakalarını içerir.
-
-## Geliştirme
-
+Projeyi yerelinizde test etmek için:
 ```bash
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 ```
 
-Üçü de temiz geçmeden bir değişiklik bitmiş sayılmaz. Ayrıntı:
-[`CONTRIBUTING.md`](CONTRIBUTING.md).
+---
 
-## Lisans
+## 📜 Lisans
 
-MIT veya Apache-2.0 — hangisini istersen.
-Bkz. [LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE](LICENSE-APACHE).
+Bu proje çift lisans altında sunulmaktadır:
+
+* **MIT Lisansı** ([LICENSE-MIT](LICENSE-MIT))
+* **Apache Lisansı, Sürüm 2.0** ([LICENSE-APACHE](LICENSE-APACHE))
+
+Tercihinize göre istediğiniz lisansı kullanabilirsiniz.

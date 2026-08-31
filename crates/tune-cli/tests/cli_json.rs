@@ -256,6 +256,55 @@ fn playing_a_local_file_records_a_listen_in_the_same_table_as_imports() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+/// Kuyruktaki her parça çalınır, her biri bir dinleme üretir ve
+/// `stats` **aynı sayıyı** gösterir (D-024 gapless + §1.6).
+///
+/// Buradaki asıl tuzak tutarlılık: etiketsiz fixture'ların süresi katalogda
+/// bilinmiyordu, `PlayRule` "parçanın yarısı" kolunu kullanamayıp 30 sn
+/// eşiğine düşüyordu. Sonuç, CLI'nin "4 dinleme kaydedildi" deyip
+/// istatistiğin 2 göstermesiydi. Süre artık kaptan okunuyor.
+#[test]
+fn every_queued_track_produces_a_listen_that_stats_also_counts() {
+    let dir = temp_dir("gapless");
+    let music = audio_fixtures();
+
+    let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["provider", "scan"]);
+    assert!(ok, "{stderr}");
+
+    // "Sanat" dört fixture'ın hepsiyle eşleşiyor (ikisi etiketsiz).
+    let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["play", "Sanat", "--all"]);
+    if !ok {
+        if stderr.contains("PLAYBACK_OUTPUT") {
+            eprintln!("ses çıkışı yok — gapless testi atlanıyor:\n{stderr}");
+            std::fs::remove_dir_all(&dir).ok();
+            return;
+        }
+        panic!("çalma başarısız: {stderr}");
+    }
+    assert!(stdout.contains("4 parça kuyruğa alındı"), "{stdout}");
+    assert!(
+        stdout.contains("kaydedilen dinleme: 4"),
+        "kuyruktaki her parça bir dinleme üretmeli:\n{stdout}"
+    );
+
+    let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["stats", "--json"]);
+    assert!(ok, "{stderr}");
+    let value: serde_json::Value = serde_json::from_str(&stdout).expect("JSON");
+    let report = &value["report"];
+    assert_eq!(
+        report["plays"],
+        serde_json::json!(4),
+        "CLI'nin saydığı ile istatistiğin saydığı aynı olmalı: {report}"
+    );
+    assert_eq!(
+        report["skipped_short"],
+        serde_json::json!(0),
+        "baştan sona çalınan parça 'kısa' sayılmamalı: {report}"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 /// İndeks kalıcı: `play` tarama yapmaz, bir kez taranmış katalogdan okur.
 #[test]
 fn the_catalog_persists_so_play_does_not_rescan() {
