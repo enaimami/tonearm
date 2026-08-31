@@ -587,3 +587,40 @@ Jellyfin'de kurulum sihirbazı API'den geçiliyor (`/Startup/Configuration`,
 ters vekil arkasındaki yönlendirme, sunucu tarafı transcode, büyük kütüphane
 (4-5 parça ile sınandı) ve Subsonic'in Navidrome dışındaki uygulamaları
 (Airsonic, Gonic, LMS).
+
+---
+
+## D-023 — Reddedilen istek hangi aşamaya ait
+**Tarih:** 2026-08-31
+**Soru:** Sunucu `HTTP 401` döndürdüğünde hata hangi `Stage` ile raporlanmalı?
+Eskiden her 2xx-dışı kod `NETWORK_REQUEST` idi.
+**Karar:** **`401` ve `403` → `PROVIDER_CALL`**; geri kalan her kod
+(`404`, `429`, `5xx`…) `NETWORK_REQUEST` olarak kalır.
+**Gerekçe:** K9'un ayrımı: "ulaşamadım" ile "hayır dedi" farklı tanılar ve
+farklı çözümleri var. `401` bir taşıma hatası değildir — bağlantı kuruldu,
+istek gitti, sunucu okudu ve reddetti. `NETWORK_REQUEST` demek kullanıcıyı
+ağını kurcalamaya gönderir; oysa yapması gereken şey kimliğini düzeltmek.
+Kusur gerçek Jellyfin'e karşı görüldü (D-022 doğrulaması): yanlış parola
+`ADIM: NETWORK_REQUEST` diye raporlanıyordu.
+
+`404` ve `5xx` bilerek taşıma katmanında bırakıldı: onlarda hatanın hangi
+katmandan geldiği gövde okunmadan bilinemez, tahmin etmek yanlış tanı üretir.
+
+**Sonuç:**
+- Kural tek yerde: `net::stage_for_status`. Hem `HttpResponse::error_for_status`
+  hem `UreqClient::open_stream` (akış açarken alınan 401) onu çağırıyor.
+- Geçen bir birim testi **kasten** değişti (`jellyfin::an_http_error_is_
+  reported_with_its_status_and_body`); §0.1 gereği önce soruldu.
+- Aynı kusur sınıfı iki yerde daha düzeltildi:
+  - `remote::prepare_server` doğrulama hatası artık "erişilemedi" değil
+    "**doğrulanamadı**" diyor (D-022 doğrulama bölümü).
+  - `tune provider test` başlığı "ERİŞİLEMİYOR" değil "**KULLANILAMIYOR**":
+    `ProviderHealth.reachable == false`'ın iki sebebi var, başlık ikisini de
+    kapsayan kelimeyi seçiyor, sebebi `not` satırı söylüyor. `ProviderHealth`
+    API'si değişmedi — bu bir sunum kararı, CLI'nin işi (Altın Kural).
+
+**Yan bulgu — panik riski kapatıldı (K8).** `error_for_status` gövdeyi
+`String::truncate(200)` ile kırpıyordu; `truncate` karakter sınırının
+ortasına düşerse **panikler**. Sunucunun Türkçe (ya da herhangi bir çok
+baytlı) hata mesajı çekirdeği düşürebilirdi. Yerine sınıra hizalayan
+`net::clip` kondu, testle kilitli.

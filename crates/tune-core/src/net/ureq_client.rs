@@ -127,8 +127,10 @@ impl UreqClient {
                 .limit(1024)
                 .read_to_string()
                 .unwrap_or_else(|err| format!("(gövde okunamadı: {err})"));
+            // Aşama seçimi `error_for_status` ile aynı kuraldan (D-023):
+            // akış açarken 401 almak da bir kimlik sorunudur, ağ sorunu değil.
             return Err(crate::Error::new(
-                crate::diag::Stage::NetworkRequest,
+                super::stage_for_status(status),
                 crate::ErrorKind::HttpStatus {
                     url: url.to_owned(),
                     status,

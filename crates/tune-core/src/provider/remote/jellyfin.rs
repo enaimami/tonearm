@@ -505,7 +505,9 @@ mod tests {
 
         let err = provider.search("Ezhel", 5).await.unwrap_err();
         let text = err.chain_text();
-        assert!(text.starts_with("ADIM: NETWORK_REQUEST"), "{text}");
+        // D-023: sunucu ayaktaydı ve **reddetti**; bu bir ağ hatası değil.
+        // Kullanıcının yapacağı iş anahtarını yenilemek, ağını kurcalamak değil.
+        assert!(text.starts_with("ADIM: PROVIDER_CALL"), "{text}");
         assert!(text.contains("401"), "{text}");
         assert!(text.contains("expired"), "{text}");
     }

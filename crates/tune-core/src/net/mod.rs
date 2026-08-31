@@ -155,16 +155,48 @@ impl HttpResponse {
         if self.is_success() {
             return Ok(());
         }
-        let mut detail = self.text_lossy();
-        detail.truncate(200);
         Err(Error::new(
-            Stage::NetworkRequest,
+            stage_for_status(self.status),
             ErrorKind::HttpStatus {
                 url: url.to_owned(),
                 status: self.status,
-                detail,
+                detail: clip(&self.text_lossy(), DETAIL_LIMIT),
             },
         ))
+    }
+}
+
+/// Hata ayrıntısına alınan gövde uzunluğu (bayt).
+const DETAIL_LIMIT: usize = 200;
+
+/// Metni en fazla `limit` bayta kırpar — **karakter sınırında**.
+///
+/// `String::truncate` sınır ortasına düşerse panikler; sunucunun Türkçe
+/// (ya da herhangi bir çok baytlı) hata mesajı `tune`'u düşürebilirdi.
+/// K8: çekirdekte panik yok.
+pub(crate) fn clip(text: &str, limit: usize) -> String {
+    if text.len() <= limit {
+        return text.to_owned();
+    }
+    let mut end = limit;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text[..end].to_owned()
+}
+
+/// Bir HTTP durum kodunun hangi aşamaya ait olduğu (D-023).
+///
+/// `401`/`403` **taşıma hatası değildir**: bağlantı kuruldu, istek gitti,
+/// sunucu okudu ve reddetti. Bunu `NETWORK_REQUEST` diye raporlamak
+/// kullanıcıyı ağını kontrol etmeye gönderir; oysa yapması gereken şey
+/// kimliğini düzeltmek. K9'un "ulaşamadım ≠ hayır dedi" ayrımı burada da
+/// geçerli. Geri kalan kodlar (404, 5xx, 429…) taşıma katmanında kalıyor:
+/// onlarda hangi katmanın hata verdiği gövdeden okunmadan bilinemez.
+pub(crate) fn stage_for_status(status: u16) -> Stage {
+    match status {
+        401 | 403 => Stage::ProviderCall,
+        _ => Stage::NetworkRequest,
     }
 }
 
@@ -281,7 +313,7 @@ mod tests {
     #[test]
     fn non_2xx_becomes_an_error_carrying_the_body() {
         let response = HttpResponse {
-            status: 401,
+            status: 500,
             headers: Vec::new(),
             body: b"nope".to_vec(),
         };
@@ -290,8 +322,68 @@ mod tests {
             .unwrap_err();
         let text = err.chain_text();
         assert!(text.starts_with("ADIM: NETWORK_REQUEST"), "{text}");
-        assert!(text.contains("401"), "{text}");
+        assert!(text.contains("500"), "{text}");
         assert!(text.contains("nope"), "sunucunun dediği görünmeli: {text}");
+    }
+
+    /// D-023: reddedilmek ağ hatası değildir — aşama onu söylemeli.
+    #[test]
+    fn a_rejected_request_is_reported_at_the_provider_stage_not_the_network() {
+        for status in [401, 403] {
+            let response = HttpResponse {
+                status,
+                headers: Vec::new(),
+                body: b"Access token is invalid or expired.".to_vec(),
+            };
+            let text = response
+                .error_for_status("http://ev/Users/Me")
+                .unwrap_err()
+                .chain_text();
+            assert!(
+                text.starts_with("ADIM: PROVIDER_CALL"),
+                "{status} kimlik reddi: {text}"
+            );
+            assert!(text.contains(&status.to_string()), "{text}");
+        }
+
+        // Geri kalanı taşıma katmanında kalıyor: hangi katmanın hata verdiği
+        // gövde okunmadan bilinemez.
+        for status in [404, 429, 500, 502] {
+            let response = HttpResponse {
+                status,
+                headers: Vec::new(),
+                body: Vec::new(),
+            };
+            let text = response
+                .error_for_status("http://ev/rest/ping")
+                .unwrap_err()
+                .chain_text();
+            assert!(
+                text.starts_with("ADIM: NETWORK_REQUEST"),
+                "{status}: {text}"
+            );
+        }
+    }
+
+    /// Sunucunun çok baytlı hata mesajı `tune`'u **düşürmemeli** (K8).
+    #[test]
+    fn a_long_multibyte_body_is_clipped_without_panicking() {
+        // "ğ" 2 bayt: 200 baytlık sınır karakterin ortasına denk geliyor.
+        let response = HttpResponse {
+            status: 500,
+            headers: Vec::new(),
+            body: "ğ".repeat(300).into_bytes(),
+        };
+        let text = response
+            .error_for_status("http://ev/rest/ping")
+            .unwrap_err()
+            .chain_text();
+        assert!(text.contains('ğ'), "{text}");
+
+        assert_eq!(clip("kısa", 200), "kısa");
+        assert_eq!(clip(&"ğ".repeat(300), 200).len(), 200);
+        // Tek karakter geri gidilmeli, sınır ortada kalmamalı.
+        assert_eq!(clip(&"ğ".repeat(300), 201).len(), 200);
     }
 
     #[test]

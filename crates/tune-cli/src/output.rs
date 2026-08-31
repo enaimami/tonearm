@@ -266,13 +266,16 @@ pub fn provider_test(report: &ProviderTestReport) -> String {
     let _ = writeln!(out, "sağlayıcı : {}", report.info.id);
     let _ = writeln!(out, "ad        : {}", report.info.display_name);
     let _ = writeln!(out, "yetenek   : {}", report.info.capabilities);
+    // "ERİŞİLEMİYOR" demiyoruz: `reachable == false`'ın iki sebebi var ve
+    // biri "sunucu ayakta ama kimliği reddetti". Başlık ikisini de kapsayan
+    // kelimeyi seçiyor, hangisi olduğunu alttaki `not` söylüyor (D-023).
     let _ = writeln!(
         out,
         "durum     : {}",
         if report.health.reachable {
-            "erişilebilir"
+            "kullanılabilir"
         } else {
-            "ERİŞİLEMİYOR"
+            "KULLANILAMIYOR"
         }
     );
     if let Some(count) = report.health.track_count {
