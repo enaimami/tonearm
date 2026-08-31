@@ -69,6 +69,16 @@ impl Config {
         self.data_dir.join("library.db")
     }
 
+    /// Kayıtlı uzak sunucular ve kimlik bilgileri (D-021).
+    ///
+    /// Veritabanından ayrı bir dosya: kimlik bilgisi kütüphane verisi
+    /// değildir ve aynı dosyada durması yedekleme/paylaşma davranışlarını
+    /// karıştırır. Unix'te `0600` yazılır.
+    #[must_use]
+    pub fn servers_path(&self) -> PathBuf {
+        self.data_dir.join("servers.json")
+    }
+
     /// Son çalıştırmanın tanı raporu.
     #[must_use]
     pub fn last_run_path(&self) -> PathBuf {
@@ -133,6 +143,10 @@ mod tests {
         assert_eq!(
             config.last_run_path(),
             PathBuf::from("/veri/tune/last-run.json")
+        );
+        assert_eq!(
+            config.servers_path(),
+            PathBuf::from("/veri/tune/servers.json")
         );
     }
 }

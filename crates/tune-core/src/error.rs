@@ -112,6 +112,30 @@ pub enum ErrorKind {
 
     #[error("ses hattı hatası: {detail}")]
     Audio { detail: String },
+
+    /// Taşıma katmanı hatası: bağlanamadı, zaman aşımı, TLS, DNS.
+    ///
+    /// Uygulama katmanı hatasından (`RemoteApi`) ayrı: "sunucuya
+    /// ulaşamadım" ile "sunucu hayır dedi" farklı tanılardır (K9).
+    #[error("ağ isteği başarısız: {url} ({detail})")]
+    Network { url: String, detail: String },
+
+    /// Sunucu 2xx dışında bir durum kodu döndürdü.
+    #[error("sunucu HTTP {status} döndürdü: {url} — {detail}")]
+    HttpStatus {
+        url: String,
+        status: u16,
+        detail: String,
+    },
+
+    /// Sunucu HTTP 200 döndü ama gövdede hata var (Subsonic'in yaptığı gibi).
+    #[error("{server} isteği reddetti: {message} (kod {code}, uç nokta: {endpoint})")]
+    RemoteApi {
+        server: String,
+        endpoint: String,
+        code: i64,
+        message: String,
+    },
 }
 
 /// Çekirdek sonuç tipi.

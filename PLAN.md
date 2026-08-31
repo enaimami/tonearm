@@ -427,13 +427,137 @@ tarama yapmıyor; kullanıcı bir kez `tune provider scan` der, sonraki
 **Kalan:** dizin izleme (watch) yok — değişiklikler `provider scan` ile
 alınıyor.
 
-### 1.3 Subsonic / Jellyfin istemcisi — SIRADAKİ
+### 1.3 Subsonic / Jellyfin istemcisi — KOD TAMAM, GERÇEK SUNUCUDA DOĞRULANMADI
 Subsonic API yaygın standart. Bu, ileride kendi sunucunun Subsonic uyumlu
 konuşması ihtimalini de açık tutar.
 
-`AudioSource::HttpStream` varyantı bugünden var ama çalınmıyor: `Player`
-açık bir "Faz 1.3'te gelecek" hatası döndürüyor (K10 — sessizce hiçbir şey
-yapmıyor değil).
+> KARAR NOKTASI: 1.3'e başlamak §0.1'deki üç tetikleyiciye birden basıyor —
+> **yeni bağımlılık**, **bilmediğin servis davranışı**, **geri alınamaz tasarım**.
+> **KAPANDI — D-019…D-022.** Aşağıdaki dört alt soru da cevaplandı; asıl soru
+> metni tarih olarak bu bölümün sonunda duruyor.
+
+**Uygulandı.** Dört karar da koda döndü:
+
+- **D-019 (kapsam):** Subsonic **ve** Jellyfin. `provider/remote/` altında
+  ortak plumbing (sunucu kaydı, kimlik saklama, akış kaynağı) + `subsonic.rs`
+  + `jellyfin.rs`. Ayrışan yalnızca uç nokta ve JSON şekli.
+- **D-020 (taşıma):** `net::HttpClient` trait'i **her zaman** derleniyor;
+  somut istemci (`ureq` + rustls) `http-client` feature'ı arkasında. Sağlayıcı
+  mantığı feature kapalıyken de derleniyor ve test ediliyor — çağıran kendi
+  `Arc<dyn HttpClient>`'ını verirse çalışıyor da. Ağaç ölçümü D-020'de.
+- **D-021 (kimlik):** `servers.json`, veri dizininde, unix'te `0600`. Şema
+  değişmedi. Subsonic'te parola diske düz yazılmıyor (salt + `md5(parola+salt)`),
+  Jellyfin'de bir kez erişim anahtarına çevriliyor. md5 için bağımlılık
+  eklenmedi, RFC 1321 çekirdekte (`provider/remote/md5.rs`).
+- **D-022 (test yolu):** `tests/remote_http.rs` — `std::net` ile elle yazılmış
+  sahte sunucu, **gerçek `UreqClient`** ile konuşuyor. Yeni bağımlılık yok.
+
+`AudioSource::HttpStream` artık çalınıyor. `playback/http_source.rs` akışı
+arka planda indirirken çözücü ilk baytları okumaya başlıyor; `Player`'ın
+eski "Faz 1.3'te gelecek" hatası yerini **derleme kararını söyleyen** bir
+hataya bıraktı (`http-client` kapalıysa: "bu derlemede yok", K9).
+
+Üç ayrıntı kayda değer:
+
+- **Subsonic hatayı HTTP 200 ile gönderiyor.** Zarftaki `status: "failed"`
+  okunmazsa "her şey yolunda" sanılırdı. Zarf her yanıtta denetleniyor ve
+  hata `ErrorKind::RemoteApi` oluyor — taşıma hatasından (`Network`,
+  `HttpStatus`) ayrı, çünkü "sunucuya ulaşamadım" ile "sunucu hayır dedi"
+  farklı tanılar ve farklı çözümler (K9). Yeni aşama: `NETWORK_REQUEST`.
+- **Kimlik nerede taşınır sağlayıcıya göre değişiyor.** Subsonic'te sorgu
+  dizesinde (protokolün dayattığı yol), Jellyfin'de `Authorization`
+  başlığında. İkincisi kasıtlı: akış adresi log'a ya da ekrana düşerse
+  anahtar sızmasın. Testler ikisini de kilitliyor.
+- **Ulaşılamamak bir sağlık cevabıdır**, komutun hatası değil. `provider test`
+  sebebi gösteriyor; `health()` `Err` döndürmüyor.
+
+**Doğrulanan ve doğrulanmayan.** `remote_http.rs`'in 10 testi gerçek soket
+üzerinden şunları kilitliyor: kaydın parolayı tele hiç çıkarmadığı, Jellyfin'in
+parolayı anahtara çevirdiği, 200+`failed` tuzağı, kapalı portun sebepli bir
+sağlık cevabı olduğu, akışın tam inip geriye arandığı ve **fixture FLAC'ının
+HTTP üzerinden gerçekten çalındığı** (ses aygıtı yoksa test kendini atlıyor,
+nedenini `stderr`'e yazarak).
+
+Sahte sunucu protokolün *bizim anladığımız hâlini* kilitler, doğru
+anladığımızı kanıtlamaz: yönlendirme, transcode, tarih biçimleri ve sürüm
+farkları görünmüyor. D-022 gereği **1.3 "gerçek sunucuda doğrulanmadı" diye
+işaretli kalıyor**; kapanışı kullanıcının Docker'da kuracağı Navidrome /
+Jellyfin denemesine bağlı.
+
+**CLI yüzeyi** (Altın Kural sınavı geçildi — kabukta karar yok):
+
+```
+tune provider add subsonic --url https://muzik.ev --user adin [--name ev] [--no-verify]
+tune provider add jellyfin --url https://jf.ev --user adin [--api-key ANAHTAR]
+tune provider servers      # kimlik bilgisi gösterilmez
+tune provider remove <ad>
+```
+
+Parola **argüman değil**: `TUNE_PASSWORD`'dan ya da terminalden yankısız
+okunuyor — komut satırına yazılan parola kabuk geçmişine ve `ps` çıktısına
+düşerdi. Tty yoksa sessizce yankılı okumaya düşülmüyor, `TUNE_PASSWORD`
+gösteriliyor. Yankısız okuma için yeni bağımlılık yok (`crossterm` zaten
+TUI için vardı). Ad önerisi (`https://muzik.ev:4533` → `muzik`) çekirdekte,
+CLI'de değil: GUI de aynı öneriyi gösterecek.
+
+<details>
+<summary>Karar noktasının özgün metni (tarih olarak duruyor)</summary>
+
+```
+KARAR GEREKLİ: Faz 1.3 uzak sağlayıcı — kapsam, taşıma katmanı, kimlik, test yolu
+
+Bağlam:  tune-core'un bağımlılık ağacında bugün HTTP/TLS yok; `tokio` bile
+         yalnızca dev-dependency (genel API çalışma zamanından bağımsız, K:
+         "çekirdek #[tokio::main] kurmasın"). İlk ağ çağrısı bu dengeyi
+         değiştirir. Ayrıca D-017 "kullanıcının çalışan bir Subsonic/Jellyfin
+         sunucusu YOK" varsayımını kayda geçirmişti; D-003 ise "hangi ortam
+         gerçekten test edilebiliyorsa o önce gelmeli" diyor.
+
+S1 — Kapsam
+  A: Yalnızca Subsonic (OpenSubsonic). Jellyfin de Subsonic eklentisiyle
+     konuşabiliyor. — artı: tek API, tek test yüzeyi, 1.3 hızlı kapanır.
+     eksi: eklentisiz Jellyfin kurulumları dışarıda kalır.
+  B: Subsonic + yerel Jellyfin API'si. — artı: kapsama geniş.
+     eksi: iki ayrı istemci, iki auth modeli; 1.3 iki katına çıkar.
+  Önerim: A. PLAN'ın kendi gerekçesi ("Subsonic yaygın standart") bunu
+  destekliyor; Jellyfin'i ayrı sağlayıcı olarak Faz 2'de eklenti sınırının
+  ilk gerçek müşterisi yapmak daha temiz.
+
+S2 — Taşıma katmanı / bağımlılık
+  A: Çekirdeğe `reqwest` (rustls, default-features kapalı). — artı: async
+     API'ye doğrudan oturur. eksi: en büyük ağaç büyümesi (hyper+tokio+rustls),
+     tokio'yu çekirdeğe **kalıcı** bağımlılık yapar; mobil binary boyutu.
+  B: Çekirdeğe `ureq` (rustls). — artı: küçük ağaç, tokio yok.
+     eksi: bloklayan API; async trait metodunun içinde yürütücüyü bloklar,
+     sarmalamak gerekir.
+  C: Çekirdekte `HttpClient` trait'i + Subsonic mantığı; somut istemci
+     `http-client` feature'ı arkasında (tıpkı `audio` gibi), CLI açar.
+     — artı: K "ağa dokunan her şey trait arkasında olsun, testler sahte
+     kullansın" kuralının tam karşılığı; ağ olmadan test edilebilir; mobil
+     kendi taşımasını verebilir. eksi: bir dolaylılık katmanı daha.
+  Önerim: C — trait çekirdekte, somut istemci feature arkasında. Feature
+  içinde hangi crate (ureq mi reqwest mi) ikincil ve geri alınabilir bir
+  seçime dönüşür; asıl karar olan "çekirdek ağa doğrudan bağlanmasın" korunur.
+
+S3 — Kimlik doğrulama ve saklama
+  Subsonic auth: `t=md5(parola+salt)&s=salt` (md5 için bir crate gerekir) ya
+  da HTTPS üzerinde düz `p=`. Sunucu adresi + kimlik nereye yazılacak?
+  A: `config.rs`'in yanında düz metin config dosyası (0600).
+  B: SQLite'ta yeni tablo (şema v3 → migration).
+  C: OS anahtarlığı (`keyring` crate) — yeni bağımlılık, başsız Linux'ta kırılgan.
+  Önerim: A + md5 token (parolayı diskte düz tutmamak için salt/token yolu),
+  şema değişmeden. Anahtarlık Faz 2'de eklenti izin modeliyle birlikte.
+
+S4 — Test yolu (bunu cevaplamadan 1.3 "bitti" sayılamaz)
+  Elinde çalışan bir Subsonic/Jellyfin sunucusu **var mı**?
+  Yoksa doğrulama, testte ayağa kalkan sahte bir HTTP sunucusuna dayanır
+  (std::net ile elle yazılabilir, yeni bağımlılık gerekmez) — gerçek sunucuya
+  karşı hiç koşmamış bir istemci olur. D-003'ün kısıtı burada yeniden çıkıyor.
+  Önerim: sunucu yoksa S2/C artı elle yazılmış sahte sunucu; ve 1.3
+  "kod tamam, gerçek sunucuda doğrulanmadı" diye açıkça işaretlensin.
+```
+
+</details>
 
 ### 1.4 Oynatma hattı — TAMAM
 `symphonia` (çözme) + `cpal` (çıkış). Saf Rust, harici bağımlılık yok.
@@ -507,16 +631,16 @@ davranışın aynısı — yani TUI o tasarımın çalıştığının kanıtı o
 
 ---
 
-### 1.8 Faz 1 durum — çalan bir player var
+### 1.8 Faz 1 durum — yerel **ve** uzak kaynaktan çalıyor
 
-**159 test**, clippy ve fmt temiz. `tune play` ve `tune play --tui` uçtan uca
+**197 test**, clippy ve fmt temiz. `tune play` ve `tune play --tui` uçtan uca
 çalışıyor.
 
 | Bölüm | Durum |
 |---|---|
 | 1.1 Provider trait | TAMAM |
 | 1.2 Yerel sağlayıcı | Kısmen — indeks kalıcı; watch yok |
-| 1.3 Subsonic/Jellyfin | Açık — sıradaki |
+| 1.3 Subsonic/Jellyfin | Kod tamam — gerçek sunucuda doğrulanmadı (D-022) |
 | 1.4 Ses hattı | TAMAM |
 | 1.5 Kuyruk | Kısmen — gapless yok |
 | 1.6 Scrobbling | TAMAM |
@@ -531,11 +655,18 @@ kısmen aşıldı: ses hattı gerçek dosyalarla, gerçek aygıtta sınanıyor.
 **Ses aygıtı olmayan ortamda testler kendini atlıyor** (CI için). Atlama
 sessiz değil: nedenini `stderr`'e yazıyor.
 
-**Faz 1'in çekirdeği tamam.** Kalan üç iş, hiçbiri bloklayıcı değil:
-1.3 (Subsonic/Jellyfin — uzak kaynak), gapless geçiş, dizin izleme (watch).
+**Faz 1'in çekirdeği tamam.** Kalan iki iş, ikisi de bloklayıcı değil:
+gapless geçiş ve dizin izleme (watch).
 
-Faz 1'in bitti ölçütü ("yerel ve uzak kaynaktan çalıyor") **uzak kaynak
-gelmeden karşılanmış sayılmaz**; 1.3 yapılmadan Faz 2'ye geçilmemeli.
+Faz 1'in bitti ölçütü ("yerel ve uzak kaynaktan çalıyor") **koda göre
+karşılandı**: uzak akış testte gerçek soketten inip gerçek aygıtta çalıyor.
+Ama D-022 gereği kalan tek doğrulama duruyor — **gerçek bir Navidrome /
+Jellyfin kurulumuna karşı bir kez koşturmak.** Faz 2'ye geçmeden önce
+yapılması gereken tek iş bu; yeni kod değil, bir deneme.
+
+**Faz 2'ye devredilen borç:** `keyring` kararı (D-021, kimlik bilgisi
+`servers.json`'da düz duruyor — token/anahtar, parola değil) eklenti izin
+modeliyle birlikte yeniden bakılacak.
 
 ---
 

@@ -21,6 +21,7 @@ use crate::library::{
 };
 use crate::model::{Listen, PlayRule, TrackRef};
 use crate::playback::QueueItem;
+use crate::provider::remote::{self, NewServer, RemoteServer, ServerKind, StoredAuth};
 use crate::provider::{ProviderHealth, ProviderInfo, ProviderRegistry, ScanSummary};
 use crate::stats::{self, StatsQuery, StatsReport};
 use crate::wrapped::{self, CardSize, WrappedData};
@@ -101,6 +102,65 @@ pub struct ScanReport {
     pub summary: ScanSummary,
     /// Kalıcı kataloğa ne yazıldığı: eklenen, güncellenen, düşen satırlar.
     pub write: CatalogWriteSummary,
+    pub diag: DiagReport,
+}
+
+/// Kayıtlı bir uzak sunucunun **sırsız** özeti.
+///
+/// Token ve API anahtarı bu tipte **yok**: `--json` çıktısı boru hattına,
+/// log'a ya da hata raporuna girebilir. Kimlik bilgisi yalnızca `0600`
+/// izinli `servers.json`'da durur (D-021).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServerSummary {
+    pub id: ProviderId,
+    pub kind: ServerKind,
+    pub url: String,
+    pub username: String,
+    /// Hangi kimlik yolu: `subsonic_token` ya da `api_key`.
+    pub auth: String,
+}
+
+impl ServerSummary {
+    fn of(server: &RemoteServer) -> Self {
+        Self {
+            id: server.id.clone(),
+            kind: server.kind,
+            url: server.url.clone(),
+            username: server.username.clone(),
+            auth: match server.auth {
+                StoredAuth::SubsonicToken { .. } => "subsonic_token".to_owned(),
+                StoredAuth::ApiKey { .. } => "api_key".to_owned(),
+            },
+        }
+    }
+}
+
+/// Kayıtlı sunucuların listesi.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServerListReport {
+    pub servers: Vec<ServerSummary>,
+    /// Kayıt dosyasının yolu — "nereye yazıldı?" sorusu tanıya ait.
+    pub path: std::path::PathBuf,
+    pub diag: DiagReport,
+}
+
+/// Sunucu ekleme sonucu.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServerAddReport {
+    pub server: ServerSummary,
+    /// Sunucuya bağlanıp kimlik doğrulandı mı.
+    pub verified: bool,
+    /// Kayıt sırasında oluşan gözlemler (zayıf entropi, öğrenilemeyen alan…).
+    pub notes: Vec<String>,
+    pub diag: DiagReport,
+}
+
+/// Sunucu silme sonucu.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServerRemoveReport {
+    pub id: ProviderId,
+    pub removed: bool,
+    pub remaining: usize,
     pub diag: DiagReport,
 }
 
@@ -467,6 +527,141 @@ impl Session {
         self.finish(rec, result, |(info, health), diag| ProviderTestReport {
             info,
             health,
+            diag,
+        })
+    }
+
+    /// Bir uzak sunucu kaydeder (§1.3, D-019/D-021).
+    ///
+    /// Parola **saklanmaz**: Subsonic'te salt/token türetilir, Jellyfin'de
+    /// erişim anahtarına çevrilir. `spec.verify` açıksa kaydetmeden önce
+    /// sunucuya bağlanılır — yanlış parolayı bir hafta sonra "çalmıyor"
+    /// diye keşfetmektense şimdi söylemek iyidir.
+    ///
+    /// # Errors
+    /// Aynı adla kayıt varsa, adres/kimlik eksikse, doğrulama başarısızsa
+    /// ya da kayıt dosyası yazılamazsa.
+    pub async fn add_server(
+        &self,
+        spec: NewServer,
+        http: Arc<dyn crate::net::HttpClient>,
+    ) -> Result<ServerAddReport> {
+        let mut rec = Recorder::start(
+            format!("provider add {} {}", spec.kind, spec.id),
+            Some(self.config.data_dir().to_path_buf()),
+        );
+
+        let path = self.config.servers_path();
+        let verify = spec.verify;
+        let result = async {
+            let mut servers = remote::load_servers(&path)?;
+            if spec.id.as_str() == "local" {
+                return Err(Error::new(
+                    Stage::ConfigLoad,
+                    ErrorKind::InvalidInput {
+                        detail: "`local` adı yerel dosya sağlayıcısına ait".to_owned(),
+                    },
+                ));
+            }
+            if servers.iter().any(|existing| existing.id == spec.id) {
+                // Üzerine sessizce yazmak, kullanıcının çalışan kaydını
+                // fark etmeden değiştirmek olurdu.
+                return Err(Error::new(
+                    Stage::ConfigLoad,
+                    ErrorKind::InvalidInput {
+                        detail: format!(
+                            "{} adında bir sunucu zaten kayıtlı; önce `tune provider remove {}`",
+                            spec.id, spec.id
+                        ),
+                    },
+                ));
+            }
+
+            let (server, notes) = remote::prepare_server(&spec, http).await?;
+            let summary = ServerSummary::of(&server);
+            servers.push(server);
+            remote::save_servers(&path, &servers)?;
+            Ok((summary, notes))
+        }
+        .await;
+
+        if let Ok((_, notes)) = &result {
+            rec.set("server.verified", i64::from(verify));
+            for note in notes {
+                rec.note(note.clone());
+            }
+        }
+
+        self.finish(rec, result, move |(server, notes), diag| ServerAddReport {
+            server,
+            verified: verify,
+            notes,
+            diag,
+        })
+    }
+
+    /// Kayıtlı uzak sunucuları listeler (kimlik bilgisi olmadan).
+    ///
+    /// # Errors
+    /// Kayıt dosyası okunamaz ya da bozuksa.
+    pub fn list_servers(&self) -> Result<ServerListReport> {
+        let mut rec = Recorder::start(
+            "provider servers".to_owned(),
+            Some(self.config.data_dir().to_path_buf()),
+        );
+        let path = self.config.servers_path();
+        let result = remote::load_servers(&path).map(|servers| {
+            rec.set(
+                "server.count",
+                i64::try_from(servers.len()).unwrap_or(i64::MAX),
+            );
+            servers.iter().map(ServerSummary::of).collect::<Vec<_>>()
+        });
+        self.finish(rec, result, move |servers, diag| ServerListReport {
+            servers,
+            path,
+            diag,
+        })
+    }
+
+    /// Bir uzak sunucu kaydını siler.
+    ///
+    /// Kayıtlı olmayan bir ad **hata**: "sildim" deyip hiçbir şey yapmamak
+    /// yazım hatasını gizler.
+    ///
+    /// # Errors
+    /// Ad kayıtlı değilse ya da dosya yazılamazsa.
+    pub fn remove_server(&self, id: &ProviderId) -> Result<ServerRemoveReport> {
+        let mut rec = Recorder::start(
+            format!("provider remove {id}"),
+            Some(self.config.data_dir().to_path_buf()),
+        );
+        let path = self.config.servers_path();
+        let result = (|| {
+            let mut servers = remote::load_servers(&path)?;
+            let before = servers.len();
+            servers.retain(|server| &server.id != id);
+            if servers.len() == before {
+                return Err(Error::new(
+                    Stage::ConfigLoad,
+                    ErrorKind::NotFound {
+                        what: format!("kayıtlı sunucu: {id}"),
+                    },
+                ));
+            }
+            remote::save_servers(&path, &servers)?;
+            rec.set(
+                "server.remaining",
+                i64::try_from(servers.len()).unwrap_or(i64::MAX),
+            );
+            Ok(servers.len())
+        })();
+
+        let id = id.clone();
+        self.finish(rec, result, move |remaining, diag| ServerRemoveReport {
+            id,
+            removed: true,
+            remaining,
             diag,
         })
     }

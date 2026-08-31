@@ -34,6 +34,11 @@ pub enum Stage {
     StatsCompute,
     /// Sağlayıcı eklentisiyle konuşma.
     ProviderCall,
+    /// HTTP taşıma katmanı: bağlanma, zaman aşımı, TLS, durum kodu.
+    ///
+    /// `ProviderCall`'dan ayrı: "sunucuya ulaşamadım" ile "sunucu isteğimi
+    /// reddetti" farklı sorunlardır ve farklı çözümleri vardır (K9).
+    NetworkRequest,
     /// Wrapped kartı üretimi veya yazımı.
     WrappedRender,
     /// Çalınacak kaynağı bulma (sağlayıcıdan `AudioSource` alma).
@@ -59,6 +64,7 @@ impl Stage {
             Self::LibraryQuery => "LIBRARY_QUERY",
             Self::StatsCompute => "STATS_COMPUTE",
             Self::ProviderCall => "PROVIDER_CALL",
+            Self::NetworkRequest => "NETWORK_REQUEST",
             Self::WrappedRender => "WRAPPED_RENDER",
             Self::PlaybackResolve => "PLAYBACK_RESOLVE",
             Self::PlaybackDecode => "PLAYBACK_DECODE",

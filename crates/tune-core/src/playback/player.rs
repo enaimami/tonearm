@@ -226,13 +226,19 @@ impl Player {
         {
             let engine = match source {
                 AudioSource::LocalFile { path } => super::engine::AudioEngine::play_file(path)?,
+                #[cfg(feature = "http-client")]
+                AudioSource::HttpStream { url, headers } => {
+                    super::engine::AudioEngine::play_http(url, headers)?
+                }
+                #[cfg(not(feature = "http-client"))]
                 AudioSource::HttpStream { .. } => {
-                    // Faz 1.3'te gelecek; bugün açıkça söylüyoruz (K10).
+                    // Yetenek yok değil, **bu derlemede** yok: kullanıcı
+                    // hangi kararın onu buraya getirdiğini görmeli (K9).
                     return Err(Error::new(
                         Stage::PlaybackResolve,
                         ErrorKind::Unsupported {
                             provider: item.id.provider.to_string(),
-                            what: "HTTP akışı (Faz 1.3'te gelecek)".to_owned(),
+                            what: "HTTP akışı (`http-client` feature'ı kapalı derleme)".to_owned(),
                             capabilities: "STREAM".to_owned(),
                         },
                     ));

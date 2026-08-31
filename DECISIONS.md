@@ -440,3 +440,101 @@ altında mı diye bakılıyor. `<kök>/../../etc/passwd` reddediliyor
 (`resolve_source_rejects_traversal_out_of_the_roots`). Çözülemeyen yol
 (silinmiş dosya) da reddediliyor — şüpheliyi kabul etmek bir dosya okuma
 açığı olurdu; kullanıcıya durumu Session anlatıyor.
+
+---
+
+## D-019 — Faz 1.3 kapsamı: Subsonic **ve** Jellyfin
+**Tarih:** 2026-08-30
+**Soru:** Uzak sağlayıcı yalnızca Subsonic (OpenSubsonic) mi olsun, Jellyfin'in
+kendi API'si de mi?
+**Karar:** **İkisi de.** İki ayrı sağlayıcı, iki ayrı kimlik modeli.
+**Gerekçe:** Jellyfin kurulumlarının çoğunda Subsonic eklentisi açık değil;
+"Jellyfin destekliyoruz ama önce eklenti kur" demek desteklememektir. İki
+istemcinin ortak yanı (HTTP taşıma, sunucu kaydı, kimlik saklama, akış
+kaynağı) zaten paylaşılıyor; ayrışan yalnızca uç nokta ve JSON şekli.
+**Sonuç:** `provider/remote/` altında ortak plumbing + `subsonic.rs` +
+`jellyfin.rs`. Jellyfin ayrıca Faz 2'de eklenti sınırının müşterisi olmak
+zorunda değil; eklenti sınırı kendi referans eklentisiyle sınanacak.
+
+---
+
+## D-020 — Ağ taşıma katmanı: trait çekirdekte, istemci feature arkasında
+**Tarih:** 2026-08-30
+**Soru:** `tune-core`'un bağımlılık ağacında bugün HTTP/TLS yok. İlk ağ
+çağrısı nasıl girsin?
+**Karar:** **Seçenek C.** `net::HttpClient` trait'i çekirdekte, Subsonic/Jellyfin
+mantığı çekirdekte; somut istemci `http-client` feature'ı arkasında (`audio` ve
+`render-png` ile aynı desen). CLI feature'ı açar, mobil açmaz — kendi taşımasını
+`Arc<dyn HttpClient>` olarak verir.
+**Gerekçe:** Konvansiyon zaten "ağa dokunan her şey trait arkasında olsun ki
+testler sahte kullanabilsin" diyordu. Trait sınırı olmadan ağ mantığı test
+edilemez ve mobil kendi HTTP yığınını kullanamaz.
+**Sonuç:**
+- Feature içindeki crate seçimi ikincil ve geri alınabilir: **`ureq` 3.4**
+  (`default-features = false`, `rustls`). `reqwest` seçilmedi çünkü `tokio`'yu
+  çekirdeğe kalıcı bağımlılık yapardı — genel API'nin çalışma zamanından
+  bağımsız kalması kuralı bunu dışlıyor.
+- `ureq` bloklayan bir API; `UreqClient::send` async imzanın içinde bloklar ve
+  bu **dokümante edilmiştir**. Çekirdek bir çalışma zamanı seçmediği için
+  `spawn_blocking` çağıramaz; bloklamayan taşıma isteyen (GUI, mobil) kendi
+  `HttpClient`'ını verir. Trait sınırı bu değiş tokuşu geri alınabilir kılıyor.
+- Ağaç ölçümü (D-011'in yaptığı gibi), yordamı yazıyorum ki tekrar ölçülebilsin:
+  `cargo tree -p tune-core --no-default-features [--features F] --prefix none |
+  sed 's/ (\*)//' | sort -u | wc -l`.
+
+  | Feature | Crate |
+  |---|---|
+  | hiçbiri | **51** |
+  | `http-client` | **69** (+18) |
+  | `audio` | 82 (+31) |
+  | `render-png` | 101 (+50) |
+
+  Yani mobil bağlamalar 18 crate'lik TLS ağacını (ureq, rustls, ring, webpki…)
+  taşımıyor. **Bu satırın ilk yazımı "56 → 112" diyordu; ölçüm değil tahmindi
+  ve yanlıştı** — karar değişmiyor ama gerekçenin büyüklüğü değişiyor:
+  `http-client` üç feature'ın **en ucuzu**, en pahalısı değil.
+
+---
+
+## D-021 — Sunucu kaydı ve kimlik bilgisi nerede durur
+**Tarih:** 2026-08-30
+**Soru:** Sunucu adresi + kullanıcı + parola nereye yazılacak?
+**Karar:** **Veri dizininde `servers.json`**, unix'te `0600` izinle. Şema
+değişmiyor (SQLite v2 olduğu gibi kalıyor).
+**Gerekçe:** Kimlik bilgisi kütüphane verisi değil; `library.db` ile aynı
+dosyada durması yedekleme ve paylaşma davranışlarını karıştırır. OS anahtarlığı
+(`keyring`) yeni bir bağımlılık ve başsız Linux'ta kırılgan — Faz 2'deki eklenti
+izin modeliyle birlikte yeniden değerlendirilecek.
+**Sonuç:**
+- **Subsonic:** parola diske **düz yazılmaz**. Kayıt anında rastgele bir salt
+  üretilip `token = md5(parola + salt)` saklanır; her istek `u/t/s` üçlüsüyle
+  gider. Bu Subsonic'in kendi kimlik yolu, uydurma değil.
+- **Jellyfin:** parola `AuthenticateByName` ile bir kez erişim anahtarına
+  çevrilir; saklanan şey anahtardır. Kullanıcı doğrudan API anahtarı da
+  verebilir — o zaman ağa hiç çıkılmaz.
+- **md5 için bağımlılık eklenmedi**, RFC 1321 çekirdekte uygulandı
+  (`provider/remote/md5.rs`, RFC'nin kendi test vektörleriyle kilitli).
+  Gerekçe: ağaç küçük kalmalı ve md5 burada bir güvenlik primitifi değil,
+  Subsonic'in dayattığı bir tel biçimi.
+- Salt entropisi `/dev/urandom`'dan; okunamazsa saat + adres tabanlı yedek
+  kullanılır ve bu **sessiz değil**, kayıt notuna düşer.
+
+---
+
+## D-022 — Faz 1.3'ün test yolu
+**Tarih:** 2026-08-30
+**Soru:** Elde çalışan bir Subsonic/Jellyfin sunucusu yok. 1.3 nasıl "bitti"
+sayılacak?
+**Karar:** Otomatik doğrulama **testte ayağa kalkan sahte HTTP sunucusuyla**
+(`std::net`, yeni bağımlılık yok). Kullanıcı ayrıca Docker ile gerçek bir sunucu
+(Navidrome / Jellyfin) kuracak; 1.3 o doğrulama yapılana kadar
+**"kod tamam, gerçek sunucuda doğrulanmadı"** diye açıkça işaretli kalır.
+**Gerekçe:** D-003'ün dogfood kısıtı burada yeniden çıkıyor. Sahte sunucu
+protokol şeklini kilitler ama gerçek bir sunucunun tuhaflıklarını (yönlendirme,
+transcode, tarih biçimleri) göstermez; bunu bildiğimizi yazmak, bilmiyormuş
+gibi "TAMAM" yazmaktan iyidir (K9).
+**Sonuç:** Sahte sunucu **gerçek** `UreqClient` ile konuşuyor — yani taşıma
+katmanı da sınanıyor, yalnızca ayrıştırıcı değil. Uçtan uca test fixture
+FLAC'ını HTTP üzerinden servis edip çalıyor: `AudioSource::HttpStream`
+yolu gerçekten ses üretiyor (ses aygıtı yoksa test kendini atlıyor, nedenini
+`stderr`'e yazarak).

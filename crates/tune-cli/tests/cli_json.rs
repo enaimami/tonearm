@@ -20,6 +20,8 @@ const VOLATILE_KEYS: &[&str] = &[
     "arch",
     "command",
     "source",
+    // Sunucu kayıt dosyasının yolu geçici dizine bağlı.
+    "path",
 ];
 
 fn fixtures() -> PathBuf {
@@ -39,6 +41,23 @@ fn temp_dir(label: &str) -> PathBuf {
 /// `tune` ikilisini çalıştırır; `(stdout, stderr, başarılı_mı)`.
 fn run(data_dir: &Path, args: &[&str]) -> (String, String, bool) {
     run_with_music(data_dir, None, args)
+}
+
+/// Parolayı ortamdan vererek çalıştırır (§1.3: parola argüman olmaz).
+fn run_with_password(data_dir: &Path, password: &str, args: &[&str]) -> (String, String, bool) {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_tune"));
+    command
+        .arg("--data-dir")
+        .arg(data_dir)
+        .args(args)
+        .env("TUNE_PASSWORD", password)
+        .env("TUNE_MUSIC_DIRS", "/olmayan/dizin/tune-test");
+    let output = command.output().expect("tune ikilisi çalışmalı");
+    (
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+        output.status.success(),
+    )
 }
 
 /// `TUNE_MUSIC_DIRS` ayarlayarak çalıştırır (yerel sağlayıcı testleri için).
@@ -389,6 +408,156 @@ fn provider_commands_report_capabilities_and_scan_counts() {
     );
     assert!(summary["indexed"].as_u64().unwrap_or(0) >= 3, "{summary}");
 
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// §1.3'ün CLI yüzeyi: uzak sunucu kaydediliyor, listeleniyor, siliniyor —
+/// ve kimlik bilgisi hiçbir aşamada çıktıya ya da diske düz düşmüyor (D-021).
+///
+/// Ağa çıkmıyor (`--no-verify`); taşıma katmanı `tune-core`'un
+/// `remote_http.rs` entegrasyon testinde gerçek soketle sınanıyor (D-022).
+#[test]
+fn remote_servers_are_registered_listed_and_removed_without_leaking_credentials() {
+    let dir = temp_dir("sunucu");
+
+    // Boşken kullanıcıya ne yapacağını söylemeli.
+    let (stdout, stderr, ok) = run(&dir, &["provider", "servers"]);
+    assert!(ok, "{stderr}");
+    assert!(stdout.contains("kayıtlı uzak sunucu yok"), "{stdout}");
+    assert!(stdout.contains("provider add"), "{stdout}");
+
+    let add_args = [
+        "provider",
+        "add",
+        "subsonic",
+        "--url",
+        "https://muzik.ev",
+        "--user",
+        "enai",
+        "--name",
+        "ev",
+        "--no-verify",
+    ];
+    let (stdout, stderr, ok) = run_with_password(&dir, "susam", &add_args);
+    assert!(ok, "kayıt başarısız: {stderr}");
+    assert!(stdout.contains("kaydedildi: ev"), "{stdout}");
+    assert!(
+        !stdout.contains("susam"),
+        "parola çıktıya düşmemeli:\n{stdout}"
+    );
+
+    // Diske ne yazıldı? Parola değil, türetilmiş token (D-021).
+    let servers = dir.join("servers.json");
+    let text = std::fs::read_to_string(&servers).expect("servers.json yazılmalı");
+    assert!(!text.contains("susam"), "parola diske yazılmamalı:\n{text}");
+    assert!(text.contains("subsonic_token"), "{text}");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&servers)
+            .expect("izinler okunmalı")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600, "kimlik dosyası herkese açık olmamalı");
+    }
+
+    // `--json` sözleşmesi: özet token taşımıyor. `--json` çıktısı boru
+    // hattına, log'a ya da hata raporuna girebilir.
+    let stored: serde_json::Value =
+        serde_json::from_str(&text).expect("servers.json geçerli JSON olmalı");
+    let token = stored["servers"][0]["auth"]["token"]
+        .as_str()
+        .expect("token saklanmalı")
+        .to_owned();
+
+    let (stdout, stderr, ok) = run(&dir, &["--json", "provider", "servers"]);
+    assert!(ok, "{stderr}");
+    assert!(
+        !stdout.contains(&token),
+        "JSON çıktısı token taşımamalı:\n{stdout}"
+    );
+    assert_snapshot("provider_servers", &stdout);
+
+    // Kayıtlı sunucu sağlayıcı listesine giriyor.
+    let (stdout, stderr, ok) = run(&dir, &["provider", "list"]);
+    assert!(ok, "{stderr}");
+    assert!(
+        stdout.contains("ev"),
+        "uzak sağlayıcı listelenmeli:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("local"),
+        "yerel sağlayıcı kalmalı:\n{stdout}"
+    );
+
+    // Aynı adla ikinci kayıt sessizce üzerine yazmamalı.
+    let (_, stderr, ok) = run_with_password(&dir, "susam", &add_args);
+    assert!(!ok, "aynı ad ikinci kez kabul edilmemeli");
+    assert!(stderr.contains("zaten kayıtlı"), "{stderr}");
+
+    let (stdout, stderr, ok) = run(&dir, &["provider", "remove", "ev"]);
+    assert!(ok, "{stderr}");
+    assert!(stdout.contains("silindi: ev"), "{stdout}");
+
+    // Olmayanı silmek "sildim" dememeli: yazım hatasını gizler.
+    let (_, stderr, ok) = run(&dir, &["provider", "remove", "ev"]);
+    assert!(!ok, "kayıtlı olmayan ad hata olmalı");
+    assert!(stderr.contains("ADIM: CONFIG_LOAD"), "{stderr}");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Bilinmeyen sunucu türü sessizce Subsonic varsayılmamalı.
+#[test]
+fn an_unknown_server_kind_is_rejected_not_guessed() {
+    let dir = temp_dir("turhata");
+    let (_, stderr, ok) = run_with_password(
+        &dir,
+        "susam",
+        &[
+            "provider",
+            "add",
+            "plex",
+            "--url",
+            "https://muzik.ev",
+            "--user",
+            "enai",
+        ],
+    );
+    assert!(!ok, "tanınmayan tür başarısız olmalı");
+    assert!(
+        stderr.contains("subsonic"),
+        "seçenekler söylenmeli:\n{stderr}"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Tty yoksa parola sessizce ekrana basılmamalı; ne yapılacağı söylenmeli.
+#[test]
+fn without_a_terminal_the_password_prompt_points_at_the_env_var() {
+    let dir = temp_dir("parolaistem");
+    // `run` TUNE_PASSWORD ayarlamıyor ve test süreci bir tty'ye bağlı değil.
+    let (_, stderr, ok) = run(
+        &dir,
+        &[
+            "provider",
+            "add",
+            "subsonic",
+            "--url",
+            "https://muzik.ev",
+            "--user",
+            "enai",
+        ],
+    );
+    assert!(!ok, "parola okunamadan kayıt yapılmamalı");
+    assert!(
+        stderr.contains("TUNE_PASSWORD"),
+        "kullanıcıya çıkış yolu gösterilmeli:\n{stderr}"
+    );
+    assert!(
+        !dir.join("servers.json").exists(),
+        "yarım kayıt yazılmamalı"
+    );
     std::fs::remove_dir_all(&dir).ok();
 }
 

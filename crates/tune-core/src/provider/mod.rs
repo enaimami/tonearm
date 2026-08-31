@@ -20,6 +20,7 @@
 //! `dyn` uyumlu kalsın (D-006'daki `MetadataLookup` ile aynı yol).
 
 pub mod local;
+pub mod remote;
 
 use std::future::Future;
 use std::pin::Pin;
@@ -136,12 +137,10 @@ pub enum AudioSource {
     },
 }
 
-/// Tek bir HTTP başlığı. (`HashMap` yerine liste: `uniffi` için daha basit.)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HttpHeader {
-    pub name: String,
-    pub value: String,
-}
+/// Tek bir HTTP başlığı. Tanımı taşıma katmanında (`net`), burada yeniden
+/// dışa açılıyor: `AudioSource` onu taşıyor ve çağıranlar iki yol
+/// öğrenmek zorunda kalmasın.
+pub use crate::net::HttpHeader;
 
 /// Sağlayıcıdan dönen bir parça.
 ///
@@ -310,15 +309,57 @@ impl ProviderRegistry {
 
 /// Yapılandırmadan varsayılan sağlayıcıları kurar.
 ///
-/// Faz 1'de yalnızca yerel dosya sağlayıcı (D-017). Faz 2'de eklentiler
-/// buraya katılacak; çağıranların (CLI, GUI, mobil) imzası değişmesin diye
-/// kurulum bugünden çekirdekte.
+/// Yerel dosya sağlayıcı (D-017) + `servers.json`'daki uzak sunucular
+/// (D-019), bu derlemenin varsayılan HTTP istemcisiyle (D-020). Faz 2'de
+/// eklentiler buraya katılacak; çağıranların (CLI, GUI, mobil) imzası
+/// değişmesin diye kurulum bugünden çekirdekte.
 ///
 /// # Errors
-/// Şu an hata üretmiyor; imza eklentiler geldiğinde değişmesin diye `Result`.
+/// Sunucu kayıt dosyası okunamaz ya da bozuksa.
 pub fn default_registry(config: &crate::config::Config) -> crate::Result<ProviderRegistry> {
+    let servers = remote::load_servers(&config.servers_path())?;
+    let http = if servers.is_empty() {
+        // Kayıtlı sunucu yoksa istemci kurmaya gerek yok: `http-client`
+        // kapalı bir derlemede de `provider list` çalışmalı.
+        None
+    } else {
+        match crate::net::default_http_client() {
+            Ok(client) => Some(client),
+            Err(err) => {
+                // Sessizce atlamıyoruz: kullanıcının kayıtlı sunucusu var
+                // ama bu derleme ağa çıkamıyor (K9).
+                tracing::warn!(
+                    error = %err.chain_text().replace('\n', " "),
+                    servers = servers.len(),
+                    "kayıtlı uzak sunucular atlandı"
+                );
+                None
+            }
+        }
+    };
+    registry_with_http(config, http)
+}
+
+/// Sağlayıcıları verilen HTTP taşımasıyla kurar.
+///
+/// GUI ve mobil bunu çağırır: kendi HTTP yığınlarını `Arc<dyn HttpClient>`
+/// olarak verip TLS ağacını ikinci kez taşımazlar (D-020). `http` `None` ise
+/// yalnızca yerel sağlayıcı kurulur.
+///
+/// # Errors
+/// Sunucu kayıt dosyası okunamaz ya da bozuksa.
+pub fn registry_with_http(
+    config: &crate::config::Config,
+    http: Option<Arc<dyn crate::net::HttpClient>>,
+) -> crate::Result<ProviderRegistry> {
     let mut registry = ProviderRegistry::new();
     registry.register(Arc::new(local::LocalProvider::new(config.music_dirs())));
+
+    if let Some(http) = http {
+        for server in remote::load_servers(&config.servers_path())? {
+            registry.register(remote::provider_for(&server, Arc::clone(&http)));
+        }
+    }
     Ok(registry)
 }
 

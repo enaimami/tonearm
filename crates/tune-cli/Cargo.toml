@@ -23,7 +23,8 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 # D-011: `--out *.png` için PNG rasterizasyonu.
 # D-016: `tune play` için ses hattı (symphonia + cpal).
-tune-core = { workspace = true, features = ["render-png", "audio"] }
+# D-020: uzak sağlayıcılar için HTTP istemcisi (ureq + rustls).
+tune-core = { workspace = true, features = ["render-png", "audio", "http-client"] }
 
 [lints]
 workspace = true

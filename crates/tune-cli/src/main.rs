@@ -140,6 +140,36 @@ enum ProviderCommand {
     },
     /// Yerel müzik dizinlerini yeniden tara.
     Scan,
+    /// Uzak bir sunucu kaydet (Subsonic ya da Jellyfin).
+    ///
+    /// Parola `TUNE_PASSWORD` ortam değişkeninden ya da sorulan istemden
+    /// alınır; komut satırına yazılmaz (kabuk geçmişine düşerdi).
+    Add {
+        /// Sunucu türü: `subsonic` | `jellyfin`.
+        kind: String,
+        /// Taban adres (`https://muzik.ev`).
+        #[arg(long, value_name = "URL")]
+        url: String,
+        /// Kullanıcı adı.
+        #[arg(long, value_name = "AD")]
+        user: String,
+        /// Sağlayıcı adı; verilmezse adresten türetilir.
+        #[arg(long, value_name = "AD")]
+        name: Option<String>,
+        /// Parola yerine doğrudan API anahtarı (yalnızca Jellyfin).
+        #[arg(long, value_name = "ANAHTAR")]
+        api_key: Option<String>,
+        /// Kaydetmeden önce sunucuya bağlanıp kimliği doğrulama.
+        #[arg(long)]
+        no_verify: bool,
+    },
+    /// Kayıtlı bir uzak sunucuyu sil.
+    Remove {
+        /// Sağlayıcı adı.
+        name: String,
+    },
+    /// Kayıtlı uzak sunucuları listele (kimlik bilgisi gösterilmez).
+    Servers,
 }
 
 #[derive(Debug, Subcommand)]
@@ -242,6 +272,48 @@ async fn run(cli: &Cli) -> tune_core::Result<String> {
                     let report = session.scan_providers(&registry).await?;
                     render(cli.json, &report, || output::scan(&report))
                 }
+                ProviderCommand::Add {
+                    kind,
+                    url,
+                    user,
+                    name,
+                    api_key,
+                    no_verify,
+                } => {
+                    let kind = provider::remote::ServerKind::parse(kind)?;
+                    let id = match name {
+                        Some(name) => ProviderId::new(name.clone()),
+                        // Öneri çekirdekte üretiliyor: GUI de aynısını
+                        // gösterecek (Altın Kural).
+                        None => provider::remote::suggest_id(url, kind),
+                    };
+                    // Parola yalnızca istem/ortamdan: argüman olarak almak
+                    // onu kabuk geçmişine ve `ps` çıktısına yazardı.
+                    let password = match api_key {
+                        Some(_) => None,
+                        None => Some(read_password(&id)?),
+                    };
+                    let spec = provider::remote::NewServer {
+                        id,
+                        kind,
+                        url: url.clone(),
+                        username: user.clone(),
+                        password,
+                        api_key: api_key.clone(),
+                        verify: !*no_verify,
+                    };
+                    let http = tune_core::net::default_http_client()?;
+                    let report = session.add_server(spec, http).await?;
+                    render(cli.json, &report, || output::server_add(&report))
+                }
+                ProviderCommand::Remove { name } => {
+                    let report = session.remove_server(&ProviderId::new(name.clone()))?;
+                    render(cli.json, &report, || output::server_remove(&report))
+                }
+                ProviderCommand::Servers => {
+                    let report = session.list_servers()?;
+                    render(cli.json, &report, || output::server_list(&report))
+                }
             }
         }
         Command::Play {
@@ -302,6 +374,98 @@ fn anyhow_to_core(err: &anyhow::Error) -> tune_core::Error {
             detail: format!("terminal arayüzü: {err}"),
         },
     )
+}
+
+/// Parolanın komut satırı yerine okunabileceği ortam değişkeni.
+const PASSWORD_ENV: &str = "TUNE_PASSWORD";
+
+/// Kullanım hatası üretir (aşama: yapılandırma okuma).
+fn input_err(detail: impl Into<String>) -> tune_core::Error {
+    tune_core::Error::new(
+        tune_core::diag::Stage::ConfigLoad,
+        tune_core::ErrorKind::InvalidInput {
+            detail: detail.into(),
+        },
+    )
+}
+
+/// Parolayı `TUNE_PASSWORD`'dan ya da terminalden **yankısız** okur.
+///
+/// Argüman olarak almıyoruz: komut satırına yazılan parola kabuk geçmişine
+/// ve `ps` çıktısına düşer. Betikler ortam değişkenini kullanır, insanlar
+/// istemi.
+fn read_password(id: &ProviderId) -> tune_core::Result<String> {
+    if let Ok(from_env) = std::env::var(PASSWORD_ENV) {
+        if from_env.is_empty() {
+            // Boşu parola saymak, sunucunun anlamsız bir "yetkisiz"
+            // hatasıyla dönmesine yol açardı.
+            return Err(input_err(format!("{PASSWORD_ENV} tanımlı ama boş")));
+        }
+        return Ok(from_env);
+    }
+    prompt_password(id)
+}
+
+/// Terminali ham kipe alıp parolayı ekrana basmadan okur.
+fn prompt_password(id: &ProviderId) -> tune_core::Result<String> {
+    use crossterm::terminal;
+    use std::io::Write as _;
+
+    eprint!("{id} parolası: ");
+    let _ = std::io::stderr().flush();
+
+    terminal::enable_raw_mode().map_err(|source| {
+        // Tty yoksa (boru hattı, CI) sessizce yankılı okumaya düşmüyoruz:
+        // parolayı ekrana basmaktansa ne yapılacağını söylemek iyidir.
+        input_err(format!(
+            "terminal yankısız kipe alınamadı ({source}); parolayı {PASSWORD_ENV} ile verin"
+        ))
+    })?;
+    let secret = read_secret();
+    // Ham kip her yolda geri veriliyor — hata da olsa kullanıcının terminali
+    // bozuk kalmamalı (TUI'deki `TerminalGuard` ile aynı gerekçe).
+    let _ = terminal::disable_raw_mode();
+    eprintln!();
+    secret
+}
+
+/// Ham kipte bir satır okur; hiçbir tuş ekrana yansımaz.
+fn read_secret() -> tune_core::Result<String> {
+    use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+
+    let mut secret = String::new();
+    loop {
+        let event =
+            event::read().map_err(|source| input_err(format!("tuş okunamadı: {source}")))?;
+        let Event::Key(key) = event else { continue };
+        if key.kind != KeyEventKind::Press {
+            continue;
+        }
+        // Ham kipte Ctrl+C sinyal üretmez; iptali kendimiz karşılıyoruz.
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('d'))
+        {
+            return Err(input_err("parola girişi iptal edildi"));
+        }
+        if key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+        {
+            continue;
+        }
+        match key.code {
+            KeyCode::Enter => break,
+            KeyCode::Backspace => {
+                secret.pop();
+            }
+            KeyCode::Char(c) => secret.push(c),
+            _ => {}
+        }
+    }
+    if secret.is_empty() {
+        return Err(input_err("parola boş"));
+    }
+    Ok(secret)
 }
 
 /// `--json` verildiyse veriyi seri hâle getirir, yoksa insan biçimini kullanır.

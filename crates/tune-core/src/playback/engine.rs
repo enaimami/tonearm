@@ -29,6 +29,20 @@ use crate::error::{Error, ErrorKind, Result};
 
 use super::anchor::PlayState;
 
+/// URL'nin yol kısmındaki uzantıyı çıkarır (`.../a.flac?x=1` → `flac`).
+///
+/// Yalnızca bir **ipucu** üretir: bulunamazsa symphonia kabı içeriğinden
+/// tanır. Uydurma bir uzantı vermek tanımayı yanlış yöne çevirirdi.
+#[cfg(feature = "http-client")]
+fn extension_from_url(url: &str) -> Option<String> {
+    let path = url.split(['?', '#']).next()?;
+    let last = path.rsplit('/').next()?;
+    let ext = last.rsplit_once('.')?.1;
+    let plausible =
+        !ext.is_empty() && ext.len() <= 5 && ext.chars().all(|c| c.is_ascii_alphanumeric());
+    plausible.then(|| ext.to_ascii_lowercase())
+}
+
 fn audio_err(stage: Stage, detail: impl Into<String>) -> Error {
     Error::new(
         stage,
@@ -192,15 +206,46 @@ impl AudioEngine {
     /// Dosya açılamaz/çözülemezse ([`Stage::PlaybackDecode`]) ya da ses aygıtı
     /// kurulamazsa ([`Stage::PlaybackOutput`]). Hangi aşamada olduğu hatada durur.
     pub fn play_file(path: &std::path::Path) -> Result<Self> {
-        // — Kaynağı aç ve kabı tanı.
         let file = std::fs::File::open(path)
             .map_err(|source| crate::error::io_err(Stage::PlaybackDecode, path, source))?;
-        let mss = MediaSourceStream::new(Box::new(file), Default::default());
 
         let mut hint = Hint::new();
         if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
             hint.with_extension(ext);
         }
+        Self::play_media(Box::new(file), hint, &path.display().to_string())
+    }
+
+    /// Bir HTTP akışını çalar (§1.3: Subsonic / Jellyfin).
+    ///
+    /// Baytlar arka planda inerken çözme başlar; ayrıntı
+    /// [`super::http_source`]. **K3:** akışı istemci kendi çekiyor, hiçbir
+    /// sunucu araya girip röle etmiyor.
+    ///
+    /// # Errors
+    /// Bağlantı kurulamaz ya da sunucu 2xx dışında dönerse
+    /// ([`Stage::NetworkRequest`]); ses çözülemezse ([`Stage::PlaybackDecode`]).
+    #[cfg(feature = "http-client")]
+    pub fn play_http(url: &str, headers: &[crate::net::HttpHeader]) -> Result<Self> {
+        let source = super::http_source::HttpMediaSource::open(url, headers)?;
+
+        let mut hint = Hint::new();
+        // Uzantı yalnızca bir **ipucu**: sunucu `?id=...` gibi uzantısız
+        // adresler veriyor, o zaman symphonia kabı içeriğinden tanıyor.
+        if let Some(ext) = extension_from_url(url) {
+            hint.with_extension(&ext);
+        }
+        Self::play_media(Box::new(source), hint, url)
+    }
+
+    /// Açılmış bir kaynağı çözer ve çalar. `play_file` ve `play_http` bunun
+    /// üstünde ince birer kabuk; hattın tamamı tek yerde durur.
+    fn play_media(
+        source: Box<dyn symphonia::core::io::MediaSource>,
+        hint: Hint,
+        label: &str,
+    ) -> Result<Self> {
+        let mss = MediaSourceStream::new(source, Default::default());
 
         let mut format = symphonia::default::get_probe()
             .probe(
@@ -212,15 +257,12 @@ impl AudioEngine {
             .map_err(|source| {
                 audio_err(
                     Stage::PlaybackDecode,
-                    format!("{} açılamadı: {source}", path.display()),
+                    format!("{label} açılamadı: {source}"),
                 )
             })?;
 
         let track = format.default_track(TrackType::Audio).ok_or_else(|| {
-            audio_err(
-                Stage::PlaybackDecode,
-                format!("{} içinde ses izi yok", path.display()),
-            )
+            audio_err(Stage::PlaybackDecode, format!("{label} içinde ses izi yok"))
         })?;
         let track_id = track.id;
 
@@ -236,7 +278,7 @@ impl AudioEngine {
             .ok_or_else(|| {
                 audio_err(
                     Stage::PlaybackDecode,
-                    format!("{} için kod çözücü parametreleri okunamadı", path.display()),
+                    format!("{label} için kod çözücü parametreleri okunamadı"),
                 )
             })?
             .clone();

@@ -18,6 +18,10 @@
 pub mod anchor;
 #[cfg(feature = "audio")]
 pub mod engine;
+/// Uzak akışı symphonia'ya bağlayan ilerlemeli okuyucu (§1.3).
+/// Hem ses hattı hem HTTP istemcisi açıkken derlenir.
+#[cfg(all(feature = "audio", feature = "http-client"))]
+pub mod http_source;
 pub mod player;
 pub mod queue;
 

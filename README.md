@@ -24,11 +24,17 @@ bağımsız kanonik kimliklere bağlar ve istatistikleri **senin** makinende ür
 ## Durum
 
 **Faz 1.** Bugün çalışan şey: export içe aktarma, kanonik kimlik çözümlemesi,
-istatistikler, paylaşılabilir Wrapped kartı ve **yerel dosya oynatma**.
+istatistikler, paylaşılabilir Wrapped kartı, **yerel dosya oynatma** ve
+**Subsonic / Jellyfin'den akış**.
 
 Faz 1'den itibaren scrobble'ı `tune` üretiyor: çaldığın parça import verinle
 aynı tabloya yazılıyor, geçmiş ve bugün tek bir zaman çizelgesi oluyor.
-Terminal arayüzü (`--tui`) var. Subsonic/Jellyfin henüz yok.
+Terminal arayüzü (`--tui`) var.
+
+> Uzak sağlayıcılar sahte bir sunucuya karşı uçtan uca test ediliyor ama
+> **gerçek bir Navidrome / Jellyfin kurulumunda henüz doğrulanmadı.** Denersen
+> ve bir şey tutmazsa `tune diag` çıktısıyla issue aç — tam olarak aradığımız
+> geri bildirim bu.
 
 Ayrıntılı yol haritası: [`PLAN.md`](PLAN.md). Verilmiş kararlar ve gerekçeleri:
 [`DECISIONS.md`](DECISIONS.md).
@@ -89,6 +95,29 @@ tune play "radiohead" --all --shuffle
 tune play "radiohead" --dry-run    # çalmadan kuyruğu göster
 tune play "radiohead" --all --tui  # terminal arayüzü
 ```
+
+### Uzak sunucular (Subsonic / Jellyfin)
+
+```bash
+tune provider add subsonic --url https://muzik.ev --user adin --name ev
+tune provider add jellyfin --url https://jf.ev --user adin
+tune provider add jellyfin --url https://jf.ev --user adin --api-key ANAHTAR
+
+tune provider servers       # kayıtlılar (kimlik bilgisi gösterilmez)
+tune provider test ev       # ayakta mı, kaç parça görüyor
+tune provider remove ev
+```
+
+Parola **argüman olarak alınmaz** — kabuk geçmişine ve `ps` çıktısına düşerdi.
+İstemden ya da `TUNE_PASSWORD` ortam değişkeninden okunur. Diskte de parola
+durmaz: Subsonic'te protokolün kendi salt/token'ı, Jellyfin'de bir erişim
+anahtarı saklanır (`servers.json`, unix'te `0600`).
+
+Kayıt sırasında sunucuya bağlanılıp kimlik doğrulanır; `--no-verify` ile
+atlanabilir. `--name` verilmezse ad adresten türetilir
+(`https://muzik.ev:4533` → `muzik`).
+
+Ses **röle edilmez**: akışı senin makinen doğrudan sunucudan çeker.
 
 `--tui` kuyruğu, ilerleme çubuğunu ve çalan parçayı gösterir:
 

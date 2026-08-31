@@ -6,7 +6,8 @@
 use tune_core::library::SearchHit;
 use tune_core::session::{
     ImportReport, PlayReport, ProviderListReport, ProviderTestReport, ResolveReport, ScanReport,
-    SearchReport, StatsResponse, WrappedResponse,
+    SearchReport, ServerAddReport, ServerListReport, ServerRemoveReport, StatsResponse,
+    WrappedResponse,
 };
 use tune_core::stats::StatsReport;
 
@@ -321,6 +322,77 @@ pub fn scan(report: &ScanReport) -> String {
         "katalog: yeni {} · güncellenen {} · düşen {}",
         w.inserted, w.updated, w.removed
     );
+    out
+}
+
+/// Sunucu kaydı sonucu.
+///
+/// Token ya da anahtar **basılmaz**: çekirdeğin verdiği özet zaten onları
+/// taşımıyor, burada da yeniden okunacak bir yer yok.
+pub fn server_add(report: &ServerAddReport) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let s = &report.server;
+    let _ = writeln!(out, "kaydedildi: {} ({})", s.id, s.kind);
+    let _ = writeln!(out, "adres     : {}", s.url);
+    let _ = writeln!(out, "kullanıcı : {}", s.username);
+    let _ = writeln!(out, "kimlik    : {}", s.auth);
+    let _ = writeln!(
+        out,
+        "doğrulama : {}",
+        if report.verified {
+            "sunucuya bağlanıldı"
+        } else {
+            "atlandı (--no-verify)"
+        }
+    );
+    // Gözlemler yutulmuyor: zayıf entropi ya da öğrenilemeyen alan
+    // kullanıcının görmesi gereken şeyler (K9).
+    for note in &report.notes {
+        let _ = writeln!(out, "not       : {note}");
+    }
+    let _ = writeln!(out, "\nsına: tune provider test {}", s.id);
+    out
+}
+
+/// Sunucu kaydının silinmesi.
+pub fn server_remove(report: &ServerRemoveReport) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "silindi: {} (kalan kayıt: {})",
+        report.id, report.remaining
+    );
+    out
+}
+
+/// Kayıtlı uzak sunucular.
+pub fn server_list(report: &ServerListReport) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    if report.servers.is_empty() {
+        let _ = writeln!(
+            out,
+            "kayıtlı uzak sunucu yok\n\
+             (örnek: tune provider add subsonic --url https://muzik.ev --user adin)"
+        );
+        return out;
+    }
+    for server in &report.servers {
+        let _ = writeln!(
+            out,
+            "{:<12} {:<9} {:<34} {:<14} {}",
+            server.id,
+            server.kind,
+            truncate(&server.url, 34),
+            truncate(&server.username, 14),
+            server.auth
+        );
+    }
+    // "Nereye yazıldı?" sorusu tanıya ait; kullanıcı dosyayı yedeklerken
+    // ya da elle düzeltirken buna bakıyor.
+    let _ = writeln!(out, "\nkayıt dosyası: {}", report.path.display());
     out
 }
 
