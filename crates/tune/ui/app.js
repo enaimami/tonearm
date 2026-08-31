@@ -86,6 +86,7 @@ function openPanel(name) {
     section.hidden = section.id !== `panel-${name}`;
   }
   if (name === "providers") refreshProviders();
+  if (name === "theme") refreshThemes();
 }
 
 // ————————————————————————————————————— oynatıcı çubuğu
@@ -411,6 +412,90 @@ $("serverForm").addEventListener("submit", async (event) => {
   refreshProviders();
 });
 
+// ————————————————————————————————————— tema (§3.3)
+//
+// Uygulama tek satır: çekirdeğin — burada tema deposunun — verdiği CSS'i
+// `<style>` etiketine yazmak. Doğrulama, `api` sürüm kontrolü ve "genişletilmiş
+// mi" kararı Rust tarafında (`src/theme.rs`); burada yalnızca gösteriliyor.
+
+function applyTheme(theme) {
+  if (!theme) return;
+  // `textContent` — `innerHTML` değil: tema CSS'i metin olarak konuyor,
+  // içindeki `</style>` bir etiket olarak yorumlanmıyor.
+  $("themeCss").textContent = theme.css ?? "";
+  if (theme.problem) toast({ stage: "CONFIG_LOAD", chain: theme.problem });
+}
+
+async function refreshThemes() {
+  const list = await call("themes_list");
+  if (!list) return;
+
+  $("themeDir").textContent = [
+    `tema dizini    : ${list.dir}`,
+    `sözleşme sürümü: api ${list.api}`,
+  ].join("\n");
+
+  const box = $("themeList");
+  box.replaceChildren();
+  // Varsayılan da bir seçenek: temadan geri dönüş yolu görünür olmalı.
+  box.append(themeRow({ id: null, name: "varsayılan", builtin: true }, list.active));
+  for (const theme of list.themes) box.append(themeRow(theme, list.active));
+
+  const rejected = $("themeRejected");
+  rejected.replaceChildren();
+  for (const entry of list.rejected) {
+    const row = document.createElement("li");
+    const id = document.createElement("span");
+    id.className = "id";
+    id.textContent = entry.id;
+    row.append(id, document.createTextNode(` — ${entry.reason}`));
+    rejected.append(row);
+  }
+  $("themeRejectedEmpty").hidden = list.rejected.length > 0;
+}
+
+function themeRow(theme, activeId) {
+  const row = document.createElement("li");
+  row.className = "theme";
+  if ((theme.id ?? null) === (activeId ?? null)) row.classList.add("current");
+
+  const name = document.createElement("span");
+  name.className = "name";
+  name.textContent = theme.name;
+  if (theme.author) {
+    const author = document.createElement("span");
+    author.className = "author";
+    author.textContent = ` · ${theme.author}`;
+    name.append(author);
+  }
+  row.append(name);
+
+  if (theme.builtin && theme.id) row.append(tag("yerleşik"));
+  // D-038: reddetmiyoruz, işaretliyoruz. Etiket kullanıcıya "bu tema
+  // sözleşmenin dışına çıkıyor, garantisi yok" diyor.
+  if (theme.extended) row.append(tag("genişletilmiş · garantisi yok", true));
+
+  const button = document.createElement("button");
+  button.textContent = "uygula";
+  button.addEventListener("click", async () => {
+    const active = await call("theme_select", { id: theme.id ?? null });
+    if (!active) return;
+    applyTheme(active);
+    refreshThemes();
+  });
+  row.append(button);
+  return row;
+}
+
+function tag(text, warn = false) {
+  const span = document.createElement("span");
+  span.className = warn ? "tag warn" : "tag";
+  span.textContent = text;
+  return span;
+}
+
+$("btnThemeReload").addEventListener("click", refreshThemes);
+
 // ————————————————————————————————————— içe aktarma, çözümleme, tanı
 
 $("importForm").addEventListener("submit", async (event) => {
@@ -503,6 +588,10 @@ listen("tune://busy", (event) => {
 // ————————————————————————————————————— açılış
 
 (async function boot() {
+  // Tema **ilk iş**: varsayılan renklerle bir kare çizip sonra temaya
+  // atlamak, her açılışta bir yanıp sönme olurdu.
+  applyTheme(await call("theme_active"));
+
   const env = await call("environment");
   if (env) {
     $("envBlock").textContent = [

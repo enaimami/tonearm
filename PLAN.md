@@ -946,9 +946,191 @@ bir tema yazarı. Yorum ve arayüz metni Türkçe kalır. Bu karar uygulanırken
 > öznitelikleri mi, sınıf adları mı, hiçbiri mi; (3) temaya IPC açılacak mı
 > (D-033 bunu buraya bıraktı: açılırsa sözleşme *dış* sözleşmeye döner ve o
 > gün sürümleme borcu doğar); (4) paket biçimi ve `api` sürüm alanı.
+>
+> **KAPANDI — D-037:** (1) dar semantik küme; (2) sınıf adları sözleşmenin
+> parçası (mevcut `.topbar` vb. artık stabil, D-036'nın "iç ayrıntı" varsayımı
+> burada geçersiz); (3) hayır, temalar yalnızca görünüm — IPC yok; (4) manifest
+> + `api` sürüm alanı, uyuşmazsa açıkça reddedilir.
+>
+> **Yeni açık madde — "mod" paketleri.** D-037'de kullanıcı, tema paketleriyle
+> birlikte dağıtılan, davranış değiştiren bir "mod" kavramı önerdi. Bilinçli
+> olarak ertelendi. Bir mod'un webview içinde çalışıp IPC çağırması K4'ün
+> sağlayıcı eklentileri için şart koştuğu "alt süreç + JSON-RPC" modelinden
+> köklü biçimde farklı bir güvenlik sınıfı taşır (aynı webview'de çöküp bütün
+> arayüzü dondurabilir). §3.3 kapandıktan sonra ayrı bir tur gerekiyor:
+>
+> KARAR NOKTASI: Mod'lar nasıl çalışır — ayrı bir süreç mi (K4 modeli, ama o
+> zaman "webview içinde" vaadi düşer), yoksa sınırlı/izinli bir webview JS
+> sandbox'ı mı? IPC'nin hangi alt kümesi (varsa) açılır? Tema ile aynı paket
+> biçimini mi paylaşır yoksa ayrı mı? **Sor.**
 
-### 3.4 Referans temalar
+#### Token seti v1 — TAMAM (D-037)
+
+`crates/tune/ui/style.css`'in `:root` bloğu artık sözleşmenin kendisi. On dört
+token, hepsi dosyada en az bir yerde kullanılıyor — kullanılmayan token yok:
+
+| Token | Değer | Anlamı |
+|---|---|---|
+| `--tune-color-scheme` | `dark` | motorun kendi çizdiği parçalar (onay kutusu, imleç, kaydırma çubuğu) |
+| `--tune-bg` | `#12100e` | sayfa arka planı |
+| `--tune-surface` | `#1b1815` | panel arka planı (topbar, sidebar, player, block) |
+| `--tune-surface-raised` | `#221e1a` | etkileşimli/hover arka planı (input, aktif nav, hover, toast) |
+| `--tune-border` | `#2e2925` | kenarlık, ayraç, ilerleme çubuğu izi |
+| `--tune-text` | `#eae2d8` | birincil metin |
+| `--tune-text-dim` | `#9a8f83` | ikincil/soluk metin |
+| `--tune-accent` | `#ffb454` | marka + etkileşim vurgusu |
+| `--tune-success` | `#7bd88f` | çalıyor / başarı durumu |
+| `--tune-error` | `#ff6b6b` | hata durumu |
+| `--tune-info` | `#79c0ff` | arabelleğe alma / bilgi durumu |
+| `--tune-radius-sm` | `6px` | kontrol köşe yarıçapı (nav, buton, girdi, kuyruk satırı) |
+| `--tune-radius-lg` | `8px` | panel köşe yarıçapı (block, toast, dropzone) |
+| `--tune-duration` | `120ms` | tek canlandırma süresi (yalnızca `opacity`/`transform`, D-028) |
+
+`--tune-color-scheme` on üçüncü değil **on dördüncüdür**: ilk sette yoktu,
+§3.4'ün açık teması yazılırken ortaya çıktı ve sonradan eklendi (D-039).
+Token'lar yalnızca *bizim* çizdiğimiz renkleri değiştiriyor; onay kutusu,
+metin imleci ve kaydırma çubuğu motorun kendi çizdiği parçalar ve açık bir
+palette koyu kalıyorlardı. Referans temanın işi tam olarak buydu.
+
+Hover/focus/disabled ayrı renk token'ı almadı — hover zaten var olan
+token'ların bileşimiyle ifade ediliyor (`.nav:hover` → `--tune-text`,
+`button:hover` → `--tune-accent` kenarlık). Şu an hiçbir kural `:focus-visible`
+veya devre dışı durum tanımlamıyor; kullanılmayan bir token yazmak yerine bu
+**bilinen bir boşluk** olarak bırakıldı — gerçek bir görsel kural yazılınca
+token da gelir.
+
+Sınıf adları (D-037/2) artık sözleşmenin parçası: `.topbar`, `.sidebar`,
+`.nav`, `.content`, `.queue` (+ `.index`, `.current`), `.player`, `.controls`,
+`.now`, `.state.{playing,paused,buffering,stopped}`, `.bar`, `.fill`, `.time`,
+`.toast` (+ `.stage`, `.info`), `.block`, `.summary` (+ `.big`, `.label`),
+`.table`, `.ranking`, `.dropzone` (+ `.over`), `.busy`, `.brand`, `.check`,
+`.row`, `.grid`, `.hint`, `.empty`, `.two-col`, ve tema ekranının kendisi:
+`.themes`, `.theme` (+ `.name`, `.author`, `.current`), `.tag` (+ `.warn`),
+`.rejected` (+ `.id`).
+
+Yeni sınıf **eklemek** `api`'yi artırmaz — eski temalar onu hedeflemiyordu.
+Artıran şey var olanı kaldırmak ya da anlamını değiştirmek. Aynı kural
+token'lar için de geçerli, ve `--tune-color-scheme` bunun ilk örneği.
+
+#### Manifest biçimi ve yükleyici — TAMAM
+
+Bir tema iki dosyalı bir dizin:
+
+```
+<tema-dizini>/
+  theme.json   # manifest
+  theme.css    # yalnızca :root { --tune-*: ...; } — ek seçici yok
+```
+
+`theme.json`:
+
+```json
+{
+  "name": "Örnek Tema",
+  "author": "Birisi",
+  "api": 1
+}
+```
+
+`api`, bu tablodaki token/sınıf sözleşmesinin sürümü. Uygulama başlangıçta
+kendi desteklediği `api` sayısıyla karşılaştırır; uyuşmazsa temayı **sessizce
+yok saymaz**, hangi temanın hangi sürüm beklediğini söyleyip reddeder (K9).
+`theme.css`'in `:root` dışına taşması (ör. `.topbar { ... }` yazıp yeni bir
+seçiciye dayanması) şimdilik engellenmiyor — motoru CSS, kısıtlamak ayrı bir
+adım (aşağıya bak).
+
+> KARAR NOKTASI (uygulama öncesi, küçük): `theme.css` `:root` dışına
+> yazarsa (örn. doğrudan `.topbar` hedefleyip token'ları atlarsa) reddedilsin
+> mi, yoksa serbest mi bırakılsın? Reddetmek sözleşmeyi token seviyesinde
+> kilitler ama tema yazarına en ufak esnekliği (örn. tek bir öğeye özel bir
+> `box-shadow` eklemek — ki D-028 zaten bunu önermez) kapatır.
+>
+> **KAPANDI — D-038: ne reddet ne serbest, işaretle.** Yükleyici yükler ama
+> tema listesinde "genişletilmiş / garantisi yok" diye etiketler. Garanti
+> her zaman yalnızca `:root`'taki token'lar için geçerli.
+
+**Uygulandı:** `crates/tune/src/theme.rs` — çekirdekte değil kabukta, çünkü bu
+tune-core'un taşıyacağı bir domain kavramı değil, webview'e özgü bir CSS
+mekanizması. Mobil bağlamalar CSS custom property kullanmayacak; Altın
+Kural'ın "çekirdek bunu sunabilir mi" testi burada `crates/tune`'u işaret
+ediyor. Üç IPC komutu: `themes_list`, `theme_active`, `theme_select`.
+
+Seçim `<data_dir>/ui.json`'da; şema değişmedi, veritabanına dokunulmadı.
+Depo durum tutmuyor, her çağrı diski okuyor — tema yazarı dosyayı düzenleyip
+"listeyi yenile" deyince değişikliği görüyor, uygulamayı kapatması gerekmiyor.
+
+Dört davranış K9'a bağlı ve testle kilitli (18 test):
+
+- **`api` uyuşmazlığı reddedilir ve iki sürüm de yazılır** ("tema sürüm 9
+  istiyor, bu yapı sürüm 1 sunuyor"). "Temam görünmüyor" bir tanı sorusu
+  olmamalı.
+- **`:root` dışına taşan tema yüklenir ama işaretlenir** (D-038): listede
+  "genişletilmiş · garantisi yok".
+- **Seçili tema silinmişse varsayılana dönülür ama sebebiyle.** Sessiz dönüş,
+  kullanıcının temasının neden kaybolduğunu hiç öğrenememesi olurdu.
+- **Yerleşik bir temanın adını gölgeleyen dizin sessizce kazanmaz**, sebebiyle
+  reddedilir — hangi dosyanın kazandığı tahmin edilmemeli.
+
+Sıra da kasıtlı: **önce doğrula, sonra yaz.** Yüklenemeyen bir temayı seçim
+olarak kaydetmek, uygulamayı bir dahaki açılışta bozuk bir seçimle
+başlatırdı; test bunu kilitliyor.
+
+### 3.4 Referans temalar — TAMAM
 En az iki farklı temada tema API'sinin yeterli olduğunu kanıtla.
+
+**İkisi de `crates/tune/themes/` altında ve uygulamayla birlikte geliyor**
+(`include_str!`) — ama **ayrıcalıkları yok**: diskteki bir tema gibi aynı
+doğrulamadan geçiyorlar. Ayrıcalıklı olsalardı sözleşmenin yeterli olduğunu
+değil yalnızca kendilerini kanıtlarlardı.
+
+| Tema | Sınadığı eksen |
+|---|---|
+| **Gün Işığı** (`daylight`) | renk — temel arayüz koyu yazılmıştı, aynı sözleşmeyle açık bir arayüz çıkıyor |
+| **Yüksek Karşıtlık** (`contrast`) | renk **dışı** — `--tune-radius-*` sıfıra iniyor, `--tune-duration` `0ms` |
+
+İkinci tema bilerek ikinci bir palet değil: iki paletle "iki tema" ölçütü
+kâğıt üstünde karşılanır ama token setinin renk dışındaki ekseni hiç
+sınanmamış olurdu. Yarıçap ve süre token'ları gerçekten kullanılıyorsa bu
+temada görünür — kullanılmıyorsa ölü token demektir. Test bunu kilitliyor
+(`the_two_reference_themes_differ_on_more_than_color`).
+
+**Ve sözleşme yetmedi.** Açık tema token'ların hepsini doğru uyguladığı hâlde
+onay kutuları, metin imleci ve kaydırma çubuğu koyu kalıyordu: bunları biz
+değil motor çiziyor. Eksik `--tune-color-scheme` olarak kapandı (D-039).
+§3.4'ün "yeterli olduğunu kanıtla" ölçütü tam olarak bunu yakalamak içindi ve
+yakaladı — iki tema yazılmasaydı eksik, ilk tema yazarının makinesinde
+ortaya çıkardı.
+
+**Uçtan uca doğrulandı** (2026-09-01, WebKitGTK): seçim `ui.json`'dan
+okunup açılışta uygulanıyor, tema ekranı yerleşik/genişletilmiş/reddedilen
+üç durumu da doğru gösteriyor, `api: 9` isteyen tema listede sebebiyle
+duruyor.
+
+---
+
+### 3.5 Faz 3 durum — KAPANDI
+
+**235 test**, clippy ve fmt temiz.
+
+| Bölüm | Durum |
+|---|---|
+| 3.1 GO/NO-GO ölçümü | TAMAM — koşullu GO (D-028), ortamı uygulama kuruyor (D-029/D-031) |
+| 3.2 IPC sözleşmesi | TAMAM — çekirdeğin yüzeyi + serde (D-033), olaylar değişimde (D-035) |
+| 3.3 Tema API'si | TAMAM — 14 token + sınıf adları + manifest/yükleyici (D-037…D-039) |
+| 3.4 Referans temalar | TAMAM — `daylight` (renk) + `contrast` (yarıçap/süre) |
+
+Tema yazarına dönük belge: `crates/tune/themes/README.md`.
+
+**Faz 3'ten devredilen açık karar:** "mod" paketleri — davranış değiştiren,
+tema paketleriyle birlikte dağıtılan eklentiler. §3.3'te bilinçli ertelendi;
+karar noktası metni orada duruyor. Tema sözleşmesi kapandığı için artık ayrı
+bir tur olarak açılabilir. **Faz 3'ü eksik bırakmıyor:** temalar bugün
+tasarlandıkları gibi çalışıyor ve mod'lar onların üstüne değil yanına gelecek.
+
+Sıradaki iş **Faz 2** (D-027'de ertelenmişti, iptal edilmemişti): eklenti
+sınırı ve sağlayıcı genişlemesi. Faz 2'nin ilk karar noktası eklenti izin
+modeli (§2.1) ve oraya Faz 1'den iki borç taşınıyor — `keyring` (D-021) ve
+gerçek zamanlı dizin izleme (D-025).
 
 ---
 

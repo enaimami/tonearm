@@ -288,7 +288,7 @@ tune play "Get Lucky" --tui
 - [x] **Faz 0.5: Paylaşılabilir Wrapped** — SVG & PNG (1080x1080 / 1080x1920) görsel kart üretimi.
 - [x] **Faz 1: Evrensel Müzik Çalar** — Yerel dosya oynatma, Navidrome & Jellyfin akışı, dahili scrobbler, TUI oynatıcı.
 - [ ] **Faz 2: Eklenti Ekosistemi & Parmak İzi** — JSON-RPC sağlayıcı eklentileri, AcoustID ses parmak izi tanıma.
-- [ ] **Faz 3: Masaüstü Uygulaması (GUI) & Temalar** — Tauri tabanlı modern masaüstü arayüzü ve topluluk CSS temaları.
+- [x] **Faz 3: Masaüstü Uygulaması (GUI) & Temalar** — Tauri tabanlı masaüstü arayüzü ve sürümlenmiş CSS tema sözleşmesi ([tema yazma rehberi](crates/tune/themes/README.md)).
 - [ ] **Faz 4: Senkronize Odalar (Birlikte Dinleme)** — Ses akışı röle edilmeden zaman çapasıyla eşzamanlı dinleme.
 - [ ] **Faz 5: Mobil İstemciler** — `uniffi` ile iOS ve Android desteği.
 

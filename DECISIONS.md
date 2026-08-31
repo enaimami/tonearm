@@ -1163,3 +1163,120 @@ dayanıyordu. Adlar çevrilince ortak belirteç kayboldu ve test 4 yerine 2
 parça gördü. Sorgu `"Artist"` oldu; fixture'lar artık `Test Artist`,
 `Other Artist`, `Dir Artist` — ortaklık **kasıtlı ve görünür**, dil
 kazasından türemiş değil.
+
+---
+
+## D-037 — Tema token seti: dar küme, sınıf adları sözleşme, IPC yok, manifest + `api`
+**Tarih:** 2026-09-01
+**Soru:** §3.3'ün KARAR NOKTASI'ı dört soru bırakmıştı: granülerlik, seçici
+vaadi, temaya IPC açılıp açılmayacağı, paket biçimi. Yazmadan önce sorulacaktı
+çünkü yayınlandıktan sonra geriye dönük uyumluluk borcu doğar.
+
+**Kararlar:**
+
+1. **Granülerlik: dar semantik küme.** Bölgeye özel geçersiz kılma yok —
+   Spicetify'ın kırılganlığı tam olarak katmanlı/geniş slot setlerinden
+   geliyordu (§3.3'ün kendi gerekçesi). ~15-20 token, durum varyantlarını
+   (hover/focus/disabled) da içerir ama bölge başına ayrı değişken yoktur.
+2. **Seçici vaadi: sınıf adları.** Önerim CSS custom property'lerle
+   sınırlamaktı (sınıf adlarını iç detay olarak D-036 sonrası bırakmak);
+   kullanıcı sınıf adlarını sözleşmenin parçası yapmayı seçti. **Sonuç:**
+   `crates/tune/ui/style.css`'teki mevcut sınıf adları (`.topbar`, `.toast`,
+   `.queue-item` vb.) artık iç ayrıntı değil, tema yazarının hedefleyebileceği
+   stabil bir yüzey. Bu, D-036'nın "class isimleri iç ayrıntı, habersiz
+   değişir" varsayımını **geçersiz kılıyor** — CSS'i yeniden adlandırmadan
+   önce artık bu bir kırılma sayılır. `style.css` başındaki "burası tema
+   sözleşmesi değil" uyarısı bu kararla düşüyor.
+3. **Temaya IPC: hayır.** Temalar yalnızca görünümü değiştirir; D-032/D-033'ün
+   kazandığı "sürümleme gerekmiyor" iç IPC sözleşmesi bozulmadan kalır.
+   **Not:** kullanıcı ayrıca davranış değiştiren bir "mod" fikri önerdi —
+   tema paketleriyle birlikte indirilebilen, kendine özel bir bölümü olan bir
+   şey. Bu **bilinçli olarak ertelendi**, bugün tasarlanmadı: bir mod'un
+   webview içinde JS çalıştırıp IPC çağırması, K4'ün sağlayıcı eklentileri
+   için şart koştuğu "alt süreç + JSON-RPC, eklenti çökerse çekirdek düşmez"
+   modelinden köklü biçimde farklı bir güvenlik sınıfı taşır — aynı webview
+   içinde çalışan bir mod bütün arayüzü çökertebilir/dondurabilir. PLAN.md'ye
+   ayrı bir KARAR NOKTASI olarak yazıldı (bkz. §3.3 sonu), tasarım o gün yapılır.
+4. **Paket biçimi: manifest + `api` sürüm alanı.** Küçük bir manifest
+   (`name`, `author`, `api`) + CSS dosyası. Uygulama yüklerken `api` sürümünü
+   kontrol eder; uyuşmazsa temayı **sessizce görmezden gelmez, açıkça
+   reddedip nedenini söyler** — K9 tanılama kültürü ve D-035'in dersiyle
+   ("bu kuralda risk fazla mesaj değil eksik mesaj") aynı çizgide.
+
+**Sonuç — yapılacaklar §3.3'ün geri kalanına taşındı:** somut token listesi,
+manifest şeması, `style.css`'in token'lara geçirilmesi, tema yükleme/doğrulama
+kodu ve §3.4'ün iki referans teması. Bu karar yalnızca dört soruyu kapatıyor;
+uygulama ayrı bir adımda yapılıyor.
+
+---
+
+## D-038 — `:root` dışına taşan tema: reddetme, işaretle
+**Tarih:** 2026-09-01
+**Soru:** Token seti yazılırken (D-037'nin uygulaması) küçük bir beşinci
+soru çıktı: `theme.css` `:root` dışına taşıp doğrudan bir seçiciyi (örn.
+`.topbar`) hedeflerse yükleyici ne yapsın — reddet mi, serbest mi bıraksın?
+**Karar:** **İkisi de değil — işaretle.** Yükleyici böyle bir temayı
+reddetmez, yükler; ama tema seçim listesinde açıkça "genişletilmiş / garantisi
+yok" diye etiketler. Sözleşmenin **garanti ettiği** yüzey her zaman yalnızca
+`:root`'taki `--tune-*` token'larıdır — bir `api` sürüm atlamasında yalnızca
+bunlar için geriye dönük uyumluluk taahhüt edilir.
+**Gerekçe:** Kullanıcı katı bir ikili seçim yerine bir orta yol istedi —
+"biri yaratıcılığa engel, biri tutarlı arayüze engel." Reddetmek tema
+yazarının en ufak esnekliğini (tek bir öğeye özel küçük bir dokunuş) kapatır;
+serbest bırakmak sözleşmeyi fiilen anlamsızlaştırır. Etiketlemek K9'un
+"sessizce yutma, söyle" ilkesinin tam karşılığı: risk gizlenmiyor, kullanıcıya
+görünür kılınıyor, ama önlenmiyor de. D-035'in dersiyle aynı çizgide —
+sorunlu olan sessiz zarar, açık bir bilgi değil.
+**Sonuç:** Yükleyici yazılırken (§3.3 kalan işi, henüz başlanmadı) manifest
+doğrulamasının yanına bir "kapsam dışı kural var mı" taraması eklenecek —
+CSS ayrıştırmadan, yalnızca `:root { ... }` bloğu dışında başka bir seçici
+var mı diye bakan basit bir kontrol yeter.
+
+---
+
+## D-039 — Token seti eksikti: `--tune-color-scheme`
+**Tarih:** 2026-09-01
+**Soru:** Sorulmadı — §3.4'ün referans temaları yazılırken **ölçüldü**.
+D-037'nin dar semantik kümesi (on üç token) açık bir temayı ifade etmeye
+yetmiyordu: `daylight` teması on üç token'ın hepsini doğru uyguladığı hâlde
+onay kutuları, metin imleci ve kaydırma çubuğu koyu kalıyordu.
+
+**Sebep:** Token'lar yalnızca **bizim çizdiğimiz** renkleri değiştiriyor.
+Onay kutusunu, imleci ve kaydırma çubuğunu motor çiziyor ve motorun tek
+girdisi CSS'in `color-scheme` özelliği — bir renk değeri değil, "bu arayüz
+açık mı koyu mu" cevabı. Hiçbir renk token'ı bunun yerine geçemez.
+
+**Karar:** On dördüncü token, `--tune-color-scheme` (`dark` | `light`).
+`style.css`'te `html { color-scheme: var(--tune-color-scheme); }` olarak
+kullanılıyor.
+
+**`api` artmadı ve bu kasıtlı.** Kural: yeni token **eklemek** sürümü
+artırmaz — eski temalar onu yazmıyordu, varsayılanını alırlar ve çalışmaya
+devam ederler. Artıran şey var olan bir token'ı kaldırmak ya da anlamını
+değiştirmek. `--tune-color-scheme` bu kuralın ilk örneği; kural PLAN §3.3'e
+ve `src/theme.rs`'e yazıldı.
+
+**Asıl kayda değer olan bulgu değil, nasıl bulunduğu.** §3.4 "en az iki
+farklı temada API'nin yeterli olduğunu kanıtla" diyor; ölçüt kanıtlamak
+değil, **yetmediği yeri bulmak** için oradaydı ve tam olarak onu yaptı.
+İkinci tema (`contrast`) da bu yüzden ikinci bir palet değil: yarıçap ve
+süre token'larını sıfıra indirerek renk **dışındaki** ekseni sınıyor.
+İki palet yazılsaydı "iki tema" ölçütü kâğıt üstünde karşılanır, eksik
+token ilk tema yazarının makinesinde ortaya çıkardı — ve suçlanan tema
+değil uygulama olurdu (D-028'in aynı gerekçesi).
+
+**Yükleyicinin küçük kararları** (hiçbiri geri alınamaz değil, o yüzden
+sorulmadı; kayda geçiyor ki ikinci kez tartışılmasın):
+- Seçim `<data_dir>/ui.json`'da tutuluyor. Veritabanı şemasına
+  dokunulmadı: tema bir dinleme verisi değil, arayüz tercihi.
+- Yerleşik referans temalar `include_str!` ile gömülü ama **ayrıcalıksız** —
+  diskteki bir tema gibi aynı doğrulamadan geçiyorlar.
+- Aynı adı taşıyan disk teması yerleşiği gölgelemiyor, sebebiyle
+  reddediliyor. Sessiz gölgeleme, hangi dosyanın kazandığını tahmin
+  ettirirdi (K9).
+- Tema komutları çekirdek iş parçacığına **girmiyor**: tema bir çekirdek
+  kavramı değil, ve uzun bir `import` sürerken arayüzün temasını
+  değiştirememek için bir sebep yok.
+- Tanı aşaması `CONFIG_LOAD`. Çekirdeğe yalnızca GUI'nin ihtiyacı olan bir
+  `THEME_LOAD` aşaması eklemek, kabuğa ait bir kavramı çekirdeğin tanı
+  sözlüğüne sızdırmak olurdu.

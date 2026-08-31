@@ -16,6 +16,7 @@ mod commands;
 mod core_thread;
 mod env;
 mod state;
+mod theme;
 
 use std::process::ExitCode;
 
@@ -23,6 +24,7 @@ use tokio::sync::mpsc;
 use tune_core::config::Config;
 
 use crate::state::{AppState, Core};
+use crate::theme::ThemeStore;
 
 fn main() -> ExitCode {
     // İlk iş: ortam düzeltmesi. GDK `GDK_BACKEND`'i `gtk_init` sırasında,
@@ -48,12 +50,14 @@ fn run() -> Result<(), String> {
     // veritabanı bozuksa kullanıcı boş bir pencereye değil, aşamasını
     // söyleyen bir hataya baksın.
     let config = Config::discover().map_err(|err| err.chain_text())?;
+    // Tema deposu çekirdeğe gitmiyor, yalnızca veri dizinini biliyor (§3.3).
+    let themes = ThemeStore::new(config.data_dir());
     let core = Core::open(config).map_err(|err| err.chain_text())?;
 
     let (jobs_tx, jobs_rx) = mpsc::unbounded_channel();
 
     tauri::Builder::default()
-        .manage(AppState::new(jobs_tx))
+        .manage(AppState::new(jobs_tx, themes))
         .setup(move |app| {
             // Çekirdek kendi iş parçacığına burada taşınıyor: `AppHandle`
             // ancak kurulumda var, olaylar da oradan gidiyor.
@@ -84,6 +88,10 @@ fn run() -> Result<(), String> {
             commands::jump_to,
             commands::set_shuffle,
             commands::set_repeat,
+            // Tema
+            commands::themes_list,
+            commands::theme_active,
+            commands::theme_select,
             // Durum ve tanılama
             commands::anchor,
             commands::queue,

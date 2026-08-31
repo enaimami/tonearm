@@ -34,7 +34,8 @@ use tune_core::session::{
 use tune_core::stats::StatsQuery;
 use tune_core::wrapped::CardPreset;
 
-use crate::state::{AppState, CommandResult};
+use crate::state::{AppState, CommandError, CommandResult};
+use crate::theme::{ActiveTheme, ThemeList};
 
 /// Uzun bir işin başladığını/bittiğini webview'e bildirir.
 ///
@@ -422,6 +423,41 @@ pub async fn set_repeat(state: State<'_, AppState>, mode: RepeatMode) -> Command
             })
         })
         .await
+}
+
+// ————————————————————————————————————— Tema (§3.3)
+//
+// Bu üç komut çekirdek iş parçacığına **girmiyor**: tema bir CSS mekanizması,
+// çekirdeğin taşıdığı bir kavram değil (bkz. `crate::theme`). Bu yüzden uzun
+// bir `import` sürerken de cevap veriyorlar.
+//
+// Aşama `CONFIG_LOAD`: veri dizininden bir yapılandırma okumak bu — çekirdeğe
+// yalnızca GUI'nin ihtiyacı olan bir `THEME_LOAD` aşaması eklemek, kabuğa ait
+// bir kavramı çekirdeğin tanı sözlüğüne sızdırmak olurdu.
+
+fn theme_error(text: String) -> CommandError {
+    CommandError::new(tune_core::diag::Stage::ConfigLoad, &text)
+}
+
+/// Yüklenebilir temalar + **reddedilenler ve sebepleri** (K9).
+#[tauri::command]
+pub async fn themes_list(state: State<'_, AppState>) -> CommandResult<ThemeList> {
+    state.themes().list().map_err(theme_error)
+}
+
+/// Kayıtlı seçimi yükler. Açılışta bir kez çağrılıyor.
+#[tauri::command]
+pub async fn theme_active(state: State<'_, AppState>) -> CommandResult<ActiveTheme> {
+    state.themes().active().map_err(theme_error)
+}
+
+/// Temayı seçer ve kalıcı yazar. `id` yoksa varsayılana döner.
+#[tauri::command]
+pub async fn theme_select(
+    state: State<'_, AppState>,
+    id: Option<String>,
+) -> CommandResult<ActiveTheme> {
+    state.themes().select(id).map_err(theme_error)
 }
 
 // ————————————————————————————————————— Durum ve tanılama

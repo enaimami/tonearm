@@ -35,6 +35,8 @@ use tune_core::playback::{LiveSession, Player};
 use tune_core::provider::ProviderRegistry;
 use tune_core::session::Session;
 
+use crate::theme::ThemeStore;
+
 /// Çekirdek iş parçacığının sahip olduğu her şey.
 pub struct Core {
     pub live: LiveSession,
@@ -86,12 +88,21 @@ pub type Job = Box<
 /// Tauri'nin yönettiği durum: çekirdeğe giden kanalın ucu.
 pub struct AppState {
     jobs: mpsc::UnboundedSender<Job>,
+    /// Tema deposu (§3.3). Çekirdek iş parçacığına **girmiyor**: tema bir
+    /// çekirdek kavramı değil (bkz. [`crate::theme`]) ve uzun bir `import`
+    /// sürerken arayüzün temasını değiştirememek için bir sebep yok.
+    themes: ThemeStore,
 }
 
 impl AppState {
     #[must_use]
-    pub const fn new(jobs: mpsc::UnboundedSender<Job>) -> Self {
-        Self { jobs }
+    pub const fn new(jobs: mpsc::UnboundedSender<Job>, themes: ThemeStore) -> Self {
+        Self { jobs, themes }
+    }
+
+    #[must_use]
+    pub const fn themes(&self) -> &ThemeStore {
+        &self.themes
     }
 
     /// Bir işi çekirdek iş parçacığında çalıştırır ve sonucunu bekler.
@@ -124,10 +135,7 @@ impl AppState {
 
 /// Çekirdek iş parçacığı kaybolduysa. Sessizce boş sonuç dönmüyoruz (K9).
 fn core_thread_gone() -> CommandError {
-    CommandError {
-        stage: Stage::ConfigLoad,
-        chain: "ADIM: CONFIG_LOAD\n  çekirdek iş parçacığı yanıt vermiyor".to_owned(),
-    }
+    CommandError::new(Stage::ConfigLoad, "çekirdek iş parçacığı yanıt vermiyor")
 }
 
 /// Webview'e giden hata.
@@ -142,6 +150,18 @@ pub struct CommandError {
     pub stage: Stage,
     /// `ADIM: ...` ile başlayan, kopyalanıp yapıştırılabilir tam zincir.
     pub chain: String,
+}
+
+impl CommandError {
+    /// Çekirdekten gelmeyen bir hata için zarf üretir — biçim çekirdeğinkiyle
+    /// aynı olsun diye tek yerden (`ADIM: <aşama>` + girintili sebep).
+    #[must_use]
+    pub fn new(stage: Stage, text: &str) -> Self {
+        Self {
+            stage,
+            chain: format!("ADIM: {stage}\n  {text}"),
+        }
+    }
 }
 
 impl From<tune_core::Error> for CommandError {

@@ -5,12 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>tune</title>
     <link rel="stylesheet" href="style.css" />
+    <!-- Seçili temanın CSS'i buraya yazılıyor (app.js). `style.css`'ten
+         **sonra** geliyor ki `:root` token'ları onunkileri geçersiz kılsın.
+         Boşsa varsayılan tema geçerlidir. -->
+    <style id="themeCss"></style>
   </head>
   <body>
-    <!-- Bu arayüz henüz tema sözleşmesi DEĞİL. §3.3 semantik token setini
-         tasarlayana kadar buradaki isimler iç ayrıntıdır; tema yazarına
-         hiçbir şey vaat edilmiyor. İsimler yine de İngilizce (D-036):
-         sözleşmeye dönüşme ihtimali olan her şey baştan öyle yazılıyor. -->
+    <!-- D-037/2: buradaki sınıf adları artık **sözleşmenin parçası**. Bir tema
+         bunları hedefleyebilir; habersiz yeniden adlandırılmazlar. Yeni sınıf
+         eklemek serbest, var olanı kaldırmak/anlamını değiştirmek `api`
+         sürümünü artırır (bkz. `style.css` başlığı, `src/theme.rs`).
+         Adlar İngilizce, metin Türkçe (D-036). -->
     <header class="topbar">
       <span class="brand">tune</span>
       <form id="playForm" class="play-form">
@@ -33,6 +38,7 @@
         <button class="nav" data-panel="library">kütüphane</button>
         <button class="nav" data-panel="stats">istatistik</button>
         <button class="nav" data-panel="providers">sağlayıcılar</button>
+        <button class="nav" data-panel="theme">görünüm</button>
         <button class="nav" data-panel="diag">tanı</button>
       </nav>
 
@@ -126,6 +132,27 @@
             <label class="check"><input id="serverVerify" type="checkbox" checked /> kaydetmeden önce bağlan ve doğrula</label>
             <button type="submit">ekle</button>
           </form>
+        </section>
+
+        <!-- ————————————————— görünüm -->
+        <section id="panel-theme" class="panel" hidden>
+          <h2>tema</h2>
+          <div class="row">
+            <button id="btnThemeReload">listeyi yenile</button>
+          </div>
+          <p class="hint">
+            Bir tema, içinde <b>theme.json</b> ve <b>theme.css</b> olan bir dizindir.
+            Aşağıdaki yola koyup <b>listeyi yenile</b> deyin — uygulamayı kapatmanız gerekmez.
+            Garanti edilen yüzey yalnızca <b>:root</b> içindeki <b>--tune-*</b> token'larıdır;
+            bunun dışına çıkan temalar yüklenir ama <i>genişletilmiş</i> diye işaretlenir.
+          </p>
+          <pre id="themeDir" class="block"></pre>
+
+          <ul id="themeList" class="themes"></ul>
+
+          <h3>yüklenemeyen temalar</h3>
+          <ul id="themeRejected" class="rejected"></ul>
+          <p id="themeRejectedEmpty" class="empty">Reddedilen tema yok.</p>
         </section>
 
         <!-- ————————————————— tanı -->

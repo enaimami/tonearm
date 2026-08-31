@@ -1,0 +1,31 @@
+/* Gün Işığı — açık tema (PLAN §3.4 referans teması).
+ *
+ * Bu tema token setinin **karşı kutbu**: temel arayüz koyu yazılmıştı, bu
+ * dosya aynı sözleşmeyle açık bir arayüz üretiyor. Tek bir sınıf adı
+ * hedeflenmiyor; yalnızca `:root` token'ları — yani "genişletilmiş" değil,
+ * garantili yüzeyin içinde (D-038).
+ *
+ * `--tune-color-scheme` bu tema yazılırken doğdu: token'lar yalnızca bizim
+ * çizdiğimiz renkleri değiştiriyor, ama onay kutusu, imleç ve kaydırma
+ * çubuğu motorun kendi çizdiği parçalar. Açık bir palette koyu kalıyorlardı.
+ */
+
+:root {
+  --tune-color-scheme: light;
+
+  --tune-bg: #faf7f2;
+  --tune-surface: #ffffff;
+  --tune-surface-raised: #f0ebe3;
+  --tune-border: #ddd5c9;
+  --tune-text: #241f1a;
+  --tune-text-dim: #6d6257;
+
+  --tune-accent: #b25e00;
+  --tune-success: #1f7a3d;
+  --tune-error: #c0392b;
+  --tune-info: #1e5fbf;
+
+  --tune-radius-sm: 6px;
+  --tune-radius-lg: 8px;
+  --tune-duration: 120ms;
+}
