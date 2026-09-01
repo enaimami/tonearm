@@ -109,6 +109,16 @@ enum Command {
         #[command(subcommand)]
         command: ProviderCommand,
     },
+    /// Eklenti işlemleri (alt süreç + JSON-RPC sağlayıcılar).
+    Plugin {
+        #[command(subcommand)]
+        command: PluginCommand,
+    },
+    /// Sır deposu: eklenti ve sağlayıcı kimlik bilgileri.
+    Secret {
+        #[command(subcommand)]
+        command: SecretCommand,
+    },
     /// Yerel bir parçayı çal.
     Play {
         /// Çalınacak parçayı bulmak için arama metni.
@@ -178,6 +188,55 @@ enum ProviderCommand {
     },
     /// Kayıtlı uzak sunucuları listele (kimlik bilgisi gösterilmez).
     Servers,
+}
+
+#[derive(Debug, Subcommand)]
+enum PluginCommand {
+    /// Kurulu eklentileri ve durumlarını listele (süreç başlatmaz).
+    List,
+    /// Bir eklentinin beyan ettiği izinleri onayla.
+    ///
+    /// Onay, eklentiyi hapsetmez: izin beyanı bir sözleşmedir, güvenlik
+    /// duvarı değil (D-040). Eklenti sizin bütün yetkinizle çalışır.
+    Approve {
+        /// Eklenti adı (dizin adı).
+        name: String,
+    },
+    /// Bir eklentiyi kapat (onay kaydı korunur).
+    Disable {
+        /// Eklenti adı.
+        name: String,
+    },
+    /// Kapalı bir eklentiyi yeniden aç.
+    Enable {
+        /// Eklenti adı.
+        name: String,
+    },
+    /// Onayı tamamen unut; bir dahaki sefere baştan sorulur.
+    Forget {
+        /// Eklenti adı.
+        name: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SecretCommand {
+    /// Ad alanlarını ve anahtar adlarını listele (değerler gösterilmez).
+    List,
+    /// Bir sır yaz. Değer `TUNE_SECRET`'ten ya da yankısız istemden okunur.
+    Set {
+        /// Ad alanı (`plugin:soundcloud`).
+        namespace: String,
+        /// Anahtar adı (`client_id`).
+        key: String,
+    },
+    /// Bir sırrı sil.
+    Remove {
+        /// Ad alanı.
+        namespace: String,
+        /// Anahtar adı.
+        key: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -328,6 +387,45 @@ async fn run(cli: &Cli) -> tune_core::Result<String> {
                 }
             }
         }
+        Command::Plugin { command } => match command {
+            PluginCommand::List => {
+                let report = session.plugins()?;
+                render(cli.json, &report, || output::plugin_list(&report))
+            }
+            PluginCommand::Approve { name } => {
+                let report = session.approve_plugin(name)?;
+                render(cli.json, &report, || output::plugin_consent(&report))
+            }
+            PluginCommand::Disable { name } => {
+                let report = session.disable_plugin(name)?;
+                render(cli.json, &report, || output::plugin_consent(&report))
+            }
+            PluginCommand::Enable { name } => {
+                let report = session.enable_plugin(name)?;
+                render(cli.json, &report, || output::plugin_consent(&report))
+            }
+            PluginCommand::Forget { name } => {
+                let report = session.forget_plugin(name)?;
+                render(cli.json, &report, || output::plugin_consent(&report))
+            }
+        },
+        Command::Secret { command } => match command {
+            SecretCommand::List => {
+                let report = session.secrets()?;
+                render(cli.json, &report, || output::secret_list(&report))
+            }
+            SecretCommand::Set { namespace, key } => {
+                // Değer argüman olarak alınmıyor: parolayla aynı gerekçe
+                // (kabuk geçmişi + `ps` çıktısı).
+                let value = read_hidden_value(&format!("{namespace} / {key}"))?;
+                let report = session.set_secret(namespace, key, &value)?;
+                render(cli.json, &report, || output::secret_write(&report))
+            }
+            SecretCommand::Remove { namespace, key } => {
+                let report = session.remove_secret(namespace, key)?;
+                render(cli.json, &report, || output::secret_write(&report))
+            }
+        },
         Command::Play {
             query,
             all,
@@ -393,6 +491,9 @@ fn anyhow_to_core(err: &anyhow::Error) -> tune_core::Error {
 /// Parolanın komut satırı yerine okunabileceği ortam değişkeni.
 const PASSWORD_ENV: &str = "TUNE_PASSWORD";
 
+/// Sır değerinin okunabileceği ortam değişkeni (`tune secret set`).
+const SECRET_ENV: &str = "TUNE_SECRET";
+
 /// Kullanım hatası üretir (aşama: yapılandırma okuma).
 fn input_err(detail: impl Into<String>) -> tune_core::Error {
     tune_core::Error::new(
@@ -420,19 +521,38 @@ fn read_password(id: &ProviderId) -> tune_core::Result<String> {
     prompt_password(id)
 }
 
+/// Sır değerini `TUNE_SECRET`'ten ya da terminalden **yankısız** okur.
+///
+/// Parolayla aynı gerekçe: komut satırına yazılan bir sır kabuk geçmişine ve
+/// `ps` çıktısına düşer (D-042).
+fn read_hidden_value(label: &str) -> tune_core::Result<String> {
+    if let Ok(from_env) = std::env::var(SECRET_ENV) {
+        if from_env.is_empty() {
+            return Err(input_err(format!("{SECRET_ENV} tanımlı ama boş")));
+        }
+        return Ok(from_env);
+    }
+    prompt_hidden(&format!("{label} değeri"), SECRET_ENV)
+}
+
 /// Terminali ham kipe alıp parolayı ekrana basmadan okur.
 fn prompt_password(id: &ProviderId) -> tune_core::Result<String> {
+    prompt_hidden(&format!("{id} parolası"), PASSWORD_ENV)
+}
+
+/// Yankısız istem. `env_hint`: tty yoksa kullanıcıya önerilecek değişken.
+fn prompt_hidden(label: &str, env_hint: &str) -> tune_core::Result<String> {
     use crossterm::terminal;
     use std::io::Write as _;
 
-    eprint!("{id} parolası: ");
+    eprint!("{label}: ");
     let _ = std::io::stderr().flush();
 
     terminal::enable_raw_mode().map_err(|source| {
         // Tty yoksa (boru hattı, CI) sessizce yankılı okumaya düşmüyoruz:
         // parolayı ekrana basmaktansa ne yapılacağını söylemek iyidir.
         input_err(format!(
-            "terminal yankısız kipe alınamadı ({source}); parolayı {PASSWORD_ENV} ile verin"
+            "terminal yankısız kipe alınamadı ({source}); değeri {env_hint} ile verin"
         ))
     })?;
     let secret = read_secret();
@@ -459,7 +579,7 @@ fn read_secret() -> tune_core::Result<String> {
         if key.modifiers.contains(KeyModifiers::CONTROL)
             && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('d'))
         {
-            return Err(input_err("parola girişi iptal edildi"));
+            return Err(input_err("giriş iptal edildi"));
         }
         if key
             .modifiers
@@ -477,7 +597,7 @@ fn read_secret() -> tune_core::Result<String> {
         }
     }
     if secret.is_empty() {
-        return Err(input_err("parola boş"));
+        return Err(input_err("boş değer kabul edilmiyor"));
     }
     Ok(secret)
 }

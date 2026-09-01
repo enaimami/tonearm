@@ -22,6 +22,8 @@ const VOLATILE_KEYS: &[&str] = &[
     "source",
     // Sunucu kayıt dosyasının yolu geçici dizine bağlı.
     "path",
+    // Eklenti dizini de öyle.
+    "dir",
 ];
 
 fn fixtures() -> PathBuf {
@@ -770,4 +772,104 @@ fn human_stats_output_is_readable() {
     assert!(stdout.contains("en çok dinlenen sanatçılar"), "{stdout}");
     assert!(stdout.contains("Portishead"), "{stdout}");
     std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Eklenti yaşam döngüsü CLI'den görünüyor mu (Faz 2 §2.1).
+///
+/// Kabuğun işi yalnızca göstermek: onay kararı, izin karşılaştırması ve
+/// sürüm denetimi çekirdekte. Buradaki iddia "CLI aynı veriyi alıyor" —
+/// yani GUI de alacak (Altın Kural).
+#[test]
+fn plugin_lifecycle_is_visible_from_the_cli() {
+    let dir = temp_dir("eklenti");
+    install_echo_plugin(&dir);
+
+    // Kurulu ama onaysız: görünüyor, yüklenmiyor.
+    let (stdout, stderr, ok) = run(&dir, &["--json", "plugin", "list"]);
+    assert!(ok, "plugin list başarısız: {stderr}");
+    assert_snapshot("plugin_list", &stdout);
+
+    let (stdout, stderr, ok) = run(&dir, &["plugin", "approve", "echo"]);
+    assert!(ok, "approve başarısız: {stderr}");
+    assert!(stdout.contains("onaylı"), "{stdout}");
+    assert!(
+        stdout.contains("izinler zorlanmıyor"),
+        "onay çıktısı neyin garanti edilmediğini söylemeli (D-040):\n{stdout}"
+    );
+
+    let (stdout, stderr, ok) = run(&dir, &["--json", "plugin", "list"]);
+    assert!(ok, "{stderr}");
+    assert_snapshot("plugin_list_approved", &stdout);
+
+    // Onaylı eklenti sağlayıcı listesine giriyor — süreç açılmadan.
+    let (stdout, stderr, ok) = run(&dir, &["provider", "list"]);
+    assert!(ok, "{stderr}");
+    assert!(stdout.contains("echo"), "{stdout}");
+
+    // Kapatma ve yeniden açma onay sormuyor.
+    let (stdout, _, ok) = run(&dir, &["plugin", "disable", "echo"]);
+    assert!(ok);
+    assert!(stdout.contains("kapalı"), "{stdout}");
+    let (stdout, _, ok) = run(&dir, &["provider", "list"]);
+    assert!(ok);
+    assert!(
+        !stdout.contains("echo"),
+        "kapalı eklenti yüklenmemeli:\n{stdout}"
+    );
+    let (stdout, _, ok) = run(&dir, &["plugin", "enable", "echo"]);
+    assert!(ok);
+    assert!(stdout.contains("onaylı"), "{stdout}");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Sır deposu: değer hiçbir çıktıda görünmüyor (D-042).
+#[test]
+fn secrets_are_listed_by_name_and_never_by_value() {
+    let dir = temp_dir("sir");
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_tune"));
+    let output = command
+        .arg("--data-dir")
+        .arg(&dir)
+        .args(["secret", "set", "plugin:echo", "token"])
+        .env("TUNE_SECRET", "cok-gizli-deger")
+        .env("TUNE_MUSIC_DIRS", "/olmayan/dizin/tune-test")
+        .output()
+        .expect("tune ikilisi çalışmalı");
+    assert!(
+        output.status.success(),
+        "secret set başarısız: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let (stdout, stderr, ok) = run(&dir, &["--json", "secret", "list"]);
+    assert!(ok, "{stderr}");
+    assert!(
+        !stdout.contains("cok-gizli-deger"),
+        "sır değeri çıktıya sızmamalı:\n{stdout}"
+    );
+    assert_snapshot("secret_list", &stdout);
+
+    // Tanı raporu da değeri taşımamalı: kopyalanıp paylaşılan metin bu.
+    let (stdout, _, ok) = run(&dir, &["diag"]);
+    assert!(ok);
+    assert!(!stdout.contains("cok-gizli-deger"), "{stdout}");
+
+    let (stdout, _, ok) = run(&dir, &["secret", "remove", "plugin:echo", "token"]);
+    assert!(ok);
+    assert!(stdout.contains("silindi"), "{stdout}");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Fixture eklentisini veri dizinine kurar (süreç açılmıyor; `python3`
+/// gerekmez).
+fn install_echo_plugin(data_dir: &Path) {
+    let source = fixtures().join("plugins/echo");
+    let target = data_dir.join("plugins/echo");
+    std::fs::create_dir_all(&target).expect("eklenti dizini");
+    for file in ["plugin.json", "main.py"] {
+        std::fs::copy(source.join(file), target.join(file)).expect("eklenti dosyası");
+    }
 }

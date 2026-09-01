@@ -67,7 +67,8 @@ tune/
 │   │   ├── identity/     # kanonik çözümleme
 │   │   ├── stats/        # dinleme istatistikleri
 │   │   ├── library/      # SQLite + FTS
-│   │   ├── provider/     # sağlayıcı trait'leri + JSON-RPC istemcisi
+│   │   ├── provider/     # sağlayıcı trait'leri
+│   │   ├── plugin/       # alt süreç + JSON-RPC eklentiler (Faz 2)
 │   │   ├── playback/     # symphonia + cpal (Faz 1)
 │   │   ├── sync/         # çapa protokolü (Faz 3)
 │   │   └── diag/         # tanılama, aşağıya bak
@@ -108,6 +109,8 @@ tune stats [--year N] [--top N]      # istatistikler
 tune resolve "<sanatçı> - <başlık>"  # kimlik çözümlemesini tek parçada dene
 tune library search <sorgu>
 tune provider list | test <ad>
+tune plugin list | approve <ad>          # eklentiler ve izin onayı
+tune secret list | set <ad-alanı> <anahtar>
 tune play <parça>                    # Faz 1
 tune diag                            # son çalıştırmanın tanı raporu
 ```

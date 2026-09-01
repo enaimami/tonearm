@@ -21,8 +21,12 @@ use crate::library::{
 };
 use crate::model::{Listen, PlayRule, TrackRef};
 use crate::playback::QueueItem;
+use crate::plugin::consent::{ConsentStatus, ConsentStore};
+use crate::plugin::manifest::Permissions;
+use crate::plugin::{PluginEntry, PluginSummary};
 use crate::provider::remote::{self, NewServer, RemoteServer, ServerKind, StoredAuth};
 use crate::provider::{ProviderHealth, ProviderInfo, ProviderRegistry, ScanSummary};
+use crate::secrets::Secrets;
 use crate::stats::{self, StatsQuery, StatsReport};
 use crate::wrapped::{self, CardSize, WrappedData};
 
@@ -91,6 +95,48 @@ pub struct ProviderListReport {
 pub struct ProviderTestReport {
     pub info: ProviderInfo,
     pub health: ProviderHealth,
+    pub diag: DiagReport,
+}
+
+/// Kurulu eklentilerin listesi (Faz 2 §2.1).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginListReport {
+    pub plugins: Vec<PluginEntry>,
+    pub summary: PluginSummary,
+    /// İzinler zorlanıyor mu — **hayır** (D-040), ve bu her çıktıda yazar.
+    /// Olmayan bir korumaya güvendirmemek için alan sabit değil, görünür.
+    pub permissions_enforced: bool,
+    pub diag: DiagReport,
+}
+
+/// Bir onay komutunun sonucu (`approve`, `disable`, `enable`, `forget`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginConsentReport {
+    pub name: String,
+    /// Hangi komut çalıştı.
+    pub action: String,
+    /// Eklentinin **beyan ettiği** izinler.
+    pub permissions: Permissions,
+    /// Komuttan sonraki durum.
+    pub status: ConsentStatus,
+    pub permissions_enforced: bool,
+    pub diag: DiagReport,
+}
+
+/// Sır deposunun **anahtar adları** (değerler yok, D-042).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SecretListReport {
+    pub namespaces: std::collections::BTreeMap<String, Vec<String>>,
+    pub diag: DiagReport,
+}
+
+/// Bir sır yazma/silme komutunun sonucu. Değer **taşımaz**.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SecretWriteReport {
+    pub namespace: String,
+    pub key: String,
+    pub action: String,
+    pub changed: bool,
     pub diag: DiagReport,
 }
 
@@ -1051,6 +1097,205 @@ impl Session {
         self.library.insert_listens(listens)
     }
 
+    /// Kurulu eklentileri listeler (Faz 2 §2.1). **Süreç başlatmaz.**
+    ///
+    /// # Errors
+    /// Eklenti dizini okunamaz ya da onay defteri bozuksa.
+    pub fn plugins(&self) -> Result<PluginListReport> {
+        let mut rec = Recorder::start(
+            "plugin list".to_owned(),
+            Some(self.config.data_dir().to_path_buf()),
+        );
+        let result = crate::plugin::discover(&self.config);
+        if let Ok((entries, summary)) = &result {
+            summary.record_into(&mut rec);
+            for entry in entries.iter().filter(|entry| !entry.is_loadable()) {
+                rec.note(format!("{}: {}", entry.name, entry.status_text()));
+            }
+        }
+        self.finish(rec, result, |(plugins, summary), diag| PluginListReport {
+            plugins,
+            summary,
+            permissions_enforced: crate::plugin::PERMISSIONS_ENFORCED,
+            diag,
+        })
+    }
+
+    /// Bir eklentinin **beyan ettiği** izinleri onaylar (D-040).
+    ///
+    /// Onaylanan küme manifestten okunur: çağıran kendi izin listesini
+    /// uyduramaz, kullanıcı yalnızca eklentinin istediğine evet der.
+    ///
+    /// # Errors
+    /// Eklenti bulunamazsa, manifesti bozuksa ya da defter yazılamazsa.
+    pub fn approve_plugin(&self, name: &str) -> Result<PluginConsentReport> {
+        self.consent_command(name, "approve", |store, name, requested| {
+            store.approve(name, requested, jiff::Timestamp::now());
+            Ok(())
+        })
+    }
+
+    /// Eklentiyi kapatır; onay kaydı korunur.
+    ///
+    /// # Errors
+    /// Eklenti bulunamazsa ya da hiç onaylanmamışsa.
+    pub fn disable_plugin(&self, name: &str) -> Result<PluginConsentReport> {
+        self.consent_command(name, "disable", |store, name, _| {
+            missing_consent(store.disable(name), name)
+        })
+    }
+
+    /// Kapalı bir eklentiyi yeniden açar.
+    ///
+    /// # Errors
+    /// Eklenti bulunamazsa ya da hiç onaylanmamışsa.
+    pub fn enable_plugin(&self, name: &str) -> Result<PluginConsentReport> {
+        self.consent_command(name, "enable", |store, name, _| {
+            missing_consent(store.enable(name), name)
+        })
+    }
+
+    /// Onayı tamamen unutur: eklenti bir dahaki sefere baştan sorulur.
+    ///
+    /// # Errors
+    /// Eklenti bulunamazsa ya da hiç onaylanmamışsa.
+    pub fn forget_plugin(&self, name: &str) -> Result<PluginConsentReport> {
+        self.consent_command(name, "forget", |store, name, _| {
+            missing_consent(store.forget(name), name)
+        })
+    }
+
+    fn consent_command(
+        &self,
+        name: &str,
+        action: &str,
+        apply: impl FnOnce(&mut ConsentStore, &str, &Permissions) -> Result<()>,
+    ) -> Result<PluginConsentReport> {
+        let mut rec = Recorder::start(
+            format!("plugin {action} {name}"),
+            Some(self.config.data_dir().to_path_buf()),
+        );
+
+        let action = action.to_owned();
+        let result = (|| {
+            let dir = self.config.plugins_dir().join(name);
+            let manifest = crate::plugin::manifest::PluginManifest::load(&dir)?;
+            let path = self.config.plugin_consent_path();
+            let mut store = ConsentStore::load(&path)?;
+            apply(&mut store, name, &manifest.permissions)?;
+            store.save(&path)?;
+            let status = store.status(name, &manifest.permissions);
+            Ok((manifest, status))
+        })();
+
+        if let Ok((manifest, status)) = &result {
+            rec.note(format!(
+                "beyan edilen izinler: {}",
+                manifest.permissions.describe()
+            ));
+            rec.note(format!("durum: {}", status.describe()));
+        }
+
+        self.finish(rec, result, move |(manifest, status), diag| {
+            PluginConsentReport {
+                name: manifest.name,
+                action,
+                permissions: manifest.permissions,
+                status,
+                permissions_enforced: crate::plugin::PERMISSIONS_ENFORCED,
+                diag,
+            }
+        })
+    }
+
+    /// Sır deposundaki **anahtar adlarını** listeler (D-042).
+    ///
+    /// Değerler dönmüyor: bu çıktı `--json` ile boru hattına ve tanı
+    /// raporuna gidebilir.
+    ///
+    /// # Errors
+    /// Sır dosyası bozuksa.
+    pub fn secrets(&self) -> Result<SecretListReport> {
+        let mut rec = Recorder::start(
+            "secret list".to_owned(),
+            Some(self.config.data_dir().to_path_buf()),
+        );
+        let result = Secrets::load(&self.config.secrets_path()).map(|secrets| secrets.describe());
+        if let Ok(namespaces) = &result {
+            rec.set(
+                "secrets.namespaces",
+                i64::try_from(namespaces.len()).unwrap_or(i64::MAX),
+            );
+        }
+        self.finish(rec, result, |namespaces, diag| SecretListReport {
+            namespaces,
+            diag,
+        })
+    }
+
+    /// Bir sır yazar.
+    ///
+    /// # Errors
+    /// Sır dosyası okunamaz ya da yazılamazsa.
+    pub fn set_secret(&self, namespace: &str, key: &str, value: &str) -> Result<SecretWriteReport> {
+        self.secret_command(namespace, key, "set", |secrets| {
+            secrets.set(namespace, key, value);
+            Ok(true)
+        })
+    }
+
+    /// Bir sırrı siler.
+    ///
+    /// # Errors
+    /// Sır dosyası okunamaz/yazılamazsa ya da anahtar yoksa.
+    pub fn remove_secret(&self, namespace: &str, key: &str) -> Result<SecretWriteReport> {
+        self.secret_command(namespace, key, "remove", |secrets| {
+            if secrets.remove(namespace, key) {
+                Ok(true)
+            } else {
+                Err(Error::new(
+                    Stage::ConfigLoad,
+                    ErrorKind::NotFound {
+                        what: format!("sır: {namespace} / {key}"),
+                    },
+                ))
+            }
+        })
+    }
+
+    fn secret_command(
+        &self,
+        namespace: &str,
+        key: &str,
+        action: &str,
+        apply: impl FnOnce(&mut Secrets) -> Result<bool>,
+    ) -> Result<SecretWriteReport> {
+        // Komut satırı tanıya yazılıyor; **değer buraya girmiyor** (D-042).
+        let rec = Recorder::start(
+            format!("secret {action} {namespace} {key}"),
+            Some(self.config.data_dir().to_path_buf()),
+        );
+        let namespace = namespace.to_owned();
+        let key = key.to_owned();
+        let action = action.to_owned();
+
+        let path = self.config.secrets_path();
+        let result = (|| {
+            let mut secrets = Secrets::load(&path)?;
+            let changed = apply(&mut secrets)?;
+            secrets.save(&path)?;
+            Ok(changed)
+        })();
+
+        self.finish(rec, result, move |changed, diag| SecretWriteReport {
+            namespace,
+            key,
+            action,
+            changed,
+            diag,
+        })
+    }
+
     /// Son çalıştırmanın tanı raporu.
     ///
     /// # Errors
@@ -1078,6 +1323,24 @@ impl Session {
             tracing::warn!(error = %write_err.chain_text(), "tanı raporu yazılamadı");
         }
         result.map(|value| wrap(value, report))
+    }
+}
+
+/// Onay defterinde kaydı olmayan eklenti için ortak hata.
+///
+/// `disable`/`enable`/`forget` hiç onaylanmamış bir eklentide sessizce
+/// başarılı olmamalı: kullanıcı bir şey yaptığını sanır (K9).
+fn missing_consent(found: bool, name: &str) -> Result<()> {
+    if found {
+        Ok(())
+    } else {
+        Err(Error::new(
+            Stage::PluginLoad,
+            ErrorKind::PluginNotApproved {
+                plugin: name.to_owned(),
+                detail: "onay defterinde kaydı yok — önce `tune plugin approve`".to_owned(),
+            },
+        ))
     }
 }
 

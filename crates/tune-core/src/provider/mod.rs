@@ -377,6 +377,26 @@ pub fn registry_with_http(
             registry.register(remote::provider_for(&server, Arc::clone(&http)));
         }
     }
+
+    // Onaylı eklentiler (Faz 2, §2.1). Hiçbiri burada **başlatılmıyor**:
+    // her eklenti ilk çağrısında kendi sürecini açar, `provider list` süreç
+    // açmadan çalışır.
+    let (plugins, summary) = crate::plugin::load(config)?;
+    for plugin in plugins {
+        registry.register(plugin);
+    }
+    if summary.discovered > 0 {
+        // Yüklenmeyenler sessiz kalmasın: sebepleri `tune plugin list`'te.
+        tracing::debug!(
+            discovered = summary.discovered,
+            ready = summary.ready,
+            awaiting_approval = summary.awaiting_approval,
+            disabled = summary.disabled,
+            incompatible = summary.incompatible,
+            broken = summary.broken,
+            "eklentiler tarandı"
+        );
+    }
     Ok(registry)
 }
 

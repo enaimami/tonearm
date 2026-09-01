@@ -271,6 +271,9 @@ tune play "Get Lucky" --tui
 | `tune provider add` | `subsonic\|jellyfin`, `--url`, `--user`, `--api-key` | Yeni bir uzak müzik sunucusu kaydeder |
 | `tune provider list` | | Etkin müzik sağlayıcılarını listeler |
 | `tune provider test` | `<sağlayıcı-adı>` | Sağlayıcının erişim durumunu ve parça sayısını test eder |
+| `tune plugin list` | | Kurulu eklentileri ve onay durumlarını listeler |
+| `tune plugin approve` | `<eklenti-adı>` | Eklentinin beyan ettiği izinleri onaylar |
+| `tune secret set` | `<ad-alanı> <anahtar>` | Sır yazar (değer istemden ya da `TUNE_SECRET`'ten) |
 | `tune resolve` | `"<sanatçı> - <başlık>"` | Tek parçayı kanonik kimlik çözümleme zincirinden geçirir |
 | `tune diag` | | Son işlemin ortam, aşama ve hata tanılama raporunu döker |
 
@@ -287,7 +290,7 @@ tune play "Get Lucky" --tui
 - [x] **Faz 0: Kimlik & İstatistikler** — Veri içe aktarma, kanonik kimlik eşleme, SQLite depolama, istatistik motoru.
 - [x] **Faz 0.5: Paylaşılabilir Wrapped** — SVG & PNG (1080x1080 / 1080x1920) görsel kart üretimi.
 - [x] **Faz 1: Evrensel Müzik Çalar** — Yerel dosya oynatma, Navidrome & Jellyfin akışı, dahili scrobbler, TUI oynatıcı.
-- [ ] **Faz 2: Eklenti Ekosistemi & Parmak İzi** — JSON-RPC sağlayıcı eklentileri, AcoustID ses parmak izi tanıma.
+- [ ] **Faz 2: Eklenti Ekosistemi & Parmak İzi** — Alt süreç + JSON-RPC eklenti protokolü **tamam** ([eklenti yazma rehberi](docs/eklenti-yazma.md)); referans eklenti, AcoustID parmak izi ve torrent sağlayıcı sırada.
 - [x] **Faz 3: Masaüstü Uygulaması (GUI) & Temalar** — Tauri tabanlı masaüstü arayüzü ve sürümlenmiş CSS tema sözleşmesi ([tema yazma rehberi](crates/tune/themes/README.md)).
 - [ ] **Faz 4: Senkronize Odalar (Birlikte Dinleme)** — Ses akışı röle edilmeden zaman çapasıyla eşzamanlı dinleme.
 - [ ] **Faz 5: Mobil İstemciler** — `uniffi` ile iOS ve Android desteği.

@@ -720,11 +720,67 @@ modeliyle birlikte yeniden bakılacak.
 **Bitti sayılır:** Rust olmayan bir referans eklenti çalışıyor ve çekirdek onu
 sürüm uyumsuzluğunda çökmeden reddedebiliyor.
 
-### 2.1 JSON-RPC eklenti protokolü
+### 2.1 JSON-RPC eklenti protokolü — TAMAM
 Yaşam döngüsü, el sıkışma, **sürümleme**, zaman aşımı, çökme izolasyonu.
 Protokol sürümlenir; uyumsuz eklenti yüklenmez, hata mesajı verir.
 
-> KARAR NOKTASI: Eklenti izin modeli (ağ/dosya erişimi kısıtlanacak mı?). **Sor.**
+**Yapıldı** (`crates/tune-core/src/plugin/`). Beş dosya, beş iş: `protocol`
+(tel biçimi), `manifest` (`plugin.json` + izin beyanı), `consent` (onay
+defteri), `transport` (alt süreç + satır çerçeveleme), `client` (id eşleme +
+zaman aşımı). Üstünde `PluginProvider` — var olan `Provider` trait'ini
+uyguluyor, yani kuyruk, arama ve çalma hattı eklentiden haberdar bile değil.
+
+Kararlar ve sebepleri:
+
+1. **api 1'in metotları dar:** `handshake`, `health`, `search`,
+   `resolve_source`, `shutdown`. `scan_catalog` ve `catalog_changed_since`
+   **bilerek dışarıda** — ikisi de trait'te varsayılanı olan opsiyonel
+   metotlar ve ilk referans eklentinin (SoundCloud) taranacak yerel kataloğu
+   yok. Kullanıcısı olmayan bir tel biçimi tahmindir. Sürüm kuralı D-039'un
+   aynısı: **eklemek `api`'yi artırmaz**, eski eklentiler `-32601` döner ve
+   çekirdek onu "desteklemiyor" diye okur.
+2. **Başlatma tembel.** Süreç ilk çağrıda açılıyor; `tune stats` yanında altı
+   süreç açmıyor, `provider list` hiç açmıyor. Bunu mümkün kılan şey
+   yeteneklerin manifestte de yazması — çelişirse el sıkışma kazanır ve fark
+   uyarı olarak raporlanır.
+3. **Zaman aşımı okumayı iş parçacığına taşıdı.** `std`'de boruya zaman aşımı
+   yok; `mpsc::recv_timeout` var. Asılı kalan eklenti çekirdeği asmıyor.
+4. **Sınır neyi tutuyor:** kimlik alanı (eklenti çıplak `id` gönderir,
+   sağlayıcı adını çekirdek ekler — başka sağlayıcının ad alanına yazamaz),
+   sır alanı (yalnızca kendi ad alanı), zaman, yaşam. **Tutmadığı:** dosya ve
+   ağ (D-040).
+5. **Yeniden başlatma sayılı** (`MAX_STARTS = 3`). Sonsuz yeniden başlatma bir
+   çökme döngüsünü sessiz kılardı. Sürüm uyuşmazlığında hiç denenmiyor:
+   tekrarla düzelmez.
+
+Aşamalar: `PLUGIN_LOAD` (manifest/onay), `PLUGIN_HANDSHAKE` (başlatma/sürüm),
+`PROVIDER_CALL` (çağrı). Hata tipleri de ayrı: `PluginCrashed` /
+`PluginTimeout` / `PluginRpc` / `PluginIncompatible` — "öldü", "cevap
+vermedi", "hayır dedi" ve "konuşamıyoruz" dört farklı tanıdır (K9).
+
+CLI: `tune plugin list|approve|disable|enable|forget`,
+`tune secret list|set|remove`. Hepsi `--json`.
+Eklenti yazarı belgesi: `docs/eklenti-yazma.md`.
+
+**Sınama.** Birim testleri betiklenmiş bir taşımayla protokol mantığını
+sınıyor; `crates/tune-core/tests/plugin_process.rs` **gerçek bir Python
+eklentisini** (`fixtures/plugins/echo`) çalıştırıyor: el sıkışma, arama,
+kaynak çözme, sürüm reddi, çökme + yeniden başlatma, zaman aşımı, izin
+büyümesi, sır yalıtımı. Fixture kötü eklenti taklidini komut satırı
+bayraklarıyla yapıyor (`--api 99`, `--crash-on`, `--hang-on`, `--noise`) —
+ortam değişkeni değil, çünkü `set_var` Rust 2024'te `unsafe` ve workspace
+`unsafe_code = "forbid"` diyor (D-031'in aynı duvarı).
+
+> KARAR NOKTASI: Eklenti izin modeli (ağ/dosya erişimi kısıtlanacak mı?).
+> **KAPANDI — D-040: beyan + onay, zorlama sonraya.** Manifestte makine
+> okunur izin beyanı (`net` ana bilgisayarları, `fs` yol önekleri), ilk
+> yüklemede kullanıcı onayı, onay `<data_dir>/plugins.json`'da özetiyle
+> saklanır. İşletim sistemi hapsi **yok** ve bu kullanıcıya böyle söylenir —
+> beyan bir güvenlik duvarı değil sözleşmedir. Landlock/bwrap sonradan
+> `api` kırmadan takılabilir.
+>
+> Sırlar D-042'de tek kavrama bağlandı: `<data_dir>/secrets.json`, `0600`,
+> ad alanlı; eklenti yalnızca kendi ad alanını görür. `keyring` yine yok.
 
 ### 2.2 Referans eklenti — SoundCloud (D-027)
 Rust olmayan bir dilde (Python) yazılmış bir sağlayıcı — protokolün gerçekten
@@ -734,6 +790,14 @@ Platform seçimi katalog kalitesine göre değil **sınanabilirliğe** göre yap
 SoundCloud abonelik gerektirmeyen tek aday, yani CI'da ve başkasının makinesinde
 çalışabilen tek aday. Referans eklentinin işi protokolü kanıtlamak, katalog sunmak
 değil.
+
+**İskelet hazır, gerçek eklenti değil.** §2.1'in sınama eklentisi
+(`fixtures/plugins/echo/main.py`, Python) protokolün tamamını uyguluyor ve
+testlerde gerçekten çalışıyor — yani "dil bağımsız mı?" sorusu bugün
+cevaplandı. Eksik olan **katalog tarafı**: SoundCloud'un `client_id` akışı,
+arama uç noktası, akış adresi çözme ve kotaya takılınca ne olacağı.
+§2.2 bittiğinde `echo` fixture olarak kalır (protokol regresyon testi),
+SoundCloud onun yerine geçmez.
 
 ### 2.3 Kimlik çözümlemesi olgunlaşır
 AcoustID / Chromaprint parmak izi. Etiketleri bozuk yerel dosyalar için.
@@ -756,7 +820,27 @@ haber vermeden bozulur, ve bozulduğunda **çalan müzik durmamalı**, yalnızca
 eklenti düşmeli.
 
 > KARAR NOKTASI: §2.2'nin referans eklentisi hangi platform olacak ve bu fazda
-> kaç tane yazılacak? **Sor.**
+> kaç tane yazılacak? **KAPANDI — D-027 (platform: SoundCloud) + D-041 (sayı:
+> bir).** Bu tur yalnızca §2.1 + §2.2. §2.3 (AcoustID), §2.4 (torrent) ve
+> §2.5 (yayın platformları) iptal değil, protokol oturduktan sonraya alındı:
+> ikinci bir sağlayıcı protokole yeni bir şey kanıtlamaz, ilk sağlayıcının
+> hatalarını iki kere yazdırır.
+
+### 2.6 Faz 2 durum — AÇIK
+
+| Bölüm | Durum |
+|---|---|
+| 2.1 JSON-RPC protokolü | TAMAM — izin modeli (D-040), sırlar (D-042), gerçek süreçle sınandı |
+| 2.2 Referans eklenti (SoundCloud) | SIRADAKİ — iskelet var (`fixtures/plugins/echo`), katalog tarafı yok |
+| 2.3 AcoustID | Ertelendi (D-041) |
+| 2.4 Torrent sağlayıcı | Ertelendi (D-041) |
+| 2.5 Yayın platformu eklentileri | Ertelendi (D-041) |
+
+**Faz 1'den taşınan borçlar:**
+- `keyring` (D-021) — **kapandı**: D-042 tek sır kavramını tanımladı,
+  `keyring` bağımlılığı yine eklenmedi ve gerekçesi yazıldı.
+- Gerçek zamanlı dizin izleme (D-025) — hâlâ açık, `--if-stale` yoklaması
+  yerinde duruyor.
 
 ---
 

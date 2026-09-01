@@ -5,8 +5,9 @@
 
 use tune_core::library::SearchHit;
 use tune_core::session::{
-    ImportReport, PlayReport, ProviderListReport, ProviderTestReport, ResolveReport, ScanReport,
-    SearchReport, ServerAddReport, ServerListReport, ServerRemoveReport, StatsResponse,
+    ImportReport, PlayReport, PluginConsentReport, PluginListReport, ProviderListReport,
+    ProviderTestReport, ResolveReport, ScanReport, SearchReport, SecretListReport,
+    SecretWriteReport, ServerAddReport, ServerListReport, ServerRemoveReport, StatsResponse,
     WrappedResponse,
 };
 use tune_core::stats::StatsReport;
@@ -257,6 +258,84 @@ pub fn provider_list(report: &ProviderListReport) -> String {
         );
     }
     out
+}
+
+/// Eklenti listesi.
+pub fn plugin_list(report: &PluginListReport) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    if report.plugins.is_empty() {
+        let _ = writeln!(out, "kurulu eklenti yok");
+        return out;
+    }
+    for entry in &report.plugins {
+        let _ = writeln!(
+            out,
+            "{:<14} {:<20} {}",
+            entry.name,
+            truncate(entry.display_name.as_deref().unwrap_or("—"), 20),
+            entry.status_text()
+        );
+        if !entry.permissions.is_empty() {
+            let _ = writeln!(out, "{:<14} istediği: {}", "", entry.permissions.describe());
+        }
+    }
+    let s = &report.summary;
+    let _ = writeln!(
+        out,
+        "\n{} eklenti: {} hazır, {} onay bekliyor, {} kapalı, {} sürüm uyumsuz, {} bozuk",
+        s.discovered, s.ready, s.awaiting_approval, s.disabled, s.incompatible, s.broken
+    );
+    if !report.permissions_enforced {
+        let _ = writeln!(out, "{}", ENFORCEMENT_NOTICE);
+    }
+    out
+}
+
+/// Onay komutu sonucu.
+pub fn plugin_consent(report: &PluginConsentReport) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(out, "eklenti : {}", report.name);
+    let _ = writeln!(out, "komut   : {}", report.action);
+    let _ = writeln!(out, "izinler : {}", report.permissions.describe());
+    let _ = writeln!(out, "durum   : {}", report.status.describe());
+    if !report.permissions_enforced && !report.permissions.is_empty() {
+        let _ = writeln!(out, "{}", ENFORCEMENT_NOTICE);
+    }
+    out
+}
+
+/// İzin beyanının ne olmadığını söyleyen uyarı (D-040).
+///
+/// Her onay çıktısında görünüyor: kullanıcının olmayan bir korumaya
+/// güvenmemesi, bu modelin kabul edilme şartıydı.
+const ENFORCEMENT_NOTICE: &str = "not: izinler zorlanmıyor — beyan bir sözleşmedir, güvenlik duvarı değil.\n\
+     eklenti sizin bütün yetkinizle çalışır.";
+
+/// Sır deposundaki anahtar adları.
+pub fn secret_list(report: &SecretListReport) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    if report.namespaces.is_empty() {
+        let _ = writeln!(out, "kayıtlı sır yok");
+        return out;
+    }
+    for (namespace, keys) in &report.namespaces {
+        let _ = writeln!(out, "{namespace}: {}", keys.join(", "));
+    }
+    let _ = writeln!(out, "\ndeğerler gösterilmez; yalnızca anahtar adları.");
+    out
+}
+
+/// Sır yazma/silme sonucu.
+pub fn secret_write(report: &SecretWriteReport) -> String {
+    let verb = if report.action == "remove" {
+        "silindi"
+    } else {
+        "yazıldı"
+    };
+    format!("{} / {} {verb}\n", report.namespace, report.key)
 }
 
 /// Sağlayıcı sınaması.

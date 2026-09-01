@@ -1280,3 +1280,90 @@ sorulmadı; kayda geçiyor ki ikinci kez tartışılmasın):
 - Tanı aşaması `CONFIG_LOAD`. Çekirdeğe yalnızca GUI'nin ihtiyacı olan bir
   `THEME_LOAD` aşaması eklemek, kabuğa ait bir kavramı çekirdeğin tanı
   sözlüğüne sızdırmak olurdu.
+
+---
+
+## D-040 — Eklenti izin modeli: beyan + onay, zorlama sonraya
+**Tarih:** 2026-09-01
+**Soru:** (PLAN §2.1) Eklentinin ağ/dosya erişimi kısıtlanacak mı?
+
+**Karar:** **Beyan + onay.** Eklenti manifestinde izinlerini bildirir,
+kullanıcı ilk yüklemede onaylar, onay kaydedilir. **İşletim sistemi
+seviyesinde hapsetme yok** — ve bu, kullanıcıya da böyle söylenir.
+
+**Gerekçe.** Üç şey aynı anda doğru:
+1. Eklenti bir alt süreç olarak **kullanıcının bütün yetkisiyle** çalışır.
+   Beyan bir güvenlik duvarı değil, bir **sözleşmedir**: "bu eklenti şunları
+   yapacağını söylüyor". Bunu güvenlik gibi sunmak, olmayan bir korumaya
+   güvendirmek olurdu — sessiz `unwrap_or_default()`'ın güvenlik hâli.
+2. Gerçek hapsetme (Landlock, `bubblewrap`) yalnızca Linux'ta var. macOS ve
+   Windows'ta karşılığı yok; model orada çöker ve "izinli/izinsiz" ayrımı
+   platforma göre anlam değiştirir. Faz 2'nin bitti ölçütü **dil bağımsız
+   bir referans eklenti**, işletim sistemi hapsi değil.
+3. Sonradan eklenebilir olması, protokolün bugün doğru yerinden bölünmesine
+   bağlı — o yüzden asıl iş izin **adlarını** doğru koymak.
+
+**Sonuç:**
+- Manifestte `permissions: { net: [host…], fs: [yol…] }`. `net` girdileri
+  ana bilgisayar adı (`api.soundcloud.com`), `fs` girdileri yol öneki.
+  Adlar sonradan bir Landlock/bwrap kuralına çevrilebilecek biçimde,
+  yani **açıklama değil, makine okunur** seçildi.
+- Onay `<data_dir>/plugins.json`'da izin kümesinin özetiyle birlikte tutulur.
+  Eklenti izinlerini büyütürse özet değişir ve **yeniden onay** istenir;
+  küçültürse istenmez.
+- Çekirdeğin kendi verdiği tek şey daraltılır: eklenti kendi veri alt dizinini
+  (`<data_dir>/plugins/<ad>/`) ve **yalnızca kendi** sırlarını görür (D-042).
+- `tune diag` ve `tune provider list --json` beyan edilen izinleri **ve**
+  zorlanmadığını raporlar. Kullanıcı neye güvendiğini bilir (K9).
+- Zorlama geldiğinde `api` sürümü artmaz: manifest alanları aynı kalır,
+  değişen şey çekirdeğin onlarla ne yaptığıdır.
+
+---
+
+## D-041 — Faz 2 kapsamı: §2.1 + §2.2, gerisi ayrı tur
+**Tarih:** 2026-09-01
+**Soru:** (PLAN §2.2) Bu fazda kaç eklenti yazılacak?
+
+**Karar:** Yalnızca **§2.1 (protokol) + §2.2 (Python SoundCloud referansı)**.
+§2.3 (AcoustID), §2.4 (torrent), §2.5 (yayın platformları) bu turun dışında.
+
+**Gerekçe:** Faz 2'nin "bitti sayılır" ölçütü zaten tam olarak bu — "Rust
+olmayan bir referans eklenti çalışıyor ve çekirdek onu sürüm uyumsuzluğunda
+çökmeden reddedebiliyor". İkinci bir sağlayıcı protokole yeni bir şey
+kanıtlamaz, yalnızca ilk sağlayıcının hatalarını iki kere yazdırır.
+Chromaprint (§2.3) yerel bir C kütüphanesi, `librqbit` (§2.4) tek başına
+büyük bir iş; ikisi de protokolün doğruluğuna bağlı ve **protokol
+oturduktan sonra** yapılırsa daha ucuz.
+
+**Sonuç:** §2.3/§2.4/§2.5 iptal değil, sıraya alındı. Faz 2 protokol
+kapandığında yeniden değerlendirilir; ilk eklenti protokolde bir eksik
+gösterirse (D-039'un temalarda yaptığı gibi) o eksik kapanmadan sıradakine
+geçilmez.
+
+---
+
+## D-042 — Sırlar: tek kavram, dosya tabanlı, ad alanlı; `keyring` yine yok
+**Tarih:** 2026-09-01
+**Soru:** (D-021'den devir) Kimlik bilgisi depolaması eklenti izin modeliyle
+birlikte yeniden ele alınacaktı. `keyring` eklenecek mi?
+
+**Karar:** **Hayır.** D-021'in gerekçesi hâlâ geçerli (yeni bağımlılık,
+başsız Linux'ta kırılgan). Onun yerine **tek bir sır kavramı** tanımlanır:
+`<data_dir>/secrets.json`, unix'te `0600`, **ad alanlı** —
+`{"plugin:soundcloud": {"client_id": "…"}}`.
+
+**Gerekçe:** Eklentilerin de sırra ihtiyacı var (SoundCloud `client_id`) ve
+`servers.json` deseni ikinci kez elle tekrarlanacaktı. İkinci kopya, ilk
+kopyanın izin sıkılaştırmasını unutan kopya olur.
+
+**Sonuç:**
+- `servers.json` **olduğu yerde kalıyor**: içindeki şey bir sunucu kaydı
+  (adres + tür + kullanıcı) ve sır o kaydın bir alanı. Göç etmek Faz 1'i
+  çalışan hâlinden oynatmak olurdu; kazancı yok.
+- Çekirdek el sıkışmada eklentiye **yalnızca kendi ad alanını** geçirir.
+  Bir eklenti başka bir eklentinin sırrını istemez, göremez.
+- Sır değerleri log'a ve `tune diag`'a **girmez**; yerine anahtar adı ve
+  "var/yok" yazılır. Tanı raporu kopyala-yapıştır edilen bir metin (K9) —
+  içinde token taşıyamaz.
+- `keyring` kapısı kapanmadı: sır **okuma** tek bir yerden geçtiği için
+  arkasına sonradan bir anahtarlık koymak tek dosyalık bir iş.

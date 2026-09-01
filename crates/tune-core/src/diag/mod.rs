@@ -34,6 +34,13 @@ pub enum Stage {
     StatsCompute,
     /// Sağlayıcı eklentisiyle konuşma.
     ProviderCall,
+    /// Eklenti keşfi: manifest okuma, doğrulama, izin onayı (Faz 2).
+    PluginLoad,
+    /// Eklenti sürecini başlatma ve el sıkışma — sürüm uyumu burada denetlenir.
+    ///
+    /// `ProviderCall`'dan ayrı: "eklenti hiç açılmadı" ile "eklenti açıldı ama
+    /// bu çağrıya hayır dedi" farklı tanılardır (K9).
+    PluginHandshake,
     /// HTTP taşıma katmanı: bağlanma, zaman aşımı, TLS, durum kodu.
     ///
     /// `ProviderCall`'dan ayrı: "sunucuya ulaşamadım" ile "sunucu isteğimi
@@ -64,6 +71,8 @@ impl Stage {
             Self::LibraryQuery => "LIBRARY_QUERY",
             Self::StatsCompute => "STATS_COMPUTE",
             Self::ProviderCall => "PROVIDER_CALL",
+            Self::PluginLoad => "PLUGIN_LOAD",
+            Self::PluginHandshake => "PLUGIN_HANDSHAKE",
             Self::NetworkRequest => "NETWORK_REQUEST",
             Self::WrappedRender => "WRAPPED_RENDER",
             Self::PlaybackResolve => "PLAYBACK_RESOLVE",

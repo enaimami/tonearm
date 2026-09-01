@@ -79,6 +79,37 @@ impl Config {
         self.data_dir.join("servers.json")
     }
 
+    /// Ad alanlı sır deposu (D-042). Unix'te `0600` yazılır.
+    ///
+    /// `servers.json`'dan ayrı ve bu bilinçli: orada duran şey bir **sunucu
+    /// kaydı** (adres + tür + kullanıcı), sır o kaydın bir alanı. Buradaki
+    /// ise sırrın kendisi, sahibi ad alanıyla belirtilmiş.
+    #[must_use]
+    pub fn secrets_path(&self) -> PathBuf {
+        self.data_dir.join("secrets.json")
+    }
+
+    /// Eklentilerin bulunduğu dizin: `<data_dir>/plugins/<ad>/plugin.json`.
+    #[must_use]
+    pub fn plugins_dir(&self) -> PathBuf {
+        self.data_dir.join("plugins")
+    }
+
+    /// Eklenti izin onayları defteri (D-040).
+    #[must_use]
+    pub fn plugin_consent_path(&self) -> PathBuf {
+        self.data_dir.join("plugins.json")
+    }
+
+    /// Bir eklentinin yazabileceği kendi dizini.
+    ///
+    /// Eklentinin gördüğü tek yazılabilir yol bu — izin beyanı zorlanmasa da
+    /// (D-040) çekirdeğin kendi eliyle verdiği şey daraltılmış olur.
+    #[must_use]
+    pub fn plugin_state_dir(&self, plugin: &str) -> PathBuf {
+        self.plugins_dir().join(plugin).join("state")
+    }
+
     /// Son çalıştırmanın tanı raporu.
     #[must_use]
     pub fn last_run_path(&self) -> PathBuf {

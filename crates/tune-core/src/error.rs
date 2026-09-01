@@ -128,6 +128,51 @@ pub enum ErrorKind {
         detail: String,
     },
 
+    /// Eklenti manifesti okunamadı ya da geçersiz (Faz 2, §2.1).
+    #[error("eklenti manifesti geçersiz: {path} — {detail}")]
+    PluginManifest { path: PathBuf, detail: String },
+
+    /// Eklentinin protokol sürümü çekirdeğinkiyle uyuşmuyor.
+    ///
+    /// Faz 2'nin "bitti sayılır" ölçütünün yarısı bu hata: uyumsuz eklenti
+    /// **yüklenmez**, çekirdek çökmez, kullanıcı neyin uyuşmadığını görür.
+    #[error(
+        "{plugin} eklentisi bu sürümle konuşamıyor: eklenti api {plugin_api}, çekirdek api {host_api}"
+    )]
+    PluginIncompatible {
+        plugin: String,
+        plugin_api: u32,
+        host_api: u32,
+    },
+
+    /// Eklenti izinleri onaylanmamış ya da onay geri alınmış.
+    #[error("{plugin} eklentisi onaylanmadı: {detail}")]
+    PluginNotApproved { plugin: String, detail: String },
+
+    /// Eklenti süreci başlatılamadı, öldü ya da kanalı kapattı.
+    #[error("{plugin} eklenti süreci çalışmıyor: {detail}")]
+    PluginCrashed { plugin: String, detail: String },
+
+    /// Eklenti verilen sürede cevap vermedi.
+    ///
+    /// Zaman aşımı çökmeden ayrı: asılı kalan bir eklenti ölmüş bir
+    /// eklentiden farklı bir sorundur ve farklı çözülür (K9).
+    #[error("{plugin} eklentisi {method} çağrısına {seconds} sn içinde cevap vermedi")]
+    PluginTimeout {
+        plugin: String,
+        method: String,
+        seconds: u64,
+    },
+
+    /// Eklenti JSON-RPC hata nesnesi döndürdü — yani süreç sağ, işi reddetti.
+    #[error("{plugin} eklentisi {method} çağrısını reddetti: {message} (kod {code})")]
+    PluginRpc {
+        plugin: String,
+        method: String,
+        code: i64,
+        message: String,
+    },
+
     /// Sunucu HTTP 200 döndü ama gövdede hata var (Subsonic'in yaptığı gibi).
     #[error("{server} isteği reddetti: {message} (kod {code}, uç nokta: {endpoint})")]
     RemoteApi {
