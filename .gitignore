@@ -5,6 +5,9 @@
 *.sqlite
 .env
 
+# Canlı SSH/Navidrome kimlik bilgisi içerir — asla versiyonlanmaz.
+extra.md
+
 # Tauri'nin `build.rs` sırasında ürettiği ACL şemaları — türetilmiş dosya,
 # her derlemede yeniden yazılıyor.
 crates/tune/gen/
