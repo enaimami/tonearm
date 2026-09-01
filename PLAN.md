@@ -791,13 +791,41 @@ SoundCloud abonelik gerektirmeyen tek aday, yani CI'da ve başkasının makinesi
 çalışabilen tek aday. Referans eklentinin işi protokolü kanıtlamak, katalog sunmak
 değil.
 
-**İskelet hazır, gerçek eklenti değil.** §2.1'in sınama eklentisi
-(`fixtures/plugins/echo/main.py`, Python) protokolün tamamını uyguluyor ve
-testlerde gerçekten çalışıyor — yani "dil bağımsız mı?" sorusu bugün
-cevaplandı. Eksik olan **katalog tarafı**: SoundCloud'un `client_id` akışı,
-arama uç noktası, akış adresi çözme ve kotaya takılınca ne olacağı.
-§2.2 bittiğinde `echo` fixture olarak kalır (protokol regresyon testi),
-SoundCloud onun yerine geçmez.
+**TAMAM.** `plugins/soundcloud/` — Python, yalnızca standart kütüphane
+(`pip install` gerektirmez), ~330 satır. `echo` fixture olarak kaldı
+(protokol regresyon testi); SoundCloud onun yerine geçmedi.
+
+Faz 2'nin "bitti sayılır" ölçütünün **ilk yarısı** buydu ve karşılandı:
+Rust olmayan bir eklenti gerçek bir servise bağlanıp arıyor ve **çalıyor**.
+`tune play "nujabes aruarian dance"` SoundCloud'dan 250 saniyelik parçayı
+baştan sona çaldı ve bir `listen` kaydı üretti — import verisiyle aynı
+tabloya (§1.6).
+
+Kararlar D-043'te. Özet:
+
+1. **client_id üç kaynaktan**, bu sırayla: kullanıcının sırrı → disk
+   önbelleği → SoundCloud'un web istemcisinden keşif. `health()` hangisinin
+   kullanıldığını söylüyor. Sır varsa keşfe hiç gidilmiyor; kullanıcının
+   anahtarı reddedilirse arkasından dolanılmıyor, kendisine söyleniyor.
+2. **Yalnızca `progressive` (düz HTTP MP3).** Ölçüldü: 200 parçalık örnekte
+   %99 kapsama. Kalan %1 yalnızca HLS sunuyor ve açık hata alıyor —
+   sessizce boş sonuç değil (K9). HLS çözücü §2.2'nin işi değil.
+3. **Akış adresi imzalı ve süreli**, önbelleğe alınmıyor; her çalmada
+   yeniden çözülüyor.
+4. **`policy: SNIP`** parçalar 30 sn önizleme; başlığa `[önizleme]`
+   ekleniyor çünkü api 1'de bunu taşıyacak alan yok.
+
+**Canlı testler varsayılan koşumda** (D-043, kullanıcının kararı; önerim
+`--ignored` arkasıydı). Bedeli açık: SoundCloud düşerse paket kırmızı yanar.
+Karşılığında eklentinin bozulduğu gün *o gün* öğreniliyor. Ağ yoksa testler
+kendini atlıyor, sebebini yazarak — "ulaşamadım" ile "hayır dedi" ayrı (K9).
+
+**Canlı koşum Faz 1'den kalan bir kusuru buldu (D-044).** `tune play`
+SoundCloud parçasını kuyruğa alıp `kaydedilen dinleme: 0` deyip anında
+çıkıyordu; hata yok, `diag` temiz, ses yok. Sebep motorun yeni gönderilen işi
+bir sonraki ses geri çağrısına kadar `Stopped` göstermesiydi — pencere yerel
+dosyada milisaniye, HTTP'de saniyeler. Sahte bir sunucu bunu gösteremezdi;
+kusur protokolde değil **zamanlamadaydı**.
 
 ### 2.3 Kimlik çözümlemesi olgunlaşır
 AcoustID / Chromaprint parmak izi. Etiketleri bozuk yerel dosyalar için.
@@ -826,12 +854,12 @@ eklenti düşmeli.
 > ikinci bir sağlayıcı protokole yeni bir şey kanıtlamaz, ilk sağlayıcının
 > hatalarını iki kere yazdırır.
 
-### 2.6 Faz 2 durum — AÇIK
+### 2.6 Faz 2 durum — D-041'in kapsamı KAPANDI
 
 | Bölüm | Durum |
 |---|---|
 | 2.1 JSON-RPC protokolü | TAMAM — izin modeli (D-040), sırlar (D-042), gerçek süreçle sınandı |
-| 2.2 Referans eklenti (SoundCloud) | SIRADAKİ — iskelet var (`fixtures/plugins/echo`), katalog tarafı yok |
+| 2.2 Referans eklenti (SoundCloud) | TAMAM — canlı SoundCloud'da arıyor ve çalıyor (D-043) |
 | 2.3 AcoustID | Ertelendi (D-041) |
 | 2.4 Torrent sağlayıcı | Ertelendi (D-041) |
 | 2.5 Yayın platformu eklentileri | Ertelendi (D-041) |
@@ -841,6 +869,16 @@ eklenti düşmeli.
   `keyring` bağımlılığı yine eklenmedi ve gerekçesi yazıldı.
 - Gerçek zamanlı dizin izleme (D-025) — hâlâ açık, `--if-stale` yoklaması
   yerinde duruyor.
+
+**D-041'in çizdiği tur (§2.1 + §2.2) bitti; 304 test, clippy ve fmt temiz.**
+Faz 2'nin "bitti sayılır" ölçütünün ikisi de karşılandı: Rust olmayan bir
+referans eklenti gerçek bir serviste çalışıyor (§2.2) ve çekirdek sürüm
+uyumsuzluğunda çökmeden reddediyor (§2.1, `plugin_process.rs`).
+
+§2.3 (AcoustID), §2.4 (torrent) ve §2.5 (yayın platformları) ertelenmiş
+durumda ve **ayrı bir tur** olarak açılacak (D-041). Sıradaki iş bir karar:
+o turu şimdi mi açalım, yoksa §3.3'ün bıraktığı **"mod" paketleri** karar
+noktası mı önce gelsin.
 
 ---
 

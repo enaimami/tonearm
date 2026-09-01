@@ -1,0 +1,13 @@
+{
+  "name": "soundcloud",
+  "display_name": "SoundCloud",
+  "version": "0.1.0",
+  "api": 1,
+  "exec": ["python3", "./main.py"],
+  "capabilities": ["search", "stream"],
+  "permissions": {
+    "net": ["soundcloud.com", "a-v2.sndcdn.com", "api-v2.soundcloud.com"],
+    "fs": []
+  },
+  "description": "SoundCloud'da arar ve çalar. client_id'yi sırdan alır, yoksa kendisi keşfeder."
+}

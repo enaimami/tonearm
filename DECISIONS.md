@@ -1367,3 +1367,95 @@ kopyanın izin sıkılaştırmasını unutan kopya olur.
   içinde token taşıyamaz.
 - `keyring` kapısı kapanmadı: sır **okuma** tek bir yerden geçtiği için
   arkasına sonradan bir anahtarlık koymak tek dosyalık bir iş.
+
+---
+
+## D-043 — SoundCloud eklentisi: client_id üç kaynaktan, canlı test varsayılan koşumda
+**Tarih:** 2026-09-01
+**Soru:** §2.2'nin referans eklentisi `client_id`'yi nereden alacak, ve ağa
+bağlı bir eklenti "ağa bağlı test yazma" kuralı altında nasıl sınanacak?
+
+**Karar (S1 — client_id):** **Üç kaynak, bu sırayla.** Kullanıcının sırrı
+(`plugin:soundcloud` / `client_id`) → diskteki önbellek
+(`<data_dir>/plugins/soundcloud/state/client_id.txt`) → SoundCloud'un web
+istemcisinden **keşif**. `health()` hangisinin kullanıldığını raporlar.
+
+**Gerekçe:** Öneri "yalnızca kullanıcı verir" idi (kazıma kırılgandır ve
+referans eklentinin işi protokolü kanıtlamak, katalog sunmak değil).
+Kullanıcı üçünü birden seçti: kurulum sürtünmesi sıfır olsun ama kendi
+anahtarını veren kullanıcının anahtarının arkasından dolanılmasın.
+Sıra bu yüzden kasıtlı — sır varsa keşfe hiç gidilmez.
+
+**Sonuç:**
+- 401/403 geldiğinde: kaynak *keşif/önbellek* ise anahtar bir kez tazelenip
+  yeniden denenir; kaynak *sır* ise **tazelenmez**, kullanıcıya kendi
+  anahtarının reddedildiği söylenir. Kullanıcının verdiği şeyi sessizce
+  değiştirmek, ona yanlış yerde hata aratmak olurdu.
+- Keşif dokümante bir uç nokta değil ve haber vermeden bozulabilir.
+  Bozulduğunda ne olacağı **yazılı**: açık hata + "kendi client_id'ni ver".
+- Keşif el sıkışmada değil **ilk gerçek çağrıda** yapılır: el sıkışmanın
+  zaman aşımı 5 sn ve protokol "ağa çıkmayın" diyor.
+
+**Karar (S2 — test yolu):** **Canlı testler varsayılan koşuma dahil.**
+`crates/tune-core/tests/plugin_soundcloud.rs` gerçek SoundCloud'a bağlanır ve
+`cargo test --workspace` ile koşar.
+
+**Gerekçe:** Önerim "sahte sunucu + `--ignored` arkasında canlı test" idi;
+gerekçe, testin kırmızı yanmasının *bizim* kodumuzun bozulduğu anlamına
+gelmesi gerektiğiydi. Kullanıcı bu itirazı gördü ve tersini seçti: eklentinin
+bozulduğu gün *o gün* öğrenilsin. Karar kullanıcınındır ve bedeli kabul
+edilmiştir — SoundCloud düştüğünde paket kırmızı yanar.
+
+**Bunun üzerine yazılan kural — `CLAUDE.md`'nin "ağa bağlı test yazma"
+cümlesi güncellendi.** Yeni hâli: *ağa bağlı test yazılabilir; ulaşamamak
+başarısızlık değildir.* Ayrım K9'un kendi ayrımı:
+- **Ulaşamamak** (DNS/TCP yok) → test kendini atlar, sebebini `stderr`'e
+  yazar. Ses aygıtı testlerinin yordamının aynısı.
+- **Ulaşıp beklenmeyeni almak** → test düşer. "Ulaşamadım" ile "hayır dedi"
+  farklı tanılar, farklı çözümler.
+
+**Kapsam kendiliğinden cevaplandı:** api 1'in metotları `search` +
+`resolve_source` ile sınırlı, `browse` için tel biçimi yok. Eklenti
+`SEARCH | STREAM` beyan ediyor.
+
+**Ölçüm (2026-09-01, 200 parçalık örnek):** parçaların **%99'unda**
+`progressive` (düz HTTP MP3) varyantı var, **%1'i** yalnızca HLS sunuyor.
+HLS çözücü yazılmadı; o %1 için açık hata dönülüyor. `policy: SNIP` olan
+4 parça 30 sn önizleme — başlığa `[önizleme]` ekleniyor, çünkü api 1'de
+bunu taşıyacak alan yok ve kullanıcı çalarken şaşırmamalı.
+
+---
+
+## D-044 — Yeni gönderilen iş anında "bitmemiş" sayılır (canlı testin bulduğu kusur)
+**Tarih:** 2026-09-01
+**Soru:** Karar değil, D-043'ün canlı sürüşünün ortaya çıkardığı kusur ve
+düzeltmesi. Kayda geçiyor çünkü aynı aile ikinci kez tekrarlandı (D-035).
+
+**Kusur:** `tune play` SoundCloud parçasını kuyruğa alıyor, sonra
+`kaydedilen dinleme: 0` deyip **anında** çıkıyordu. Hata yok, uyarı yok,
+`tune diag` temiz. Ses hiç çalmıyordu.
+
+**Sebep:** `AudioEngine::open()` cpal akışını hemen başlatıyor; geri çağrı
+boş tampon + `idle` görüp `Stopped` basıyor. Ardından `play_source`
+kaynağı açıyor (`open_source`) ve işi kuyruğa koyup `idle = false` yapıyor —
+ama **durumu düzeltmeyi ilk geri çağrıya bırakıyordu.** Arada kalan pencerede
+durum `Stopped` ve `Session::play`'in döngüsü tam da ona bakıyor:
+"başlamadan bitti".
+
+**Pencere neden şimdi görüldü:** yerel dosyada `open_source` birkaç
+milisaniye, HTTP akışında **saniyeler** (4 MB indiriyor). Kusur Faz 1'den
+beri oradaydı ve yalnızca uzak kaynakta görünüyordu.
+
+**Düzeltme:** `play_prepared` işi kuyruğa koyarken durumu da **anında**
+`Buffering` yapıyor. `idle` için zaten yapılan şeyin (kodda yorumu da vardı)
+`state` için yapılmamış hâliydi. `Buffering` "hattın beklemesi"dir (D-016) ve
+anlatılmak istenen tam olarak odur.
+
+**Regresyon:** `a_freshly_queued_track_is_never_reported_as_stopped` —
+motoru açıyor, geri çağrının `Stopped` basmasını **bekliyor** (ön koşulu
+`assert` ediyor), sonra iş gönderip **uyumadan** durumu okuyor.
+
+**Ders — bu üçüncü kez:** D-035'te GUI donmuştu (eksik durum olayı),
+D-022'de "erişilemedi" ile "doğrulanamadı" birleşmişti, burada CLI sessizce
+çıktı. Üçü de *eksik* sinyal; fazlası ölçülür, eksiği iz bırakmaz. Ve üçünü
+de sahte bir sunucu değil **gerçek bir çalıştırma** buldu.

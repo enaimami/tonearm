@@ -4,8 +4,13 @@
 JSON-RPC 2.0 konuşur. Yani bir eklenti herhangi bir dilde yazılabilir:
 stdin'den satır okuyup stdout'a satır yazabilen her şey yeterli.
 
-Çalışan bir örnek: [`fixtures/plugins/echo/main.py`](../fixtures/plugins/echo/main.py)
-(Python, ~150 satır, protokolün tamamını uygular).
+İki çalışan örnek:
+
+- [`plugins/soundcloud/main.py`](../plugins/soundcloud/main.py) — **gerçek
+  eklenti.** Python, yalnızca standart kütüphane, canlı bir servise bağlanır.
+  Yazacağınız şeye en yakın örnek budur.
+- [`fixtures/plugins/echo/main.py`](../fixtures/plugins/echo/main.py) — sabit
+  kataloglu sınama eklentisi (~150 satır). Protokolü çıplak görmek için.
 
 ---
 
@@ -255,3 +260,43 @@ tune diag
 
 Hata mesajları aşamayı taşır: `PLUGIN_LOAD` (manifest/onay),
 `PLUGIN_HANDSHAKE` (başlatma/sürüm), `PROVIDER_CALL` (çağrı).
+
+---
+
+## 7. SoundCloud eklentisini kurmak
+
+Depodaki `plugins/soundcloud/` doğrudan kullanılabilir:
+
+```bash
+mkdir -p ~/.local/share/tune/plugins/soundcloud
+cp plugins/soundcloud/{main.py,plugin.json} ~/.local/share/tune/plugins/soundcloud/
+
+tune plugin approve soundcloud
+tune provider test soundcloud     # "kullanılabilir" demeli
+tune play "nujabes aruarian dance"
+```
+
+`client_id` **istenmez**: eklenti SoundCloud'un web istemcisinden kendisi
+keşfeder ve `state/client_id.txt` içine önbellekler. Kendi anahtarınız varsa
+o kullanılır ve keşfe hiç gidilmez:
+
+```bash
+tune secret set plugin:soundcloud client_id
+```
+
+`tune provider test soundcloud` hangi kaynağın kullanıldığını yazar
+(`sır` / `önbellek` / `keşif`) — yanlış anahtarla çalışan bir kurulum sessizce
+doğru görünmesin diye (D-043).
+
+**Bilinen sınırlar**, ikisi de kasıtlı:
+
+- **Yalnızca `progressive` (düz HTTP MP3).** Ölçüldü: parçaların %99'unda var.
+  Kalan %1 yalnızca HLS sunuyor ve açık bir hata alır — sessizce boş sonuç
+  değil.
+- **`[önizleme]` etiketli parçalar 30 saniyedir.** SoundCloud'un `SNIP`
+  politikası; tam parça abonelik istiyor. api 1'de bunu taşıyacak bir alan
+  olmadığı için başlığa yazılıyor.
+
+Keşif dokümante edilmemiş bir yola dayanıyor ve **haber vermeden bozulabilir**.
+Bozulursa eklenti size kendi `client_id`'nizi vermenizi söyler; sessizce boş
+sonuç döndürmez.

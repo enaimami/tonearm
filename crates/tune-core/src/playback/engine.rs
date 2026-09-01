@@ -418,6 +418,15 @@ impl AudioEngine {
         // boşta = bitti" deyip Stopped basmasına yol açıyordu; kullanıcı
         // henüz başlamamış bir parçayı bitmiş görürdü.
         self.shared.idle.store(false, Ordering::Release);
+        // Durumu da **şimdi** düzeltiyoruz, ilk geri çağrıyı bekleyerek değil.
+        // `open()` ile bu an arasında geri çağrı `idle`'ı doğru görüp `Stopped`
+        // basmış olabilir ve o `Stopped` yanlıştır: iş kuyrukta, henüz
+        // çalınmadı. Aradaki pencere yerel dosyada birkaç milisaniye, HTTP
+        // akışında saniyelerdi (`open_source` indiriyor) — `Session::play`'in
+        // döngüsü orada "başlamadan bitti" deyip çıkıyordu, sessizce ve
+        // sıfır dinlemeyle. `Buffering` "hattın beklemesi"dir (D-016) ve
+        // burada anlatılmak istenen tam olarak odur.
+        self.shared.set_state(PlayState::Buffering);
         if let Ok(mut pending) = self.shared.pending.lock() {
             pending.push_back(Job::Prepared(Box::new(prepared)));
         }
@@ -1004,6 +1013,50 @@ mod tests {
         ] {
             assert_eq!(u8_to_state(state_to_u8(state)), state);
         }
+    }
+
+    /// Yeni gönderilen iş, motoru **anında** "bitmemiş" saymalı.
+    ///
+    /// Regresyon: `open()` ses akışını hemen başlatıyor ve geri çağrı boş
+    /// tampon + `idle` görüp `Stopped` basıyordu. `play_source` bu durumu
+    /// düzeltmeyip ilk geri çağrıya bıraktığı için arada bir pencere kalıyordu;
+    /// `Session::play`'in döngüsü oraya denk gelince "başlamadan bitti" deyip
+    /// sessizce çıkıyordu. Pencere yerel dosyada milisaniyeydi, HTTP akışında
+    /// saniyeler (`open_source` indiriyor) — yani kusur yalnızca uzak
+    /// kaynakta görünüyordu.
+    ///
+    /// Ses aygıtı yoksa test kendini atlar, sebebini yazarak.
+    #[test]
+    fn a_freshly_queued_track_is_never_reported_as_stopped() {
+        let Ok(engine) = AudioEngine::open() else {
+            eprintln!("ses aygıtı yok — atlanıyor (bu bir başarısızlık değil)");
+            return;
+        };
+
+        // Geri çağrının en az bir kez çalışıp `Stopped` basmasını bekle:
+        // testin ön koşulu, kusurun oluştuğu başlangıç durumu.
+        std::thread::sleep(std::time::Duration::from_millis(80));
+        assert_eq!(
+            engine.state(),
+            PlayState::Stopped,
+            "ön koşul: boş motor durmuş görünmeli"
+        );
+
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/audio/tagged.flac");
+        let source = AudioSource::LocalFile { path: fixture };
+        let Ok(_seq) = engine.play_source(&source) else {
+            eprintln!("fixture çözülemedi — atlanıyor");
+            return;
+        };
+
+        // Uyku **yok**: düzeltmenin bütün mesele ettiği şey, durumun geri
+        // çağrıyı beklemeden doğru olması.
+        assert_ne!(
+            engine.state(),
+            PlayState::Stopped,
+            "iş kuyruktayken motor bitmiş görünemez"
+        );
     }
 
     /// Test için çıplak paylaşılan durum (aygıt açmadan).

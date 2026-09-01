@@ -173,7 +173,10 @@ Mobil (`uniffi`) daha sonra. İkisi de çekirdeği değiştirmeden gelmeli — g
 ## Test
 
 - `tune-core`: birim testleri + `fixtures/` üzerinden entegrasyon testleri.
-- Gerçek export zip'lerini kırpıp fixture yap; ağa bağlı test yazma.
+- Gerçek export zip'lerini kırpıp fixture yap.
+- **Ağa bağlı test yazılabilir (D-043)** ama "ulaşamamak" başarısızlık değildir:
+  ağ yoksa test kendini atlar ve sebebini `stderr`'e yazar; ulaşıp beklenmeyeni
+  alırsa düşer. Sınır "ağa çıkma" değil, iki başarısızlığı ayırmaktır (K9).
 - Kimlik çözümlemesi için **etiketli bir doğruluk kümesi** tut (`fixtures/identity/cases.json`).
   Her değişiklikte doğruluk oranını ölç — bu sayı projenin en önemli metriği.
 - CLI için: alt komutların `--json` çıktısını snapshot testiyle doğrula.
