@@ -1459,3 +1459,114 @@ motoru açıyor, geri çağrının `Stopped` basmasını **bekliyor** (ön koşu
 D-022'de "erişilemedi" ile "doğrulanamadı" birleşmişti, burada CLI sessizce
 çıktı. Üçü de *eksik* sinyal; fazlası ölçülür, eksiği iz bırakmaz. Ve üçünü
 de sahte bir sunucu değil **gerçek bir çalıştırma** buldu.
+
+---
+
+## D-045 — §2.3-2.5 turu: kapsam, sıra ve Chromaprint yolu
+**Tarih:** 2026-09-01
+**Soru:** D-041 §2.3/§2.4/§2.5'i ertelemiş ve "ayrı bir tur" demişti. O tur
+şimdi açılıyor: neyi kapsayacak, hangi sırayla, ve parmak izi nereden gelecek?
+
+**Turdan önce ölçülen gerçek — zincirin ortası ölü.** `session.rs`'in
+`default_lookup()`'ı her zaman `OfflineLookup` döndürüyor; `impl
+MetadataLookup` yalnızca `OfflineLookup` ve `StaticLookup` için var. Yani
+bugün içe aktarılan her kayıt ya ISRC'den (export'ta varsa) ya da
+`LocalKey`'den kimlik alıyor: K6 zincirinin **2. ve 3. halkası hiç
+çalışmıyor** ve `authoritative_ratio()` ölçülen değil sabit bir sayı.
+Bu bulgu §2.3'ün ne olduğunu değiştirdi — PLAN §2.3 yalnızca "AcoustID"
+diyordu.
+
+**Karar (S1 — §2.3 kapsamı): önce MusicBrainz, sonra AcoustID.**
+Gerçek bir `MetadataLookup` (MusicBrainz; ISRC sorgusu + kayıt araması,
+rate-limit'e uyan, `http-client` feature'ı arkasında) yazılır ve
+`fixtures/identity/cases.json` üzerinde doğruluk oranı **ilk kez gerçekten
+ölçülür**. Ardından AcoustID zincirin 4. halkası olarak eklenir.
+
+**Gerekçe:** AcoustID yalnızca elde ses dosyası varken çalışır. İçe aktarılan
+geçmişin dosyası yok — o kayıtların ezici çoğunluğu için tek otorite
+MusicBrainz'dir. Etki sırası PLAN'ın yazdığının tersi; sıra bu yüzden
+değişti, kapsam değil.
+
+**Karar (S2 — Chromaprint): `rusty-chromaprint` crate'i.**
+Öneri `fpcalc` alt süreciydi (bağımlılık ağacına tek satır eklemez, K5'in
+zaten kullandığı sınır). Kullanıcı saf Rust'ı seçti: PCM zaten symphonia'dan
+geliyor ve kullanıcıdan hiçbir kurulum istenmiyor.
+**Kabul edilen bedel:** yeni bağımlılık (FFT dahil) ve parmak izinin `audio`
+feature'ına bağlanması — `audio` kapalıyken 4. halka düşer, ve bu K9 gereği
+sessizce değil "bu derlemede parmak izi yok" diye raporlanır.
+
+**Karar (S3 — tur genişliği): üçü de bu turda.** §2.3 + §2.4 (torrent) +
+§2.5 (yayın platformları). Öneri "yalnızca §2.3" idi (üç ayrı bağımlılık
+kararı ve üç ayrı canlı test yüzeyi aynı anda açılıyor); kullanıcı Faz 2'nin
+tümüyle kapanmasını seçti.
+
+**Sıra:** §2.3 → §2.4 → §2.5. Her biri kendi kapısından geçer (`test`,
+`clippy`, `fmt`) ve kendi commit'ini alır; tur sonunda §2.6 tablosu
+güncellenir.
+
+**Bu turda hâlâ açık, sırası gelince sorulacak iki alt karar:**
+1. **§2.4 torrent nerede yaşar** — PLAN "`librqbit`" diyerek çekirdeği ima
+   ediyor, ama K5 "sağlayıcılar alt süreç eklentisidir" diyor. Çelişki
+   kod yazılmadan karara bağlanacak; ağaç boyutu o noktada ölçülüp sunulacak.
+2. **§2.5 hangi platform(lar)** — EK tablosunda `STREAM` verilen üç aday var
+   (SoundCloud yazıldı, Qobuz abonelik ister, YouTube Music bakımı en pahalı
+   olan). Kaç tane ve hangisi, §2.4 bittiğinde sorulacak.
+
+### D-045 eki — §2.3'ün MusicBrainz yarısı: canlı koşumun bulduğu üç kusur
+
+**Tarih:** 2026-09-01. `crates/tune-core/src/identity/musicbrainz.rs` +
+`tests/identity_musicbrainz.rs`. Zincirin 2. ve 3. halkası artık çalışıyor;
+`tune --online resolve "..."` gerçek MusicBrainz'e bağlanıyor.
+
+Üçü de **gerçek yanıt üzerinde** ortaya çıktı; hiçbirini sentetik katalog
+gösteremezdi. Bu, D-044'ün dersinin dördüncü tekrarı.
+
+**1. Canlı kayıt başlıkta değil, notta işaretli.** `variant_markers` yalnızca
+başlığa bakıyordu. Gerçek katalogda `Radiohead — Creep` araması 191 kayıt
+döndürüyor, ilk sayfanın çoğu canlı ve **hiçbirinin başlığında "live"
+yazmıyor** — hepsi düpedüz `Creep`, ayrım `disambiguation` alanında. Ölçülen
+sonuç: 1994 Astoria kaydı, süresi stüdyoya 12 sn yakın olduğu için **1.00
+güvenle "tam isabet"**. Düzeltme: `Candidate.disambiguation` alanı,
+`fuzzy::similarity`'ye `context_b` parametresi.
+- Bunun açtığı ikinci soru: iki *farklı* canlı kayıt birleşmeli mi? Hayır
+  (D-010). `Creep (Live at Glastonbury)` ile `live, 1994-05-27: Astoria`
+  aynı işareti taşır, aynı performans değildir. Kural: kullanıcının verdiği
+  ayırt edici kelime (`glastonbury`) adayın metninde karşılık bulmuyorsa
+  ceza. Tek yönlü — adayın fazladan bildiği ayrıntı çelişki değil.
+
+**2. Aynı sorgu iki koşumda iki farklı MBID verdi.** Beraberlik gerçek
+katalogda istisna değil kural, ve `max_by` eşitlikte sunucunun gönderdiği
+sıraya teslim oluyordu; o sıra sabit değil. Kimlik katmanında bu, aynı
+parçanın yarın başka bir kanonik kimlik alması demekti. Düzeltme:
+belirlenimci sıralama — skor, sonra `tiebreak_rank` (notu olmayan kayıt
+varsayılandır; süresi bilinen tercih edilir), son çare MBID sırası.
+
+**3. Beraberlik "%100 güven" diye raporlanıyordu.** 25 eşdeğer aday arasından
+belirlenimci ama **keyfi** bir seçim yapılırken çıktı tam isabet iddia
+ediyordu. Düzeltme: `Resolution.tied_candidates`; beraberlikte yöntem `Mbid`
+olamaz ve güven tam isabet eşiğinin altına kırpılır. CLI bunu ayrı bir satırda
+söylüyor, `diag` `identity.tied_candidates` olarak sayıyor.
+
+**Değişen dışa açık imzalar** (§0.1'in "API imzası değişecek" tetikleyicisi;
+üçü de Faz 2 içinde, `uniffi` hattı henüz kurulmadı):
+- `Candidate` → `disambiguation: Option<String>` alanı,
+- `Resolution` → `tied_candidates: usize` alanı (`serde(default)`, eski
+  kayıtlar tekil sayılır),
+- `fuzzy::similarity` → 7. parametre `context_b: Option<&str>`.
+
+**Doğruluk kümesi: %97.2 → %100 (72/72).** Küme 69'dan 72 vakaya, katalog
+20'den 22 girdiye çıktı; yeni sınıf `mb_disambiguation` gerçek MusicBrainz
+biçimini taklit ediyor (başlık düz, ayrım notta). `ACCURACY_FLOOR` 0.97'de
+bırakıldı: %100'e sabitlemek her yeni zor vakada testi kırar. **Kümenin
+kolaylaştığı anlamına gelmiyor — zorlaştırılması gereken bir borç.**
+
+**CLI bağlaması:** `--online` genel bayrağı, **varsayılan kapalı**. Seçim
+çekirdekte (`session::LookupMode` + `lookup_for`), CLI yalnızca bayrağı
+kipe çeviriyor (Altın Kural). Varsayılanın kapalı olması bilinçli: bir
+export'u içe aktarmak kimseyi sessizce ağa bağlamamalı, ve MusicBrainz
+saniyede bir istek kabul ettiği için binlerce parçalık bir `import --online`
+saatler sürer.
+
+**Canlı testler varsayılan koşumda** (D-043'ün kararının aynısı):
+`tests/identity_musicbrainz.rs`, 6 test, ağ yoksa sebebini yazıp atlıyor.
+`http-client` kapalı derlemede de atlıyor ve **bunu söylüyor**.

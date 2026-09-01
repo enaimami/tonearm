@@ -3,7 +3,8 @@
   "diag": {
     "command": "<değişken>",
     "counters": {
-      "identity.confidence_pct": 20
+      "identity.confidence_pct": 20,
+      "identity.tied_candidates": 1
     },
     "env": {
       "arch": "<değişken>",
@@ -24,7 +25,8 @@
     "canonical_id": "local:b51521e93103eefa",
     "confidence": 0.2,
     "matched": null,
-    "method": "local_key"
+    "method": "local_key",
+    "tied_candidates": 1
   },
   "title": "Creep"
 }

@@ -166,8 +166,20 @@ pub fn resolve(report: &ResolveReport) -> String {
             "eşleşme : {} - {} [{}]",
             candidate.artist, candidate.title, candidate.mbid
         );
+        if let Some(note) = &candidate.disambiguation {
+            let _ = writeln!(out, "not     : {note}");
+        }
     } else {
         let _ = writeln!(out, "eşleşme : yok (üstveri kaynağı aday döndürmedi)");
+    }
+    // Beraberlik sessiz kalmamalı: seçim eşdeğerler arasından yapıldıysa
+    // kullanıcı bunu görmeli, yoksa keyfi bir seçimi kesin bir cevap sanır.
+    if res.tied_candidates > 1 {
+        let _ = writeln!(
+            out,
+            "belirsiz: {} aday aynı skoru aldı; seçim belirlenimci ama keyfi",
+            res.tied_candidates
+        );
     }
     out
 }

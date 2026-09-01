@@ -16,7 +16,7 @@ use tune_core::ids::ProviderId;
 use tune_core::model::PlayRule;
 use tune_core::playback::LiveSession;
 use tune_core::provider;
-use tune_core::session::{self, Session};
+use tune_core::session::{self, LookupMode, Session};
 use tune_core::stats::StatsQuery;
 use tune_core::wrapped::CardPreset;
 
@@ -37,6 +37,15 @@ struct Cli {
     /// Çıktıyı JSON olarak ver.
     #[arg(long, global = true)]
     json: bool,
+
+    /// Kimlik çözümlemesinde MusicBrainz'e sor.
+    ///
+    /// Varsayılan kapalı: `tune` ağ olmadan da çalışır ve bir export'u içe
+    /// aktarmak kimseyi sessizce ağa bağlamaz. MusicBrainz saniyede bir
+    /// istek kabul ediyor — tek parçalık `resolve` için uygun, binlerce
+    /// parçalık `import` için saatler sürer.
+    #[arg(long, global = true)]
+    online: bool,
 
     /// Ayrıntılı log (tekrarlanabilir: -v, -vv).
     #[arg(short, long, global = true, action = clap::ArgAction::Count)]
@@ -279,11 +288,16 @@ async fn run(cli: &Cli) -> tune_core::Result<String> {
         None => Config::discover()?,
     };
     let mut session = Session::open(config)?;
+    let lookup_mode = if cli.online {
+        LookupMode::Online
+    } else {
+        LookupMode::Offline
+    };
 
     match &cli.command {
         Command::Import { path } => {
             let report = session
-                .import_archive(path, session::default_lookup())
+                .import_archive(path, session::lookup_for(lookup_mode)?)
                 .await?;
             render(cli.json, &report, || output::import(&report))
         }
@@ -298,7 +312,7 @@ async fn run(cli: &Cli) -> tune_core::Result<String> {
         }
         Command::Resolve { query } => {
             let report = session
-                .resolve_track(query, session::default_lookup())
+                .resolve_track(query, session::lookup_for(lookup_mode)?)
                 .await?;
             render(cli.json, &report, || output::resolve(&report))
         }

@@ -89,7 +89,7 @@ const REISSUE_MARKERS: [&str; 13] = [
 /// Bu etiketler eskiden [`REISSUE_MARKERS`] içindeydi ve `Creep (Live at
 /// Glastonbury)` stüdyo kaydına %100 güvenle bağlanıyordu. Artık hem metinde
 /// kalırlar hem de [`variant_markers`] üzerinden skoru düşürürler.
-const VARIANT_MARKERS: [&str; 9] = [
+pub(crate) const VARIANT_MARKERS: [&str; 9] = [
     "live",
     "remix",
     "acoustic",

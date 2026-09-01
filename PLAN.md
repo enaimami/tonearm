@@ -830,6 +830,27 @@ kusur protokolde değil **zamanlamadaydı**.
 ### 2.3 Kimlik çözümlemesi olgunlaşır
 AcoustID / Chromaprint parmak izi. Etiketleri bozuk yerel dosyalar için.
 
+**MusicBrainz yarısı TAMAM.** `identity/musicbrainz.rs` — `MetadataLookup`'ın
+ilk gerçek uygulaması; zincirin 2. ve 3. halkası artık çalışıyor.
+`tune --online resolve "Şebnem Ferah - Sil Baştan"` gerçek MusicBrainz'e
+bağlanıp MBID döndürüyor. Hız sınırı (1 istek/sn), `User-Agent`, Lucene
+kaçırma ve `503` yeniden denemesi içeride; `--online` varsayılan kapalı.
+
+Canlı koşum üç kusur buldu ve üçü de düzeltildi (ayrıntı D-045 ekinde):
+canlı kayıtlar **başlıkta değil `disambiguation`'da** işaretli, beraberlikte
+seçim sunucunun sırasına teslimdi (aynı sorgu iki farklı MBID verdi), ve
+beraberlik "%100 güven" diye raporlanıyordu. Doğruluk kümesi %97.2 → %100
+(72 vaka); yeni sınıf `mb_disambiguation`.
+
+> KARAR NOKTASI: bu turun kapsamı ve sırası. **KAPANDI — D-045.** Tur açıldı
+> ve **üçünü de** (§2.3 + §2.4 + §2.5) kapsıyor; sıra §2.3 → §2.4 → §2.5.
+> §2.3'ün içinde sıra PLAN'ın yazdığının tersi: **önce MusicBrainz, sonra
+> AcoustID.** Sebep turdan önce ölçüldü — `default_lookup()` her zaman
+> `OfflineLookup` döndürüyor, yani K6'nın 2. ve 3. halkası bugün hiç
+> çalışmıyor ve AcoustID dosyası olmayan import kayıtlarına dokunamaz.
+> Parmak izi yolu: **`rusty-chromaprint`** (saf Rust; PCM symphonia'dan),
+> `fpcalc` alt süreci değil.
+
 ### 2.4 Torrent sağlayıcı
 `librqbit`. `set_piece_deadline` ile sıralı akış. Bash prototipinin varisi —
 oradaki dersler geçerli: her torrent kendi dizinine, hazırlık için sabit `sleep` yerine

@@ -6,6 +6,7 @@
 //! kayıtta durur; "çözüldü" demek yetmez, *nasıl* çözüldüğü ölçülebilir olmalı.
 
 pub mod fuzzy;
+pub mod musicbrainz;
 pub mod normalize;
 
 use std::future::Future;
@@ -65,6 +66,42 @@ pub struct Resolution {
     pub confidence: f64,
     /// Eşleşmenin hangi kayda gittiği (varsa).
     pub matched: Option<Candidate>,
+    /// En yüksek skoru **kaç aday paylaştı**. `1` = tekil kazanan.
+    ///
+    /// Gerçek bir katalogda beraberlik istisna değil kural: `Radiohead —
+    /// Creep` araması onlarca birebir aynı sanatçı ve başlığı döndürüyor ve
+    /// süre bilinmediğinde hepsi aynı skoru alıyor. Bu sayı olmadan çıktı
+    /// "%100 güven" diyordu — oysa yapılan iş 25 eşdeğer aday arasından
+    /// **belirlenimci ama keyfi** bir seçimdi (D-045). K9: seçimin dayandığı
+    /// kanıtın zayıflığı ölçülebilir olmalı.
+    ///
+    /// Aday listesi kullanılmayan halkalarda (ISRC, `LocalKey`) `1`.
+    #[serde(default = "one")]
+    pub tied_candidates: usize,
+}
+
+/// `serde` varsayılanı: alanı olmayan eski kayıtlar tekil sayılır.
+const fn one() -> usize {
+    1
+}
+
+/// İki skorun "aynı" sayılacağı pay.
+///
+/// Kayan noktada tam eşitlik aramak, aynı hesabı farklı sırayla yapan iki
+/// adayı ayrı gösterirdi. Beraberliği kaçırmak onu uydurmaktan daha kötü:
+/// kaçırılan beraberlik "%100 güven" diye raporlanır.
+const SCORE_EPSILON: f64 = 1e-9;
+
+/// Beraberlikte güvenin **kesin olarak** altında kalacağı eşiğe pay.
+const AMBIGUITY_MARGIN: f64 = 0.01;
+
+/// En yüksek skoru kaç aday paylaşıyor.
+fn count_tied(scored: &[(Candidate, f64)], top: f64) -> usize {
+    scored
+        .iter()
+        .take_while(|(_, score)| (top - score).abs() <= SCORE_EPSILON)
+        .count()
+        .max(1)
 }
 
 /// Üstveri kaynağından dönen aday kayıt.
@@ -75,6 +112,29 @@ pub struct Candidate {
     pub title: String,
     pub duration_ms: Option<u64>,
     pub isrc: Option<Isrc>,
+    /// Kaydı adaşlarından ayıran not — MusicBrainz'in `disambiguation` alanı.
+    ///
+    /// Başlıkta olmayan ama kimliği belirleyen bilgi buradan gelir:
+    /// `"live, 1994-05-27: Astoria, London, UK"`. Katalogdaki üç `Creep`'in
+    /// üçünün de başlığı `Creep`'tir; hangisinin canlı kayıt olduğu **yalnızca**
+    /// bu alanda yazar (D-045). [`fuzzy::similarity`] onu `context_b` olarak
+    /// alır.
+    #[serde(default)]
+    pub disambiguation: Option<String>,
+}
+
+/// Skorları eşit adaylar arasında hangisinin daha iyi bir kanonik seçim
+/// olduğu. Büyük olan kazanır.
+///
+/// İki ölçüt, ikisi de "hangisi bu şarkının **varsayılan** kaydı" sorusunu
+/// cevaplıyor:
+/// - **Ayırt edici notu olmayan** kayıt varsayılandır: MusicBrainz notu
+///   yalnızca bir kaydı adaşlarından ayırmak gerektiğinde yazar. Notu olan
+///   kayıt tanım gereği bir istisnadır (canlı, remiks, farklı bir gece).
+/// - **Süresi bilinen** kayıt, bilinmeyene tercih edilir: daha çok bilgi
+///   taşıyan kayıt daha çok işlenmiş, dolayısıyla daha çok güvenilir kayıttır.
+fn tiebreak_rank(candidate: &Candidate) -> u8 {
+    u8::from(candidate.disambiguation.is_none()) * 2 + u8::from(candidate.duration_ms.is_some())
 }
 
 /// Bir çözümleme turunun özeti. Projenin en önemli metriği buradan okunur.
@@ -288,6 +348,7 @@ impl Resolver {
                     method: ResolveMethod::Isrc,
                     confidence: 1.0,
                     matched: Some(candidate),
+                    tied_candidates: 1,
                 });
             }
             // Kaynak ISRC'yi tanımadı ama ISRC'nin kendisi geçerli bir otorite.
@@ -296,6 +357,7 @@ impl Resolver {
                 method: ResolveMethod::Isrc,
                 confidence: 0.95,
                 matched: None,
+                tied_candidates: 1,
             });
         }
 
@@ -304,7 +366,7 @@ impl Resolver {
             .lookup
             .search_recordings(&track.artist, &track.title)
             .await?;
-        let best = candidates
+        let mut scored: Vec<(Candidate, f64)> = candidates
             .into_iter()
             .map(|candidate| {
                 let score = fuzzy::similarity(
@@ -314,23 +376,58 @@ impl Resolver {
                     &candidate.artist,
                     &candidate.title,
                     candidate.duration_ms,
+                    candidate.disambiguation.as_deref(),
                 );
                 (candidate, score)
             })
-            .max_by(|(_, a), (_, b)| a.total_cmp(b));
+            .collect();
+        // Skor eşitliğini **belirlenimci** biçimde kır. Gerçek bir katalogda
+        // eşitlik istisna değil kural: `Radiohead — Creep` araması 190'dan
+        // fazla kayıt döndürüyor, onlarcası birebir aynı sanatçı ve başlığı
+        // taşıyor ve süre bilinmediğinde hepsi aynı skoru alıyor. `max_by` bu
+        // durumda MusicBrainz'in gönderdiği sıraya teslim oluyordu ve o sıra
+        // sabit değil — aynı sorgu iki koşumda iki farklı MBID verdi (D-045).
+        // Kimlik katmanı için bu kabul edilemez: aynı parça yarın başka bir
+        // kanonik kimlik alamaz.
+        scored.sort_by(|(left_candidate, left), (right_candidate, right)| {
+            right
+                .total_cmp(left)
+                .then_with(|| tiebreak_rank(right_candidate).cmp(&tiebreak_rank(left_candidate)))
+                // Son çare: MBID sırası. Keyfi ama **sabit** — sabit olması
+                // keyfi olmamasından daha önemli.
+                .then_with(|| {
+                    left_candidate
+                        .mbid
+                        .as_str()
+                        .cmp(right_candidate.mbid.as_str())
+                })
+        });
+        let tied = scored
+            .first()
+            .map_or(1, |(_, top)| count_tied(&scored, *top));
+        let best = scored.into_iter().next();
 
         if let Some((candidate, score)) = best {
             if score >= self.config.min_fuzzy_confidence {
-                let method = if score >= self.config.exact_match_confidence {
+                // Beraberlik varsa "tam isabet" denmez. Skor aynı kalıyor —
+                // metin ve süre gerçekten uyuyor — ama seçim eşdeğerler
+                // arasından yapıldı ve `Mbid` bunu iddia edemez.
+                let method = if tied == 1 && score >= self.config.exact_match_confidence {
                     ResolveMethod::Mbid
                 } else {
                     ResolveMethod::Fuzzy
                 };
+                let confidence = if tied > 1 {
+                    score.min(self.config.exact_match_confidence - AMBIGUITY_MARGIN)
+                } else {
+                    score
+                };
                 return Ok(Resolution {
                     canonical_id: CanonicalId::from_mbid(&candidate.mbid),
                     method,
-                    confidence: score,
+                    confidence,
                     matched: Some(candidate),
+                    tied_candidates: tied,
                 });
             }
             tracing::debug!(
@@ -351,6 +448,7 @@ impl Resolver {
             method: ResolveMethod::LocalKey,
             confidence: 0.2,
             matched: None,
+            tied_candidates: 1,
         })
     }
 
@@ -397,6 +495,7 @@ mod tests {
             title: title.to_owned(),
             duration_ms,
             isrc: None,
+            disambiguation: None,
         }
     }
 
@@ -457,6 +556,129 @@ mod tests {
         let track = TrackRef::new("Radiohead", "Creep");
         let res = resolver.resolve(&track).await.unwrap();
         assert_eq!(res.method, ResolveMethod::LocalKey);
+    }
+
+    /// Eşdeğer adaylar arasından seçim "tam isabet" sayılmaz (D-045).
+    #[tokio::test]
+    async fn a_tie_is_reported_and_never_claims_an_exact_match() {
+        // Aynı sanatçı, aynı başlık, üç ayrı kayıt — gerçek MusicBrainz'de
+        // `Radiohead — Creep` tam olarak bunu döndürüyor.
+        let lookup = StaticLookup::new(vec![
+            candidate(
+                "cccccccc-1111-4042-ae91-78d6a3267d01",
+                "Nirvana",
+                "Lithium",
+                None,
+            ),
+            candidate(
+                "aaaaaaaa-1111-4042-ae91-78d6a3267d02",
+                "Nirvana",
+                "Lithium",
+                None,
+            ),
+            candidate(
+                "bbbbbbbb-1111-4042-ae91-78d6a3267d03",
+                "Nirvana",
+                "Lithium",
+                None,
+            ),
+        ]);
+        let resolver = Resolver::new(Arc::new(lookup));
+        let track = TrackRef::new("Nirvana", "Lithium");
+
+        let res = resolver.resolve(&track).await.unwrap();
+        assert_eq!(res.tied_candidates, 3, "üç aday da aynı skoru almalı");
+        assert_eq!(
+            res.method,
+            ResolveMethod::Fuzzy,
+            "beraberlikte `Mbid` (tam isabet) iddia edilemez"
+        );
+        assert!(
+            res.confidence < 0.98,
+            "güven tam isabet eşiğinin altında kalmalı: {}",
+            res.confidence
+        );
+        // Belirlenimci: MBID sırası son çare olarak kullanılıyor.
+        assert_eq!(
+            res.canonical_id,
+            CanonicalId::from_mbid(
+                &Mbid::parse("aaaaaaaa-1111-4042-ae91-78d6a3267d02").expect("test mbid")
+            )
+        );
+    }
+
+    /// Sunucunun sırası değişse bile aynı kimlik çıkmalı.
+    #[tokio::test]
+    async fn candidate_order_does_not_change_the_chosen_id() {
+        let entries = [
+            candidate(
+                "cccccccc-1111-4042-ae91-78d6a3267d01",
+                "Nirvana",
+                "Lithium",
+                None,
+            ),
+            candidate(
+                "aaaaaaaa-1111-4042-ae91-78d6a3267d02",
+                "Nirvana",
+                "Lithium",
+                None,
+            ),
+            candidate(
+                "bbbbbbbb-1111-4042-ae91-78d6a3267d03",
+                "Nirvana",
+                "Lithium",
+                None,
+            ),
+        ];
+        let track = TrackRef::new("Nirvana", "Lithium");
+
+        let forward = Resolver::new(Arc::new(StaticLookup::new(entries.to_vec())))
+            .resolve(&track)
+            .await
+            .unwrap();
+        let mut reversed = entries.to_vec();
+        reversed.reverse();
+        let backward = Resolver::new(Arc::new(StaticLookup::new(reversed)))
+            .resolve(&track)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            forward.canonical_id, backward.canonical_id,
+            "seçim kaynağın gönderdiği sıraya bağlı kalmış"
+        );
+    }
+
+    /// Notu olmayan kayıt varsayılandır; süre bilgisi ikinci ölçüt.
+    #[tokio::test]
+    async fn the_plain_recording_wins_over_the_annotated_one() {
+        let live = Candidate {
+            disambiguation: Some("live, 1994-05-27: Astoria, London, UK".to_owned()),
+            // MBID kasten alfabetik olarak önce: not olmasaydı bu kazanırdı.
+            ..candidate(
+                "00000000-1111-4042-ae91-78d6a3267d01",
+                "Nirvana",
+                "Lithium",
+                None,
+            )
+        };
+        let plain = candidate(
+            "ffffffff-1111-4042-ae91-78d6a3267d02",
+            "Nirvana",
+            "Lithium",
+            None,
+        );
+        let resolver = Resolver::new(Arc::new(StaticLookup::new(vec![live, plain])));
+
+        let res = resolver
+            .resolve(&TrackRef::new("Nirvana", "Lithium"))
+            .await
+            .unwrap();
+        let matched = res.matched.expect("aday dönmeli");
+        assert_eq!(
+            matched.disambiguation, None,
+            "notu olan kayıt seçilmemeliydi"
+        );
     }
 
     #[tokio::test]

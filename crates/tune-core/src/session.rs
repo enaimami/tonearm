@@ -373,6 +373,12 @@ impl Session {
                 "identity.confidence_pct",
                 (resolution.confidence * 100.0) as i64,
             );
+            // Beraberlik tanının parçası: "%97 güven" ile "%97 güven, 10 aday
+            // berabere" aynı çalıştırmayı anlatmıyor (K9).
+            rec.set(
+                "identity.tied_candidates",
+                i64::try_from(resolution.tied_candidates).unwrap_or(i64::MAX),
+            );
             rec.note(format!("yöntem: {}", resolution.method));
             Ok((track, resolution))
         }
@@ -1362,10 +1368,43 @@ fn open_archive(path: &Path) -> Result<Box<dyn import::ExportArchive>> {
     }
 }
 
-/// Faz 0'ın varsayılan üstveri kaynağı: ağ yok.
+/// Kimlik zincirinin üstveri kaynağını nereden alacağı.
+///
+/// Ağa çıkmak **açık bir tercih**: `tune` ağ olmadan da eksiksiz çalışan bir
+/// araçtır ve bir export'u içe aktarmak kimseyi sessizce MusicBrainz'e
+/// bağlamamalı. Seçim çekirdekte duruyor ki GUI ve mobil aynı iki seçeneği
+/// aynı adlarla sunsun (Altın Kural).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LookupMode {
+    /// Ağ yok: zincir ISRC'den öteye gitmez, gerisi `LocalKey`'e düşer.
+    #[default]
+    Offline,
+    /// MusicBrainz'e sorar — zincirin 2. ve 3. halkası çalışır.
+    ///
+    /// **Yavaştır ve bu kaçınılmaz:** MusicBrainz anonim istemciye saniyede
+    /// bir istek veriyor, yani binlerce parçalık bir export saatler sürer.
+    /// Tek parçalık `resolve` için uygun, toplu içe aktarma için değil.
+    Online,
+}
+
+/// Verilen kipin üstveri kaynağı.
 ///
 /// Dönüş tipi somut değil `Arc<dyn MetadataLookup>` (D-006): çağıranlar
 /// — CLI, GUI, mobil — kaynağı değiştirdiğimizde imza görmeden geçsin.
+///
+/// # Errors
+/// [`LookupMode::Online`] istendi ama bu derlemede HTTP istemcisi yok
+/// (`http-client` feature'ı kapalı). Sessizce çevrimdışına düşmüyoruz:
+/// kullanıcı ağ istediğini söyledi ve neden alamadığını bilmeli (K9).
+pub fn lookup_for(mode: LookupMode) -> Result<Arc<dyn MetadataLookup>> {
+    match mode {
+        LookupMode::Offline => Ok(default_lookup()),
+        LookupMode::Online => crate::identity::musicbrainz::default_musicbrainz_lookup(),
+    }
+}
+
+/// Varsayılan üstveri kaynağı: ağ yok.
 #[must_use]
 pub fn default_lookup() -> Arc<dyn MetadataLookup> {
     Arc::new(OfflineLookup)

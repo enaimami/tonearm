@@ -8,9 +8,9 @@
     "radio_edit / uzun-kısa sürümler": "D-010: kanonik kimlik kayıt düzeyindedir, radio edit ayrı bir kayıttır. Süre farkı bunu kanıtlıyorsa eşleşme reddedilir; süre bilinmiyorsa zincir elindeki kanıtla en iyi tahminini bulanık güvenle verir."
   },
   "counts": {
-    "total": 69,
-    "positive": 46,
-    "negative": 23
+    "total": 72,
+    "positive": 50,
+    "negative": 22
   },
   "catalog": [
     {
@@ -152,6 +152,22 @@
       "title": "Nar",
       "duration_ms": 412000,
       "isrc": null
+    },
+    {
+      "mbid": "5e5e5e5e-1994-4042-ae91-78d6a3267d94",
+      "artist": "Radiohead",
+      "title": "Creep",
+      "duration_ms": 250000,
+      "isrc": null,
+      "disambiguation": "live, 1994-05-27: Astoria, London, UK"
+    },
+    {
+      "mbid": "6d6d6d6d-2003-4042-ae91-78d6a3267d03",
+      "artist": "Portishead",
+      "title": "Roads",
+      "duration_ms": 318000,
+      "isrc": null,
+      "disambiguation": "live"
     }
   ],
   "cases": [
@@ -711,6 +727,30 @@
       "title": "Roads",
       "duration_ms": 303000,
       "expect_mbid": null
+    },
+    {
+      "class": "mb_disambiguation",
+      "note": "katalogdaki canlı kayıt yalnızca notta işaretli, başlığı düz 'Creep'; süre bilinmiyor",
+      "artist": "Radiohead",
+      "title": "Creep",
+      "duration_ms": null,
+      "expect_mbid": "b1a9c0e9-d987-4042-ae91-78d6a3267d69"
+    },
+    {
+      "class": "mb_disambiguation",
+      "note": "kullanıcı canlı kaydı arıyor: başlıktaki etiket katalogdaki notla eşleşmeli",
+      "artist": "Radiohead",
+      "title": "Creep (Live)",
+      "duration_ms": null,
+      "expect_mbid": "5e5e5e5e-1994-4042-ae91-78d6a3267d94"
+    },
+    {
+      "class": "mb_disambiguation",
+      "note": "süre iki kayda da yakın; ayrımı yalnızca not veriyor",
+      "artist": "Portishead",
+      "title": "Roads",
+      "duration_ms": 310000,
+      "expect_mbid": "44ab6e2f-fcff-45cc-a241-67a03067c8e3"
     }
   ]
 }

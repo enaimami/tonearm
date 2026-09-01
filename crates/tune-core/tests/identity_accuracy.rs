@@ -32,6 +32,10 @@ struct CatalogEntry {
     title: String,
     duration_ms: Option<u64>,
     isrc: Option<String>,
+    /// MusicBrainz'in ayırt edici notu. Gerçek katalogda canlı kayıtların
+    /// **tek** işareti budur; başlık düz kalır (D-045).
+    #[serde(default)]
+    disambiguation: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -104,6 +108,7 @@ async fn identity_accuracy_over_labelled_cases() {
                 title: entry.title.clone(),
                 duration_ms: entry.duration_ms,
                 isrc: entry.isrc.as_deref().and_then(Isrc::parse),
+                disambiguation: entry.disambiguation.clone(),
             })
             .collect(),
     );
