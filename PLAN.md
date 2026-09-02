@@ -843,9 +843,20 @@ yalnızca sonuç `LocalKey`'e düşerse ses. Parmak izi en pahalı halka.
 propagate edilir. Anahtar sır deposundan ya da gömülü varsayılandan gelir ve
 ikisi de yoksa çağrı *ne yapılacağını söyleyerek* reddedilir.
 
+**Gerçek anahtarla canlı sınandı (D-046 eki 3).** AcoustID ürettiğimiz parmak
+izini kabul ediyor, bozuk bir dizeyi reddediyor (yani "kabul etti" boş bir
+iddia değil), ve eşleşme yolu artık **gerçekten** çalışıyor: `duration` alanı
+ondalık geliyor (`309.0`), `Option<u32>` yazılmıştı ve ilk gerçek eşleşme bir
+JSON hatasıyla düşecekti. Kusuru gizleyen şey elle yazılmış fixture'dı; fixture
+artık canlı servisten alınıyor ve donmuş hâlinin yalana dönmesini ayrı bir
+canlı test kolluyor.
+
 > **Açık borç — gömülü anahtar boş.** `EMBEDDED_API_KEY` bilerek boş
 > bırakıldı; `acoustid.org/new-application` adresinden proje adına bir anahtar
 > alınana kadar 4. halka yalnızca kullanıcının kendi anahtarıyla çalışır.
+> Kullanıcının kişisel anahtarı `.env`'de duruyor ve testlerde
+> `TUNE_ACOUSTID_KEY` olarak kullanılıyor — kaynağa gömmek onu herkese açık
+> yapacağı için ayrıca sorulacak.
 
 **MusicBrainz yarısı TAMAM.** `identity/musicbrainz.rs` — `MetadataLookup`'ın
 ilk gerçek uygulaması; zincirin 2. ve 3. halkası artık çalışıyor.
@@ -921,7 +932,7 @@ eklenti düşmeli.
 |---|---|
 | 2.1 JSON-RPC protokolü | TAMAM — izin modeli (D-040), sırlar (D-042), gerçek süreçle sınandı |
 | 2.2 Referans eklenti (SoundCloud) | TAMAM — canlı SoundCloud'da arıyor ve çalıyor (D-043) |
-| 2.3 AcoustID | TAMAM — parmak izi + AcoustID + `resolve --file` (D-046); tek borç: gömülü AcoustID anahtarı henüz alınmadı |
+| 2.3 AcoustID | TAMAM — parmak izi + AcoustID + `resolve --file` (D-046), gerçek anahtarla canlı sınandı; tek borç: `EMBEDDED_API_KEY` hâlâ boş |
 | 2.4 Torrent sağlayıcı | Ertelendi (D-041) |
 | 2.5 Yayın platformu eklentileri | Ertelendi (D-041) |
 

@@ -1,0 +1,22 @@
+{
+  "results": [
+    {
+      "id": "5e45e8ba-c6d9-4782-a20e-5e897f528d23",
+      "recordings": [
+        {
+          "artists": [
+            {
+              "id": "4e6a53e1-e27e-4cf0-9f6e-b51fc0335d0a",
+              "name": "Şebnem Ferah"
+            }
+          ],
+          "duration": 309.0,
+          "id": "e0a22727-1fcf-4e3a-81a3-b65623b2c53e",
+          "title": "Sil Baştan"
+        }
+      ],
+      "score": 1.0
+    }
+  ],
+  "status": "ok"
+}

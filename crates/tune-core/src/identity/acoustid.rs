@@ -255,7 +255,7 @@ impl AcoustIdLookup {
                         mbid,
                         artist,
                         title,
-                        duration_ms: recording.duration.map(|secs| u64::from(secs) * 1000),
+                        duration_ms: recording.duration.and_then(duration_secs_to_ms),
                         isrc: None,
                         disambiguation: None,
                     },
@@ -310,6 +310,27 @@ fn default_user_agent() -> String {
     format!("tune/{}", env!("CARGO_PKG_VERSION"))
 }
 
+/// AcoustID'nin ondalık saniyesini milisaniyeye çevirir.
+///
+/// Anlamsız değerler (negatif, `NaN`, sonsuz, akıl almaz uzunluk) `None`
+/// döner — uydurma bir süre bulanık eşleşmeyi yanlış yöne çeker ve süre artık
+/// eşitlik bozucu olduğu için (D-046) kimliği de yanlış kayda bağlayabilir.
+/// Yok saymak, tahmin etmekten iyidir.
+fn duration_secs_to_ms(secs: f64) -> Option<u64> {
+    // 24 saat: bundan uzun bir "kayıt" ya veri hatasıdır ya da bizim işimiz
+    // değildir. Üst sınır ayrıca `as` dönüşümünü taşmadan korur.
+    const MAX_SECS: f64 = 86_400.0;
+    if !secs.is_finite() || secs <= 0.0 || secs > MAX_SECS {
+        return None;
+    }
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "üstteki koşul sonlu, pozitif ve 24 saatin altında olduğunu garanti ediyor"
+    )]
+    Some((secs * 1000.0).round() as u64)
+}
+
 /// `POST /v2/lookup` yanıtı.
 #[derive(Debug, Deserialize)]
 struct LookupResponse {
@@ -338,9 +359,14 @@ struct RecordingRef {
     id: String,
     #[serde(default)]
     title: Option<String>,
-    /// Saniye — AcoustID süreyi tam saniye veriyor.
+    /// Saniye — ve **ondalık olarak** geliyor (`309.0`).
+    ///
+    /// `u32` yazılmıştı ve sahte testler tam sayı (`238`) kullandığı için
+    /// yeşildi. Gerçek servis `"duration": 309.0` döndürüyor ve `serde_json`
+    /// ondalık bir değeri `u32`'ye çözemez: ilk gerçek eşleşme, eşleşmeyi
+    /// ayrıştıramadan bir JSON hatasıyla düşerdi (D-046 eki, canlı ölçüm).
     #[serde(default)]
-    duration: Option<u32>,
+    duration: Option<f64>,
     #[serde(default)]
     artists: Vec<ArtistRef>,
 }
@@ -382,28 +408,25 @@ mod tests {
     use super::*;
     use crate::net::fake::FakeHttp;
 
-    const CREEP_MATCH: &str = r#"{
-      "status": "ok",
-      "results": [
-        {
-          "id": "9ff43b6a-4f16-427c-93c2-92307ca505e0",
-          "score": 0.97,
-          "recordings": [
-            {
-              "id": "b1a9c0e9-d987-4042-ae91-78d6a3267d69",
-              "title": "Creep",
-              "duration": 238,
-              "artists": [{ "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711", "name": "Radiohead" }]
-            }
-          ]
-        }
-      ]
-    }"#;
+    /// **Gerçek** AcoustID yanıtı — elle yazılmış değil, ölçülmüş.
+    ///
+    /// `fixtures/identity/acoustid_lookup.json`, canlı servisten alındı
+    /// (2026-09-02, `GET /v2/lookup?trackid=5e45e8ba-…&meta=recordings`).
+    ///
+    /// Önceki sürüm gövdeyi burada elle yazıyordu ve `"duration"` alanına tam
+    /// sayı koymuştu. Servis ondalık gönderiyor (`309.0`); alan `Option<u32>`
+    /// olduğu için **ilk gerçek eşleşme bir JSON hatasıyla düşerdi** ve bütün
+    /// birim testleri yeşil kalırdı. Şema uydurulmaz, ölçülür (D-046 eki).
+    ///
+    /// Fixture'ın hâlâ gerçeği anlattığını `tests/identity_acoustid.rs`
+    /// içindeki canlı test doğruluyor — dosya donar, servis değişirse orası
+    /// haber verir.
+    const REAL_MATCH: &str = include_str!("../../../../fixtures/identity/acoustid_lookup.json");
 
     fn sample() -> Fingerprint {
         Fingerprint {
             raw: vec![1, 2, 3, 4, 5, 6, 7, 8],
-            duration_secs: 238,
+            duration_secs: 309,
         }
     }
 
@@ -421,14 +444,43 @@ mod tests {
 
     #[tokio::test]
     async fn a_match_becomes_a_scored_candidate() {
-        let http = fake(CREEP_MATCH);
+        let http = fake(REAL_MATCH);
         let found = lookup(http).lookup(&sample()).await.expect("sorgu");
 
         assert_eq!(found.len(), 1);
-        assert_eq!(found[0].candidate.title, "Creep");
-        assert_eq!(found[0].candidate.artist, "Radiohead");
-        assert_eq!(found[0].candidate.duration_ms, Some(238_000));
-        assert!((found[0].score - 0.97).abs() < f64::EPSILON);
+        assert_eq!(found[0].candidate.title, "Sil Baştan");
+        assert_eq!(found[0].candidate.artist, "Şebnem Ferah");
+        // `309.0` ondalık geliyor; milisaniyeye tam çevrilmeli.
+        assert_eq!(found[0].candidate.duration_ms, Some(309_000));
+        assert!((found[0].score - 1.0).abs() < f64::EPSILON);
+        assert_eq!(
+            found[0].candidate.mbid.as_str(),
+            "e0a22727-1fcf-4e3a-81a3-b65623b2c53e"
+        );
+    }
+
+    /// Süre alanı **ondalık** ve bu bir varsayım değil ölçüm.
+    ///
+    /// Ayrı bir test çünkü kaybı sessiz: alan `Option<u32>` iken bütün gövde
+    /// ayrıştırılamıyordu ve hata "eşleşme yok" gibi değil, JSON hatası gibi
+    /// düşüyordu — yani zincir hiç cevap vermiyordu.
+    #[tokio::test]
+    async fn a_fractional_duration_is_parsed_not_rejected() {
+        let fractional = REAL_MATCH.replace("\"duration\": 309.0", "\"duration\": 238.44");
+        let http = fake(&fractional);
+        let found = lookup(http).lookup(&sample()).await.expect("sorgu");
+        assert_eq!(found[0].candidate.duration_ms, Some(238_440));
+    }
+
+    /// Anlamsız süre uydurulmaz, düşürülür.
+    #[test]
+    fn a_nonsensical_duration_becomes_unknown_rather_than_a_wrong_number() {
+        assert_eq!(duration_secs_to_ms(309.0), Some(309_000));
+        assert_eq!(duration_secs_to_ms(0.0), None);
+        assert_eq!(duration_secs_to_ms(-5.0), None);
+        assert_eq!(duration_secs_to_ms(f64::NAN), None);
+        assert_eq!(duration_secs_to_ms(f64::INFINITY), None);
+        assert_eq!(duration_secs_to_ms(1e12), None);
     }
 
     /// Parmak izi gövdede gitmeli — URL'de değil.
@@ -437,7 +489,7 @@ mod tests {
     /// çünkü hata anında ayırt edilemez.
     #[tokio::test]
     async fn the_fingerprint_travels_in_the_body_not_the_url() {
-        let http = fake(CREEP_MATCH);
+        let http = fake(REAL_MATCH);
         lookup(Arc::clone(&http))
             .lookup(&sample())
             .await
@@ -448,13 +500,13 @@ mod tests {
         assert!(!request.url.contains("fingerprint"), "{}", request.url);
         let body = String::from_utf8_lossy(request.body.as_deref().unwrap_or_default()).to_string();
         assert!(body.contains("fingerprint="), "{body}");
-        assert!(body.contains("duration=238"), "{body}");
+        assert!(body.contains("duration=309"), "{body}");
     }
 
     /// Anahtar sorgu dizesine sızmamalı: URL'ler log'lanır.
     #[tokio::test]
     async fn the_api_key_never_appears_in_the_url() {
-        let http = fake(CREEP_MATCH);
+        let http = fake(REAL_MATCH);
         lookup(Arc::clone(&http))
             .lookup(&sample())
             .await
@@ -467,7 +519,7 @@ mod tests {
     /// Kullanıcının anahtarı gömülü olanı geçersiz kılar.
     #[test]
     fn a_user_key_overrides_the_embedded_one_but_an_empty_one_does_not() {
-        let http = fake(CREEP_MATCH);
+        let http = fake(REAL_MATCH);
         let set =
             AcoustIdLookup::new(Arc::clone(&http) as Arc<dyn HttpClient>).with_api_key("kullanici");
         assert_eq!(set.api_key, "kullanici");
@@ -479,7 +531,7 @@ mod tests {
     /// Anahtarsız çağrı ağa çıkmadan, ne yapılacağını söyleyerek durmalı.
     #[tokio::test]
     async fn a_missing_key_is_reported_before_any_request_goes_out() {
-        let http = fake(CREEP_MATCH);
+        let http = fake(REAL_MATCH);
         let bare = AcoustIdLookup::new(Arc::clone(&http) as Arc<dyn HttpClient>);
         // Gömülü anahtar dolu bir dağıtımda bu test anlamsız olurdu; o zaman
         // atlanır ve sebebi yazılır.
@@ -553,7 +605,7 @@ mod tests {
     /// Zayıf eşleşmeler aday sayılmaz.
     #[tokio::test]
     async fn a_weak_match_is_not_offered_as_a_candidate() {
-        let weak = CREEP_MATCH.replace("0.97", "0.31");
+        let weak = REAL_MATCH.replace("\"score\": 1.0", "\"score\": 0.31");
         let http = fake(&weak);
         let found = lookup(http).lookup(&sample()).await.expect("sorgu");
         assert!(found.is_empty(), "{found:?}");
@@ -562,7 +614,7 @@ mod tests {
     /// Geçersiz MBID taşıyan aday atlanır ama sorgu düşmez.
     #[tokio::test]
     async fn a_malformed_mbid_is_skipped_without_failing_the_lookup() {
-        let broken = CREEP_MATCH.replace("b1a9c0e9-d987-4042-ae91-78d6a3267d69", "mbid-degil");
+        let broken = REAL_MATCH.replace("e0a22727-1fcf-4e3a-81a3-b65623b2c53e", "mbid-degil");
         let http = fake(&broken);
         let found = lookup(http).lookup(&sample()).await.expect("sorgu");
         assert!(found.is_empty());
@@ -572,7 +624,7 @@ mod tests {
     /// yapıştırılan bir metin (D-042).
     #[test]
     fn debug_output_does_not_leak_the_key() {
-        let http = fake(CREEP_MATCH);
+        let http = fake(REAL_MATCH);
         let text = format!("{:?}", lookup(http));
         assert!(!text.contains("test-key"), "{text}");
     }

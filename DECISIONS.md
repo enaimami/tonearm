@@ -1704,3 +1704,47 @@ yazıyor; reddettiği tek şey canlı bir kaydın seçilmesi.
 **Bu turda kapanmayan:** kümenin kendisini sabitlemek (sayfalama) ya da kimliği
 eser düzeyine taşımak. İkisi de belirsiz sorguların otorite almasını sağlardı;
 ikisi de ayrı birer karar.
+
+### D-046 eki (3) — gerçek anahtarla koşum: eşleşme yolu hiç çalışmıyormuş
+
+**Tarih:** 2026-09-02. Kullanıcı AcoustID anahtarını verdi ve halka ilk kez
+**gerçek anahtarla** koştu. Üç şey ölçüldü, üçüncüsü bir kusurdu.
+
+**1. Ürettiğimiz parmak izi geçerli.** AcoustID 15 sn'lik sentetik fixture'ın
+parmak izini kabul etti ve 0 aday döndürdü — sentetik ses için doğru sonuç.
+Sıkıştırma, URL-güvenli base64 ve form gövdesi doğru.
+
+**2. "Kabul etti" boş bir iddia değil — kontrol edildi.** Servis her dizeyi
+kabul etseydi 1. maddedeki test hiçbir şey ölçmezdi ve sıkıştırıcımız bozulsa
+bile yeşil kalırdı. Bilerek bozulmuş bir dize gönderildi: `code 3, invalid
+fingerprint`. Kontrol artık kalıcı bir test.
+
+**3. Kusur: `duration` alanı ondalık geliyor, `Option<u32>` yazılmıştı.**
+Gerçek yanıt `"duration": 309.0` gönderiyor. `serde_json` ondalık bir değeri
+`u32`'ye çözemez — yani **ilk gerçek eşleşme, eşleşmeyi ayrıştıramadan bir
+JSON hatasıyla düşecekti.** Zincirin 4. halkası "çalışıyor" görünüyordu ve
+hiç çalışmamıştı: eşleşme *bulunmayan* yol sınanmıştı, *bulunan* yol değil.
+
+Kusuru gizleyen şey elle yazılmış fixture'dı: `"duration": 238` (tam sayı)
+koymuştum, çünkü şemayı ölçmeden varsaydım. **Bu, D-044'ün dersinin altıncı
+tekrarı** ve ilk kez sahte veri *kendisi* kusurun kaynağıydı — sahte sunucu
+değil, sahte **gövde**.
+
+**Düzeltmeler:**
+- Alan `Option<f64>`, dönüşüm `duration_secs_to_ms` üzerinden. Anlamsız değer
+  (negatif, `NaN`, sonsuz, 24 saatten uzun) `None` — süre artık eşitlik
+  bozucu olduğu için (bkz. ek 2) uydurma bir süre kimliği yanlış kayda bağlar.
+- Fixture artık elle yazılmıyor: `fixtures/identity/acoustid_lookup.json`
+  canlı servisten alındı ve birim testler onu `include_str!` ile okuyor.
+- **Donmuş fixture'ın yalana dönmesi ayrı bir kusur sınıfı ve o da kapatıldı:**
+  `the_committed_fixture_still_matches_what_the_service_sends` canlı yanıtı
+  çekip fixture'la *alan alan tip* karşılaştırması yapıyor. Değerler
+  değişebilir (katalog yaşıyor), şekil değişemez. Tespitin kendisi de
+  doğrulandı — fixture'ın süresi tam sayıya çevrildiğinde test tam o alanı
+  adıyla gösterip düşüyor.
+
+**Anahtar hakkında:** kullanıcının anahtarı `.env`'de (gitignore'da) duruyor ve
+testlerde `TUNE_ACOUSTID_KEY` olarak kullanıldı. `EMBEDDED_API_KEY` **hâlâ
+boş** — o anahtarı kaynağa gömmek onu herkese açık hâle getirir ve bu, sırlar
+dosyasında tutulan kişisel bir anahtar için kullanıcının ayrıca vereceği bir
+karardır. Sorulmadan yapılmadı.
