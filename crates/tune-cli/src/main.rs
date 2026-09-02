@@ -93,7 +93,12 @@ enum Command {
     /// Tek bir parçayı kimlik zincirinden geçir.
     Resolve {
         /// `"Sanatçı - Başlık"` biçiminde sorgu.
-        query: String,
+        #[arg(required_unless_present = "file", conflicts_with = "file")]
+        query: Option<String>,
+        /// Sorgu yerine bir ses dosyası: üstveri etiketlerinden okunur ve
+        /// metin halkaları sonuçsuz kalırsa ses parmak izi sorulur.
+        #[arg(long, value_name = "YOL")]
+        file: Option<PathBuf>,
     },
     /// Kütüphane işlemleri.
     Library {
@@ -310,10 +315,33 @@ async fn run(cli: &Cli) -> tune_core::Result<String> {
             let response = session.stats(query)?;
             render(cli.json, &response, || output::stats(&response))
         }
-        Command::Resolve { query } => {
-            let report = session
-                .resolve_track(query, session::lookup_for(lookup_mode)?)
-                .await?;
+        Command::Resolve { query, file } => {
+            let report = match (query, file) {
+                (_, Some(path)) => {
+                    session
+                        .resolve_file(
+                            path,
+                            session::lookup_for(lookup_mode)?,
+                            session.fingerprint_lookup_for(lookup_mode)?,
+                        )
+                        .await?
+                }
+                (Some(query), None) => {
+                    session
+                        .resolve_track(query, session::lookup_for(lookup_mode)?)
+                        .await?
+                }
+                // `clap` bu bileşimi zaten reddediyor (`required_unless_present`);
+                // yine de sessiz bir varsayılan üretmiyoruz.
+                (None, None) => {
+                    return Err(tune_core::Error::new(
+                        tune_core::diag::Stage::IdentityResolve,
+                        tune_core::error::ErrorKind::InvalidInput {
+                            detail: "sorgu ya da --file verilmeli".to_owned(),
+                        },
+                    ));
+                }
+            };
             render(cli.json, &report, || output::resolve(&report))
         }
         Command::Library { command } => match command {

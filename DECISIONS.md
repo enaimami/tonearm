@@ -1570,3 +1570,137 @@ saatler sürer.
 **Canlı testler varsayılan koşumda** (D-043'ün kararının aynısı):
 `tests/identity_musicbrainz.rs`, 6 test, ağ yoksa sebebini yazıp atlıyor.
 `http-client` kapalı derlemede de atlıyor ve **bunu söylüyor**.
+
+---
+
+## D-046 — §2.3'ün AcoustID yarısı: anahtar nereden, halka zincire nereden
+**Tarih:** 2026-09-02
+**Soru:** D-045 parmak izi yolunu (`rusty-chromaprint`) seçmişti ama iki şeyi
+açık bırakmıştı: AcoustID'nin istediği istemci anahtarı nereden gelecek, ve
+zincirin 4. halkası `TrackRef`'in dosyası yokken nereye bağlanacak?
+
+**Karar (S1 — anahtar): gömülü varsayılan + kullanıcı geçersiz kılması.**
+Sıra: önce sır deposu (`identity:acoustid` / `api_key`, D-042'nin altyapısı),
+yoksa derlemeye gömülü anahtar. Kullanıcının koyduğu **her zaman** kazanır.
+Reddedilen seçenek "yalnızca sır deposu" idi: kutudan çıkar çıkmaz çalışmayan
+bir 4. halka pratikte hiç çalışmayan bir halkadır.
+**Ödenen bedel:** gömülü anahtar depoda görünür ve kötüye kullanılırsa AcoustID
+onu iptal edebilir. Bu yüzden kullanıcı geçersiz kılması aynı turda yazıldı —
+anahtar düşerse kimse kilitlenmiyor.
+**Bugünkü durum:** `EMBEDDED_API_KEY` **boş** ve bilerek boş. Uydurulmuş bir
+dize koymak, ilk canlı çağrıda "geçersiz anahtar" olarak dönerdi ve kusuru
+anahtarda değil parmak izinde arattırırdı. `acoustid.org/new-application`
+adresinden proje adına bir anahtar alınıp oraya yazılana kadar halka yalnızca
+kullanıcının kendi anahtarıyla çalışır ve anahtarsız çağrı **ne yapılacağını
+söyleyerek** reddedilir.
+
+**Karar (S2 — bağlantı): ayrı giriş noktası, `Resolver::resolve_file(path)`.**
+`TrackRef`'e `source_path` alanı eklenmedi. Sebep: o alan dışa açık bir tipin
+imzasını değiştirir (§0.1 tetikleyicisi), her `TrackRef` üreten yeri
+dokundurur ve **dosyası olmayan** import kayıtlarına ömür boyu boş bir alan
+taşıtırdı. `resolve()` ve `TrackRef` hiç değişmedi.
+**Ödenen bedel:** iki giriş noktası; çağıran hangisini kullanacağını bilmeli.
+
+**Sıra korunuyor (K6).** `resolve_file` önce dosyanın **kendi etiketlerinden**
+üç metin halkasını dener; yalnızca sonuç `LocalKey`'e düşerse sese sorar.
+Parmak izi en pahalı halka (dosyanın tamamı çözülür) ve ilk üçü çalıştığında
+gereksizdir — `a_tagged_file_never_reaches_the_fingerprint_link` bunu ölçüyor.
+
+**İki başarısızlık ayrı tutuluyor (K9).** Parmak izinin **üretilememesi**
+(dosya çok kısa, paketler bozuk) hata değil: sebebi loglanır ve zincir metin
+tarafının bulduğu yerel anahtarla biter. AcoustID'ye **sorulamaması** ise
+propagate edilir — anahtarı ayarlanmamış bir kurulumu "hiçbir şey eşleşmiyor"
+diye raporlamak, kusuru dosyada arattırırdı.
+
+**Değişen dışa açık imzalar:**
+- `identity::FingerprintCandidate` (yeni), `identity::FingerprintLookup` (yeni trait),
+- `Resolver::with_fingerprint_lookup`, `Resolver::resolve_file` (yeni),
+- `Session::resolve_file`, `Session::fingerprint_lookup_for` (yeni),
+- `net::HttpRequest::post_form` (yeni) — parmak izi base64'te binlerce karakter
+  tutuyor ve URL'ye sığmıyor; kesilen bir URL "eşleşme yok" gibi görünürdü.
+- `net::RateLimiter` musicbrainz'den `net`'e taşındı (AcoustID'nin de kotası var).
+
+**CLI:** `tune resolve --file <yol>`. `--online` kapalıyken zincir üç halkayla
+biter ve bu bir kusur değil bir yapılandırmadır.
+
+**Feature:** `fingerprint` (D-045'te tanımlandı) artık `tune-cli`'de **açık**.
+CLI her çekirdek yeteneğinin sınandığı yüzey; ağacı büyütmesi bilinçli bedel.
+
+### D-046 eki — canlı koşumun bulduğu iki şey
+
+**1. Kendi kusurum: geçersiz anahtar `400` ile geliyor, `200` ile değil.**
+İlk sürüm gövdeyi durum kodundan **sonra** okuyordu, bu yüzden gerçek servisin
+reddi `ADIM: NETWORK_REQUEST` diye raporlanıyordu — kullanıcıyı ağını kontrol
+etmeye gönderen bir tanı, oysa yapması gereken şey anahtarını düzeltmek.
+D-023'ün `401`/`403` için kurduğu ayrımın aynısı. Düzeltme: gövde önce
+ayrıştırılır; AcoustID'nin kendi cevabıysa `IDENTITY_RESOLVE`, değilse (proxy
+sayfası, bakım ekranı) durum koduna teslim edilir. **Sahte istemci bunu
+gösteremezdi** — testim `200` varsayıyordu ve yeşildi. D-044'ün dersinin
+beşinci tekrarı.
+
+**2. Benim kusurum değil, ama D-045'in "kapandı" dediği kusur açık:
+MusicBrainz araması koşumlar arası kararsız.**
+`the_same_query_always_yields_the_same_canonical_id` canlı koşumda yine düştü
+ve iki farklı MBID gösterdi. D-045 seçimi **küme içinde** belirlenimci yaptı;
+ölçülen şey kümenin kendisinin sabit olmadığı. `mb_stability_probe` sondası:
+aynı `Radiohead — Creep` araması art arda iki kez 25 aday döndürüyor ve bazı
+koşumlarda **ortak aday sayısı sıfır**. MusicBrainz aramayı birden çok indeks
+kopyasından sunuyor; bir kopya içinde sıra sabit, kopyalar arasında top-25
+tamamen farklı. Yani belirlenimci sıralama bu sorunu **çözemez**: sıralanacak
+küme her seferinde başka.
+**Sonuç:** süresi ve ISRC'si olmayan belirsiz bir sorgu, hangi kopyanın
+cevapladığına bağlı bir kanonik kimlik alıyordu. Kimlik katmanı için kabul
+edilemez.
+
+**Karar (S3 — belirsizlikte otorite iddia edilmez).** Ayırt edici kanıt yoksa
+MBID döndürülmüyor; zincir yerel anahtarla bitiyor. Reddedilen iki seçenek:
+*sayfalama* (tüm eşleşmeleri çekip kümeyi sabitlemek — belirsiz her sorgu ~9
+saniye sürerdi, toplu çözümleme pratik olmaktan çıkardı) ve *eser (work)
+düzeyinde kimlik* (kavramsal olarak en doğrusu ama K6'nın "kanonik = kayıt
+MBID" tanımını değiştirir; ertelendi).
+**Ölçülen sonuç:** `Radiohead — Creep` (süresiz) artık her koşumda
+`local:b51521e93103eefa` — aday kümeleri **hiç kesişmediği** koşumda bile aynı.
+`tied_candidates` (2 ya da 7) kanıtın ne kadar zayıf olduğunu kayıtta tutuyor:
+"aday yok" ile "aday ayırt edilemedi" aynı kimliği üretiyor ama aynı tanı değil.
+
+### D-046 eki (2) — kuralın açtığı ikinci kusur: süre kanıtı çöpe gidiyordu
+
+S3 uygulandıktan sonra `Şebnem Ferah — Sil Baştan` **süresi verilmiş olduğu
+hâlde** otorite kaybetti. Sonda sebebi gösterdi: üç aday — süreleri 309, 313 ve
+315 sn, sorgu 309 sn — **üçü de tam 1.0000 skor alıyordu.**
+
+Sebep `fuzzy::similarity`'de: taban skor metin tam uyduğunda zaten 1.0, süre
+bonusu `clamp`'te yutuluyor, ve süre farkı üç bant (≤3 sn / 3–15 sn / ≥15 sn)
+olarak okunduğu için bandın içindeki 0 sn ile 4 sn ayırt edilmiyor. Yani süre
+gerçekten bilindiği hâlde kimlik seçiminde **kullanılmıyordu**.
+
+**Düzeltme skorlamada değil, eşitlik bozmada.** Skor formülüne dokunulmadı
+(doğruluk kümesi ona göre ayarlı); süre farkı sıralamaya `tiebreak_rank`'ten
+sonra, MBID sırasından önce üçüncü ölçüt olarak eklendi ve `count_tied` artık
+skoru, rütbeyi **ve** süre farkını paylaşanları sayıyor. Bilinmeyen süre
+`u64::MAX`: "yakınlık iddiasında bulunamıyorum", en sona düşer.
+
+**Ölçülen etki — bu bir düzeltme, bir denge değil:**
+- Doğruluk kümesi **72/72 = %100** (değişmedi).
+- `Şebnem Ferah — Sil Baştan` (süreli) artık `mbid` yöntemiyle
+  `e0a22727-1fcf-4e3a-81a3-b65623b2c53e` veriyor — **ISRC halkasının aynı
+  sorgu için verdiği kaydın ta kendisi.** Düzeltmeden önce `1eaab31f…`
+  seçiliyordu, yani zincir *yanlış kaydı* seçiyordu ve bunu kimse ölçmemişti.
+- `Radiohead — Creep` (süreli, 238 sn) tekil kazananla çözülüyor (`berabere 1`).
+
+**Kalan risk — ve gerçekleşti.** Süreli sorgunun tekil kazanana ulaşması,
+kazanan adayın o kopyanın ilk 25'inde bulunmasına bağlı. `Radiohead — Creep`
+(238 sn) koşumların çoğunda `berabere 1` ile çözülüyor ama bazı koşumlarda
+238 sn'lik kayıt kümede yok ve zincir yine yerel anahtara düşüyor. Yani süre
+kanıtı **kararlılığı garanti etmiyor, yalnızca çoğu zaman sağlıyor.**
+
+Bu, canlı testi kırdı ve testin yanlış şeyi ölçtüğünü gösterdi:
+`a_live_take_does_not_win_over_the_studio_take` "her zaman bir aday dönmeli"
+diyordu. Değişmez o değil — değişmez **canlı kaydın kazanamaması.** Kazanan
+çıkmaması da o değişmezi bozmuyor ve D-046'nın kuralı gereği doğru davranış.
+Test artık iki kabul edilebilir sonucu da tanıyor ve hangisinin olduğunu
+yazıyor; reddettiği tek şey canlı bir kaydın seçilmesi.
+
+**Bu turda kapanmayan:** kümenin kendisini sabitlemek (sayfalama) ya da kimliği
+eser düzeyine taşımak. İkisi de belirsiz sorguların otorite almasını sağlardı;
+ikisi de ayrı birer karar.

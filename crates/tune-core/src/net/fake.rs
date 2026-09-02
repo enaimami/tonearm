@@ -59,6 +59,14 @@ impl FakeHttp {
             .unwrap_or_default()
     }
 
+    /// Son istek — gövdesiyle birlikte.
+    ///
+    /// `last_url` yetmediği yer için: bir POST'un asıl yükü gövdededir ve
+    /// "parmak izi URL'de mi gövdede mi gitti" ancak buradan görülür.
+    pub(crate) fn last_request(&self) -> Option<HttpRequest> {
+        self.requests().last().cloned()
+    }
+
     /// Son isteğin URL'si.
     pub(crate) fn last_url(&self) -> String {
         self.requests()

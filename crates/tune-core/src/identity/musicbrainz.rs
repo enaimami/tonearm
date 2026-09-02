@@ -12,26 +12,18 @@
 //!   Varsayılan bir değer üretiyoruz ama [`MusicBrainzLookup::with_user_agent`]
 //!   ile değiştirilebilir; dağıtan kişi kendi iletişim adresini koymalı.
 //! - **Saniyede bir istek.** Anonim istemcilerin ortalama hızı budur; aşınca
-//!   `503` gelir. Kısıtlayıcı [`RateLimiter`] içinde ve **çağrılar arasında
-//!   uyur**.
-//!
-//! ## Neden `thread::sleep`, `async` bir uykuya rağmen
-//!
-//! Çekirdek çalışma zamanı kurmaz (K7 / konvansiyon: "çalışma zamanını çağıran
-//! seçsin") ve bu yüzden `tokio::time::sleep` çağıramaz — bağımlılık olarak
-//! `tokio` çekirdekte yok. Altımızdaki HTTP istemcisi (`ureq`) zaten senkron:
-//! her istek çağıran iş parçacığını bloklar. Kısıtlayıcının aynı iş parçacığını
-//! bloklaması bu yüzden yeni bir kısıt getirmiyor, var olanla tutarlı.
+//!   `503` gelir. Kısıtlayıcı [`crate::net::RateLimiter`] içinde ve **çağrılar
+//!   arasında uyur**; gerekçesi orada yazılı.
 
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::time::Duration;
 
 use serde::Deserialize;
 
 use super::{Candidate, LookupFuture, MetadataLookup};
 use crate::error::Result;
 use crate::ids::{Isrc, Mbid};
-use crate::net::{HttpClient, HttpHeader, HttpRequest, encode_query, parse_json};
+use crate::net::{HttpClient, HttpHeader, HttpRequest, RateLimiter, encode_query, parse_json};
 
 /// Genel MusicBrainz sunucusu.
 pub const DEFAULT_BASE_URL: &str = "https://musicbrainz.org/ws/2";
@@ -54,48 +46,6 @@ const SEARCH_LIMIT: usize = 25;
 /// Sayılı: sonsuz yeniden deneme, kotayı aşan bir istemciyi sessiz kılardı —
 /// eklenti yeniden başlatmalarının sayılı olmasıyla aynı gerekçe (§2.1).
 const RATE_LIMIT_RETRIES: u32 = 2;
-
-/// Çağrılar arasında en az [`MIN_INTERVAL`] geçmesini sağlayan kısıtlayıcı.
-#[derive(Debug)]
-struct RateLimiter {
-    interval: Duration,
-    last: Mutex<Option<Instant>>,
-}
-
-impl RateLimiter {
-    fn new(interval: Duration) -> Self {
-        Self {
-            interval,
-            last: Mutex::new(None),
-        }
-    }
-
-    /// Sıra gelene kadar bekler ve çıkarken damgayı günceller.
-    ///
-    /// Kilit uyku boyunca **tutulmaz**: iki iş parçacığı aynı anda girerse
-    /// ikisi de bekler, ama biri diğerinin uykusunu uzatmaz.
-    fn acquire(&self) {
-        let wait = {
-            // Kilit zehirlenmişse (başka bir iş parçacığı panikledi) kısıtlamayı
-            // düşürmüyoruz: `unwrap` yerine "bilmiyorum, tam aralık bekle".
-            let Ok(mut last) = self.last.lock() else {
-                std::thread::sleep(self.interval);
-                return;
-            };
-            let now = Instant::now();
-            let wait = last
-                .map(|prev| self.interval.saturating_sub(now.duration_since(prev)))
-                .unwrap_or_default();
-            // Damgayı şimdiden ileri al: sıradaki çağıran bizim uyumamızı da
-            // hesaba katsın, yoksa ikisi birlikte uyanır.
-            *last = Some(now + wait);
-            wait
-        };
-        if !wait.is_zero() {
-            std::thread::sleep(wait);
-        }
-    }
-}
 
 /// MusicBrainz'e bağlanan üstveri kaynağı.
 ///
@@ -625,21 +575,6 @@ mod tests {
             http.requests().len(),
             (RATE_LIMIT_RETRIES + 1) as usize,
             "ilk deneme + {RATE_LIMIT_RETRIES} yeniden deneme"
-        );
-    }
-
-    /// Kısıtlayıcı gerçekten bekletiyor mu — süre ölçülerek.
-    #[test]
-    fn the_rate_limiter_actually_spaces_calls_apart() {
-        let limiter = RateLimiter::new(Duration::from_millis(40));
-        let start = Instant::now();
-        limiter.acquire(); // ilki beklemez
-        limiter.acquire();
-        limiter.acquire();
-        let elapsed = start.elapsed();
-        assert!(
-            elapsed >= Duration::from_millis(80),
-            "iki aralık beklenmeliydi, {elapsed:?} geçti"
         );
     }
 }

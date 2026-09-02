@@ -12,7 +12,9 @@ use serde::{Deserialize, Serialize};
 use crate::config::Config;
 use crate::diag::{DiagReport, Recorder, Stage};
 use crate::error::{Error, ErrorKind, Result};
-use crate::identity::{MetadataLookup, OfflineLookup, Resolution, ResolveSummary, Resolver};
+use crate::identity::{
+    FingerprintLookup, MetadataLookup, OfflineLookup, Resolution, ResolveSummary, Resolver,
+};
 use crate::ids::ProviderId;
 use crate::import::{self, ImportSummary};
 use crate::library::{
@@ -394,6 +396,114 @@ impl Session {
                 diag,
             }
         })
+    }
+
+    /// Bir **ses dosyasını** kimlik zincirinden geçirir.
+    ///
+    /// [`Self::resolve_track`]'ten farkı, zincirin 4. halkasının da
+    /// çalışabilmesi: üstveri dosyanın kendi etiketlerinden okunur ve metin
+    /// halkaları sonuçsuz kalırsa parmak izi sorulur.
+    ///
+    /// `fingerprint_lookup` `None` ise zincir üç halkayla biter — bu
+    /// **bir kusur değil bir yapılandırma**: kullanıcı ağa çıkmayı istemediyse
+    /// AcoustID'ye de sorulmaz.
+    ///
+    /// # Errors
+    /// Dosya okunamazsa ya da bir kaynak hata verirse.
+    pub async fn resolve_file(
+        &self,
+        path: &Path,
+        lookup: Arc<dyn MetadataLookup>,
+        fingerprint_lookup: Option<Arc<dyn FingerprintLookup>>,
+    ) -> Result<ResolveReport> {
+        let label = path.display().to_string();
+        let mut rec = Recorder::start(
+            format!("resolve --file {label:?}"),
+            Some(self.config.data_dir().to_path_buf()),
+        );
+        // Halkanın bağlı olup olmadığı tanının parçası: parmak izi kaynağı
+        // yokken "eşleşme bulunamadı" ile kaynak varken bulunamaması aynı
+        // çalıştırma değil (K9).
+        rec.set(
+            "identity.fingerprint_lookup",
+            i64::from(fingerprint_lookup.is_some()),
+        );
+
+        let result = async {
+            let mut resolver = Resolver::new(lookup);
+            if let Some(fingerprint_lookup) = fingerprint_lookup {
+                resolver = resolver.with_fingerprint_lookup(fingerprint_lookup);
+            }
+            let (track, _) = crate::provider::local::read_track(path)?;
+            let resolution = resolver.resolve_file(path).await?;
+            rec.set(
+                "identity.confidence_pct",
+                (resolution.confidence * 100.0) as i64,
+            );
+            rec.set(
+                "identity.tied_candidates",
+                i64::try_from(resolution.tied_candidates).unwrap_or(i64::MAX),
+            );
+            rec.note(format!("yöntem: {}", resolution.method));
+            Ok((track, resolution))
+        }
+        .await;
+
+        self.finish(rec, result, move |(track, resolution), diag| {
+            ResolveReport {
+                query: label,
+                artist: track.artist,
+                title: track.title,
+                resolution,
+                diag,
+            }
+        })
+    }
+
+    /// Bu kurulumun AcoustID kaynağı — anahtar sır deposundan okunur.
+    ///
+    /// `None` dönmesi "ağ istenmedi" demek. Anahtarın **bulunamaması** ise
+    /// `None` değil: kaynak yine kurulur ve ilk çağrıda ne yapılacağını
+    /// söyleyen bir hata döner (K9 — "istemedim" ile "yapamıyorum" ayrı).
+    ///
+    /// # Errors
+    /// Sır deposu okunamazsa ya da bu derlemede HTTP istemcisi yoksa.
+    #[cfg(feature = "fingerprint")]
+    pub fn fingerprint_lookup_for(
+        &self,
+        mode: LookupMode,
+    ) -> Result<Option<Arc<dyn FingerprintLookup>>> {
+        use crate::identity::acoustid::{AcoustIdLookup, SECRET_KEY, SECRET_NAMESPACE};
+
+        if mode == LookupMode::Offline {
+            return Ok(None);
+        }
+        let secrets = Secrets::load(&self.config.secrets_path())?;
+        let key = secrets
+            .namespace(SECRET_NAMESPACE)
+            .get(SECRET_KEY)
+            .cloned()
+            .unwrap_or_default();
+        let lookup = AcoustIdLookup::new(crate::net::default_http_client()?).with_api_key(key);
+        Ok(Some(Arc::new(lookup)))
+    }
+
+    /// Bu kurulumun AcoustID kaynağı.
+    ///
+    /// Bu derlemede `fingerprint` feature'ı kapalı: zincirin 4. halkası yok
+    /// ve `None` bunu anlatıyor. Çağıran sessizce "eşleşme yok" görmesin diye
+    /// [`crate::identity::fingerprint::fingerprint_file`] aynı durumu ayrıca
+    /// hata olarak da söylüyor.
+    ///
+    /// # Errors
+    /// Bu derlemede hiç hata dönmez; imza açık derlemeyle aynı kalsın diye
+    /// `Result`.
+    #[cfg(not(feature = "fingerprint"))]
+    pub fn fingerprint_lookup_for(
+        &self,
+        _mode: LookupMode,
+    ) -> Result<Option<Arc<dyn FingerprintLookup>>> {
+        Ok(None)
     }
 
     /// Kütüphanede tam metin arama.

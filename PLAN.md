@@ -827,8 +827,25 @@ bir sonraki ses geri çağrısına kadar `Stopped` göstermesiydi — pencere ye
 dosyada milisaniye, HTTP'de saniyeler. Sahte bir sunucu bunu gösteremezdi;
 kusur protokolde değil **zamanlamadaydı**.
 
-### 2.3 Kimlik çözümlemesi olgunlaşır
+### 2.3 Kimlik çözümlemesi olgunlaşır — TAMAM
 AcoustID / Chromaprint parmak izi. Etiketleri bozuk yerel dosyalar için.
+
+**AcoustID yarısı TAMAM (D-046).** `identity/fingerprint.rs` symphonia'nın
+PCM'inden Chromaprint parmak izi üretiyor, `identity/acoustid.rs` onu
+AcoustID'ye soruyor, `Resolver::resolve_file` ikisini zincire bağlıyor.
+`tune resolve --file <yol>` bir ses dosyasını dördünden birden geçiriyor.
+
+Sıra korunuyor: önce dosyanın **kendi etiketlerinden** üç metin halkası,
+yalnızca sonuç `LocalKey`'e düşerse ses. Parmak izi en pahalı halka.
+
+İki başarısızlık ayrı (K9): parmak izinin **üretilememesi** zinciri düşürmez
+(sebebi loglanır, yerel anahtarla biter); AcoustID'ye **sorulamaması**
+propagate edilir. Anahtar sır deposundan ya da gömülü varsayılandan gelir ve
+ikisi de yoksa çağrı *ne yapılacağını söyleyerek* reddedilir.
+
+> **Açık borç — gömülü anahtar boş.** `EMBEDDED_API_KEY` bilerek boş
+> bırakıldı; `acoustid.org/new-application` adresinden proje adına bir anahtar
+> alınana kadar 4. halka yalnızca kullanıcının kendi anahtarıyla çalışır.
 
 **MusicBrainz yarısı TAMAM.** `identity/musicbrainz.rs` — `MetadataLookup`'ın
 ilk gerçek uygulaması; zincirin 2. ve 3. halkası artık çalışıyor.
@@ -841,6 +858,29 @@ canlı kayıtlar **başlıkta değil `disambiguation`'da** işaretli, beraberlik
 seçim sunucunun sırasına teslimdi (aynı sorgu iki farklı MBID verdi), ve
 beraberlik "%100 güven" diye raporlanıyordu. Doğruluk kümesi %97.2 → %100
 (72 vaka); yeni sınıf `mb_disambiguation`.
+
+> KARAR NOKTASI: AcoustID anahtarı nereden gelir, 4. halka zincire nereden
+> bağlanır? **KAPANDI — D-046.** Anahtar: gömülü varsayılan + sır deposundan
+> kullanıcı geçersiz kılması. Bağlantı: `TrackRef`'e alan eklenmedi, ayrı bir
+> giriş noktası açıldı (`Resolver::resolve_file`) — `resolve()` ve `TrackRef`
+> hiç değişmedi.
+
+> KARAR NOKTASI: MusicBrainz araması koşumlar arası kararsız. **KAPANDI —
+> D-046 (S3).** `mb_stability_probe` ölçtü: aynı `Radiohead — Creep` araması
+> art arda iki kez 25 aday döndürüyor ve bazı koşumlarda **ortak aday sayısı
+> sıfır** — MusicBrainz aramayı birden çok indeks kopyasından sunuyor.
+> D-045'in belirlenimci sıralaması bunu çözemez, çünkü sıralanacak küme her
+> seferinde başka. **Karar: ayırt edici kanıt yoksa otorite iddia edilmez** —
+> zincir yerel anahtarla biter ve `tied_candidates` kanıtın zayıflığını
+> kayıtta tutar. Sayfalama ve eser (work) düzeyi kimlik reddedildi (gerekçeler
+> D-046'da; work düzeyi ertelendi, iptal değil).
+>
+> Kuralın açtığı ikinci kusur da düzeltildi: **süre kanıtı çöpe gidiyordu.**
+> `Şebnem Ferah — Sil Baştan` için 309, 313 ve 315 sn'lik üç aday, sorgu 309 sn
+> olmasına rağmen üçü de tam 1.0000 alıyordu (`clamp` + bantlı süre karşılaştırması).
+> Süre farkı artık sıralamada üçüncü eşitlik bozucu. Ölçülen etki: doğruluk
+> kümesi %100'de kaldı ve zincir artık ISRC halkasının verdiği **aynı** kaydı
+> buluyor — düzeltmeden önce yanlış kaydı seçiyordu.
 
 > KARAR NOKTASI: bu turun kapsamı ve sırası. **KAPANDI — D-045.** Tur açıldı
 > ve **üçünü de** (§2.3 + §2.4 + §2.5) kapsıyor; sıra §2.3 → §2.4 → §2.5.
@@ -881,7 +921,7 @@ eklenti düşmeli.
 |---|---|
 | 2.1 JSON-RPC protokolü | TAMAM — izin modeli (D-040), sırlar (D-042), gerçek süreçle sınandı |
 | 2.2 Referans eklenti (SoundCloud) | TAMAM — canlı SoundCloud'da arıyor ve çalıyor (D-043) |
-| 2.3 AcoustID | Ertelendi (D-041) |
+| 2.3 AcoustID | TAMAM — parmak izi + AcoustID + `resolve --file` (D-046); tek borç: gömülü AcoustID anahtarı henüz alınmadı |
 | 2.4 Torrent sağlayıcı | Ertelendi (D-041) |
 | 2.5 Yayın platformu eklentileri | Ertelendi (D-041) |
 

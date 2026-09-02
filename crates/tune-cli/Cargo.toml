@@ -24,7 +24,16 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 # D-011: `--out *.png` için PNG rasterizasyonu.
 # D-016: `tune play` için ses hattı (symphonia + cpal).
 # D-020: uzak sağlayıcılar için HTTP istemcisi (ureq + rustls).
-tune-core = { workspace = true, features = ["render-png", "audio", "http-client"] }
+# D-046: `tune resolve --file` için ses parmak izi (Chromaprint).
+#   CLI her çekirdek yeteneğinin sınandığı yüzey (CLAUDE.md); parmak izi
+#   feature'ının açık kalması gereken tek derleme burası. Ağacı büyütüyor ve
+#   bedel bilerek ödeniyor — mobil ve sunucu derlemeleri onu taşımaz.
+tune-core = { workspace = true, features = [
+    "render-png",
+    "audio",
+    "http-client",
+    "fingerprint",
+] }
 
 [lints]
 workspace = true

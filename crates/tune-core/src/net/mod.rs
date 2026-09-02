@@ -20,7 +20,8 @@ mod ureq_client;
 
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -108,6 +109,25 @@ impl HttpRequest {
         }
     }
 
+    /// Form kodlu POST (`application/x-www-form-urlencoded`).
+    ///
+    /// GET'in yetmediği yer için: bir Chromaprint parmak izi base64'e
+    /// çevrildiğinde binlerce karakter tutar ve pek çok sunucu/aracı URL'yi
+    /// 8 KB civarında keser. Kesilen bir URL "eşleşme yok" gibi görünür —
+    /// yani tanısı en zor başarısızlık türü (K9). Gövdede böyle bir sınır yok.
+    #[must_use]
+    pub fn post_form(url: impl Into<String>, body: impl Into<Vec<u8>>) -> Self {
+        Self {
+            method: HttpMethod::Post,
+            url: url.into(),
+            headers: vec![HttpHeader::new(
+                "Content-Type",
+                "application/x-www-form-urlencoded",
+            )],
+            body: Some(body.into()),
+        }
+    }
+
     #[must_use]
     pub fn with_headers(mut self, headers: Vec<HttpHeader>) -> Self {
         self.headers.extend(headers);
@@ -168,6 +188,60 @@ impl HttpResponse {
 
 /// Hata ayrıntısına alınan gövde uzunluğu (bayt).
 const DETAIL_LIMIT: usize = 200;
+
+/// Çağrılar arasında en az `interval` geçmesini sağlayan kısıtlayıcı.
+///
+/// Kotası olan her servis için: MusicBrainz saniyede bir istek, AcoustID
+/// saniyede üç. Servis başına bir örnek tutulur — sınır ortak değil, her
+/// servisin kendi kotası kendi sayacıyla ölçülür.
+///
+/// ## Neden `thread::sleep`, `async` bir uykuya rağmen
+///
+/// Çekirdek çalışma zamanı kurmaz (K7 / konvansiyon: "çalışma zamanını çağıran
+/// seçsin") ve bu yüzden `tokio::time::sleep` çağıramaz — bağımlılık olarak
+/// `tokio` çekirdekte yok. Altımızdaki HTTP istemcisi (`ureq`) zaten senkron:
+/// her istek çağıran iş parçacığını bloklar. Kısıtlayıcının aynı iş parçacığını
+/// bloklaması bu yüzden yeni bir kısıt getirmiyor, var olanla tutarlı.
+#[derive(Debug)]
+pub(crate) struct RateLimiter {
+    interval: Duration,
+    last: Mutex<Option<Instant>>,
+}
+
+impl RateLimiter {
+    pub(crate) fn new(interval: Duration) -> Self {
+        Self {
+            interval,
+            last: Mutex::new(None),
+        }
+    }
+
+    /// Sıra gelene kadar bekler ve çıkarken damgayı günceller.
+    ///
+    /// Kilit uyku boyunca **tutulmaz**: iki iş parçacığı aynı anda girerse
+    /// ikisi de bekler, ama biri diğerinin uykusunu uzatmaz.
+    pub(crate) fn acquire(&self) {
+        let wait = {
+            // Kilit zehirlenmişse (başka bir iş parçacığı panikledi) kısıtlamayı
+            // düşürmüyoruz: `unwrap` yerine "bilmiyorum, tam aralık bekle".
+            let Ok(mut last) = self.last.lock() else {
+                std::thread::sleep(self.interval);
+                return;
+            };
+            let now = Instant::now();
+            let wait = last
+                .map(|prev| self.interval.saturating_sub(now.duration_since(prev)))
+                .unwrap_or_default();
+            // Damgayı şimdiden ileri al: sıradaki çağıran bizim uyumamızı da
+            // hesaba katsın, yoksa ikisi birlikte uyanır.
+            *last = Some(now + wait);
+            wait
+        };
+        if !wait.is_zero() {
+            std::thread::sleep(wait);
+        }
+    }
+}
 
 /// Metni en fazla `limit` bayta kırpar — **karakter sınırında**.
 ///
@@ -396,5 +470,20 @@ mod tests {
         assert_eq!(response.header("content-length"), Some("42"));
         assert_eq!(response.header("CONTENT-LENGTH"), Some("42"));
         assert_eq!(response.header("etag"), None);
+    }
+
+    /// Kısıtlayıcı gerçekten bekletiyor mu — süre ölçülerek.
+    #[test]
+    fn the_rate_limiter_actually_spaces_calls_apart() {
+        let limiter = RateLimiter::new(Duration::from_millis(40));
+        let start = Instant::now();
+        limiter.acquire(); // ilki beklemez
+        limiter.acquire();
+        limiter.acquire();
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed >= Duration::from_millis(80),
+            "iki aralık beklenmeliydi, {elapsed:?} geçti"
+        );
     }
 }

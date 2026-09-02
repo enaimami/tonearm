@@ -438,7 +438,7 @@ fn has_audio_extension(path: &Path) -> bool {
 ///
 /// Dönüş: `(track, etiketlerden_mi)`. İkinci alan `false` ise üstveri dosya
 /// adından türetildi — bu bir kayıp değil ama sayılması gereken bir düşüş (K9).
-fn read_track(path: &Path) -> Result<(TrackRef, bool)> {
+pub(crate) fn read_track(path: &Path) -> Result<(TrackRef, bool)> {
     #[cfg(feature = "audio")]
     {
         match tags::read(path) {

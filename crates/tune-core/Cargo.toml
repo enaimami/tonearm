@@ -11,6 +11,7 @@ publish.workspace = true
 cpal = { version = "0.18", optional = true }
 jiff = { version = "0.2.35", features = ["serde"] }
 resvg = { version = "0.48", optional = true }
+rusty-chromaprint = { version = "0.3.0", optional = true }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
@@ -29,6 +30,16 @@ tokio = { version = "1.53.1", features = ["rt", "macros"] }
 name = "playback_probe"
 required-features = ["audio"]
 
+# AcoustID'ye giden parmak izi dizesini gözle görmek için (D-046).
+[[example]]
+name = "fingerprint_probe"
+required-features = ["fingerprint"]
+
+# MusicBrainz aramasının aday kümesi koşumlar arası sabit mi (D-046 eki).
+[[example]]
+name = "mb_stability_probe"
+required-features = ["http-client"]
+
 [lints]
 workspace = true
 
@@ -42,6 +53,12 @@ render-png = ["dep:resvg"]
 # yalnızca gerçek ses çıkışı düşer. Böylece sunucu/mobil derlemeleri ALSA'ya
 # bağlanmak zorunda kalmaz.
 audio = ["dep:symphonia", "dep:cpal"]
+
+# D-045: ses parmak izi (Chromaprint). `audio`'yu gerektiriyor çünkü PCM'i
+# symphonia üretiyor; ayrı bir feature çünkü `rustfft` + `rubato` ağacını
+# yalnızca parmak izi isteyen derlemeler taşısın. Kapalıyken zincirin 4.
+# halkası düşer ve bu **söylenir**, sessizce atlanmaz (K9).
+fingerprint = ["dep:rusty-chromaprint", "audio"]
 
 # D-020: HTTP taşıma katmanı. `net::HttpClient` trait'i her zaman derlenir;
 # bu feature yalnızca somut istemciyi (ureq + rustls) getirir. Kapalıyken
