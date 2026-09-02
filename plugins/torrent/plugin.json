@@ -1,0 +1,13 @@
+{
+  "name": "torrent",
+  "display_name": "Torrent",
+  "version": "0.0.1-beta",
+  "api": 1,
+  "exec": ["./tune-plugin-torrent"],
+  "capabilities": ["search", "stream"],
+  "permissions": {
+    "net": ["dht.transmissionbt.com", "dht.libtorrent.org"],
+    "fs": []
+  },
+  "description": "Torznab (Prowlarr/Jackett) üzerinde arar, librqbit ile sıralı indirip yerel bir adresten çalar. DİKKAT — beyan edilen iki ana bilgisayar yalnızca DHT giriş noktalarıdır: bir torrent istemcisi tanımı gereği önceden bilinemeyen tracker'lara ve rastgele peer adreslerine bağlanır, ve arama için sizin verdiğiniz Torznab adresine gider. İzin sözlüğü (D-040) bunu ifade edemiyor; liste eksiktir ve bilerek eksiktir."
+}

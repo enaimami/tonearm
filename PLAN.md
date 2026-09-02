@@ -903,9 +903,29 @@ beraberlik "%100 güven" diye raporlanıyordu. Doğruluk kümesi %97.2 → %100
 > `fpcalc` alt süreci değil.
 
 ### 2.4 Torrent sağlayıcı
-`librqbit`. `set_piece_deadline` ile sıralı akış. Bash prototipinin varisi —
+`librqbit`. Sıralı akış. Bash prototipinin varisi —
 oradaki dersler geçerli: her torrent kendi dizinine, hazırlık için sabit `sleep` yerine
 gerçek hazır olma kontrolü, peer sayısı ve indirme hızı raporlanır.
+
+> KARAR NOKTASI: torrent çekirdekte mi, eklentide mi? Bu bölüm "`librqbit`"
+> diyerek çekirdeği ima ediyordu, K5 ise "sağlayıcılar alt süreç eklentisidir"
+> diyor. **KAPANDI — D-047: eklenti.** Ağaç bedeli karardan önce ölçüldü:
+> `librqbit` `tune-core`'a **+179 crate** ekliyordu (77 → 256) ve o ağaç
+> `uniffi` ile mobile de gidecekti. Sağlayıcı artık `crates/tune-plugin-torrent`,
+> ayrı bir Rust ikilisi; `tune-core`'un ağacı 77'de kaldı.
+>
+> Aynı kararda iki alt soru daha kapandı. **Ses teslimi:** eklenti
+> `127.0.0.1`'de sıralı bir HTTP akışı sunuyor ve `resolve_source`
+> `HttpStream` döndürüyor — protokolde tek satır değişmedi, ve indirmenin
+> bitmesi beklenmiyor. **Arama:** Torznab (Prowlarr/Jackett) — tek standart
+> API, tek ayrıştırıcı; depoda hiçbir siteye özel kazıyıcı yok. Torznab
+> yapılandırılmamışsa arama sessiz boş küme değil, ne yazılacağını söyleyen
+> bir hata döndürüyor (K9).
+>
+> Torznab bir *yayım* döndürür, bir parça değil. api 1 büyütülmeden iki adımla
+> çözüldü: `search "<sorgu>"` → yayımlar (`<infohash>`), `search "<infohash>"`
+> → içindeki ses dosyaları (`<infohash>/<sıra>`). Birden çok dosya varken
+> `resolve_source` tahmin etmiyor.
 
 ### 2.5 Yayın platformu eklentileri
 Hangi platformdan ses çalınabileceği API'nin varlığına değil **DRM'e** bağlı.
@@ -933,7 +953,7 @@ eklenti düşmeli.
 | 2.1 JSON-RPC protokolü | TAMAM — izin modeli (D-040), sırlar (D-042), gerçek süreçle sınandı |
 | 2.2 Referans eklenti (SoundCloud) | TAMAM — canlı SoundCloud'da arıyor ve çalıyor (D-043) |
 | 2.3 AcoustID | TAMAM — parmak izi + AcoustID + `resolve --file` (D-046), gerçek anahtarla canlı sınandı; tek borç: `EMBEDDED_API_KEY` hâlâ boş |
-| 2.4 Torrent sağlayıcı | Ertelendi (D-041) |
+| 2.4 Torrent sağlayıcı | TAMAM — `crates/tune-plugin-torrent` alt süreç eklentisi (D-047): Torznab araması, sıralı yerel akış, iki adımlı yayım→dosya kimliği |
 | 2.5 Yayın platformu eklentileri | Ertelendi (D-041) |
 
 **Faz 1'den taşınan borçlar:**
@@ -947,10 +967,15 @@ Faz 2'nin "bitti sayılır" ölçütünün ikisi de karşılandı: Rust olmayan 
 referans eklenti gerçek bir serviste çalışıyor (§2.2) ve çekirdek sürüm
 uyumsuzluğunda çökmeden reddediyor (§2.1, `plugin_process.rs`).
 
-§2.3 (AcoustID), §2.4 (torrent) ve §2.5 (yayın platformları) ertelenmiş
-durumda ve **ayrı bir tur** olarak açılacak (D-041). Sıradaki iş bir karar:
-o turu şimdi mi açalım, yoksa §3.3'ün bıraktığı **"mod" paketleri** karar
-noktası mı önce gelsin.
+D-045'in açtığı tur §2.3 (D-046) ve §2.4 (D-047) ile ilerledi. Faz 2'de
+kalan tek bölüm **§2.5 — yayın platformu eklentileri**, ve oradaki açık alt
+karar hangi platform(lar)ın yazılacağı.
+
+§2.4'ün açtığı ve kapanmayan bir konu: **izin sözlüğü (D-040) "rastgele peer"
+diyemiyor.** Bir torrent istemcisi önceden bilinemeyen tracker'lara ve peer
+adreslerine bağlanır; `plugin.json` yalnızca iki DHT giriş noktası beyan
+edebiliyor ve gerisini `description`'da anlatıyor. Sözlüğün genişletilmesi
+ayrı bir karar.
 
 ---
 

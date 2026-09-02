@@ -1,6 +1,14 @@
 [workspace]
 resolver = "2"
-members = ["crates/tune-core", "crates/tune-cli", "crates/tune"]
+members = [
+    "crates/tune-core",
+    "crates/tune-cli",
+    "crates/tune",
+    # D-047: torrent sağlayıcı workspace üyesi ama **çekirdeğin bağımlılığı
+    # değil** — ayrı bir ikili, alt süreç olarak konuşuyor. `librqbit`'in
+    # 179 crate'i buradan kilide girer, `tune-core`'un ağacına girmez.
+    "crates/tune-plugin-torrent",
+]
 exclude = ["spike"]
 
 [workspace.package]

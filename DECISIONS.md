@@ -1748,3 +1748,135 @@ testlerde `TUNE_ACOUSTID_KEY` olarak kullanıldı. `EMBEDDED_API_KEY` **hâlâ
 boş** — o anahtarı kaynağa gömmek onu herkese açık hâle getirir ve bu, sırlar
 dosyasında tutulan kişisel bir anahtar için kullanıcının ayrıca vereceği bir
 karardır. Sorulmadan yapılmadı.
+
+---
+
+## D-047 — §2.4 torrent: alt süreç eklentisi, localhost akışı, Torznab araması
+**Tarih:** 2026-09-02
+**Soru:** PLAN §2.4 "`librqbit`" diyor ve bunu çekirdeğin içine koyuyormuş gibi
+okunuyor; K5 ise "sağlayıcılar alt süreç eklentisidir" diyor. Çelişki kod
+yazılmadan kapatılacaktı (D-045'in açık bıraktığı iki alt karardan biri).
+
+**Karardan önce ölçülen ağaç bedeli** (`cargo tree -e normal`, benzersiz crate):
+
+| | crate |
+|---|---|
+| `tune-core` bugün (`fingerprint` açık) | 77 |
+| `librqbit` 9.0.1 tek başına (`--no-default-features`) | 223 |
+| çekirdeğe eklenirse **yeni** gelen | **+179** (ortak yalnızca 35) |
+
+Yani çekirdek 77 → 256, **3,3 kat**. Ve bu ağaç `uniffi` ile mobile de gider —
+K7'nin ve "ağaç küçük kalmalı (mobil binary boyutu)" kuralının doğrudan konusu.
+
+**Karar (S1 — nerede yaşar): ayrı workspace crate'i, alt süreç eklentisi.**
+`crates/tune-plugin-torrent`, `librqbit` kullanan bağımsız bir Rust ikilisi,
+çekirdekle §2.1'in JSON-RPC protokolü üzerinden konuşuyor. `tune-core`'un
+ağacı 77'de kalıyor. Çelişki K5 lehine kapandı; PLAN §2.4'ün "`librqbit`"
+tavsiyesi geçerli, **yeri** değişti.
+
+Dürüst olmak gerekirse bedelsiz değil: workspace tek `Cargo.lock` paylaştığı
+için o 179 crate kilide giriyor ve `cargo test --workspace` onları derliyor.
+Değişmeyen şey `tune-core`'un **kendi** bağımlılık ağacı — mobil bağlamanın
+taşıyacağı olan da o. Ölçü `cargo tree -p tune-core` ile her zaman doğrulanabilir.
+
+**Karar (S2 — ses nasıl teslim edilir): 127.0.0.1'de sıralı HTTP akışı.**
+Eklenti `librqbit`'in `ManagedTorrent::stream(file_id)` akışını (`AsyncRead +
+AsyncSeek`, parça önceliğini okuma konumuna göre ayarlıyor) yalnızca yerel
+arayüze bağlı küçük bir HTTP/1.1 sunucusundan sunuyor ve `resolve_source`
+`HttpStream` döndürüyor. **Protokolde tek satır değişmedi.**
+
+Alternatif "tam indir, sonra `LocalFile` döndür" idi: basit ama `tune play`
+dakikalarca bloke olurdu ya da protokole ilerleme bildirimi eklemek gerekirdi.
+
+K3 ihlali değil: röle edilen bir şey yok, akış kullanıcının kendi makinesinde
+kendi çektiği veriden okunuyor. Sunucu `127.0.0.1`'e bağlanıyor ve yol içinde
+süreç ömrü kadar yaşayan rastgele bir jeton taşıyor — aynı makinedeki başka
+bir süreç adresleri deneyerek bulamasın diye.
+
+**Karar (S3 — kapsam): çalma + arama.** Öneri "yalnızca çalma" idi (arama her
+indeks için ayrı bir kazıyıcı demek, ve bakımı SoundCloud eklentisinden
+pahalı). Kullanıcı aramayı da istedi.
+
+**Karar (S3b — arama nereden): Torznab (Prowlarr/Jackett).** İtirazın kendisini
+ortadan kaldıran yol bu: tek standart XML API, tek ayrıştırıcı. Hangi
+indekslerin sorgulanacağını kullanıcı kendi Prowlarr/Jackett'ında seçer; bir
+site bozulduğunda **bizim kodumuz değil** onların indeks tanımı güncellenir.
+Depoda hiçbir siteye özel kazıyıcı durmuyor.
+
+Bedeli kullanıcının bir kurulum yapması ve bu bedel K9 uyarınca gizlenmiyor:
+Torznab yapılandırılmamışsa `search` sessiz boş küme değil, "yapılandırılmamış
+— `tune secret set plugin:torrent torznab_url ...`" diyen açık bir hata döner.
+"Bulamadım" ile "bakmadım" ayrı tanılardır.
+
+**Torznab bir *release* döndürür, bir parça değil** — ve bu, tel biçimindeki
+`WireTrack`'e doğrudan uymaz. api 1'i büyütmeden çözüldü, iki adım:
+1. `search "<sorgu>"` → release'ler; her birinin `id`'si infohash.
+2. `search "<infohash>"` → o torrent'in içindeki ses dosyaları; `id`'ler
+   `<infohash>/<dosya sırası>`.
+
+Tek ses dosyası olan bir release'te `resolve_source("<infohash>")` doğrudan
+çalar. Birden çok dosya varsa **tahmin etmez**: hangi dosyaların olduğunu ve
+infohash'i aratmayı söyleyen bir hata döner (K9 — "hangisi olduğunu bilmiyorum"
+sessizce ilk dosyayı seçmekten iyidir).
+
+**Yeni bağımlılık:** `roxmltree` (Torznab RSS ayrıştırma) ve `reqwest` — ikisi
+de workspace kilidinde zaten var (`roxmltree` resvg'den, `reqwest` librqbit ve
+Tauri'den), yani kilide yeni bir isim eklemiyorlar. `tune-core`'a hiçbiri
+girmiyor.
+
+### D-047 eki — inşanın bulduğu üç şey
+
+**Tarih:** 2026-09-02.
+
+**1. Ad ayrıştırmada sıra yanlıştı (üç kusur, tek sebep).** Yayım adından
+sanatçı/başlık çıkarırken önce yılı, sonra gürültüyü, en son sanatçıyı
+ayırıyordum. Sonuç: `Van Halen — 1984`'te yıl alınınca başlık boşalıyor ve
+ayırma başarısız oluyor, **sanatçı da kayboluyordu**; scene adlarında
+(`Portishead.Dummy.1994.FLAC`) yıl sondaki `FLAC`'in arkasında kaldığı için
+hiç bulunmuyordu; ve Sigur Rós'un `( )` albümü "içi boş parantez" olduğu için
+gürültü sayılıp siliniyordu. Doğru sıra: **önce sanatçı, sonra gürültü, en son
+yıl.** "Hepsi gürültü" iddiası artık en az bir kelime gerektiriyor.
+
+**2. Kusur: bütçe `add_torrent`'ı kapsamıyordu — ve bu üretimde de vardı.**
+Zaman aşımını yalnızca `wait_until_initialized`'ın etrafına koymuştum. Oysa bir
+magnet'te üstveriyi çözen `add_torrent`'ın kendisi: peer bulunamazsa orada
+**süresizce** bekliyor. Soğuk bir magnet'te eklenti çekirdeğin 20 sn'lik çağrı
+zaman aşımına düşüyor, kullanıcı "eklenti takıldı" görüyor ve sebebini hiç
+öğrenemiyordu — yani K9'un tam olarak yasakladığı şey. Bütçe artık ikisini
+birden sarıyor ve dolduğunda peer/tracker durumunu açıklayan bir hata dönüyor.
+
+Bunu **yalnızca gerçek koşum gösterdi.** Birim testleri yeşildi; kusur ancak
+akış sunucusuna gerçek bir HTTP isteği gidince ortaya çıktı, ve o istek
+katalogda kayıt olmadığı için çıplak bir magnet üretmişti. Sahte bir oturum
+"hemen döndü" derdi. D-044'ün dersinin yedinci tekrarı. Regresyon testi:
+`a_source_with_no_peers_gives_up_within_the_budget_and_says_why`.
+
+**3. Uçtan uca test peer kullanmıyor — ve bu bilinçli.** Test bir torrent
+üretip verisini indirme dizinine koyuyor; `librqbit` karma doğrulayıp tamam
+sayıyor. Böylece sınanan şey bizim kodumuz oluyor: üstveriden dosya listesi,
+akış açma, `Range` yanıtlama, jeton denetimi. Peer'a bağlı bir test ağın hâline
+göre bazen geçerdi ve D-043'ün ayırmak istediği iki başarısızlığı karıştırırdı.
+**Sınanmayan şey açıkça şudur: peer'lardan indirme.** O `librqbit`'in kendi
+test kümesinin işi.
+
+**Kapanmayan konu — izin sözlüğü "rastgele peer" diyemiyor.** `plugin.json`
+yalnızca iki DHT giriş noktası beyan ediyor; oysa bir torrent istemcisi
+önceden bilinemeyen tracker'lara ve peer adreslerine, ayrıca kullanıcının
+verdiği Torznab adresine bağlanır. D-040'ın sözlüğü ("ana bilgisayar listesi,
+`*` yok") bunu ifade edemiyor. Beyanı eksik bırakıp `description`'da söylemeyi,
+olmayan bir kısıtlama varmış gibi göstermeye tercih ettim. Sözlüğün
+genişletilmesi ayrı bir karar ve sorulmadı.
+
+**Ölçülmemiş bir bedel ölçüldü: disk.** D-047 "workspace tek `Cargo.lock`
+paylaşıyor, o 179 crate kilide girer ve `cargo test --workspace` onları
+derler" diyordu ama sayı vermemişti. Sayı şu: bu makinede `target/` 45 GB'ye
+çıktı ve **disk doldu** — koşum bir derleme hatasıyla değil,
+`No space left on device` ve linker'da `Bus error` ile düştü. `target/debug/
+incremental` tek başına 12 GB'ydi (saf önbellek, silinince hiçbir çıktı
+kaybolmaz). Silindikten sonra tur temiz geçti.
+
+Bu bir kusur değil, ölçülmüş bir bedel: torrent eklentisi `tune-core`'un
+ağacını büyütmüyor (77'de kaldı, `cargo tree -p tune-core` ile doğrulandı)
+ama **workspace'in derleme yükünü** büyütüyor. Geliştirici makinesinde
+`CARGO_INCREMENTAL=0` ya da düzenli `cargo clean` gerekebilir; CI'da tek bir
+`--workspace` koşumu için disk ayırırken bu hesaba katılmalı.
