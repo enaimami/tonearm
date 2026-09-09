@@ -123,7 +123,25 @@ Dışa açılan imzalarda **yasak**: generic parametre (`<L: Trait>`), lifetime,
 (`#[uniffi::export(with_foreign)]`), yani Kotlin/Swift tarafında uygulanabilir.
 `async fn` de serbest, `uniffi` destekliyor.
 
+**"Dışa açılan" ne demek (D-052):** `uniffi`'nin ihraç edeceği yüzey — `Session`
+metodları, o imzalarda geçen tipler ve callback interface olarak modellenen
+trait'ler. Bir tip bu yüzeyden geçiyorsa alanlarında lifetime **olamaz**;
+`PlayOptions` bu yüzden `&'a str` yerine `String` taşıyor.
+
+Ergonomi için yazılmış `pub fn new(x: impl Into<String>)` tarzı yapıcılar kuralın
+**dışındadır**: `uniffi` yalnızca işaretlenmiş öğeye bakar, Faz 6'da bunların
+yanına `#[uniffi::constructor]` ile `String` alan ikinci bir yapıcı eklenir ve
+mevcut Rust çağıranları kırılmaz. Gerekçe D-052'de.
+
 > Bu kuralın ilk yazımı "trait object yok" diyordu; fazla katıydı ve D-006'da düzeltildi.
+
+> **Bilinen açık (D-052):** `ProviderFuture<'a, T>`, `HttpFuture<'a>` ve
+> `LookupFuture<'a, T>` dışa açılan yüzeyde lifetime taşıyor. Kaza değil —
+> dyn-uyumlu async trait'in makrosuz tek yolu bu. Ama `uniffi` bir trait
+> metodunun dönüşünde `Pin<Box<dyn Future + Send + 'a>>` ifade **edemez**:
+> `Provider`, `HttpClient`, `MetadataLookup` ve `FingerprintLookup` Faz 6'da
+> `uniffi`'nin kendi async makinesine göre yeniden yazılacak. Bugün
+> düzeltilebilir bir şey değil, izlenmesi gereken bir borç.
 
 ### K8 — `tune-core` içinde `unwrap()` / `expect()` / `panic!()` yok
 Testler hariç. Sessiz `unwrap_or_default()` de yasak — veri kaybını yutar.
@@ -1489,8 +1507,18 @@ Gelmiyorsa çekirdek yanlış tasarlanmış demektir (K7).
 denensin — derlenmesi bile gerekmez, sadece "bu API ifade edilebilir mi?" sorusunu
 her commit'te sorar. Aksi halde ihlaller aylarca birikir ve toplu halde ortaya çıkar.
 
-> KARAR NOKTASI: Bu CI kontrolü ne zaman eklenecek? Öneri: Faz 0.8'deki D-006
-> düzeltmesiyle birlikte, hemen. **Sor.**
+> **KARAR NOKTASI KAPANDI — D-052 / D-053.** Uyarı haklı çıktı: `PlayOptions<'a>`
+> tam olarak böyle birikti, aylarca dışa açılan yüzeyde lifetime taşıdı.
+>
+> Bugün konan şey **gerçek scaffolding üretimi değil**, ondan önce gelen ucuz
+> süzgeç: `crates/tune-core/tests/k7_surface.rs` public tiplerde lifetime ve
+> public imzalarda closure arıyor, CI'ın üçüncü kapısında koşuyor (D-053).
+>
+> Gerçek `uniffi` kontrolü hâlâ bu fazın işi ve iki şey istiyor: çekirdekteki
+> ~60-80 tipin `#[derive(uniffi::Record)]` ile işaretlenmesi, ve aşağıdaki dört
+> trait'in yeniden yazılması — `uniffi` bir trait metodunun dönüşünde
+> `Pin<Box<dyn Future + Send + 'a>>` ifade edemiyor:
+> `Provider`, `HttpClient`, `MetadataLookup`, `FingerprintLookup` (D-052 borcu).
 
 ---
 

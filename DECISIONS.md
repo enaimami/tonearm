@@ -2278,3 +2278,94 @@ gerçeğe çekildi, CLI yüzeyi tamamlandı, faz durumu tamamen çıkarıldı);
 **Kayma için tek panzehir:** faz durumu artık **yalnızca** PLAN.md'nin faz
 başlıklarındaki `TAMAM` / `YAPILACAK` işaretlerinde. Başka hiçbir dosya
 "şu an hangi fazdayız" cümlesi kurmaz.
+
+---
+
+## D-052 — K7'nin sınırı: "dışa açılan" uniffi'nin ihraç ettiğidir
+**Tarih:** 2026-09-09
+**Soru:** D-051'in belge temizliği bitince K7 kodda denetlendi ve üç ayrı
+bulgu çıktı. Hepsi "lifetime/generic var" diyordu ama üçü aynı şey değildi:
+
+| bulgu | ne | karar |
+|---|---|---|
+| `PlayOptions<'a>` (`session.rs`) | dışa açılan record'da lifetime | **ihlal — düzeltildi** |
+| 24 public yapıcıda `impl Into<String>` / `impl AsRef<Path>` | ergonomik generic | **kural dışı — kalıyor** |
+| `ProviderFuture<'a,T>`, `HttpFuture<'a>`, `LookupFuture<'a,T>` | dyn-uyumlu async trait | **bilinen borç — izleniyor** |
+
+**Karar 1 — "dışa açılan imza" = `uniffi`'nin ihraç edeceği yüzey.**
+`Session` metodları, o imzalardan geçen tipler ve callback interface olarak
+modellenen trait'ler. Bir tip bu yüzeyden geçiyorsa lifetime taşıyamaz.
+
+**Gerekçe:** `uniffi` yalnızca işaretlenmiş öğeye bakar. `PlayOptions` bir
+record olarak ihraç edilecek ve `uniffi` bir record alanında `&'a str`'i
+ifade edemez — bu gerçek bir engel. Ama `ProviderTrackId::new(id: impl
+Into<String>)` ihraç edilmek zorunda değil: Faz 6'da yanına
+`#[uniffi::constructor] fn create(id: String)` eklenir, mevcut Rust
+çağıranları kırılmaz. Geniş okuma 24 imzayı `String`'e çevirip her çağrı
+yerine `.to_owned()` ektirirdi; kazanç yok, ergonomi kaybı var.
+
+**Karar 2 — `PlayOptions` sahipli `String` taşır.** `query: &'a str` →
+`query: String`, `Copy` düştü. Bedeli komut başına tek bir kısa metin kopyası.
+
+**Karar 3 — kural artık kodda denetleniyor.** `crates/tune-core/tests/
+k7_surface.rs`: public bir `struct`/`enum`/`type` lifetime aldıysa ya da
+public bir imza closure parametresi alıyorsa test düşer, `ADIM: K7_SURFACE`
+ile hangi dosya:satır olduğunu söyler (K9).
+
+**Bu gerçek `uniffi` scaffolding üretimi değildir** ve yerine geçtiğini
+iddia etmiyor. Gerçek kontrol çekirdekteki ~60-80 tipi
+`#[derive(uniffi::Record)]` ile işaretlemeyi ister; o iş Faz 6'ya ait (K10)
+ve aşağıdaki borç yüzünden ilk günden kırmızı yanardı. Ucuz süzgeç önce
+gelir.
+
+**Bilinen borç:** `uniffi` bir trait metodunun dönüşünde
+`Pin<Box<dyn Future + Send + 'a>>` ifade edemez. `Provider`, `HttpClient`,
+`MetadataLookup` ve `FingerprintLookup` bugün böyle yazılmış — kaza değil,
+dyn-uyumlu async trait'in makrosuz tek yolu (D-006 `Arc<dyn Trait>`'i
+serbest bıraktığı için gerekli). Faz 6'da dördü de `uniffi`'nin kendi async
+makinesine göre yeniden yazılacak. Test bunları `BOXED_FUTURE_ALIASES`
+listesinde tutuyor; **liste bir borç kaydıdır, muafiyet değil** — yeni ad
+eklemek borcu büyütür, önce sorulur.
+
+**Yan bulgu — denetimin kendisi kusurluydu.** İlk yazımda test modülü
+ayıklaması ilk `#[cfg(test)]`'ten sonrasını topluca kesiyordu; test
+modülünden *sonra* tanımlanan her public tip denetimin dışında kalıyordu.
+Enjekte edilen ihlal yakalanmayınca çıktı. Süslü parantez sayan blok
+atlamaya çevrildi ve iki ihlal sınıfı da enjeksiyonla doğrulandı: yeşil
+olduğu için değil, kırmızı yakabildiği için güveniliyor.
+
+## D-053 — CI: depoda hiç yoktu, üç kapı artık makinede koşuyor
+**Tarih:** 2026-09-09
+**Soru:** PLAN.md'nin Faz 6 bölümünde cevaplanmamış bir KARAR NOKTASI
+duruyordu: *"CI'da `uniffi` scaffolding üretimi denensin… ne zaman
+eklenecek? Öneri: hemen."* Sorulunca "şimdi" denildi.
+
+Ölçüldüğünde asıl eksik ortaya çıktı: **depoda hiç CI yoktu.** Üç kapı
+(`fmt`, `clippy`, `test`) CONTRIBUTING.md'de yazılıydı ve yalnızca elle
+koşulursa koşuyordu.
+
+**Karar:** `.github/workflows/ci.yml` — push ve PR'da üç kapı. K7 yüzey
+denetimi (D-052) üçüncü kapının içinde koşuyor.
+
+**Sistem bağımlılıkları:** `cpal` ALSA'ya, Tauri kabuğu WebKitGTK'ya
+bağlanıyor; `libasound2-dev` + `libwebkit2gtk-4.1-dev` ve arkadaşları
+olmadan `--workspace` derlenmiyor.
+
+**Ağ testleri (D-043) CI'da koşar.** Ulaşamamak başarısızlık değil, o yüzden
+ayrı bir "atla" düğmesi eklenmedi: CI'da yalnızca SoundCloud ve MusicBrainz
+gerçekten koşar; AcoustID anahtarsız, `ytmusic` yt-dlp'siz, `torznab`
+yapılandırmasız oldukları için kendilerini atlar. Kırmızı yanan bir ağ
+testi "ulaşamadım" değil, "ulaşıp beklenmeyeni aldım" demektir (K9) — ve o
+zaten bilinmesi gereken şeydir.
+
+**İkinci iş `core-alone`, ve bugün kırmızı.** `--workspace` koşumunda
+`tune-cli` ile `tune`, `tune-core`'un `audio`/`http-client` feature'larını
+açıyor ve varsayılan derlemedeki ölü kodu gizliyor. Mobil (Faz 6) çekirdeği
+bu feature'lar olmadan derleyecek. Bugün üç kusur var: `net::network_err`
+ölü, `net::fake::last_request` ölü, `playback/player.rs:228`'de karşılanmayan
+bir lint beklentisi. Bu yüzden iş `continue-on-error: true` ile **rapor**,
+kapı değil. Üçü düzeltilince o satır kaldırılmalı.
+
+**Doğrulanmamış:** CI hiç koşmadı — bu commit'in kendisi ilk koşum olacak.
+Sistem bağımlılığı listesi ve `ubuntu-24.04` üzerindeki WebKitGTK sürümü
+(`4.1`) yerel makinede değil, yalnızca okunarak seçildi.

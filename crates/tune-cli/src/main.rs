@@ -481,11 +481,10 @@ async fn run(cli: &Cli) -> tune_core::Result<String> {
             let registry = provider::default_registry(session.config())?;
 
             let options = session::PlayOptions {
-                query,
                 all: *all,
                 shuffle: *shuffle,
                 dry_run: *dry_run,
-                ..session::PlayOptions::new(query)
+                ..session::PlayOptions::new(query.clone())
             };
 
             if *use_tui {

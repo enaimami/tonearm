@@ -323,7 +323,7 @@ pub async fn play(
                 let options = PlayOptions {
                     all,
                     shuffle,
-                    ..PlayOptions::new(&query)
+                    ..PlayOptions::new(query)
                 };
                 let task = core
                     .live

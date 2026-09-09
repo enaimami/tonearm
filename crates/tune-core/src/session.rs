@@ -221,10 +221,14 @@ pub struct ServerRemoveReport {
 ///
 /// Ayrı bir struct: `uniffi` için de tek bir record olarak geçer ve yeni
 /// seçenek eklemek çağıranların imzasını kırmaz.
-#[derive(Debug, Clone, Copy)]
-pub struct PlayOptions<'a> {
+///
+/// `query` ödünç değil **sahipli** bir `String`: K7 dışa açılan tiplerde
+/// lifetime yasaklıyor ve `uniffi` bir record alanında `&str`'i ifade
+/// edemiyor. Kopyanın bedeli komut başına tek bir kısa metin.
+#[derive(Debug, Clone)]
+pub struct PlayOptions {
     /// Aranacak metin.
-    pub query: &'a str,
+    pub query: String,
     /// Eşleşen tüm parçalar kuyruğa alınsın mı (false: yalnızca ilki).
     pub all: bool,
     /// Kuyruk karıştırılsın mı.
@@ -235,10 +239,10 @@ pub struct PlayOptions<'a> {
     pub limit: usize,
 }
 
-impl<'a> PlayOptions<'a> {
+impl PlayOptions {
     /// Varsayılan seçeneklerle: ilk eşleşmeyi çal.
     #[must_use]
-    pub fn new(query: &'a str) -> Self {
+    pub fn new(query: String) -> Self {
         Self {
             query,
             all: false,
@@ -1093,7 +1097,7 @@ impl Session {
     pub async fn play(
         &mut self,
         registry: &ProviderRegistry,
-        options: PlayOptions<'_>,
+        options: PlayOptions,
     ) -> Result<PlayReport> {
         let mut rec = Recorder::start(
             format!("play {:?}", options.query),
@@ -1102,7 +1106,7 @@ impl Session {
 
         let result = async {
             let items = self
-                .queue_from_search(registry, options.query, options.all, options.limit)
+                .queue_from_search(registry, &options.query, options.all, options.limit)
                 .await?;
 
             let mut player = crate::playback::Player::new(registry.clone());
@@ -1156,7 +1160,7 @@ impl Session {
             Err(err) => Err(err),
         };
 
-        let query = options.query.to_owned();
+        let query = options.query;
         self.finish(
             rec,
             report,
@@ -1181,10 +1185,10 @@ impl Session {
     pub async fn player_from_search(
         &self,
         registry: &ProviderRegistry,
-        options: PlayOptions<'_>,
+        options: PlayOptions,
     ) -> Result<crate::playback::Player> {
         let items = self
-            .queue_from_search(registry, options.query, options.all, options.limit)
+            .queue_from_search(registry, &options.query, options.all, options.limit)
             .await?;
 
         let mut player = crate::playback::Player::new(registry.clone());

@@ -23,7 +23,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 ```
 
-Tam "bitti" ölçütü PLAN.md §0.4'te.
+Tam "bitti" ölçütü PLAN.md §0.4'te. Üçü CI'da da koşuyor
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml), D-053) — ama önce
+kendi makinende geçmeli, CI bir hatırlatıcıdır, ilk savunma hattı değil.
 
 Yeni bir yetenek eklediysen ayrıca:
 
