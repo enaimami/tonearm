@@ -1880,3 +1880,344 @@ ağacını büyütmüyor (77'de kaldı, `cargo tree -p tune-core` ile doğruland
 ama **workspace'in derleme yükünü** büyütüyor. Geliştirici makinesinde
 `CARGO_INCREMENTAL=0` ya da düzenli `cargo clean` gerekebilir; CI'da tek bir
 `--workspace` koşumu için disk ayırırken bu hesaba katılmalı.
+
+## D-048 — §2.5 YouTube Music: arama InnerTube'dan, akış yt-dlp'den, format 140
+**Tarih:** 2026-09-09
+**Soru:** Faz 2'de kalan tek bölüm §2.5 idi ve açık alt karar "hangi platform,
+kaç tane" idi. EK tablosunda `STREAM` verilen üç adaydan SoundCloud D-043'te
+yazıldı; geriye Qobuz ve YouTube Music kaldı.
+
+**Karar (S1 — platform): YouTube Music, tek eklenti.** Qobuz abonelik ister;
+sende abonelik yoksa eklenti **canlı koşturulamaz** — ve D-044'ten D-047'ye
+kadar her turun tek ortak dersi "kusuru yalnızca gerçek koşum gösterdi" oldu.
+Sınanamayan bir eklenti yazmak o dersin tersini yapmak olurdu. YouTube Music
+abonelik istemeyen tek aday.
+
+Bu turun bir **protokol** turu olmadığı baştan kabul edildi: SoundCloud (Python)
+ve torrent (Rust) ile protokol iki dilde ve iki farklı ses teslim biçiminde
+zaten kanıtlanmıştı. Bu bir **ürün değeri** turu.
+
+### Yazmadan önce ölçülenler
+
+PLAN'ın EK bölümü "buradaki API bilgileri doğrulanmadı, bir eklenti yazılmadan
+önce ilgili satır yeniden sınanır" diyor. Dört ölçüm yapıldı ve **üçü PLAN'ın
+ima ettiği yolu değiştirdi.**
+
+**Ölçüm 1 — yt-dlp'nin kendi araması yetmiyor.** EK "yol yt-dlp" diyor. Ama
+`yt-dlp --flat-playlist -J "music.youtube.com/search?q=..."` sonuçları şöyle:
+
+| gelen alan | durum |
+|---|---|
+| `title` | var |
+| `id` | var |
+| sanatçı | **yok** |
+| süre | **yok** |
+| albüm | **yok** |
+
+Üstelik liste kirli: 20 sonucun içinde kanal sayfaları, çalma listeleri,
+"10 hours ... for sleep with rain", "slowed + reverb" ve "30min Loop" var.
+K6'nın 3. halkası (bulanık eşleşme) **sanatçı + başlık + süre** istiyor;
+`duration_ms: 0` dönen bir sağlayıcı o halkaya hiç giremez.
+
+**Ölçüm 2 — InnerTube'un "Songs" süzgeci tam da isteneni veriyor.**
+`POST music.youtube.com/youtubei/v1/search`, `WEB_REMIX` istemci bağlamı,
+`params: EgWKAQIIAWoKEAoQCRADEAQQBQ==` (şarkı süzgeci). Anahtar **gerekmiyor**
+(HTTP 200, 676 KB). 20 satırın hepsi şarkı ve her satırda sanatçı, albüm,
+süre (`4:11`) ve `videoId` var.
+
+**Karar (S2 — arama nereden): InnerTube, yt-dlp değil.** İş bölümü şu:
+InnerTube üstveriyi verir, yt-dlp sesi çözer. İkisi de kendi güçlü olduğu işi
+yapıyor.
+
+**Ölçüm 3 — `bestaudio` çalınamaz.** `tune-core`'un symphonia feature'ları:
+`mp3, flac, vorbis, isomp4, aac`. Yani **ne webm kabı ne opus çözücüsü var.**
+yt-dlp'nin `bestaudio` seçimi format 251'i (opus/webm, 136 kbps) veriyor —
+indirilir, çalınmaz. Mevcut ses formatları:
+
+| id | kap | kodek | kbps | çekirdek çözebilir mi |
+|---|---|---|---|---|
+| 139 | m4a | mp4a.40.5 | 49 | evet |
+| **140** | **m4a** | **mp4a.40.2 (AAC-LC)** | **130** | **evet** |
+| 249/250/251 | webm | opus | 52/69/136 | **hayır** |
+
+**Karar (S3 — format): `140/bestaudio[ext=m4a]`, `bestaudio` değil.** Kalite
+kaybı var (130 kbps AAC yerine 136 kbps opus) ve bedeli bilinerek ödeniyor:
+çalınabilen düşük kalite, çalınamayan yüksek kaliteden iyidir. Symphonia'ya
+opus/webm geldiği gün bu satır tek kelimeyle değişir.
+
+**Ölçüm 4 — ve bu turun asıl bulgusu: YouTube düz GET'i kısıtlıyor.**
+Aynı `videoplayback` adresi, aynı dosya (4.054.677 bayt), üç istek biçimi:
+
+| istek | kod | hız |
+|---|---|---|
+| düz GET | 200 | **32 KB/s** |
+| `&range=0-` sorgu parametresi | 200 | 7,7 MB/s |
+| `Range: bytes=0-` başlığı | 206 | **8,0 MB/s** |
+
+**250 kat.** Düz GET 130 kbps'lik bir parçayı 2× gerçek zamanda indiriyor —
+teknik olarak çalıyor ama hattaki en küçük dalgalanma sesi kesiyor, ve sebebi
+hiçbir yerde görünmüyordu.
+
+**Karar (S4 — kısıtlama nasıl aşılıyor): `Range: bytes=0-` başlığı.**
+Protokolde bunu taşıyan alan zaten var (`source.headers`) ve çekirdeğin
+`UreqClient::open_stream`'i 206'yı 2xx sayıp `Content-Range`'in verdiği
+`Content-Length`'i okuyor — **tek satır değişmedi.** Sorgu parametresi biçimi
+de çalışıyor ve neredeyse aynı hızda; başlık seçildi çünkü standart mekanizma
+o ve adresi kurcalamıyor.
+
+Bunun bir koruma önlemini aşmakla ilgisi yok (D-026 / ASLA YAPMA): ortada
+şifre yok, DRM yok; sunucunun kendi desteklediği ve `206` ile cevapladığı
+standart bir HTTP başlığı gönderiliyor.
+
+### Karar (S5 — yt-dlp kütüphane değil, alt süreç)
+
+`pip install yt-dlp` bir depo bağımlılığı olurdu; eklenti onun yerine
+`yt-dlp`'yi **alt süreç** olarak çağırıyor ve `-J` çıktısını okuyor. Üç sebep:
+
+1. Depoda hiçbir Python bağımlılığı yok — SoundCloud eklentisinin kuralı
+   (yalnızca standart kütüphane) korunuyor.
+2. Bozulduğunda kullanıcının gördüğü mesaj **yt-dlp'nin kendi mesajı** olur
+   (K9). "Bir şey olmadı" değil, "Sign in to confirm you're not a bot".
+3. yt-dlp'yi kullanıcı kendi paket yöneticisiyle günceller. YouTube'un
+   bozduğu şeyi biz değil yt-dlp tamir eder — ve bu, EK'in "bakım maliyeti en
+   yükseği" uyarısına verilen cevabın ta kendisi.
+
+yt-dlp aranma sırası: `TUNE_YTDLP` (yol) → `PATH`'te `yt-dlp` →
+`python3 -m yt_dlp`. Hiçbiri yoksa `health` `reachable: false` diyor ve
+`search`/`resolve_source` nasıl kurulacağını yazan bir hata döndürüyor —
+sessiz boş sonuç değil.
+
+### İzin beyanı yine eksik, yine bilerek
+
+D-047'nin kapanmayan konusu burada tekrar çıktı. Ses adresi
+`rr6---sn-u0g3jxaa-n5fz.googlevideo.com` gibi **her çözümde değişen** bir ana
+bilgisayarda duruyor; D-040'ın sözlüğü joker kabul etmiyor (`*` yok).
+`music.youtube.com` ve `www.youtube.com` beyan edildi, `*.googlevideo.com`
+`description`'da anlatıldı. Olmayan bir kısıtlama varmış gibi göstermektense
+beyanı eksik bırakmayı yine tercih ettim — ama artık bunu **iki** eklenti
+yapıyor, yani sözlüğün genişletilmesi tekil bir sıkıntı değil.
+
+### D-048 eki — inşanın bulduğu iki şey
+
+**Tarih:** 2026-09-09.
+
+**1. Kusur: arama sonuçları alaka sırasında değildi.** InnerTube'un ağacı derin
+ve haber vermeden değişiyor, bu yüzden satırları yolu ezberleyerek değil
+`musicResponsiveListItemRenderer` anahtarını **arayarak** topluyorum. Gezinme
+bir yığınla yazılmıştı ve `stack.pop()` çocukları ters sırada veriyordu — yani
+belge sırası tamamen bozuluyordu.
+
+Görünen sonuç şuydu: `nujabes aruarian dance` sorgusunda ilk beş sonucun içinde
+**aranan parça hiç yoktu**; onun yerine "Island", "Luv (sic)", "Horizon" ve iki
+tane gitar coverı geliyordu. Hepsi geçerli parça, hepsi doğru biçimlenmiş —
+yalnızca yanlış beş tane. Bir birim testi bunu göremezdi çünkü kontrol edeceği
+her alan doluydu. Düzeltme tek kelime: çocuklar yığına **ters** basılıyor.
+
+Bu, K6'nın 3. halkasını da doğrudan ilgilendiriyor: `resolve` sağlayıcıdan
+gelen ilk adayları puanlıyor ve doğru aday listeye hiç girmezse zincir onu
+hiçbir zaman göremez.
+
+**2. Test yanlış şeyi iddia ediyordu — ve bunu da canlı koşum gösterdi.**
+Sırayı sınamak için önce "aynı sorguyu 3 ve 12 limitiyle sor, kısa liste uzun
+listenin başında aynı sırada durmalı" yazdım. Düştü. Sebep bizde değildi:
+**YouTube aynı sorguya iki çağrıda aynı sırayı vermiyor.**
+
+Ölçüm (aynı sorgu, beş ardışık koşum):
+
+| sıra | kararlılık |
+|---|---|
+| 1. sonuç | **5/5 aynı** |
+| 2. sonuç | 4/5 |
+| 3. sonuç | 4/5 |
+
+Test, kararlı olan tek şeyi iddia edecek şekilde yeniden yazıldı: tam eşleşen
+bir sorguda **ilk sonuç aranan parça olmalı**. Bu, 1. maddedeki kusuru da
+yakalıyor (kusurluyken ilk sonuç "Island"dı) ve servisin garanti etmediği bir
+şeyi garanti saymıyor. D-045'in MusicBrainz'de öğrendiği dersin aynısı:
+koşumlar arası kararsız bir servise kararlılık yazdıran test, kendi kodunu
+değil servisi sınar.
+
+**Ayrıca düzeltildi:** hata mesajını `err.to_string()` ile arayan assert
+yanlış yere bakıyordu. `Error`'un `Display`'i yalnızca `ADIM: PROVIDER_CALL`
+yazıyor; sebep zinciri `chain_text()`'te ve CLI ile GUI'nin kullanıcıya
+gösterdiği de o. Test artık oraya bakıyor ve **iki şeyi birden** doğruluyor:
+mesaj yt-dlp'nin kendi cümlesini taşıyor **ve** hangi aşamada olduğunu
+söylüyor.
+
+**Uçtan uca kanıt:** `tune play "hopeless_0taku_guitar Aruarian Dance Guitar
+with Rain"` — 69 saniyelik parça 88 saniyede baştan sona çaldı (aradaki ~19 sn
+yt-dlp'nin çözümü ve ilk tamponlama), çıkış kodu 0, ve dinleme kaydı
+veritabanına yazıldı. §2.5'in aradığı kanıt buydu.
+
+## D-049 — Eklenti bağımlılık sözleşmesi: root isteyen eklenti yoktur
+**Tarih:** 2026-09-09
+**Soru:** §2.5 biterken kullanıcı sordu: bir eklenti sistemde kurulu bir
+araca yaslanıyorsa o eklenti "çalışıyor" sayılabilir mi? "Her eklenti kendi
+başına bağımlılıklarını getirmek veya sistemde root yetkisi almadan kuracak
+bir script yazmak zorunda. Her işletim sistemi için tonlarca sıkıntı çıkmaz
+mı diğer türlü?"
+
+Soru D-048'in yt-dlp'sinden çıktı ama **tek bir eklentinin sorunu değil.**
+Ölçüldüğünde ortaya çıkan şey şu: üç eklentinin üç ayrı bağımlılık sözleşmesi
+var ve hiçbiri yazılı değil.
+
+| eklenti | bugünkü gerçek sözleşme | kullanıcıdan istediği |
+|---|---|---|
+| `soundcloud` | `PATH`'te `python3` | Linux/macOS'ta genelde hazır; **Windows'ta yok** |
+| `ytmusic` | `python3` **+ yt-dlp** | paket yöneticisi → **root** |
+| `torrent` | `exec` hedefi (`./tune-plugin-torrent`) **depoda yok** | `cargo build --release`, yani **Rust araç zinciri** |
+
+Yani en ağır bağımlılığı olan eklenti, bu turda yazılan değil: torrent bir
+ikiliyi çalıştırabilmek için önce derleyici kurduruyor.
+
+**Karar: hiçbir eklenti kullanıcıdan root yetkisi ya da sistem çapında bir
+kurulum isteyemez.** Bir eklenti ya bağımlılıklarını **kendisi getirir**, ya
+da onları **root'suz kuran bir yordam** sunar. "Şunu paket yöneticinle kur"
+bir kurulum yordamı değildir; her dağıtım ve her işletim sistemi için ayrı
+bir destek yüzeyi açar ve o yüzeyi eklenti yazarı değil biz taşırız.
+
+**Kuralın kaçmaması gereken yer.** D-048 bilerek "yt-dlp'yi kullanıcı kendi
+paket yöneticisiyle günceller"e yaslanmıştı: YouTube yt-dlp'yi düzenli olarak
+bozuyor ve tamiri yt-dlp yapıyor. Bu kural "depoya bir kopya dondur" diye
+okunursa o bakım yükünü **biz devralırız** — EK'in "bakım maliyeti en
+yükseği" uyarısının anlattığı şey tam olarak budur. Kuralın üç şartı birden
+sağlanmalı: **root yok + her işletim sistemi + güncel kalabilir.**
+
+**Ölçülen iyi haber:** tanılama tarafı zaten ayakta. Eksik bağımlılık sessizce
+"sonuç yok"a dönüşmüyor; `tune provider test` her iki durumda da KULLANILAMIYOR
+diyor ve sebebini yazıyor (eksik `exec` için `PLUGIN_HANDSHAKE` + işletim
+sisteminin hatası, eksik yt-dlp için `health`'in cümlesi). K9 raporlama
+düzeyinde karşılanıyor; kırık olan **kurulabilirlik**, görünürlük değil.
+
+**Ölçülen kötü haber, ve bu turun kendi kusuru:** `plugins/ytmusic/main.py`
+eksik yt-dlp'de `pacman -S yt-dlp` diyor. Arch dışında **yanlış tavsiye** —
+kullanıcının dediği "her işletim sistemi için tonlarca sıkıntı"nın kendi
+kodumuzdaki örneği. Mesaj işletim sisteminden bağımsız hâle getirildi
+(bkz. D-049 eki).
+
+### Kararın kapsamadığı, sorulacak olan
+
+Kural ne olduğunu söylüyor, **nasıl** olduğunu değil. Dördü de ayrı birer
+karar ve hiçbiri bu turda alınmadı:
+
+1. **Bir eklenti çalışma zamanında çalıştırılabilir dosya indirebilir mi?**
+   yt-dlp tek dosyalık bir zipapp olarak dağıtılıyor (~3 MB, `pip` gerekmez);
+   eklentinin protokolce zaten yazma izni olan `data_dir`'ine indirip kendini
+   güncel tutması kuralın üç şartını da sağlar. Ama bu, "eklenti ağdan ikili
+   çekip çalıştırıyor" demektir ve **izin sözlüğü bunu ifade edemiyor** —
+   D-040'ın açığına üçüncü kez basılıyor (torrent'te rastgele peer, ytmusic'te
+   değişken `googlevideo.com`, burada indirilen ikili).
+2. **İndirme yoksa: root'suz kurulum betiği kim yazar, hangi dilde?**
+   Betik Python olamaz — Python'un kendisi bağımlılıklardan biri.
+3. **Torrent eklentisi nasıl dağıtılacak?** Platform başına önceden derlenmiş
+   yayın çıktısı mı, yoksa "kaynaktan derle" mi kalacak? Bugünkü hâli kuralı
+   en ağır ihlal eden şey.
+4. **`python3` varsayılmaya devam edecek mi?** Linux ve macOS'ta savunulabilir,
+   Windows'ta değil.
+
+**Bir de sorulacak bir ekleme var:** manifeste makine okunur bir `requires`
+alanı. Bugün eksik bağımlılık ancak süreç başlatıldıktan sonra (`health`) ya da
+başlatılamayınca (`PLUGIN_HANDSHAKE`) anlaşılıyor; beyan edilmiş bir gereksinim
+listesi `tune plugin list`'in daha süreç açmadan "eksik: yt-dlp" demesini
+sağlardı. api'yi kırmaz — D-039/§2.1'in kuralı gereği **eklemek sürümü
+artırmaz.**
+
+## D-050 — Eklenti motoru: çalışma zamanı host'un işi, eklentinin değil
+**Tarih:** 2026-09-09
+**Soru:** D-049 kuralı koydu ("eklenti root isteyemez") ama nasıl uygulanacağı
+açıktı. Kullanıcı yönü verdi: *"Programın kendi eklenti motoru olsun ve
+çalışacak scriptler onun üzerinden geçsin. Python dersen al Python olsun,
+derlenirken Python'ın gerekli olduğu söylenir yeter. Her eklenti ayrı ayrı
+paketler veya uğraştıracak şeyler getirmesin... onlar öyle elleri uzun
+olmasın."*
+
+Doğru yer burası ve bunu bir ölçüm doğruluyor: **`python3` bugün dört
+eklentinin üçünün gereksinimi ve hiçbir yerde yazılı değil** — ne `README`'de,
+ne `CONTRIBUTING`'de, ne `Cargo.toml`'da. Yani projenin fiilen bir çalışma
+zamanı gereksinimi zaten var; eksik olan onu **sahiplenmek**.
+
+**Karar (S1 — motor): `tune`'un tek bir eklenti motoru olur, çalışma zamanı
+Python'dur ve bu `tune`'un kendi gereksinimi olarak bir kez ilan edilir.**
+Derleme/kurulum belgesinde yazar. Eklentiler o motorun üstünde koşan
+betiklerdir. Bir eklentinin "hangi Python", "kurulu mu", "nasıl kurulur"
+sorularıyla işi olmaz — bunlar host'un soruları.
+
+Yorumlayıcı **gömülmüyor.** Kullanıcının cümlesi zaten bunu söylüyor
+("gerekli olduğu söylenir yeter") ve gömmenin bedeli ağır olurdu: ikili boyutu
+ve mobilde CPython taşıma derdi. Sistem Python'u yeter, yeter ki **ilan
+edilsin ve eksikse açıkça söylensin.**
+
+**Karar (S2 — paketler): motorun kendine ait, ayrılmış bir ortamı olur.**
+Düğüm buradaydı: "Python var" demek yt-dlp'yi getirmiyor — yt-dlp yorumlayıcı
+değil, bir **paket**. Çözüm eklentiye bırakılmıyor:
+
+- Eklenti `plugin.json`'da ne istediğini **beyan eder** (`requires`).
+- Kurulumu **motor yapar**, veri dizinindeki kendi özel ortamına.
+- Sisteme dokunulmaz, root istenmez, kullanıcının Python kurulumu kirlenmez.
+- Eklentinin kendisi hiçbir şey kurmaz, indirmez, `pip` çağırmaz. D-049'un
+  "elleri uzun olmasın" şartı tam olarak budur.
+
+Bu, D-049'un üç şartını birden sağlıyor: **root yok** (özel ortam kullanıcının
+veri dizininde), **her işletim sistemi** (tek yol, dağıtıma özel komut yok),
+**güncel kalabilir** (paket motorca güncellenir; D-048'in yt-dlp gerekçesi
+korunur — YouTube bozduğunda tamiri hâlâ yt-dlp yapar, biz değil).
+
+**Karar (S3 — torrent): işlevi çekirdeğe taşınır, D-047'nin *yeri* geri
+alınır.** Sebep tutarlılık: torrent bir Rust ikilisi, betik değil, motordan
+geçemez — ve bugünkü hâli D-049'u en ağır ihlal eden şey (kullanıcıya
+`cargo build --release` yaptırıyor).
+
+D-047'nin ölçümü hâlâ geçerli ve göz ardı edilmiyor: `librqbit` `tune-core`'un
+ağacına **+179 crate** ekliyor (77 → 256, 3,3 kat) ve o ağaç `uniffi` ile
+mobile gidecek. Bu yüzden taşımanın **şekli** feature kapısı:
+
+```toml
+torrent = ["dep:librqbit"]   # varsayılan kapalı
+```
+
+Depo bunu zaten üç kez yaptı (`audio` D-016, `http-client` D-020,
+`fingerprint` D-045): ağır bir yeteneği açık bir kapının arkasına koymak.
+Masaüstü derlemesi kapıyı açar ve kullanıcı hiçbir şey derlemez; mobil ve
+sunucu derlemeleri açmaz ve **`cargo tree -p tune-core` yine 77 der.**
+Koşulsuz taşıma da mümkündü ve reddedilmedi — ölçülmüş bir bedeli sebepsiz
+ödemek olurdu.
+
+K5 ihlali değil: K5 *eklentilerin* alt süreç olmasını şart koşuyor, torrent
+ise eklenti olmaktan çıkıp yerleşik bir sağlayıcı oluyor — `local`, Subsonic
+ve Jellyfin gibi (Faz 1).
+
+**Karar (S4 — K4 duruyor):** "eklentiler herhangi bir dilde yazılabilir"
+değişmiyor. Alt süreç + JSON-RPC sınırı herkese açık kalır; motor **tek yol
+değil, desteklenen ve kurulum gerektirmeyen yol** olur. Depoda dağıtılan her
+eklenti motordan geçer. EK'in Tencent satırındaki gerekçe ("o bölgedeki biri
+eklentiyi kendi yazabilir — biz protokolü veririz, listeyi değil") böylece
+bozulmuyor.
+
+### Bu kararın değiştirdiği işler
+
+Hiçbiri bu turda yapılmadı; hepsi §2.8'in kapsamı:
+
+1. **Motor yazılacak:** Python bulma, sürüm kontrolü, özel ortamın kurulması,
+   `requires` çözümü, ve eksiklik durumunda **hangi adımda ne eksik** diyen
+   tanı (K9). Eksik bağımlılık bugün ancak süreç açıldıktan sonra anlaşılıyor.
+2. **`plugin.json`'a `requires` alanı** — `api` kırılmaz, eklemek sürümü
+   artırmaz (§2.1'in kuralı).
+3. **`ytmusic`** kendi yt-dlp arayışını bırakır (`TUNE_YTDLP` → `PATH` →
+   `python3 -m yt_dlp` üçlüsü silinir), `requires: ["yt-dlp"]` der ve motorun
+   verdiğini kullanır.
+4. **`soundcloud`** ve `echo` motora taşınır — ikisi de stdlib, `requires` boş.
+5. **`torrent`** eklenti olmaktan çıkar; `crates/tune-plugin-torrent`
+   çekirdeğe feature'lı bir sağlayıcı olarak gider, `plugins/torrent/` kalkar.
+   CLAUDE.md'nin workspace düzeni ve `plugins/torrent/README.md` güncellenir.
+6. **`python3` `README`/`CONTRIBUTING`'de gereksinim olarak ilan edilir.**
+
+### Sorulmayan, açık kalanlar
+
+- **Özel ortam nasıl kurulur?** `venv` + `pip` sistem Python'una yaslanır ama
+  her dağıtımda `pip` gelmiyor (Debian'da `python3-venv` ayrı paket). Motorun
+  bunu nasıl çözeceği ve `pip` de yoksa ne diyeceği ayrı bir karar.
+- **Paket doğrulama.** Motor ağdan paket çekiyorsa sürüm sabitleme, karma
+  doğrulama ve bunun izin sözlüğünde nasıl görüneceği açık — D-040'ın
+  açığına dördüncü kez basılıyor.
+- **Çevrimdışı kurulum.** Ağ yokken motor ne yapar; "kurulmadı" ile
+  "kurulamadı" ayrı tanılar (K9).

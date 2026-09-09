@@ -1,0 +1,13 @@
+{
+  "name": "ytmusic",
+  "display_name": "YouTube Music",
+  "version": "0.1.0",
+  "api": 1,
+  "exec": ["python3", "./main.py"],
+  "capabilities": ["search", "stream"],
+  "permissions": {
+    "net": ["music.youtube.com", "www.youtube.com"],
+    "fs": []
+  },
+  "description": "YouTube Music'te arar (InnerTube) ve yt-dlp ile çözdüğü m4a akışını çalar. DİKKAT — beyan eksiktir: ses adresi her çözümde değişen bir googlevideo.com ana bilgisayarında duruyor ve izin sözlüğü (D-040) joker kabul etmiyor. Ayrıca yt-dlp bir alt süreç olarak çalışır; onun ağ trafiği bu listede görünmez."
+}

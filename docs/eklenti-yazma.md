@@ -4,11 +4,14 @@
 JSON-RPC 2.0 konuşur. Yani bir eklenti herhangi bir dilde yazılabilir:
 stdin'den satır okuyup stdout'a satır yazabilen her şey yeterli.
 
-İki çalışan örnek:
+Üç çalışan örnek:
 
 - [`plugins/soundcloud/main.py`](../plugins/soundcloud/main.py) — **gerçek
   eklenti.** Python, yalnızca standart kütüphane, canlı bir servise bağlanır.
   Yazacağınız şeye en yakın örnek budur.
+- [`plugins/ytmusic/main.py`](../plugins/ytmusic/main.py) — üstverisini bir
+  servisten, sesini **harici bir araçtan** (yt-dlp alt süreci) alan eklenti.
+  İkisini birleştiren bir eklenti yazacaksanız buraya bakın.
 - [`fixtures/plugins/echo/main.py`](../fixtures/plugins/echo/main.py) — sabit
   kataloglu sınama eklentisi (~150 satır). Protokolü çıplak görmek için.
 
@@ -86,6 +89,33 @@ hızlı yoludur. (Karar ve gerekçesi: `DECISIONS.md`, D-040.)
   (`plugin:<ad>`). Kullanıcı `tune secret set plugin:soundcloud client_id`
   ile yazar; siz el sıkışmada `secrets` olarak alırsınız. Başka bir
   eklentinin sırrını göremezsiniz.
+
+---
+
+## 2.5 Bağımlılıklar: root isteyemezsiniz (D-049)
+
+Eklentiniz sistemde kurulu bir araca yaslanıyorsa, o aracı **kullanıcıya
+kurdurmak sizin çözümünüz değildir.** Kural:
+
+> Bir eklenti ya bağımlılıklarını kendisi getirir, ya da onları **root yetkisi
+> istemeden** kuran bir yordam sunar.
+
+Sebep destek yüzeyi: "paket yöneticinle kur" cümlesi her dağıtım ve her
+işletim sistemi için ayrı bir yol demek, ve o yolları eklenti yazarı değil
+proje taşır. Hata mesajınızda `apt`/`pacman`/`brew` gibi tek bir sisteme ait
+komut **yazmayın** — kullanıcıların çoğuna yanlış tavsiye olur.
+
+Uygulanış şekli **D-050'de kapandı: `tune`'un kendi eklenti motoru var.**
+Çalışma zamanı (Python) eklentinin değil host'un işi ve `tune`'un gereksinimi
+olarak bir kez ilan ediliyor. İhtiyacınız olan paketleri **siz kurmazsınız**:
+`plugin.json`'da `requires` ile beyan edersiniz, motor onları kendi ayrılmış
+ortamına kurar. Eklenti hiçbir şey indirmez, `pip` çağırmaz, sisteme dokunmaz.
+
+`api` kırılmadı — `requires` bir **ekleme** ve eklemek sürümü artırmaz.
+
+**Motorun kodu henüz yazılmadı** (PLAN §2.8). Depodaki eklentiler bugün hâlâ
+eski hâlleriyle duruyor ve kurala uymuyor; bu bilerek yazılı. Kendi
+eklentinizi yazarken **kuralı** izleyin, depodaki örnekleri değil.
 
 ---
 
@@ -300,3 +330,52 @@ doğru görünmesin diye (D-043).
 Keşif dokümante edilmemiş bir yola dayanıyor ve **haber vermeden bozulabilir**.
 Bozulursa eklenti size kendi `client_id`'nizi vermenizi söyler; sessizce boş
 sonuç döndürmez.
+
+---
+
+## 8. YouTube Music eklentisini kurmak
+
+Depodaki `plugins/ytmusic/` doğrudan kullanılabilir, ama **yt-dlp gerekiyor**.
+yt-dlp'nin kendi kurulum sayfası işletim sistemine göre yolları sayıyor:
+<https://github.com/yt-dlp/yt-dlp#installation>. Tek dosyalık sürümü root
+yetkisi istemez; indirdiğiniz yeri `TUNE_YTDLP` ile de verebilirsiniz.
+
+```bash
+mkdir -p ~/.local/share/tune/plugins/ytmusic
+cp plugins/ytmusic/{main.py,plugin.json} ~/.local/share/tune/plugins/ytmusic/
+
+tune plugin approve ytmusic
+tune provider test ytmusic     # "kullanılabilir" + yt-dlp sürümünü yazmalı
+tune play "nujabes aruarian dance"
+```
+
+Sır **istemiyor**. yt-dlp'yi üç yerde arıyor, bu sırayla: `TUNE_YTDLP` ortam
+değişkeni (bir yol) → `PATH`'te `yt-dlp` → `python3 -m yt_dlp`. Hiçbirinde
+yoksa `tune provider test` "kullanılamıyor" der ve nereye bakacağınızı yazar —
+sessizce boş sonuç dönmez.
+
+> **Bu eklenti henüz D-049'un kuralına uymuyor.** Kural şu: hiçbir eklenti
+> root yetkisi ya da sistem çapında kurulum isteyemez; ya bağımlılıklarını
+> kendisi getirir ya da onları root'suz kuran bir yordam sunar. yt-dlp'yi
+> kullanıcıya kurduran bugünkü hâl geçicidir ve nasıl düzeleceği açık bir
+> karar noktasıdır (PLAN §2.7). Kendi eklentinizi yazarken kurala **uyun**;
+> buradaki örneği değil kuralı izleyin.
+
+**Neden alt süreç, neden kütüphane değil** (D-048): depoda hiçbir Python
+bağımlılığı yok, ve YouTube bir şeyi bozduğunda kullanıcının gördüğü mesaj
+yt-dlp'nin kendi mesajı oluyor ("Sign in to confirm you're not a bot" gibi).
+Tamiri de yt-dlp yapıyor — `pacman -Syu` yeter, bizden sürüm beklemek gerekmez.
+
+**Bilinen sınırlar**, üçü de ölçülmüş:
+
+- **Ses m4a (AAC-LC, ~130 kbps).** Daha iyisi var (opus, 136 kbps) ama
+  çekirdeğin symphonia'sında ne opus çözücüsü ne webm kabı var; çalınamayan
+  yüksek kalite yerine çalınabilen düşük kalite seçildi.
+- **Akış `Range: bytes=0-` başlığıyla çekiliyor.** Bu başlık olmadan aynı adres
+  32 KB/s veriyor, onunla 8 MB/s — 250 kat. Başlık `source.headers` içinde
+  geliyor; kendi eklentinizi yazarken benzer bir kısıtlamayla karşılaşırsanız
+  taşıyacağınız yer orası.
+- **İzin beyanı eksik.** Ses adresi her çözümde değişen bir
+  `googlevideo.com` ana bilgisayarında duruyor ve izin sözlüğü joker kabul
+  etmiyor (`*` yok). `music.youtube.com` + `www.youtube.com` beyan edildi,
+  gerisi `description`'da yazıyor. Aynı sıkıntı torrent eklentisinde de var.
