@@ -2221,3 +2221,60 @@ Hiçbiri bu turda yapılmadı; hepsi §2.8'in kapsamı:
   açığına dördüncü kez basılıyor.
 - **Çevrimdışı kurulum.** Ağ yokken motor ne yapar; "kurulmadı" ile
   "kurulamadı" ayrı tanılar (K9).
+
+---
+
+## D-051 — Belge sahipliği: her olgu tek dosyada yaşar
+**Tarih:** 2026-09-09
+**Soru:** Temizliğe başlarken ölçüldü: değişmez kurallar `CLAUDE.md`,
+`PLAN.md §2` ve `CONTRIBUTING.md`'de **üç kez** yazılıydı; workspace ağacı,
+kod konvansiyonları ve komutlar da ikişer kez. Kopyalar kaymıştı ve kayma
+sessiz değildi — birbirini yalanlıyorlardı:
+
+| çelişki | CLAUDE.md diyordu | gerçek |
+|---|---|---|
+| K7 | "trait object olmasın" | D-006 bunu gevşetti: `Arc<dyn Trait>` ve `async fn` serbest |
+| faz numaraları | Faz 3 = odalar | PLAN: Faz 3 = GUI, Faz 4 = odalar, 5 = sosyal, 6 = mobil |
+| şu anki faz | "Şu an Faz 0" | Faz 0–3 kapandı, §2.8 açık |
+| workspace ağacı | olmayan `sync/` listeleniyor | `net/`, `wrapped/`, `session.rs`, `tune-plugin-torrent`, `plugins/` hiç yok |
+| CLI yüzeyi | 8 komut | gerçekte `wrapped`, `scan`, `server`, `library` dahil daha fazlası |
+
+En tehlikelisi K7'ydi: **ihlal edilemez denen bir kuralın geçersiz yazımı**,
+her oturumda okunan dosyada duruyordu. README'nin yol haritası da Faz 5'i
+"Mobil" sanıp Sosyal Graf'ı tamamen atlamıştı.
+
+**Karar: her olgunun tek bir sahip dosyası vardır. Sahip olmayan dosya o
+olguyu tekrar etmez, sahibine işaret eder.**
+
+| olgu | sahip |
+|---|---|
+| çalışma protokolü, değişmez kurallar (K1–K10), faz planı, ASLA YAPMA, sözlük | `PLAN.md` |
+| workspace ağacı, komutlar, CLI test yüzeyi, kod konvansiyonları, tanılama pratiği, test düzeni | `CLAUDE.md` |
+| katkıcı süreci (üç kapı, doğruluk kümesi, lisans) | `CONTRIBUTING.md` |
+| bir kararın gerekçesi | `DECISIONS.md` |
+
+**Gerekçe — neden kurallar CLAUDE.md'de değil:** kural metni gerekçesiyle
+birlikte anlam taşır ("K7 neden gevşetildi?" sorusunun cevabı kuralın
+yanındadır). Gerekçeli metin uzundur, uzun metin her oturumda okunan dosyaya
+sığmaz, sığdırmak için kısaltılınca da kayar. Kayan şey zaten buydu.
+
+**Gerekçe — neden ağaç ve komutlar PLAN.md'de değil:** `CLAUDE.md` her
+oturumda otomatik okunur, `PLAN.md` okunmaz. Ajanın her gün ihtiyaç duyduğu
+operasyonel bilgiyi okunmayan dosyaya koymak, 87 KB'lık bir dosyayı her
+oturumda açtırmak demektir. Sahiplik "önemliye göre" değil, **kullanım
+sıklığına göre** bölündü.
+
+**İki dosyada birden duran tek şey:** K1'in (Altın Kural) tam metni ve
+K1–K10 başlık indeksi. İndeks bir başlık listesidir, kayacak gövdesi yoktur;
+K1 ise kod yazarken en sık ihlal edilen kural olduğu için özetin içinde
+duruyor ve "tam metin PLAN.md §2" diye işaretli.
+
+**Uygulandı:** `CLAUDE.md` yeniden yazıldı (kurallar → indeks + çapa, ağaç
+gerçeğe çekildi, CLI yüzeyi tamamlandı, faz durumu tamamen çıkarıldı);
+`PLAN.md §3` konvansiyon/ağaç/komut kopyalarını bırakıp çapaya döndü;
+`CONTRIBUTING.md`'nin kural ve konvansiyon kopyaları çapaya döndü;
+`PLAN.md` K10 ile `README.md` yol haritasının faz numaraları düzeltildi.
+
+**Kayma için tek panzehir:** faz durumu artık **yalnızca** PLAN.md'nin faz
+başlıklarındaki `TAMAM` / `YAPILACAK` işaretlerinde. Başka hiçbir dosya
+"şu an hangi fazdayız" cümlesi kurmaz.

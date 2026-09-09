@@ -1,20 +1,30 @@
 # CLAUDE.md
 
+Her oturumda okunan **operasyonel özet**. Normatif metin burada değil:
+değişmez kurallar, faz planı ve çalışma protokolü [`PLAN.md`](PLAN.md)'de yaşar.
+Çelişki olursa **PLAN.md geçerlidir**.
+
+Bu dosya şunların tek sahibidir: workspace ağacı, komutlar, CLI test yüzeyi,
+kod konvansiyonları, tanılama pratiği, test düzeni. Bunları PLAN.md tekrar
+etmez, buraya işaret eder.
+
 > Proje adı `tune` bir yer tutucudur. Değiştirirsen crate adlarını da güncelle.
+
+---
 
 ## Proje nedir
 
 Sağlayıcıdan bağımsız bir müzik dinleme katmanı. Ürün ses değil — **dinleme kimliği**:
 geçmiş, istatistikler, çalma listeleri ve sosyal bağlar kullanıcıya ait olur, sağlayıcıya değil.
-Ses nereden gelirse gelsin (yerel dosya, Subsonic/Jellyfin, SoundCloud, Tidal, torrent, FTP)
-üstteki katman aynı kalır.
+Ses nereden gelirse gelsin (yerel dosya, Subsonic/Jellyfin, SoundCloud, YouTube Music,
+torrent, FTP) üstteki katman aynı kalır.
 
-Şu anki hedef: **Rust çekirdek kütüphane + onu tüketen bir CLI.**
-CLI, GUI gelene kadar tek test yüzeyidir.
+Çekirdek bir Rust kütüphanesidir; onu bir CLI, bir Tauri masaüstü kabuğu ve
+(ileride) `uniffi` üzerinden mobil bağlamalar tüketir.
 
 ---
 
-## ALTIN KURAL
+## ALTIN KURAL (K1)
 
 **CLI ince bir kabuktur. Bütün mantık `tune-core` içindedir.**
 
@@ -24,35 +34,36 @@ CLI yalnızca şunları yapar — argüman ayrıştırma, çekirdek çağrısı,
 CLI içinde **asla**: iş mantığı, veri dönüşümü, ağ çağrısı, SQL, eşleştirme algoritması.
 Bir şeyi CLI'de yazmak istiyorsan önce "bunu GUI de isteyecek mi?" diye sor. Cevap evetse çekirdeğe koy.
 
-Bu kural, sonradan gelecek Tauri GUI ve `uniffi` üzerinden mobil bağlamaların
-sıfır kod tekrarıyla çalışması için var. İhlal edilirse üç kez yazarız.
+Aynısı Tauri kabuğu (`crates/tune`) için de geçerlidir: o da bir kabuktur.
+
+> Tam metin ve gerekçe: PLAN.md §2, K1. Burada tekrarlanmasının tek sebebi,
+> kod yazarken en sık ihlal edilen kural olması.
 
 ---
 
-## Değişmez kurallar
+## Değişmez kurallar — indeks
 
-Bunlar tartışmaya kapalı; ihlal ediyorsan dur ve sor.
+Tam metin ve gerekçeleri **[`PLAN.md` §2](PLAN.md)**'de. Aşağısı yalnızca hatırlatma
+indeksidir; bir kuralı uygulamadan önce oradaki metni oku.
 
-1. **İçe aktarma API'den değil, veri export dosyalarından yapılır.**
-   Spotify/Apple/Google export zip'leri (GDPR taşınabilirlik hakkı). Sağlayıcı geliştirici
-   şartları bunu kısıtlayamaz. Bu, projenin kırılamayan tek parçası — API'ye kaydırma.
+| # | Kural |
+|---|---|
+| **K1** | Altın Kural: CLI ince kabuktur |
+| **K2** | İçe aktarma export dosyalarından yapılır, API'den değil |
+| **K3** | Ses asla röle edilmez, yalnızca pozisyon senkronlanır |
+| **K4** | Spotify çekirdeğe girmez |
+| **K5** | Eklentiler alt süreç + JSON-RPC ile konuşur |
+| **K6** | Kanonik kimlik zinciri sırası: ISRC → MBID → bulanık → AcoustID |
+| **K7** | Çekirdek API'si `uniffi` ile ifade edilebilir olmalı |
+| **K8** | `tune-core` içinde `unwrap()` / `expect()` / `panic!()` yok |
+| **K9** | Her başarısızlık hangi aşamada olduğunu söyler |
+| **K10** | Faz sınırı aşılmaz |
 
-2. **Ses asla röle edilmez, yalnızca pozisyon senkronlanır.**
-   Odalar (Faz 3) her istemcinin *kendi* kaynağından çaldığı, sadece zaman çapasının
-   dağıtıldığı bir tasarımdır. Sunucudan ses akıtan kod yazma.
+Bir kuralı ihlal etmen gerekiyorsa **dur ve sor** — PLAN.md §0.1.
 
-3. **Spotify çekirdeğe girmez.** Ayrı, opsiyonel bir eklenti olarak kalır.
-   `tune-core`'un bağımlılık ağacında Spotify'a ait hiçbir şey olmamalı.
-
-4. **Sağlayıcı eklentileri alt süreç + JSON-RPC ile konuşur.**
-   Dinamik kütüphane değil. Eklenti çökerse çekirdek düşmez, ve eklentiler
-   herhangi bir dilde yazılabilir (yt-dlp saran bir Python eklentisi gibi).
-
-5. **Kanonik kimlik zinciri:** ISRC → MusicBrainz ID → bulanık eşleşme (sanatçı+başlık+süre)
-   → AcoustID parmak izi. Bu sıra bozulmaz; her adım bir güven skoru döndürür.
-
-6. **Çekirdek arayüzü `uniffi` ile ifade edilebilir olmalı.**
-   Dışa açılan tiplerde ömür (lifetime) sızıntısı, trait object, kapanış (closure) parametresi olmasın.
+> K7 hakkında sık yapılan hata: kural *lifetime, generic parametre ve closure
+> parametresini* yasaklar. `Arc<dyn Trait>` ve `async fn` **serbesttir**
+> (D-006 düzeltmesi). Kuralın "trait object yok" diyen ilk yazımı geçersizdir.
 
 ---
 
@@ -60,28 +71,51 @@ Bunlar tartışmaya kapalı; ihlal ediyorsan dur ve sor.
 
 ```
 tune/
-├── Cargo.toml            # workspace
+├── Cargo.toml                  # workspace
+├── CLAUDE.md                   # bu dosya — operasyonel özet
+├── PLAN.md                     # kurallar, faz planı, protokol (normatif)
+├── DECISIONS.md                # karar defteri (D-001…)
+├── CONTRIBUTING.md             # katkıcı süreci
 ├── crates/
-│   ├── tune-core/        # BÜTÜN mantık burada
-│   │   ├── import/       # export zip ayrıştırıcıları
-│   │   ├── identity/     # kanonik çözümleme
-│   │   ├── stats/        # dinleme istatistikleri
-│   │   ├── library/      # SQLite + FTS
-│   │   ├── provider/     # sağlayıcı trait'leri
-│   │   ├── plugin/       # alt süreç + JSON-RPC eklentiler (Faz 2)
-│   │   ├── playback/     # symphonia + cpal (Faz 1)
-│   │   ├── sync/         # çapa protokolü (Faz 3)
-│   │   └── diag/         # tanılama, aşağıya bak
-│   ├── tune-cli/         # ince kabuk (ikili adı: `tune`)
-│   └── tune/             # Tauri masaüstü kabuğu (ikili adı: `tune-desktop`)
-│       ├── src/          # main + env + state + core_thread + commands
-│       └── ui/           # düz statik webview — bundler yok, npm yok
-├── spike/                # ATILABILIR prototipler (Python vb.) — workspace DIŞI
-└── fixtures/             # test verisi: kırpılmış export zip'leri, örnek JSON
+│   ├── tune-core/              # BÜTÜN mantık burada
+│   │   ├── src/
+│   │   │   ├── import/         # export zip ayrıştırıcıları
+│   │   │   ├── identity/       # kanonik çözümleme (+ musicbrainz, acoustid, fuzzy)
+│   │   │   ├── stats/          # dinleme istatistikleri
+│   │   │   ├── wrapped/        # paylaşılabilir kart (svg + png)
+│   │   │   ├── library/        # SQLite + FTS
+│   │   │   ├── provider/       # sağlayıcı trait'leri + local + remote/{subsonic,jellyfin}
+│   │   │   ├── plugin/         # alt süreç + JSON-RPC eklentiler
+│   │   │   ├── playback/       # symphonia + cpal
+│   │   │   ├── net/            # HTTP trait'i + ureq istemcisi + fake
+│   │   │   ├── diag/           # tanılama, aşağıya bak
+│   │   │   └── session.rs      # dışa açılan komut yüzeyi (Session)
+│   │   ├── examples/           # elle koşulan probe'lar (fingerprint, mb, playback)
+│   │   └── tests/              # fixtures/ üzerinden entegrasyon testleri
+│   ├── tune-cli/               # ince kabuk (ikili adı: `tune`)
+│   │   └── tests/snapshots/    # --json çıktısının snapshot'ları
+│   ├── tune/                   # Tauri masaüstü kabuğu (ikili adı: `tune-desktop`)
+│   │   ├── src/                # main + env + state + core_thread + commands
+│   │   ├── ui/                 # düz statik webview — bundler yok, npm yok
+│   │   └── themes/             # iki referans tema (contrast, daylight)
+│   └── tune-plugin-torrent/    # torrent sağlayıcısı — ayrı ikili, JSON-RPC (D-047)
+├── plugins/                    # kurulabilir eklentiler: soundcloud, ytmusic, torrent
+├── docs/                       # eklenti yazma rehberi, tanıtım sayfası
+├── spike/                      # ATILABILIR prototipler — workspace DIŞI, CI DIŞI
+└── fixtures/                   # test verisi: kırpılmış export'lar, doğruluk kümesi
 ```
 
 `spike/` derlenmez, test edilmez, CI'ya girmez. Eşleştirme sezgilerini önce burada
-Python'da dene; doğruluk tatmin edici olunca `identity/`'ye porta.
+dene; doğruluk tatmin edici olunca `identity/`'ye porta.
+
+`tune-plugin-torrent` neden `crates/` altında ama çekirdeğin dışında: eklentidir
+(K5), ama Rust yazılmıştır ve aynı workspace'te derlenir. `tune-core`'un
+bağımlılık ağacına girmez — D-047.
+
+> Bu düzen **değişecek**: D-050, torrent'ı eklenti olmaktan çıkarıp çekirdeğe
+> feature'lı bir sağlayıcı olarak taşımayı kararlaştırdı (`plugins/torrent/`
+> kalkar). Karar alındı, kod yazılmadı — PLAN.md §2.8. O iş bitince yukarıdaki
+> ağaç güncellenir.
 
 ---
 
@@ -96,6 +130,11 @@ cargo fmt --all
 ```
 
 Bir değişikliği bitmiş saymadan önce üçü de temiz geçmeli: `test`, `clippy`, `fmt`.
+Tam "bitti" ölçütü: PLAN.md §0.4.
+
+> `cargo test -p tune-core` tek başına koşulduğunda feature'lar birleşmediği için
+> workspace koşumunda görünmeyen `dead_code` uyarıları çıkar. Üç kapı **workspace**
+> üzerinden geçer; tek crate koşumu bir tanı aracıdır, kapı değil.
 
 ---
 
@@ -104,32 +143,37 @@ Bir değişikliği bitmiş saymadan önce üçü de temiz geçmeli: `test`, `cli
 CLI'nin amacı çekirdeği elle sınamak. Her çekirdek yeteneğinin bir alt komutu olmalı.
 
 ```
-tune import <zip>                    # export içe aktar
-tune stats [--year N] [--top N]      # istatistikler
-tune resolve "<sanatçı> - <başlık>"  # kimlik çözümlemesini tek parçada dene
+tune import <zip|dizin>                     # export içe aktar
+tune stats [--year N] [--top N]             # istatistikler
+tune resolve "<sanatçı> - <başlık>" | --file <ses>
 tune library search <sorgu>
-tune provider list | test <ad>
-tune plugin list | approve <ad>          # eklentiler ve izin onayı
+tune wrapped [--year N] [--out <dosya>] [--format square|story]
+tune provider list | test <ad> | scan [--incremental]
+tune provider add <tür> <url> <kullanıcı> | remove <ad> | servers
+tune plugin list | approve <ad> | disable <ad> | enable <ad> | forget <ad>
 tune secret list | set <ad-alanı> <anahtar>
-tune play <parça>                    # Faz 1
-tune diag                            # son çalıştırmanın tanı raporu
+tune play <parça> [--all] [--shuffle] [--dry-run] [--tui]
+tune diag                                   # son çalıştırmanın tanı raporu
 ```
 
 Her komut `--json` desteklemeli — hem betiklenebilirlik hem de GUI'nin aynı veriyi
-alacağının kanıtı olarak. İnsan okunur çıktı ayrı bir biçimlendirme katmanıdır.
+alacağının kanıtı olarak. İnsan okunur çıktı ayrı bir biçimlendirme katmanıdır
+(`tune-cli/src/output.rs`).
 
 ---
 
 ## Tanılama kültürü
 
 Bu proje bir bash prototipinden doğdu ve orada işe yarayan tek şey **her başarısızlığın
-nerede olduğunu söylemesiydi.** Bunu koru:
+nerede olduğunu söylemesiydi.** Bunu koru (K9):
 
 - Her başarısızlık **hangi aşamada** olduğunu söylemeli (`ADIM: IDENTITY_RESOLVE`).
 - `tune diag` son çalıştırmanın ortam bilgisi, aşama, hata zinciri ve ilgili sayıları
   tek blokta, kopyalanıp yapıştırılabilir şekilde basmalı.
 - Loglama `tracing` ile; `println!` yalnızca CLI'nin kullanıcıya dönük çıktısında.
 - Sessiz `unwrap_or_default()` yasak — veri kaybını yutar. Ya hata döndür ya say ve raporla.
+- **"Bakmadım" ile "bulamadım" ayrı tanılardır.** Yapılandırılmamış bir sağlayıcı
+  boş küme değil, ne yazılacağını söyleyen bir hata döndürür.
 
 Eşleştirme gibi kısmi başarı üreten işlemler **her zaman** özet döndürsün:
 kaç kayıt geldi, kaçı ISRC ile, kaçı bulanık, kaçı eşleşmedi.
@@ -144,29 +188,12 @@ kaç kayıt geldi, kaçı ISRC ile, kaçı bulanık, kaçı eşleşmedi.
   arayüz yazısı ve `ADIM:` çıktısı Türkçe. Ayrım kod dili değil, kimin
   okuduğu: tanımlayıcıyı yabancı bir katkıcı okur, metni kullanıcı.
 - `tune-core` hataları `thiserror` ile tiplenmiş; `tune-cli` `anyhow` kullanabilir.
-- **`tune-core` içinde `unwrap()` / `expect()` / `panic!()` yok.** Testler hariç.
 - Genel API'de `async` — çalışma zamanını çağıran seçsin, çekirdek `#[tokio::main]` kurmasın.
 - Yeni bağımlılık eklemeden önce sor. Ağaç küçük kalmalı (mobil binary boyutu).
+  Zorunlu değilse opsiyonel bir cargo feature arkasına koy (`render-png`, `audio`,
+  `fingerprint`, `http-client`).
 - Ağ ve dosya sistemine dokunan her şey trait arkasında olsun ki testler sahte (fake) kullanabilsin.
-- Kimlikler tip güvenli: `CanonicalId`, `ProviderTrackId` ayrı newtype'lar, `String` değil.
-
----
-
-## Faz planı
-
-Şu an **Faz 0**. Kapsam dışı işe başlamadan önce sor.
-
-| Faz | Kapsam | Backend? |
-|-----|--------|----------|
-| **0** | export içe aktarma + kanonik kimlik + istatistikler | Hayır |
-| 1 | oynatma: yerel dosya, Subsonic/Jellyfin | Hayır |
-| 2 | sağlayıcı eklentileri, kimlik çözümlemesi olgunlaşır | Hayır |
-| 3 | odalar — çapa tabanlı pozisyon senkronu | Evet, başlar |
-| 4 | arkadaşlık grafı (odalardan türer, ayrıca kurulmaz) | Evet |
-
-Tauri GUI + tema sistemi Faz 1'den sonra paralel bir hat olarak açılır.
-Mobil (`uniffi`) daha sonra. İkisi de çekirdeği değiştirmeden gelmeli — gelmiyorsa
-çekirdek yanlış tasarlanmış demektir.
+- Kimlikler tip güvenli: `CanonicalId`, `ProviderTrackId`, `ListenId` ayrı newtype'lar, `String` değil.
 
 ---
 
@@ -177,34 +204,27 @@ Mobil (`uniffi`) daha sonra. İkisi de çekirdeği değiştirmeden gelmeli — g
 - **Ağa bağlı test yazılabilir (D-043)** ama "ulaşamamak" başarısızlık değildir:
   ağ yoksa test kendini atlar ve sebebini `stderr`'e yazar; ulaşıp beklenmeyeni
   alırsa düşer. Sınır "ağa çıkma" değil, iki başarısızlığı ayırmaktır (K9).
+  Atlanan test **geçmiş sayılmaz** — raporlarken "atlandı" de.
 - Kimlik çözümlemesi için **etiketli bir doğruluk kümesi** tut (`fixtures/identity/cases.json`).
-  Her değişiklikte doğruluk oranını ölç — bu sayı projenin en önemli metriği.
+  Her değişiklikte doğruluk oranını ölç — bu sayı projenin en önemli metriğidir:
+  `cargo test -p tune-core --test identity_accuracy`
 - CLI için: alt komutların `--json` çıktısını snapshot testiyle doğrula.
 
 ---
 
-## Asla yapma
+## Nerede ne var
 
-- CLI'ye iş mantığı koyma (Altın Kural).
-- Sağlayıcı API'sinden geçmiş/kütüphane çekmeye çalışma — export dosyası kullan.
-- Sunucudan ses akıtan bir tasarım önerme.
-- **DRM'li bir akışı çözen kod yazma** (Widevine, FairPlay, Deezer'ın Blowfish'i).
-  Koruma önlemi aşmak telif ihlalinden ayrı bir kanun maddesidir. Hangi platformun
-  hangi tarafta olduğu PLAN.md'nin "EK — Yayın platformları" bölümünde.
-- Çekirdeğe Spotify bağımlılığı ekleme.
-- Faz 3 gelmeden ağ servisi, hesap sistemi veya sunucu kodu yazma.
-- Çekirdek API'sine `uniffi`'nin ifade edemeyeceği tip sızdırma.
-- İzinsiz büyük bağımlılık ekleme.
-
----
-
-## Sözlük
-
-| Terim | Anlamı |
+| Arıyorsan | Bak |
 |---|---|
-| **canonical id** | Sağlayıcıdan bağımsız parça kimliği (tercihen MBID) |
-| **provider** | Ses kaynağı: yerel, Subsonic, SoundCloud, torrent… |
-| **plugin** | Alt süreç olarak çalışan, JSON-RPC konuşan sağlayıcı |
-| **listen** | Tek bir dinleme olayı (parça + zaman damgası + süre + kaynak) |
-| **anchor** | `{track, wall_time, position, rate, state}` — oda senkronunun tek primitifi |
-| **resolve** | Bir parçayı kanonik kimliğe, oradan da bir sağlayıcı kimliğine eşleme |
+| Bir kuralın tam metni ve gerekçesi | PLAN.md §2 |
+| Ne zaman durup soracağım | PLAN.md §0.1 |
+| Hangi fazdayız, sırada ne var | PLAN.md — faz başlıkları ve alt bölüm durumları |
+| Bir kararın gerekçesi (D-001…) | DECISIONS.md |
+| "Asla yapma" listesi | PLAN.md — ASLA YAPMA |
+| Terimler (canonical id, anchor, listen…) | PLAN.md — SÖZLÜK |
+| Hangi platform hukuken hangi tarafta | PLAN.md — EK: Yayın platformları |
+| Eklenti nasıl yazılır | docs/eklenti-yazma.md |
+| Tema nasıl yazılır | crates/tune/themes/README.md |
+
+**Faz durumunu bu dosyaya yazma.** Tek yerde dursun ki bayatlamasın: PLAN.md'nin
+faz başlıkları ve `TAMAM` / `YAPILACAK` işaretleri.

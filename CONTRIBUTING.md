@@ -6,8 +6,10 @@ böyle yapılmamış?" sorusunun cevabı orada, gerekçesiyle duruyor.
 
 ## Önce oku
 
-- [`PLAN.md`](PLAN.md) — yol haritası, değişmez kurallar, faz sınırları.
-  CLAUDE.md ile çelişirse **PLAN.md geçerlidir**.
+- [`PLAN.md`](PLAN.md) — yol haritası, değişmez kurallar (§2), faz sınırları,
+  ASLA YAPMA, sözlük. **Kurallarda bu dosya geçerlidir.**
+- [`CLAUDE.md`](CLAUDE.md) — workspace ağacı, komutlar, kod konvansiyonları,
+  CLI test yüzeyi, tanılama pratiği. **Operasyonel bilgide bu dosya geçerlidir.**
 - [`DECISIONS.md`](DECISIONS.md) — verilmiş kararlar ve gerekçeleri.
   Aynı soru iki kez tartışılmaz.
 
@@ -21,72 +23,68 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 ```
 
+Tam "bitti" ölçütü PLAN.md §0.4'te.
+
 Yeni bir yetenek eklediysen ayrıca:
 
 - CLI'de bir alt komutu var ve `--json` destekliyor.
 - Kimlik veya içe aktarmaya dokunduysan doğruluk kümesi çalıştırıldı ve
   oran PR açıklamasında yazıyor.
 
-## Altın Kural
+## Altın Kural (K1)
 
 **CLI ince bir kabuktur. Bütün mantık `tune-core` içindedir.**
 
 Testi şu: bir özellik CLI'den silindiğinde çekirdek onu hâlâ sunabiliyor olmalı.
 CLI yalnızca argüman ayrıştırır, çekirdeği çağırır, çıktıyı biçimler, çıkış kodu
 verir. CLI'de iş mantığı, veri dönüşümü, ağ çağrısı, SQL veya eşleştirme
-algoritması **olmaz**.
+algoritması **olmaz**. Aynısı Tauri kabuğu için de geçerlidir.
 
 Bir şeyi CLI'de yazmak istiyorsan önce sor: "bunu GUI de isteyecek mi?"
-Cevap evetse çekirdeğe koy. Bu kural gelecek Tauri GUI'sinin ve `uniffi`
-üzerinden mobil bağlamaların sıfır kod tekrarıyla çalışması için var.
+Cevap evetse çekirdeğe koy. Bu kural GUI'nin ve `uniffi` üzerinden mobil
+bağlamaların sıfır kod tekrarıyla çalışması için var.
 
 ## Değişmez kurallar
 
-Bunlar tartışmaya kapalı. İhlal etmen gerektiğini düşünüyorsan kod yazma —
-bir issue aç ve neden gerektiğini anlat.
+Tartışmaya kapalı. İhlal etmen gerektiğini düşünüyorsan kod yazma — bir issue aç
+ve neden gerektiğini anlat.
 
-1. **İçe aktarma export dosyalarından yapılır, API'den değil.** Sağlayıcı
-   API'sinden geçmiş veya kütüphane çekme.
-2. **Ses asla röle edilmez, yalnızca pozisyon senkronlanır.** Sunucudan ses
-   akıtan bir tasarım önerme.
-3. **Spotify çekirdeğe girmez.** `tune-core`'un bağımlılık ağacında Spotify'a
-   ait hiçbir şey olmaz.
-4. **Sağlayıcı eklentileri alt süreç + JSON-RPC ile konuşur.** Dinamik
-   kütüphane değil.
-5. **Kanonik kimlik zinciri sırası bozulmaz:** ISRC → MusicBrainz ID →
-   bulanık eşleşme → AcoustID.
-6. **Çekirdek API'si `uniffi` ile ifade edilebilir olmalı.** Dışa açık
-   imzalarda generic parametre, lifetime veya closure parametresi yok.
-   (`Arc<dyn Trait>` ve `async fn` serbest.)
-7. **`tune-core` içinde `unwrap()` / `expect()` / `panic!()` yok.** Testler
-   hariç. Sessiz `unwrap_or_default()` de yasak — veri kaybını yutar.
-8. **Faz sınırı aşılmaz.** Sonraki fazın kodunu "hazır olsun diye" yazma.
+Tam metin ve gerekçeleri **[`PLAN.md` §2](PLAN.md)**'de, K1–K10 olarak numaralı.
+Aşağısı yalnızca indekstir; burada tekrarlanmamalarının sebebi, bir zamanlar üç
+dosyada birden yazılı olmaları ve kopyaların birbiriyle çelişecek kadar
+kaymasıydı.
+
+| # | Kural |
+|---|---|
+| **K1** | Altın Kural: CLI ince kabuktur |
+| **K2** | İçe aktarma export dosyalarından yapılır, API'den değil |
+| **K3** | Ses asla röle edilmez, yalnızca pozisyon senkronlanır |
+| **K4** | Spotify çekirdeğe girmez |
+| **K5** | Eklentiler alt süreç + JSON-RPC ile konuşur |
+| **K6** | Kanonik kimlik zinciri sırası: ISRC → MBID → bulanık → AcoustID |
+| **K7** | Çekirdek API'si `uniffi` ile ifade edilebilir olmalı |
+| **K8** | `tune-core` içinde `unwrap()` / `expect()` / `panic!()` yok |
+| **K9** | Her başarısızlık hangi aşamada olduğunu söyler |
+| **K10** | Faz sınırı aşılmaz |
+
+Ayrıca **ASLA YAPMA** listesi (DRM, ses rölesi, ham `listen` kaydını silme…)
+PLAN.md'nin sonundadır.
 
 ## Kod konvansiyonları
 
-- Hata tipleri: `tune-core` → `thiserror`; `tune-cli` → `anyhow` serbest.
-- Loglama `tracing` ile. `println!` yalnızca CLI'nin kullanıcıya dönük çıktısında.
-- Genel API `async`; çalışma zamanını çağıran seçer, çekirdek `#[tokio::main]` kurmaz.
-- Ağ ve dosya sistemine dokunan her şey trait arkasında olsun ki testler
-  sahte (fake) kullanabilsin.
-- Kimlikler newtype: `CanonicalId`, `ProviderTrackId`. Çıplak `String` değil.
-- **Kod ve tanımlayıcılar İngilizce; yorumlar ve dokümanlar Türkçe.**
+Tek sahibi [`CLAUDE.md`](CLAUDE.md), "Kod konvansiyonları" başlığı — hata tipleri,
+`async` sözleşmesi, newtype kimlikler, bağımlılık politikası ve isimlendirme dili
+(D-036: tanımlayıcılar İngilizce, yazı Türkçe).
 
-## Tanılama kültürü
+Workspace ağacı ve komutlar da orada.
 
-Bu proje bir bash prototipinden doğdu ve orada işe yarayan tek şey her
-başarısızlığın *nerede* olduğunu söylemesiydi. Bunu koru:
+## Tanılama kültürü ve bağımlılıklar
 
-- Her başarısızlık hangi aşamada olduğunu söyler: `ADIM: IDENTITY_RESOLVE`.
-- Kısmi başarı üreten her işlem **özet döndürür**: kaç kayıt geldi, kaçı hangi
-  yolla çözüldü, kaçı çözülemedi. Atlanan kayıt sayılır ve raporlanır,
-  sessizce düşürülmez.
+Tek sahibi [`CLAUDE.md`](CLAUDE.md). Özü (K9): her başarısızlık **hangi aşamada**
+olduğunu söyler, kısmi başarı üreten her işlem özet döndürür, atlanan kayıt
+sayılır ve raporlanır — sessizce düşürülmez.
 
-## Bağımlılıklar
-
-Yeni bağımlılık eklemeden önce sor. Ağaç küçük kalmalı — mobil binary boyutu
-buna bağlı. Zorunlu değilse opsiyonel bir cargo feature arkasına koy
-(örnek: `render-png`, bkz. D-011).
+Yeni bağımlılık eklemeden **önce sor**; ağaç küçük kalmalı (mobil binary boyutu).
 
 ## Kimlik doğruluğu
 

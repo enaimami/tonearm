@@ -1,7 +1,13 @@
 # PLAN.md — Faz Faz Yürütme Planı
 
-Bu dosya projenin yol haritası ve kural setidir. `CLAUDE.md` kısa, her oturumda okunan
-özet; bu dosya iş planlarken okunur. Çelişki olursa **bu dosya geçerlidir**.
+Bu dosya projenin yol haritası ve **normatif kural setidir**: çalışma protokolü,
+değişmez kurallar (§2), faz planı, ASLA YAPMA, SÖZLÜK. `CLAUDE.md` her oturumda
+okunan operasyonel özettir ve şunların sahibidir: workspace ağacı, komutlar, CLI
+test yüzeyi, kod konvansiyonları, tanılama pratiği, test düzeni.
+
+**Her olgu tek dosyada yaşar.** Bir başlık iki yerde yazılıysa biri kayar — bu
+zaten bir kez oldu. Çelişki olursa **kurallarda bu dosya, operasyonel bilgide
+CLAUDE.md geçerlidir**.
 
 > Proje adı `tune` bir yer tutucudur.
 
@@ -127,54 +133,25 @@ Kısmi başarı üreten her işlem özet döndürür: kaç geldi, kaçı başar�
 kaçı başarısız.
 
 ### K10 — Faz sınırı aşılmaz
-Sonraki fazın kodunu "hazır olsun diye" yazma. Faz 3 gelmeden sunucu kodu yok.
+Sonraki fazın kodunu "hazır olsun diye" yazma. Faz 4 gelmeden sunucu kodu yok.
 
 ---
 
-# 3. KONVANSİYONLAR
+# 3. KONVANSİYONLAR, WORKSPACE, KOMUTLAR — `CLAUDE.md`'de
 
-- Hata tipleri: `tune-core` → `thiserror`; `tune-cli` → `anyhow` serbest.
-- Loglama: `tracing`. `println!` yalnızca CLI'nin kullanıcıya dönük çıktısında.
-- Genel API `async`; çalışma zamanını çağıran seçer. Çekirdek `#[tokio::main]` kurmaz.
-- Ağ ve dosya sistemine dokunan her şey trait arkasında (testler fake kullanabilsin).
-- Kimlikler newtype: `CanonicalId`, `ProviderTrackId`, `ListenId`. Çıplak `String` yok.
-- Bağımlılık ağacı küçük kalır (mobil binary boyutu).
-- Kod ve tanımlayıcılar İngilizce; yorumlar ve dokümanlar Türkçe.
+Bu üç başlığın tek sahibi [`CLAUDE.md`](CLAUDE.md)'dir; burada tekrarlanmaz.
+Sebebi kayma: aynı ağaç iki dosyada durunca biri bayatladı ve olmayan bir
+`sync/` dizinini aylarca listeledi, var olan `net/` ile `wrapped/`'ı hiç
+göstermedi.
 
-## Workspace
+- **Kod konvansiyonları** (hata tipleri, `async`, newtype kimlikler, isimlendirme
+  dili D-036) → CLAUDE.md, "Kod konvansiyonları"
+- **Workspace ağacı** → CLAUDE.md, "Workspace"
+- **Komutlar** → CLAUDE.md, "Komutlar"
+- **Tanılama pratiği ve test düzeni** → CLAUDE.md, "Tanılama kültürü" / "Test"
 
-```
-tune/
-├── Cargo.toml              # workspace
-├── CLAUDE.md               # kısa özet
-├── PLAN.md                 # bu dosya
-├── DECISIONS.md            # karar defteri
-├── crates/
-│   ├── tune-core/
-│   │   ├── import/         # export ayrıştırıcıları
-│   │   ├── identity/       # kanonik çözümleme
-│   │   ├── stats/          # istatistik motoru
-│   │   ├── library/        # SQLite + FTS
-│   │   ├── provider/       # trait'ler + JSON-RPC istemcisi
-│   │   ├── playback/       # symphonia + cpal        (Faz 1)
-│   │   ├── sync/           # çapa protokolü          (Faz 4)
-│   │   └── diag/           # tanılama
-│   ├── tune-cli/           # ince CLI kabuğu
-│   └── tune/               # Tauri masaüstü kabuğu (Faz 3)
-│       ├── src/            # main + env + state + core_thread + commands
-│       └── ui/             # düz statik webview — bundler yok, npm yok
-├── spike/                  # ATILABILIR prototipler — workspace DIŞI, CI DIŞI
-└── fixtures/               # kırpılmış export'lar, doğruluk kümesi
-```
-
-## Komutlar
-
-```bash
-cargo run -p tune-cli -- <alt-komut>
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt --all
-```
+Normatif olan bu dosyada kalır: çalışma protokolü (§0), değişmez kurallar (§2),
+faz planı, ASLA YAPMA, SÖZLÜK.
 
 ---
 
@@ -1544,7 +1521,7 @@ sürmek (`CONTROL`), ya da yalnızca metadata almak.
 
 | Platform | Yetenek | Gerekçe |
 |---|---|---|
-| **SoundCloud** | `SEARCH BROWSE STREAM` | DRM yok. Resmî API var ama anahtar başvurusu yıllardır kapalı/aralıklı; pratik yol yt-dlp. CLAUDE.md'nin K5 örneği zaten bu. Bazı parçalar (Go+, gizli) erişilemez — eklenti bunu **sayıp raporlar**, sessizce atlamaz (K9). |
+| **SoundCloud** | `SEARCH BROWSE STREAM` | DRM yok. Resmî API var ama anahtar başvurusu yıllardır kapalı/aralıklı; pratik yol yt-dlp. §2 K5'in referans eklentisi zaten bu. Bazı parçalar (Go+, gizli) erişilemez — eklenti bunu **sayıp raporlar**, sessizce atlamaz (K9). |
 | **Qobuz** | `SEARCH BROWSE STREAM` | DRM yok; FLAC aboneye şifresiz iniyor. Resmî public API yok, tersine mühendislikle biliniyor. Abonelik şart. Hi-res katalog en temiz kaynak. |
 | **YouTube Music** | `SEARCH BROWSE STREAM` | DRM yok, yol yt-dlp. **Bakım maliyeti en yükseği:** YouTube aktif olarak zorlaştırıyor (nsig, PO token). Tam da bu yüzden eklenti — bozulduğunda çekirdek ayakta kalır. |
 | **Tidal** | `SEARCH BROWSE` | Resmî geliştirici API'si katalog/arama veriyor. Tam akış partner programına bağlı, yüksek kalite katmanları DRM'li. Tidal Connect sertifikalı cihaz programı, herkese açık değil. |
