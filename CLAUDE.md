@@ -112,10 +112,11 @@ dene; doğruluk tatmin edici olunca `identity/`'ye porta.
 (K5), ama Rust yazılmıştır ve aynı workspace'te derlenir. `tune-core`'un
 bağımlılık ağacına girmez — D-047.
 
-> Bu düzen **değişecek**: D-050, torrent'ı eklenti olmaktan çıkarıp çekirdeğe
-> feature'lı bir sağlayıcı olarak taşımayı kararlaştırdı (`plugins/torrent/`
-> kalkar). Karar alındı, kod yazılmadı — PLAN.md §2.8. O iş bitince yukarıdaki
-> ağaç güncellenir.
+> Bu düzen **kalıcı.** D-050 S3 bir zamanlar torrent'ı çekirdeğe feature'lı bir
+> sağlayıcı olarak taşımayı kararlaştırmıştı; **D-056 o kararı geri aldı.**
+> Torrent eklenti olarak kalıyor, yukarıdaki ağaç doğru. Geriye kalan borç
+> taşıma değil **dağıtım**: eklenti kullanıcıya `cargo build --release`
+> yaptırıyor ve bu D-049'u ihlal ediyor — ilk sürümden sonraya ertelendi.
 
 ---
 

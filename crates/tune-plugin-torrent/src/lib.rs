@@ -22,6 +22,23 @@
 //! `resolve_source`, `127.0.0.1`'de dinleyen kendi HTTP sunucumuzun adresini
 //! `HttpStream` olarak döndürür (bkz. [`stream`]). İndirmenin bitmesini
 //! beklemez: `librqbit` parça önceliğini okuma konumuna göre ayarlıyor.
+//!
+//! ## TODO: AFTER FIRST RELEASE — dağıtım D-049'u ihlal ediyor
+//!
+//! Bu eklenti kullanıcıya `cargo build --release -p tune-plugin-torrent`
+//! yaptırıyor, yani **bir Rust araç zinciri kurduruyor.** D-049 hiçbir
+//! eklentinin sistem çapında kurulum istememesini şart koşuyor ve depodaki
+//! dört eklentiden D-055'ten sonra bunu ihlal eden **tek** şey burası:
+//! ötekiler betik, motorun Python'undan geçiyorlar; bu bir ikili, geçemiyor.
+//!
+//! Bir zamanlar çözüm "çekirdeğe feature'lı sağlayıcı olarak taşı" idi
+//! (D-050 S3). **D-056 o kararı iptal etti**: taşınacak şey 2.335 satır
+//! kaynak + 647 satır test, çalışan bir eklenti — ilk sürümden önce sökmenin
+//! karşılığı yok.
+//!
+//! Açık kalan soru **dağıtım**, mimari değil: platform başına önceden
+//! derlenmiş yayın çıktısı mı, yoksa "kaynaktan derle" mi kalacak. İlk
+//! sürümden sonra karara bağlanacak — PLAN §2.8 madde 5.
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 

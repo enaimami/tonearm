@@ -2163,7 +2163,9 @@ veri dizininde), **her işletim sistemi** (tek yol, dağıtıma özel komut yok)
 korunur — YouTube bozduğunda tamiri hâlâ yt-dlp yapar, biz değil).
 
 **Karar (S3 — torrent): işlevi çekirdeğe taşınır, D-047'nin *yeri* geri
-alınır.** Sebep tutarlılık: torrent bir Rust ikilisi, betik değil, motordan
+alınır.** — **İPTAL: bkz. D-056 (2026-09-19).** Bu alt karar hiç uygulanmadı;
+torrent eklenti olarak kalıyor ve D-047 yürürlükte. Aşağısı iptal edilen
+gerekçedir, S1/S2/S4 etkilenmedi. Sebep tutarlılık: torrent bir Rust ikilisi, betik değil, motordan
 geçemez — ve bugünkü hâli D-049'u en ağır ihlal eden şey (kullanıcıya
 `cargo build --release` yaptırıyor).
 
@@ -2206,9 +2208,9 @@ Hiçbiri bu turda yapılmadı; hepsi §2.8'in kapsamı:
    `python3 -m yt_dlp` üçlüsü silinir), `requires: ["yt-dlp"]` der ve motorun
    verdiğini kullanır.
 4. **`soundcloud`** ve `echo` motora taşınır — ikisi de stdlib, `requires` boş.
-5. **`torrent`** eklenti olmaktan çıkar; `crates/tune-plugin-torrent`
-   çekirdeğe feature'lı bir sağlayıcı olarak gider, `plugins/torrent/` kalkar.
-   CLAUDE.md'nin workspace düzeni ve `plugins/torrent/README.md` güncellenir.
+5. ~~**`torrent`** eklenti olmaktan çıkar; `crates/tune-plugin-torrent`
+   çekirdeğe feature'lı bir sağlayıcı olarak gider, `plugins/torrent/` kalkar.~~
+   **İPTAL — D-056.** Yapılmadı ve yapılmayacak.
 6. **`python3` `README`/`CONTRIBUTING`'de gereksinim olarak ilan edilir.**
 
 ### Sorulmayan, açık kalanlar
@@ -2619,3 +2621,60 @@ motordan geçemez ve kullanıcıya hâlâ `cargo build --release` yaptırıyor �
 D-049'u ihlal eden tek şey artık bu. Taşıma kendi başına bir tur:
 `librqbit`'in +179 crate'i, `torrent = ["dep:librqbit"]` kapısı,
 `crates/tune-plugin-torrent`'ın sökülmesi. PLAN §2.8'in 5. maddesi açık.
+
+---
+
+## D-056 — Torrent çekirdeğe taşınmıyor: D-050 S3 iptal
+**Tarih:** 2026-09-19 · **Durum:** UYGULANDI (2026-09-19)
+
+**Soru:** Kullanıcı D-055'in hemen ardından: *"torrent'in çekirdeğe girme
+mevzusunu kaldıralım. hatta direkt torrent kısmı çok yazılmamış ise şimdilik
+`//TODO:AFTER FIRST RELEASE`'de kalsın."*
+
+**Karar: D-050 S3 iptal. Torrent eklenti olarak kalıyor; D-047 yürürlükte.**
+
+### Şartlı kısım ölçüldü ve tutmadı
+
+Kullanıcının ikinci cümlesi bir şarta bağlıydı — "çok yazılmamış ise". Ölçüm:
+
+| | satır |
+|---|---|
+| `crates/tune-plugin-torrent/src/` | 2.335 |
+| testleri | 647 |
+| test sayısı | 56 |
+
+Yazılmamış değil: D-047 §2.4'te canlı Torznab'a karşı arayan, `librqbit` ile
+sıralı indirip `127.0.0.1` üzerinden akıtan, çalışan bir eklenti. Yani
+**silinecek bir şey yok** ve şart karşılanmıyor. Bu yüzden ilk cümle
+(koşulsuz iptal) uygulandı, ikincisi kodu silmek olarak değil **kalan borcu
+ertelemek** olarak uygulandı.
+
+### D-050 S3 neden alınmıştı, neden geri alınıyor
+
+Alınma gerekçesi tutarlılıktı: torrent bir Rust ikilisi, betik değil, eklenti
+motorundan (D-055) geçemez — ve bugünkü hâli D-049'u en ağır ihlal eden şey.
+Çözüm olarak çekirdeğe `torrent = ["dep:librqbit"]` kapısıyla taşınacaktı.
+
+Geri alma gerekçesi **iptal edilen şeyin bedeli**: D-047'nin ölçtüğü
+mimari karşılığını vermişti (`tune-core` ağacı 77'de kaldı, mobil temiz),
+eklenti çalışıyordu, ve taşıma 3 bin satırı sökmek demekti. İlk sürümden
+önce çalışan bir mimariyi bir *tutarlılık* uğruna sökmenin karşılığı yok.
+
+**D-049 ihlali bu kararla çözülmedi, ertelendi.** Bunu saklamıyoruz: torrent
+hâlâ kullanıcıya `cargo build --release` yaptırıyor ve D-055'ten sonra kuralı
+ihlal eden **tek** eklenti bu.
+
+### Açık kalan soru artık mimari değil, dağıtım
+
+Taşıma iptal olunca geriye D-049'un asıl sorusu kalıyor: bir Rust ikilisi
+kullanıcıya derleyici kurdurtmadan nasıl ulaşır? İki yol var ve ikisi de
+seçilmedi — platform başına önceden derlenmiş yayın çıktısı (sürüm, imza ve
+CI işi getirir), ya da "kaynaktan derle"nin kalması (bugünkü hâl).
+
+**`TODO: AFTER FIRST RELEASE`.** İşaret üç yerde: `plugin/lib.rs`'in modül
+başlığı, `plugins/torrent/README.md`'nin en üstü, PLAN §2.8 madde 5.
+
+Bu, depoya bilerek konan **ilk** `TODO`. D-054 "kodda tek bir
+`TODO`/`FIXME`/`unimplemented!` yoktu" diye ölçmüştü ve bu tercih sürüyor:
+işaret bir *eksik uygulamayı* değil, **ertelenmiş bir kararı** gösteriyor ve
+yanında neyin neden ertelendiği yazılı.

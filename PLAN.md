@@ -943,6 +943,14 @@ gerçek hazır olma kontrolü, peer sayısı ve indirme hızı raporlanır.
 > çözüldü: `search "<sorgu>"` → yayımlar (`<infohash>`), `search "<infohash>"`
 > → içindeki ses dosyaları (`<infohash>/<sıra>`). Birden çok dosya varken
 > `resolve_source` tahmin etmiyor.
+>
+> **Bu karar bir kez geri alındı ve geri konuldu.** D-050 S3 (2026-09-09)
+> tutarlılık gerekçesiyle torrent'ı çekirdeğe feature'lı bir sağlayıcı olarak
+> taşımayı kararlaştırmıştı; **D-056 (2026-09-19) o kararı iptal etti** ve
+> D-047 yürürlükte kaldı. Ölçüm iptalin gerekçesi: taşınacak şey 2.335 satır
+> kaynak + 647 satır test, 56 test — "henüz yazılmamış" değil, çalışan bir
+> eklenti. Bedeli ödenmiş bir mimariyi ilk sürümden önce sökmenin karşılığı
+> yok.
 
 ### 2.5 Yayın platformu eklentileri
 Hangi platformdan ses çalınabileceği API'nin varlığına değil **DRM'e** bağlı.
@@ -1013,11 +1021,11 @@ D-045'in açtığı tur §2.3 (D-046), §2.4 (D-047) ve §2.5 (D-048) ile bitti.
 Faz 2'den çıkarken açık kalan beş borcun biri kapandı (eklenti motoru,
 D-055), dördü duruyor ve bir tanesi küçüldü:
 
-- **~~Eklenti motoru~~ — KAPANDI (D-055), ama torrent hâlâ dışarıda.**
-  Motor yazıldı, `ytmusic` ve `soundcloud` ondan geçiyor. Geriye tek ihlal
-  kaldı: `torrent` bir Rust ikilisi olduğu için motordan geçemez ve
-  kullanıcıya hâlâ `cargo build --release` yaptırıyor. D-050 S3'ün çözümü
-  (çekirdeğe feature'lı sağlayıcı) karar olarak duruyor, kodu yazılmadı.
+- **~~Eklenti motoru~~ — KAPANDI (D-055).** Motor yazıldı, `ytmusic` ve
+  `soundcloud` ondan geçiyor.
+- **`torrent` kullanıcıya `cargo build --release` yaptırıyor** — D-049'u
+  ihlal eden tek şey bu. Çekirdeğe taşıma çözümü **iptal edildi** (D-056);
+  eklenti olarak kalıyor ve dağıtım sorusu **`TODO: AFTER FIRST RELEASE`**.
 - **Gömülü AcoustID anahtarı yok** (`EMBEDDED_API_KEY` boş, D-046).
 - **İzin sözlüğü joker kabul etmiyor** (D-040) — googlevideo.com, rastgele
   peer. D-055 buna yeni bir yük **eklemedi**: motorun indirmesi ayrı bir
@@ -1041,7 +1049,7 @@ kaldı:
 |---|---|---|
 | `soundcloud` | Python | motorun yorumlayıcısı — **uyuyor** |
 | `ytmusic` | Python + yt-dlp | eser motorca kuruluyor — **uyuyor** |
-| `torrent` | `cargo build --release` | **hâlâ ihlal** — Rust ikilisi motordan geçemez, D-050 S3 bekliyor |
+| `torrent` | `cargo build --release` | **hâlâ ihlal** — Rust ikilisi motordan geçemez; çözümü `TODO: AFTER FIRST RELEASE` (D-056) |
 
 Kuralın kaçmaması gereken yer: D-048 bilerek "yt-dlp'yi kullanıcı kendi paket
 yöneticisiyle günceller"e yaslanmıştı, çünkü YouTube onu düzenli bozuyor ve
@@ -1092,11 +1100,13 @@ D-050'nin kararı yazıldı. Altı maddenin beşi bitti, biri açık:
    `requirements` haritasından alıyor.
 4. **`soundcloud` + `echo`** motora geçti — ikisi de `python3` yazıyor,
    yorumlayıcıyı motor çözüyor, `requires` boş.
-5. **`torrent` — YAPILMADI.** D-050 S3 onu çekirdeğe feature'lı bir sağlayıcı
-   olarak taşımayı kararlaştırdı (`plugins/torrent/` kalkar). Bu kendi başına
-   bir tur: `librqbit`'in +179 crate'i, `torrent = ["dep:librqbit"]` kapısı,
-   `crates/tune-plugin-torrent`'ın sökülmesi ve CLAUDE.md'nin workspace
-   ağacının güncellenmesi. **D-049'u ihlal eden tek şey artık bu.**
+5. **`torrent` — TAŞIMA İPTAL (D-056).** D-050 S3'ün "çekirdeğe feature'lı
+   sağlayıcı olarak taşı" kararı **geri alındı**. Torrent eklenti olarak
+   kalıyor, `crates/tune-plugin-torrent` ve `plugins/torrent/` yerinde.
+
+   Geriye kalan borç taşıma değil **dağıtım**: eklenti kullanıcıya
+   `cargo build --release` yaptırıyor ve D-049'u ihlal eden tek şey bu.
+   **`TODO: AFTER FIRST RELEASE`** — ilk sürümden sonra ele alınacak.
 6. **Python 3.9+ ilan edildi** — `README` ve `CONTRIBUTING`.
 
 > KARAR NOKTASI: motorun özel ortamı nasıl kurulacak? **KAPANDI — D-055.**

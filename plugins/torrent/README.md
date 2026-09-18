@@ -4,15 +4,22 @@ Faz 2 §2.4'ün sağlayıcısı. Karar kaydı: **D-047**.
 
 Bu dizin eklentinin *kurulu* hâlidir; kaynağı `crates/tune-plugin-torrent/`.
 
-> **Bu dizin kalkacak (D-050).** Torrent eklenti olmaktan çıkıp çekirdeğe
-> feature kapılı bir sağlayıcı olarak taşınacak: kullanıcı hiçbir şey
-> derlemeyecek, ama `librqbit`'in +179 crate'i yalnızca kapıyı açan derlemeye
-> girecek. Karar alındı, **kod yazılmadı** — PLAN.md §2.8. Aşağısı bugünkü
-> hâli anlatır.
+> **`TODO: AFTER FIRST RELEASE` — kurulum D-049'u ihlal ediyor.**
+> Aşağıdaki kurulum size bir **Rust araç zinciri** kurduruyor. D-049 hiçbir
+> eklentinin sistem çapında kurulum istememesini şart koşuyor ve D-055'ten
+> sonra bunu ihlal eden tek eklenti bu: ötekiler betik, motorun Python'undan
+> geçiyorlar; bu bir ikili, geçemiyor.
+>
+> Bir ara çözüm "çekirdeğe feature kapılı sağlayıcı olarak taşı" idi
+> (D-050 S3); **D-056 onu iptal etti** — sökülecek şey 2.335 satır kaynak +
+> 647 satır test, çalışan bir eklenti. Açık kalan soru **dağıtım**: platform
+> başına önceden derlenmiş yayın çıktısı mı, yoksa "kaynaktan derle" mi
+> kalacak. İlk sürümden sonra karara bağlanacak (PLAN §2.8 madde 5).
 
 Eklenti çekirdeğin içinde değil, **alt süreç** olarak çalışır (K5) — sebebi
 ölçüldü: `librqbit` `tune-core`'un bağımlılık ağacına 179 crate ekliyordu
-(77 → 256) ve o ağaç `uniffi` ile mobile de gidecekti.
+(77 → 256) ve o ağaç `uniffi` ile mobile de gidecekti. Bu düzen D-056 ile
+**kalıcı** oldu.
 
 ## Kurulum
 

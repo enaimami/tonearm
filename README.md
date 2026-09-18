@@ -358,7 +358,7 @@ tune play "Get Lucky" --tui
   | :--- | :--- | :--- |
   | `soundcloud` | Python 3.9+ | motorun yorumlayıcısı; paket istemiyor |
   | `ytmusic` | Python 3.9+ · yt-dlp | `tune plugin install ytmusic` — sabitlenmiş sürüm, sha256 doğrulanır |
-  | `torrent` | Rust araç zinciri | **hâlâ ihlal ediyor** — D-050 S3 onu çekirdeğe feature'lı sağlayıcı olarak taşıyor, kodu yazılmadı |
+  | `torrent` | Rust araç zinciri | **hâlâ ihlal ediyor** — çözümü ilk sürümden sonraya ertelendi (D-056) |
 
   Bir eklenti kendi bağımlılığını **aramaz, indirmez, kurmaz**; manifestinde
   beyan eder ve motorun verdiği yolu kullanır. Eksik bir eser sessizce "sonuç
