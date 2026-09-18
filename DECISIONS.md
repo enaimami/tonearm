@@ -1192,7 +1192,7 @@ vaadi, temaya IPC açılıp açılmayacağı, paket biçimi. Yazmadan önce soru
    **Not:** kullanıcı ayrıca davranış değiştiren bir "mod" fikri önerdi —
    tema paketleriyle birlikte indirilebilen, kendine özel bir bölümü olan bir
    şey. Bu **bilinçli olarak ertelendi**, bugün tasarlanmadı: bir mod'un
-   webview içinde JS çalıştırıp IPC çağırması, K4'ün sağlayıcı eklentileri
+   webview içinde JS çalıştırıp IPC çağırması, K5'in sağlayıcı eklentileri
    için şart koştuğu "alt süreç + JSON-RPC, eklenti çökerse çekirdek düşmez"
    modelinden köklü biçimde farklı bir güvenlik sınıfı taşır — aynı webview
    içinde çalışan bir mod bütün arayüzü çökertebilir/dondurabilir. PLAN.md'ye
@@ -2186,7 +2186,7 @@ K5 ihlali değil: K5 *eklentilerin* alt süreç olmasını şart koşuyor, torre
 ise eklenti olmaktan çıkıp yerleşik bir sağlayıcı oluyor — `local`, Subsonic
 ve Jellyfin gibi (Faz 1).
 
-**Karar (S4 — K4 duruyor):** "eklentiler herhangi bir dilde yazılabilir"
+**Karar (S4 — K5 duruyor):** "eklentiler herhangi bir dilde yazılabilir"
 değişmiyor. Alt süreç + JSON-RPC sınırı herkese açık kalır; motor **tek yol
 değil, desteklenen ve kurulum gerektirmeyen yol** olur. Depoda dağıtılan her
 eklenti motordan geçer. EK'in Tencent satırındaki gerekçe ("o bölgedeki biri
@@ -2369,3 +2369,116 @@ kapı değil. Üçü düzeltilince o satır kaldırılmalı.
 **Doğrulanmamış:** CI hiç koşmadı — bu commit'in kendisi ilk koşum olacak.
 Sistem bağımlılığı listesi ve `ubuntu-24.04` üzerindeki WebKitGTK sürümü
 (`4.1`) yerel makinede değil, yalnızca okunarak seçildi.
+
+---
+
+## D-054 — Borç temizliği: belgenin iddia ettiği ile kodun yaptığı ayrışmıştı
+**Tarih:** 2026-09-18 · **Durum:** UYGULANDI (2026-09-18)
+
+**Soru:** "Olmayan özellikler, yanlış planlar, yanlış yazılmış özellikler"
+temizlensin. Bu bir karar sorusu değil, bir **ölçüm** sorusuydu: hangi iddia
+tutmuyor?
+
+**Yöntem:** üç kapı koşuldu (üçü de zaten temizdi), sonra her belge iddiası
+koda karşı tek tek sınandı — CLI alt komutları `main.rs`'e, çıktı örnekleri
+`output.rs`'e, TUI maketi `tui.rs`'in çizimine, sır deposu `secrets.rs`'e,
+faz durumları koda. Kodda tek bir `TODO`/`FIXME`/`unimplemented!` yoktu;
+borcun tamamı belgelerdeydi ve bir kısmı **yanlış**, olmayan değil.
+
+### 1. CI'nın maskelenmiş kırmızısı kapandı — iş artık kapı
+
+D-053'ün `core-alone` işi `continue-on-error: true` ile rapor olarak
+duruyordu. Üç kusur da düzeltildi:
+
+- `net::network_err` — yalnızca `ureq_client` (`http-client`) ve testlerdeki
+  sahte istemci çağırıyor. `#[cfg(any(feature = "http-client", test))]`
+  eklendi; varsayılan derlemede artık **yok**, susturulmuş değil.
+- `net::fake::last_request` — tek çağıranı `fingerprint` arkasındaki AcoustID
+  testleri. `#[allow(dead_code)]` + gerekçe: ölü değil **koşullu**. Feature
+  adını buraya yazmak, genel bir test yardımcısını tek özelliğe bağlardı.
+- `playback/player.rs` — `#[expect(unused_variables)]` hiç karşılanmıyordu,
+  çünkü hemen altındaki `let _ = (source, item);` lint'i zaten susturuyor.
+  Beklenti kaldırıldı; iki kemerden biri sökülmüş oldu.
+
+Ölçerken **dördüncü** bir kusur çıktı: `--features http-client` tek başına
+açıldığında (`audio` kapalı) `tests/remote_http.rs`'in `Resp::bytes` ve
+`fixture` yardımcıları ölüyor. Borcun biriktiği yer feature *birleşimi*
+değil, tek başına açılan feature'mış. CI işi bu yüzden `core-features`'a
+dönüştü: varsayılan + her feature tek tek + hepsi birden.
+
+### 2. README'nin dört yanlış iddiası
+
+- **"Diskte şifrelenmiş anahtar/token olarak saklanır" — yanlıştı.**
+  Hiçbir şey şifrelenmiyor. Uzak sunucuda parolanın kendisi gerçekten diske
+  yazılmıyor (Subsonic'te `salt` + `md5(parola+salt)`, Jellyfin'de erişim
+  anahtarı türetiliyor) ama saklanan token o sunucuya erişim için parolanın
+  yerine geçiyor ve `servers.json`'da düz metin duruyor, unix'te `0600`.
+  Eklenti/AcoustID sırları ayrı dosyada (`secrets.json`), aynı şekilde.
+  Bu bir kusur değil, D-042'nin bilinçli kararı; kusur onu **şifreliymiş gibi
+  anlatmaktı.** Bir güvenlik vaadinin yanlış olması, olmayan bir özelliği
+  anlatmaktan kötüdür: kullanıcı diskini paylaşırken buna göre karar verir.
+  Metin ne koruduğunu ve neyi korumadığını söyleyecek şekilde yeniden yazıldı.
+- **`tune stats` örnek çıktısı uydurmaydı** — emoji başlıklar, yüzdeler ve
+  `─────` çubukları. `output.rs` böyle bir şey basmıyor. Örnek, biçimleyicinin
+  hizalamasıyla birebir üretilip değiştirildi.
+- **TUI maketi gerçek çizimle uyuşmuyordu** — satır başına süre ve albüm
+  sütunu, `Kuyruk (3/10)` sayacı, `[Tekrar: TÜMÜ]` rozetleri. Gerçek kuyruk
+  satırı yalnızca `sanatçı - başlık`. Maket `draw_*` fonksiyonlarına göre
+  yeniden çizildi.
+- **`tune provider scan` "artımlı" diye anlatılıyordu.** Bayraksız hâli tam
+  tarama; artımlı olan `--if-stale` ve o da dizin damgasına bakıyor, yerinde
+  yeniden etiketlenen dosyayı görmüyor. CLAUDE.md'de aynı komut
+  `--incremental` diye yazılıydı — öyle bir bayrak hiç olmadı.
+
+Ayrıca: depo adresi `kullanici-adi/tune` yer tutucusuydu; `python3`/`yt-dlp`
+gereksinimi hiçbir kullanıcı belgesinde yazmıyordu (PLAN §2.8'in 6. maddesi
+bunu kendisi itiraf ediyordu); komut tablosunda `provider remove/servers`,
+`plugin disable/enable/forget`, `secret list/remove` eksikti.
+
+### 3. `tune provider search` diye bir komut yok
+
+`plugins/torrent/README.md` iki adımlı arama akışını `tune provider search`
+ile anlatıyordu. `ProviderCommand` = `list | test | scan | add | remove |
+servers`; `search` hiç yazılmadı. Eklentinin araması `tune play` üzerinden
+çalışıyor (`Session::queue_from_search`, katalog boşsa akıtabilen bütün
+sağlayıcılara sorar).
+
+**Ve burada gerçek bir CLI eksiği ortaya çıktı:** `output::play` yalnızca
+`sanatçı - başlık` basıyor, sağlayıcı parça kimliğini basmıyor. Torrent'in
+yayım→dosya seçimi (`<infohash>/<sıra>`) kimliği görmeyi gerektiriyor, yani
+belgelenen akış insan çıktısından **izlenemiyor**, `--json | jq` şart.
+Düzeltilmedi: çıktıyı değiştirmek snapshot testlerini kırar ve bu bir ürün
+kararıdır. PLAN §2.6'ya açık borç olarak yazıldı, README `--json` yolunu
+gösteriyor.
+
+### 4. Bayatlamış plan maddeleri
+
+- **§0.3'ün biçim örneği `D-007` numarasını kullanıyordu** ve depoda
+  bambaşka bir konuda (diag hata zinciri) gerçek bir D-007 vardı. Örneği
+  arayan okur yanlış kararı buluyordu. Örnek `D-NNN`'e çevrildi ve
+  DECISIONS.md'nin gerçekten kullandığı alan biçimine uyduruldu.
+- **Kapanmış Faz 0'da üç karar noktası hâlâ "Sor." diyordu.** İkisinin cevabı
+  koddaydı: şema yazıldı ve `user_version` ile sürümlendi; doğruluk tabanı
+  `ACCURACY_FLOOR = 0.97` (bugünkü ölçüm 72/72 = %100). Üçüncüsü —
+  Last.fm/ListenBrainz içe aktarma — "bu fazda mı, Faz 2'de mi" diye
+  soruyordu ve **iki faz da kapandı, hiçbirinde yazılmadı.** Soru bayat: artık
+  "hangi fazda" değil "yapılacak mı" sorusudur. Sahipsiz olarak işaretlendi.
+- **Beş yerde K5 yerine K4 yazılmıştı.** "Alt süreç + JSON-RPC" K5'tir; K4
+  Spotify kuralı. D-050'nin kendi metni iki paragraf arayla önce doğru (K5)
+  sonra yanlış (K4) yazıyordu.
+
+### 5. Tel değeri arayüz metni sanılıyordu (D-036)
+
+`RepeatMode`'un `Display`'i `off`/`all`/`one` basıyor — JSON ve IPC için
+doğru. Ama hem TUI'nin kuyruk başlığı hem de masaüstü arayüzünün düğme ipucu
+o dizeyi **kullanıcıya** gösteriyordu. D-036: tanımlayıcı İngilizce, arayüz
+yazısı Türkçe. Her iki kabuğa kendi etiket eşlemesi eklendi (`kapalı/tümü/
+tek`); tel değeri değişmedi ve bir test bunu kilitliyor.
+
+**Sonuç:** 433 test geçiyor, 7'si kendini atlıyor ve sebebini yazıyor.
+Üç kapı + `core-features` temiz.
+
+**Yapılmayanlar (bilerek):** `EMBEDDED_API_KEY` hâlâ boş (D-046), eklenti
+motoru hâlâ yazılmadı (D-050), izin sözlüğü hâlâ joker kabul etmiyor (D-040),
+`play` insan çıktısı hâlâ kimlik basmıyor. Dördü de PLAN §2.6'da açık borç
+olarak duruyor — bu tur onları **saymak** için açıldı, kapatmak için değil.

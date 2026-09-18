@@ -63,6 +63,12 @@ impl FakeHttp {
     ///
     /// `last_url` yetmediği yer için: bir POST'un asıl yükü gövdededir ve
     /// "parmak izi URL'de mi gövdede mi gitti" ancak buradan görülür.
+    ///
+    /// Bugün tek çağıranı `identity::acoustid` testleri ve o modül
+    /// `fingerprint` feature'ının arkasında; feature kapalıyken bu metot
+    /// çağrılmıyor. Ölü değil **koşullu** — feature adını buraya yazmak,
+    /// genel bir test yardımcısını tek bir özelliğe bağlardı.
+    #[allow(dead_code)]
     pub(crate) fn last_request(&self) -> Option<HttpRequest> {
         self.requests().last().cloned()
     }

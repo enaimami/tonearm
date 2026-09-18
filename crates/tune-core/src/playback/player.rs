@@ -222,13 +222,11 @@ impl Player {
     }
 
     /// Kaynağı ses hattına verir.
-    #[cfg_attr(
-        not(feature = "audio"),
-        expect(
-            unused_variables,
-            reason = "ses hattı kapalıyken kaynak ve öğe kullanılmaz; hata döner"
-        )
-    )]
+    ///
+    /// Ses hattı kapalı derlemede argümanlar aşağıdaki `let _ = (source, item);`
+    /// ile tüketiliyor; ayrıca bir `unused_variables` beklentisi **koymuyoruz**,
+    /// çünkü lint hiç tetiklenmiyor ve karşılanmayan beklentinin kendisi hata
+    /// oluyordu (`cargo clippy -p tune-core`).
     fn start_source(&mut self, source: &AudioSource, item: QueueItem) -> Result<()> {
         #[cfg(feature = "audio")]
         {

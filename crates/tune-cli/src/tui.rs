@@ -361,7 +361,7 @@ fn draw_queue(
     let title = format!(
         " kuyruk ({}) · tekrar: {} · karıştır: {} ",
         view.queue.len(),
-        view.repeat,
+        repeat_label(view.repeat),
         if view.shuffle { "açık" } else { "kapalı" }
     );
     frame.render_stateful_widget(
@@ -371,6 +371,20 @@ fn draw_queue(
         area,
         selection,
     );
+}
+
+/// Tekrar kipinin **kullanıcıya gösterilen** adı.
+///
+/// `RepeatMode`'un `Display`'i `off`/`all`/`one` basar ve orası doğru yer:
+/// o dize JSON'a ve IPC'ye giden tel değeridir. Ekrana yazılan metin ayrı
+/// bir şeydir ve Türkçedir (D-036) — ikisini tek fonksiyona bağlamak, tel
+/// biçimini değiştirmeden arayüz metnini düzeltmeyi imkânsız kılardı.
+fn repeat_label(mode: RepeatMode) -> &'static str {
+    match mode {
+        RepeatMode::Off => "kapalı",
+        RepeatMode::All => "tümü",
+        RepeatMode::One => "tek",
+    }
 }
 
 fn draw_footer(frame: &mut ratatui::Frame<'_>, area: Rect, view: &View<'_>) {
@@ -406,6 +420,17 @@ fn clock(ms: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Tel değeri İngilizce kalır, ekrana yazılan Türkçe olur (D-036).
+    #[test]
+    fn the_repeat_label_is_turkish_while_the_wire_value_stays_english() {
+        assert_eq!(repeat_label(RepeatMode::Off), "kapalı");
+        assert_eq!(repeat_label(RepeatMode::All), "tümü");
+        assert_eq!(repeat_label(RepeatMode::One), "tek");
+        // Tel tarafı değişmemeli: JSON ve IPC bunu okuyor.
+        assert_eq!(RepeatMode::All.as_str(), "all");
+        assert_eq!(RepeatMode::One.to_string(), "one");
+    }
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)

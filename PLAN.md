@@ -51,12 +51,18 @@ Sonra **bekle.** Cevap gelmeden ilerleme, geçici çözümle devam etme.
 Her cevaplanan soru `DECISIONS.md` dosyasına eklenir:
 
 ```
-## D-007 — Kimlik eşleşme eşiği
-Tarih: 2026-09-01
-Soru: Bulanık eşleşmede minimum güven skoru kaç olmalı?
-Karar: 0.85. Altındakiler "eşleşmedi" sayılır, kullanıcıya elle onay için sunulur.
-Gerekçe: 0.75'te yanlış eşleşme oranı %4'e çıkıyordu.
+## D-NNN — <kararın tek satırlık başlığı>
+**Tarih:** YYYY-AA-GG · **Durum:** UYGULANDI (YYYY-AA-GG)
+**Soru:** <cevaplanan soru>
+**Karar:** <verilen karar>
+**Gerekçe:** <neden bu, neden öteki değil>
 ```
+
+Numara **uydurulmaz**: `DECISIONS.md`'nin sonundaki son numaranın bir
+fazlasıdır. Bu blok bir biçim örneğidir; içindeki `D-NNN` bilerek sahte bir
+numaradır. Bir zamanlar burada örnek olarak `D-007` yazıyordu ve depoda
+bambaşka bir konuda gerçek bir D-007 vardı — örneği arayan okur yanlış kararı
+buluyordu.
 
 Aynı soru iki kez sorulmaz. Bir şeye karar vermeden önce `DECISIONS.md`'yi oku.
 
@@ -192,13 +198,23 @@ Cargo workspace, iki crate, CI (test + clippy + fmt), `DECISIONS.md` boş dosya.
 - Zip'i akış halinde oku — 8 yıllık arşiv büyük olabilir, tamamını belleğe alma.
 - **Format değişebilir.** Beklenmeyen alan görürsen düşürme; sayıp raporla (K9).
 
-> KARAR NOKTASI: Last.fm / ListenBrainz içe aktarma bu fazda mı, Faz 2'de mi? **Sor.**
+> KARAR NOKTASI: Last.fm / ListenBrainz içe aktarma bu fazda mı, Faz 2'de mi?
+> **İKİSİ DE DEĞİL — soru bayatladı.** Faz 0 ve Faz 2 kapandı, ikisinde de
+> yazılmadı: `import/` bugün yalnızca `spotify.rs` + `archive.rs` taşıyor.
+> Soru "hangi fazda" değil artık; **yapılacak mı** diye sorulmalı ve yeni bir
+> faza bağlanmalı. K2 gereği kaynak yine export dosyası olurdu (ListenBrainz
+> export'u JSON, Last.fm'in kendi export'u yok — üçüncü taraf araç gerekir ve
+> bu tek başına bir karar). Açık, sahipsiz, ve bir faza bağlı değil.
 
 ### 0.3 Depolama
 SQLite. Ham `listen` olayları **asla silinmez** — istatistikler bunlardan türetilir.
 Şema versiyonlanır, migration'lar baştan planlanır.
 
-> KARAR NOKTASI: Şema taslağını yazmadan önce sun ve onay al. Sonradan değiştirmek pahalı.
+> KARAR NOKTASI: Şema taslağını yazmadan önce sun ve onay al. Sonradan
+> değiştirmek pahalı. **KAPANDI — şema yazıldı ve uygulandı.**
+> `library/schema.rs`: sıralı, geri dönüşsüz göçler dizisi, sürüm SQLite'ın
+> `user_version` pragma'sında, "yeni göç ekle, var olanı değiştirme" kuralı
+> modül başlığında yazılı. Ham `listen` satırı silen bir göç yok (ASLA YAPMA).
 
 ### 0.4 Kanonik kimlik çözümlemesi
 **Önce `spike/` içinde Python ile prototiple.** Algoritma belli değil; eşik değerleri,
@@ -209,7 +225,13 @@ Doğruluk oranı bu projenin en önemli metriğidir; her değişiklikte ölç.
 
 Tatmin edici orana ulaşınca `identity/`'ye porta. Zincir K6'daki sırayı izler.
 
-> KARAR NOKTASI: Kabul edilebilir minimum doğruluk oranı ve güven eşiği. **Sor.**
+> KARAR NOKTASI: Kabul edilebilir minimum doğruluk oranı ve güven eşiği.
+> **KAPANDI — kod ve D-009.** Taban `tests/identity_accuracy.rs` içinde
+> `ACCURACY_FLOOR = 0.97` ve asla "test geçsin" diye düşürülmez; küme de bir
+> sözleşmedir (en az 60 vaka, en az 15 negatif). Bulanık tarafta sanatçı
+> benzerliği `ARTIST_MIN_SIMILARITY = 0.7`'nin altındaysa aday hiç
+> değerlendirilmez (`identity/fuzzy.rs`). Bugünkü ölçüm: **72/72 = %100**,
+> 22 negatif vaka.
 
 ### 0.5 İstatistik motoru
 Toplam süre, en çok dinlenenler, dönemsel kırılım, atlanma oranı, ilk/son dinleme,
@@ -976,7 +998,11 @@ eklenti düşmeli.
 - Gerçek zamanlı dizin izleme (D-025) — hâlâ açık, `--if-stale` yoklaması
   yerinde duruyor.
 
-**D-041'in çizdiği tur (§2.1 + §2.2) bitti; 304 test, clippy ve fmt temiz.**
+**D-041'in çizdiği tur (§2.1 + §2.2) bitti; üç kapı temiz.**
+
+Bugünkü koşum: **433 test geçiyor**, 7 test kendini atlıyor ve sebebini
+yazıyor (AcoustID anahtarsız ×3, Torznab yapılandırmasız ×3, ses aygıtı
+açılamadı ×1). Atlanan test geçmiş sayılmaz — D-043'ün kuralı.
 Faz 2'nin "bitti sayılır" ölçütünün ikisi de karşılandı: Rust olmayan bir
 referans eklenti gerçek bir serviste çalışıyor (§2.2) ve çekirdek sürüm
 uyumsuzluğunda çökmeden reddediyor (§2.1, `plugin_process.rs`).
@@ -984,7 +1010,7 @@ uyumsuzluğunda çökmeden reddediyor (§2.1, `plugin_process.rs`).
 D-045'in açtığı tur §2.3 (D-046), §2.4 (D-047) ve §2.5 (D-048) ile bitti.
 **Faz 2'nin bütün bölümleri TAMAM.**
 
-Faz 2'den çıkarken açık kalan dört borç — biri bloklayıcı, üçü değil:
+Faz 2'den çıkarken açık kalan beş borç — biri bloklayıcı, dördü değil:
 
 - **Eklenti motoru (D-049 kural + D-050 tasarım) — Faz 2'nin gerçek bitmemiş
   işi.** Bölümlerin hepsi TAMAM ama üç eklentinin üçü de kullanıcıdan sistem
@@ -998,6 +1024,14 @@ Faz 2'den çıkarken açık kalan dört borç — biri bloklayıcı, üçü değ
   cevaplanırsa **üç** olur.
 - **Gömülü AcoustID anahtarı yok** (`EMBEDDED_API_KEY` boş, D-046).
 - **Gerçek zamanlı dizin izleme** (D-025) — `--if-stale` yoklaması yerinde.
+- **`play --dry-run` sağlayıcı parça kimliğini insan çıktısına yazmıyor**
+  (D-054'te ölçüldü). `output::play` yalnızca `sanatçı - başlık` basıyor;
+  kimlik ancak `--json` ile görünüyor. Yerel kütüphanede sorun değil (sorgu
+  zaten adla yapılıyor) ama kimliği **opak** olan sağlayıcılarda belgelenen
+  akışı `jq`'ya mahkûm ediyor: torrent'in iki adımlı yayım→dosya seçimi
+  (`<infohash>/<sıra>`) insan çıktısından izlenemiyor. Çıktıyı değiştirmek
+  snapshot testlerini kırar, o yüzden ölçüldü ve borç olarak yazıldı;
+  düzeltilmedi.
 
 ### 2.7 Eklenti bağımlılık sözleşmesi — KURAL KAPANDI (D-049), UYGULAMA §2.8'de
 
@@ -1041,7 +1075,7 @@ yok"a dönüşmüyor, `tune provider test` KULLANILAMIYOR deyip sebebini yazıyo
 > kullanıcı hiçbir şey derlemez, ama D-047'nin ölçtüğü +179 crate yalnızca
 > kapıyı açan derlemeye girer ve `cargo tree -p tune-core` mobilde yine 77 der.
 >
-> **K4 değişmiyor:** alt süreç + JSON-RPC sınırı herkese açık kalır, motor tek
+> **K5 değişmiyor:** alt süreç + JSON-RPC sınırı herkese açık kalır, motor tek
 > yol değil *kurulum gerektirmeyen desteklenen yol* olur. Depoda dağıtılan her
 > eklenti ondan geçer.
 
@@ -1266,12 +1300,12 @@ bir tema yazarı. Yorum ve arayüz metni Türkçe kalır. Bu karar uygulanırken
 >
 > **Yeni açık madde — "mod" paketleri.** D-037'de kullanıcı, tema paketleriyle
 > birlikte dağıtılan, davranış değiştiren bir "mod" kavramı önerdi. Bilinçli
-> olarak ertelendi. Bir mod'un webview içinde çalışıp IPC çağırması K4'ün
+> olarak ertelendi. Bir mod'un webview içinde çalışıp IPC çağırması K5'in
 > sağlayıcı eklentileri için şart koştuğu "alt süreç + JSON-RPC" modelinden
 > köklü biçimde farklı bir güvenlik sınıfı taşır (aynı webview'de çöküp bütün
 > arayüzü dondurabilir). §3.3 kapandıktan sonra ayrı bir tur gerekiyor:
 >
-> KARAR NOKTASI: Mod'lar nasıl çalışır — ayrı bir süreç mi (K4 modeli, ama o
+> KARAR NOKTASI: Mod'lar nasıl çalışır — ayrı bir süreç mi (K5 modeli, ama o
 > zaman "webview içinde" vaadi düşer), yoksa sınırlı/izinli bir webview JS
 > sandbox'ı mı? IPC'nin hangi alt kümesi (varsa) açılır? Tema ile aynı paket
 > biçimini mi paylaşır yoksa ayrı mı? **Sor.**

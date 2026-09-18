@@ -337,6 +337,11 @@ pub(crate) fn parse_json<T: serde::de::DeserializeOwned>(
 }
 
 /// Ağ katmanı hatası üretir (bağlantı kurulamadı, zaman aşımı, TLS…).
+///
+/// Yalnızca gerçekten sokete dokunan derlemelerde var: somut istemci
+/// (`http-client`) ve testlerdeki sahte istemci. Varsayılan feature'larla
+/// derlenen çekirdekte çağıranı yok — orada durması ölü kod uyarısıydı.
+#[cfg(any(feature = "http-client", test))]
 pub(crate) fn network_err(url: &str, detail: impl std::fmt::Display) -> Error {
     Error::new(
         Stage::NetworkRequest,

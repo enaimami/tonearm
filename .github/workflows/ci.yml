@@ -62,15 +62,36 @@ jobs:
   # feature'larını açıyor ve varsayılan derlemedeki ölü kodu gizliyor. Mobil
   # (Faz 6) çekirdeği bu feature'lar olmadan derleyecek, o yüzden ayrı bakılır.
   #
-  # Bugün bu iş **kırmızı**: net::network_err ve net::fake::last_request ölü,
-  # playback/player.rs'te karşılanmayan bir lint beklentisi var. Bu yüzden
-  # kapı değil, rapor — düzeltilince `continue-on-error` kaldırılmalı.
-  core-alone:
+  # Bu iş bir zamanlar kırmızıydı ve `continue-on-error` ile maskeliydi;
+  # D-054'te düzeltildi ve **kapıya** dönüştü. Tek tek feature'lara da
+  # bakılıyor: borcun biriktiği yer birleşim değil, tek başına açılan
+  # feature'dı (`http-client` açık, `audio` kapalı gibi).
+  core-features:
     runs-on: ubuntu-24.04
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+
+      # `audio` feature'ı cpal üzerinden ALSA istiyor.
+      - name: Sistem bağımlılıkları
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libasound2-dev
+
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
       - uses: Swatinem/rust-cache@v2
+
       - name: Çekirdek tek başına (varsayılan feature'lar)
         run: cargo clippy -p tune-core --all-targets -- -D warnings
+
+      - name: Her feature tek tek
+        run: |
+          for f in audio http-client fingerprint render-png; do
+            echo "::group::$f"
+            cargo clippy -p tune-core --all-targets --features "$f" -- -D warnings
+            echo "::endgroup::"
+          done
+
+      - name: Hepsi birden
+        run: cargo clippy -p tune-core --all-targets --features audio,http-client,fingerprint,render-png -- -D warnings

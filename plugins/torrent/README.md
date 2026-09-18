@@ -3,6 +3,13 @@
 Faz 2 §2.4'ün sağlayıcısı. Karar kaydı: **D-047**.
 
 Bu dizin eklentinin *kurulu* hâlidir; kaynağı `crates/tune-plugin-torrent/`.
+
+> **Bu dizin kalkacak (D-050).** Torrent eklenti olmaktan çıkıp çekirdeğe
+> feature kapılı bir sağlayıcı olarak taşınacak: kullanıcı hiçbir şey
+> derlemeyecek, ama `librqbit`'in +179 crate'i yalnızca kapıyı açan derlemeye
+> girecek. Karar alındı, **kod yazılmadı** — PLAN.md §2.8. Aşağısı bugünkü
+> hâli anlatır.
+
 Eklenti çekirdeğin içinde değil, **alt süreç** olarak çalışır (K5) — sebebi
 ölçüldü: `librqbit` `tune-core`'un bağımlılık ağacına 179 crate ekliyordu
 (77 → 256) ve o ağaç `uniffi` ile mobile de gidecekti.
@@ -42,18 +49,38 @@ elinizde bir infohash ya da magnet varsa.
 Torznab bir **yayım** (release) döndürür, bir parça değil — genelde bir albüm.
 Protokolün `WireTrack`'i ise bir parça. api 1'i büyütmeden çözüm iki adım:
 
+**Sağlayıcıya doğrudan arama yaptıran bir CLI komutu yok** — `tune provider`
+altında `search` diye bir alt komut yoktur. Eklentinin araması `tune play`'in
+üzerinden çalışıyor: katalogda sonuç yoksa çekirdek akıtabilen bütün
+sağlayıcılara soruyor (`Session::queue_from_search`), torrent de onlardan
+biri.
+
+Kimlikleri görmek için `--dry-run --json` gerekiyor; insan okunur çıktı
+yalnızca `sanatçı - başlık` basıyor ve bir yayımın infohash'i orada
+**görünmüyor**:
+
 ```bash
-tune provider search torrent "radiohead ok computer"   # yayımlar; kimlik = <infohash>
-tune provider search torrent <infohash>                # içindeki ses dosyaları; kimlik = <infohash>/<sıra>
+# 1. adım — yayımlar. Kimlik = <infohash>, ve yalnızca JSON'da görünür.
+tune play "radiohead ok computer" --dry-run --json | jq -r '.queued[].id.id'
+
+# 2. adım — o yayımın içindeki ses dosyaları. Kimlik = <infohash>/<sıra>
+tune play <infohash> --dry-run --json | jq -r '.queued[].id.id'
+
+# 3. adım — çal.
 tune play <infohash>/3
 ```
+
+> Bu iki adımın `--json`'a mahkûm olması eklentinin değil **CLI'nin** eksiği:
+> `play --dry-run` sağlayıcı parça kimliğini insan çıktısına yazmıyor. Açık
+> borç olarak PLAN.md §2.6'da duruyor.
 
 Bir magnet bağlantısını doğrudan aratabilirsiniz; eklenti onu kataloğuna yazıp
 içindeki dosyaları listeler.
 
 Tek ses dosyası olan bir yayımda çıplak `<infohash>` doğrudan çalar. Birden
 çok dosya varsa eklenti **tahmin etmez**: dosyaları listeleyen ve ne
-yazacağınızı söyleyen bir hata döner.
+yazacağınızı söyleyen bir hata döner — 2. adımı `--json` olmadan da bu hata
+üzerinden görebilirsiniz.
 
 ## Ses nasıl geliyor
 

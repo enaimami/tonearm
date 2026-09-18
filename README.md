@@ -69,14 +69,14 @@ flowchart LR
     end
 
     subgraph Core["⚙️ tune Çekirdeği (tune-core)"]
-        D["Kanonik Kimlik Çözümleyici\n(ISRC / MBID / Bulanık Eşleme)"]
-        E[("Yerel SQLite Veritabanı\n(listens & provider_tracks)")]
-        F["Ses Motoru & Scrobbler\n(Symphonia + CPAL)"]
+        D["Kanonik Kimlik Çözümleyici<br/>(ISRC / MBID / Bulanık Eşleme)"]
+        E[("Yerel SQLite Veritabanı<br/>(listens & provider_tracks)")]
+        F["Ses Motoru & Scrobbler<br/>(Symphonia + CPAL)"]
     end
 
     subgraph Surfaces["🖥️ Arayüz & Çıktılar"]
         G["📊 İstatistik Motoru"]
-        H["🎨 Wrapped Kart Üreticisi\n(SVG / PNG)"]
+        H["🎨 Wrapped Kart Üreticisi<br/>(SVG / PNG)"]
         I["📟 Terminal Oynatıcı (TUI)"]
         J["✨ Gelecek: Tauri GUI & Mobil"]
     end
@@ -116,12 +116,17 @@ flowchart LR
 
 ### 1. Kurulum
 
-Sisteminizde **Rust 1.85+** (2024 edition) kurulu olmalıdır:
+Çekirdek, CLI ve masaüstü kabuğu için tek gereksinim **Rust 1.85+** (2024
+edition). Eklentiler ayrı şeyler istiyor — hangisinin neye ihtiyacı olduğu
+[Yol Haritası](#️-yol-haritası)'ndaki Faz 2 satırında ve
+[eklenti yazma rehberinde](docs/eklenti-yazma.md) yazılı. Hiçbiri `tune`'u
+çalıştırmak için gerekli değildir; kurulu değilse ilgili eklenti
+`tune provider test <ad>` çıktısında KULLANILAMIYOR der ve sebebini yazar.
 
 ```bash
 # 1. Depoyu klonlayın
-git clone https://github.com/kullanici-adi/tune.git
-cd tune
+git clone https://github.com/enaimami/u-tune.git
+cd u-tune
 
 # 2. Optimize edilmiş sürümü derleyin
 cargo build --release
@@ -161,13 +166,28 @@ tune stats --year 2024 --top 10
 ```text
 $ tune stats --year 2024 --top 3
 
-📊 2024 Dinleme İpuçları (Toplam: 54,120 dk)
-─────────────────────────────────────────────
-🏆 En Çok Dinlenen Sanatçılar:
-   1. Pink Floyd ─────── 12,450 dk (%23)
-   2. Radiohead ────────  8,120 dk (%15)
-   3. Daft Punk ────────  6,300 dk (%12)
+dönem: 2024
+4128 çalma · 271.3 saat · 1163 parça · 402 sanatçı
+kapsamda 4310 kayıt, 182 kısa çalma atlandı, 0 kayıt kapsam dışı, 37 kayıt kimliksiz
+
+en çok dinlenen sanatçılar
+   1. Pink Floyd                         312 çalma  28sa 41dk  47 parça
+   2. Radiohead                          268 çalma  21sa 12dk  53 parça
+   3. Daft Punk                          193 çalma  14sa 55dk  31 parça
+
+en çok dinlenen parçalar
+   1. Pink Floyd - Time                               38 çalma  4sa 21dk
+   2. Radiohead - Weird Fishes/Arpeggi                29 çalma  2sa 34dk
+   3. Daft Punk - Digital Love                        27 çalma  2sa 10dk
+
+en çok dinlenen albümler
+   1. Pink Floyd - The Dark Side of the Moon         214 çalma
+   2. Radiohead - In Rainbows                        171 çalma
+   3. Daft Punk - Discovery                          142 çalma
 ```
+
+> Sayılar örnektir; biçim `tune-cli/src/output.rs`'in bastığının aynısıdır.
+> Atlanan kayıtlar sessizce düşmez, üçüncü satırda sayılır (K9).
 
 #### 🎨 Adım 3: Wrapped Kartınızı Oluşturun
 Sosyal medyada paylaşmak üzere yüksek çözünürlüklü görsel kartınızı üretin:
@@ -194,8 +214,12 @@ Yerel müzik klasörlerinizi tek bir komutla indeksleyin ve çalın:
 # Müzik dizininizi ayarlayın (varsayılan: ~/Müzik veya ~/Music)
 export TUNE_MUSIC_DIRS=~/Müzik
 
-# Kütüphaneyi tarayın (artımlı tarama, yalnızca değişenler güncellenir)
+# Kütüphaneyi tarayın (tam tarama)
 tune provider scan
+
+# Yalnızca dizin damgası değiştiyse tara — düz `scan`'den ucuz, ama
+# yerinde yeniden etiketlenen dosyaları göremez.
+tune provider scan --if-stale
 
 # Arama yapın ve Terminal Arayüzü (TUI) ile çalın
 tune play "Pink Floyd" --all --tui
@@ -219,7 +243,21 @@ tune play "Get Lucky" --tui
 ```
 
 > [!NOTE]
-> **Güvenlik Güvencesi:** Parolanız komut satırına argüman olarak yazılmaz (kabuk geçmişine ve `ps` çıktısına sızmaz). Komut çalışırken yankısız sorulur veya `TUNE_PASSWORD` ortam değişkeninden okunur. Diskte şifrelenmiş anahtar/token olarak saklanır.
+> **Parola nereye gitmez:** komut satırına argüman olarak yazılmaz (kabuk
+> geçmişine ve `ps` çıktısına sızardı). Yankısız sorulur ya da `TUNE_PASSWORD`
+> ortam değişkeninden okunur; log'a ve `tune diag` raporuna da girmez.
+>
+> **Parolanın kendisi diske hiç yazılmaz.** Subsonic'te ondan bir `salt` +
+> `md5(parola+salt)` token'ı türetilir, Jellyfin'de bir erişim anahtarı
+> alınır; saklanan bunlardır. Kayıt `<veri dizini>/servers.json` dosyasında,
+> unix'te `0600` izinle, **düz metin JSON** olarak durur.
+>
+> Bunu bir şifreleme vaadi olarak okumayın: türetilmiş token o sunucuya
+> erişim için parolanın yerine geçer. Koruma dosya izninin verdiği kadardır,
+> disk erişimi olan birine karşı değildir. Eklenti ve AcoustID sırları ayrı
+> bir dosyada (`secrets.json`, yine `0600` ve düz metin) durur — anahtarlığa
+> (`keyring`) yaslanmamak bilinçli bir karardı (D-042): okuma tek bir yerden
+> geçtiği için arkasına sonradan anahtarlık koymak tek dosyalık bir iş.
 
 ---
 
@@ -228,21 +266,24 @@ tune play "Get Lucky" --tui
 `tune play "<sorgu>" --tui` komutu zengin bir terminal arayüzü başlatır:
 
 ```text
-┌─────────────────────────────── tune player ────────────────────────────────┐
-│                                                                            │
-│  ▸ Pink Floyd — Time [The Dark Side of the Moon]                           │
-│  02:45 ━━━━━━━━━━━━━━━━━━━━━━●───────────────────────────── 06:53 (40%)    │
-│                                                                            │
-│  Kuyruk (3/10)                  [Karıştır: AÇIK]  [Tekrar: TÜMÜ]          │
-│  ────────────────────────────────────────────────────────────────────────  │
-│    1. Pink Floyd — Speak to Me                                   01:08     │
-│    2. Pink Floyd — Breathe (In the Air)                          02:49     │
-│  ▸ 3. Pink Floyd — Time                                          06:53     │
-│    4. Pink Floyd — The Great Gig in the Sky                      04:47     │
-│                                                                            │
-│  [Boşluk] Duraklat  [n/b] Sonraki/Önceki  [s] Karıştır  [r] Tekrar  [q] Çık │
+┌ tune ──────────────────────────────────────────────────────────────────────┐
+│ ▶ Pink Floyd - Time  (çalıyor)                                             │
 └────────────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────┐
+│████████████████████████████    2:45 / 6:53                                 │
+└────────────────────────────────────────────────────────────────────────────┘
+┌ kuyruk (4) · tekrar: tümü · karıştır: açık ────────────────────────────────┐
+│   Pink Floyd - Speak to Me                                                 │
+│   Pink Floyd - Breathe (In the Air)                                        │
+│ ▸ Pink Floyd - Time                                                        │
+│   Pink Floyd - The Great Gig in the Sky                                    │
+└────────────────────────────────────────────────────────────────────────────┘
+ boşluk duraklat · n/b sonraki/önceki · ↑↓ seç · enter çal · s karıştır · r tekrar · q çık
 ```
+
+> Kuyruk satırları `sanatçı - başlık`tır; süre ve albüm sütunu **yoktur**.
+> Bir hata olursa alt satır bir çerçeveye dönüşür, ilk satırını gösterir ve
+> `tune diag`'a yönlendirir — hata ekranı kaplamaz ama saklanmaz da (K9).
 
 ### ⌨️ Klavye Kısayolları
 
@@ -262,20 +303,26 @@ tune play "Get Lucky" --tui
 
 | Alt Komut | Seçenekler | Açıklama |
 | :--- | :--- | :--- |
-| `tune import <zip>` | | Spotify genişletilmiş geçmiş arşivini içe aktarır |
+| `tune import <zip\|dizin>` | | Export arşivini (zip ya da açılmış dizin) içe aktarır |
 | `tune stats` | `--year <yıl>`, `--top <n>`, `--min-ms <ms>` | Detaylı dinleme istatistiklerini listeler |
 | `tune wrapped` | `--year <yıl>`, `--format square\|story`, `--out <dosya>` | Paylaşılabilir görsel Wrapped kartı oluşturur |
+| `tune resolve` | `"<sanatçı> - <başlık>"` ya da `--file <ses>` | Tek parçayı kanonik kimlik zincirinden geçirir |
 | `tune play <sorgu>` | `--all`, `--shuffle`, `--dry-run`, `--tui` | Arama sonucundaki parçaları çalar |
-| `tune library search` | `<sorgu>`, `--limit <n>` | Kütüphane içinde tam metin arama yapar |
-| `tune provider scan` | | Yerel müzik klasörlerini tarar ve indeksler |
-| `tune provider add` | `subsonic\|jellyfin`, `--url`, `--user`, `--api-key` | Yeni bir uzak müzik sunucusu kaydeder |
-| `tune provider list` | | Etkin müzik sağlayıcılarını listeler |
-| `tune provider test` | `<sağlayıcı-adı>` | Sağlayıcının erişim durumunu ve parça sayısını test eder |
+| `tune library search <sorgu>` | `--limit <n>`, `--min-ms <ms>` | Kütüphane içinde tam metin arama yapar |
+| `tune provider list` | | Kayıtlı sağlayıcıları listeler (süreç başlatmaz) |
+| `tune provider test <ad>` | | Sağlayıcının erişim durumunu ve parça sayısını sınar |
+| `tune provider scan` | `--if-stale` | Yerel müzik dizinlerini tarar; bayraksız hâli **tam** tarama |
+| `tune provider add <tür>` | `--url`, `--user`, `--name`, `--api-key`, `--verify` | Subsonic ya da Jellyfin sunucusu kaydeder |
+| `tune provider remove <ad>` | | Kayıtlı uzak sunucuyu siler |
+| `tune provider servers` | | Kayıtlı uzak sunucuları listeler (kimlik bilgisi gösterilmez) |
 | `tune plugin list` | | Kurulu eklentileri ve onay durumlarını listeler |
-| `tune plugin approve` | `<eklenti-adı>` | Eklentinin beyan ettiği izinleri onaylar |
-| `tune secret set` | `<ad-alanı> <anahtar>` | Sır yazar (değer istemden ya da `TUNE_SECRET`'ten) |
-| `tune resolve` | `"<sanatçı> - <başlık>"` | Tek parçayı kanonik kimlik çözümleme zincirinden geçirir |
-| `tune diag` | | Son işlemin ortam, aşama ve hata tanılama raporunu döker |
+| `tune plugin approve <ad>` | | Eklentinin beyan ettiği izinleri onaylar |
+| `tune plugin disable\|enable <ad>` | | Eklentiyi kapatır (onay korunur) / geri açar |
+| `tune plugin forget <ad>` | | Onayı tamamen unutur; bir dahaki sefere baştan sorulur |
+| `tune secret list` | | Ad alanlarını ve anahtar adlarını listeler (değerler **gösterilmez**) |
+| `tune secret set <ad-alanı> <anahtar>` | | Sır yazar (değer istemden ya da `TUNE_SECRET`'ten) |
+| `tune secret remove <ad-alanı> <anahtar>` | | Bir sırrı siler |
+| `tune diag` | | Son çalıştırmanın ortam, aşama ve hata tanılama raporunu döker |
 
 > [!TIP]
 > Bütün komutlar `--json` parametresini destekler. Çıktıları `jq` veya kendi betiklerinizle kolayca işleyebilirsiniz:
@@ -290,7 +337,24 @@ tune play "Get Lucky" --tui
 - [x] **Faz 0: Kimlik & İstatistikler** — Veri içe aktarma, kanonik kimlik eşleme, SQLite depolama, istatistik motoru.
 - [x] **Faz 0.5: Paylaşılabilir Wrapped** — SVG & PNG (1080x1080 / 1080x1920) görsel kart üretimi.
 - [x] **Faz 1: Evrensel Müzik Çalar** — Yerel dosya oynatma, Navidrome & Jellyfin akışı, dahili scrobbler, TUI oynatıcı.
-- [x] **Faz 2: Eklenti Ekosistemi & Parmak İzi** — Alt süreç + JSON-RPC eklenti protokolü ([eklenti yazma rehberi](docs/eklenti-yazma.md)); AcoustID parmak izi ile kimlik zincirinin dördüncü halkası; üç sağlayıcı eklentisi: [SoundCloud](plugins/soundcloud/) ve [YouTube Music](plugins/ytmusic/) (Python, `pip install` gerektirmez) ile [torrent](plugins/torrent/) (Rust, Torznab araması + sıralı akış). Üçü de canlı serviste arıyor ve çalıyor. *(Kalan iş: eklenti çalışma zamanı motoru — PLAN.md §2.8.)*
+- [x] **Faz 2: Eklenti Ekosistemi & Parmak İzi** — Alt süreç + JSON-RPC eklenti protokolü ([eklenti yazma rehberi](docs/eklenti-yazma.md)); AcoustID parmak izi ile kimlik zincirinin dördüncü halkası; üç sağlayıcı eklentisi: [SoundCloud](plugins/soundcloud/), [YouTube Music](plugins/ytmusic/) ve [torrent](plugins/torrent/). Üçü de canlı serviste arıyor ve çalıyor.
+
+  **Ama üçü de kurulum istiyor ve bu Faz 2'nin bitmemiş işi** (PLAN.md §2.7–2.8):
+
+  | eklenti | bugün istediği |
+  | :--- | :--- |
+  | `soundcloud` | `PATH`'te `python3` (yalnızca standart kütüphane, `pip install` yok) |
+  | `ytmusic` | `python3` + `yt-dlp` |
+  | `torrent` | Rust araç zinciri — `cargo build --release -p tune-plugin-torrent` |
+
+  Kural (D-049) hiçbir eklentinin root ya da sistem çapında kurulum
+  isteyememesi; bugünkü hâl bunu **üçünde de** ihlal ediyor. Çözüm karara
+  bağlandı (D-050: eklenti motoru), kodu yazılmadı.
+
+  AcoustID tarafında ayrıca gömülü bir istemci anahtarı **yok**: parmak izi
+  halkası yalnızca kendi anahtarınızı `tune secret set identity:acoustid
+  api_key` ile yazdığınızda çalışır, anahtarsız çağrı sessizce boş dönmez,
+  ne yapılacağını söyleyerek durur.
 - [x] **Faz 3: Masaüstü Uygulaması (GUI) & Temalar** — Tauri tabanlı masaüstü arayüzü ve sürümlenmiş CSS tema sözleşmesi ([tema yazma rehberi](crates/tune/themes/README.md)).
 - [ ] **Faz 4: Senkronize Odalar (Birlikte Dinleme)** — Ses akışı röle edilmeden zaman çapasıyla eşzamanlı dinleme.
 - [ ] **Faz 5: Sosyal Graf** — Arkadaşlık kurulmaz, odalardan türetilir.

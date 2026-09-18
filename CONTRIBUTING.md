@@ -27,6 +27,24 @@ Tam "bitti" ölçütü PLAN.md §0.4'te. Üçü CI'da da koşuyor
 ([`.github/workflows/ci.yml`](.github/workflows/ci.yml), D-053) — ama önce
 kendi makinende geçmeli, CI bir hatırlatıcıdır, ilk savunma hattı değil.
 
+### Kendini atlayan testler
+
+Ağa bağlı testler (D-043) ulaşamadıklarında **düşmez, kendilerini atlar ve
+sebebini `stderr`'e yazar.** Atlanan test geçmiş sayılmaz — rapor ederken
+"atlandı" de. Bugün 433 test geçiyor, 7'si kendini atlıyor.
+
+Atlananları gerçekten koşturmak için gereken ortam değişkenleri:
+
+| Değişken | Neyi açar |
+|---|---|
+| `TUNE_ACOUSTID_KEY` | AcoustID canlı sınamaları (3 test). Anahtarsız derlemede `EMBEDDED_API_KEY` boş olduğu için atlanırlar. |
+| `TUNE_TORZNAB_URL` + `TUNE_TORZNAB_KEY` | Torznab canlı sınamaları (3 test). Kendi Prowlarr/Jackett'ınızı ister; `TUNE_TORZNAB_QUERY` sorguyu değiştirir. |
+| `TUNE_YTDLP` | `ytmusic` eklentisinin yt-dlp yolu; `PATH`'te yoksa buradan verilir. |
+
+Depo kökündeki `.env` **hiçbir kod tarafından okunmaz** — `dotenv` benzeri bir
+bağımlılık yok. Oraya yazdığınız değer kendiliğinden ortama girmez; kabuğunuza
+siz aktarmalısınız (`set -a; . ./.env; set +a`). Dosya `.gitignore`'da.
+
 Yeni bir yetenek eklediysen ayrıca:
 
 - CLI'de bir alt komutu var ve `--json` destekliyor.

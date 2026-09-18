@@ -144,21 +144,27 @@ CLI'nin amacı çekirdeği elle sınamak. Her çekirdek yeteneğinin bir alt kom
 
 ```
 tune import <zip|dizin>                     # export içe aktar
-tune stats [--year N] [--top N]             # istatistikler
+tune stats [--year N] [--top N] [--min-ms MS]
 tune resolve "<sanatçı> - <başlık>" | --file <ses>
-tune library search <sorgu>
+tune library search <sorgu> [--limit N] [--min-ms MS]
 tune wrapped [--year N] [--out <dosya>] [--format square|story]
-tune provider list | test <ad> | scan [--incremental]
-tune provider add <tür> <url> <kullanıcı> | remove <ad> | servers
+tune provider list | test <ad> | scan [--if-stale]
+tune provider add <tür> --url U --user K [--name AD] [--api-key A] [--verify]
+tune provider remove <ad> | servers
 tune plugin list | approve <ad> | disable <ad> | enable <ad> | forget <ad>
-tune secret list | set <ad-alanı> <anahtar>
+tune secret list | set <ad-alanı> <anahtar> | remove <ad-alanı> <anahtar>
 tune play <parça> [--all] [--shuffle] [--dry-run] [--tui]
 tune diag                                   # son çalıştırmanın tanı raporu
 ```
 
+Küresel bayraklar: `--json`, `--data-dir <DİZİN>`, `--online`, `-v/-vv`.
+
 Her komut `--json` desteklemeli — hem betiklenebilirlik hem de GUI'nin aynı veriyi
 alacağının kanıtı olarak. İnsan okunur çıktı ayrı bir biçimlendirme katmanıdır
 (`tune-cli/src/output.rs`).
+
+`--online` varsayılan **kapalı**: bir export'u içe aktarmak kimseyi sessizce
+ağa bağlamaz. Bayrak yokken kimlik zinciri yalnızca yerel halkaları koşar.
 
 ---
 

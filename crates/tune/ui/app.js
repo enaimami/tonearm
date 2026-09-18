@@ -23,6 +23,11 @@ const $ = (id) => document.getElementById(id);
 let anchor = null;
 let queue = { items: [], position: 0, repeat: "off", shuffle: false };
 
+// Tekrar kipinin kullanıcıya gösterilen adı (D-036). Anahtarlar tel
+// değerleridir; bilinmeyen bir kip gelirse ham değer gösterilir — sessizce
+// "kapalı" demek, yanlış durumu doğru gibi göstermek olurdu (K9).
+const REPEAT_LABELS = { off: "kapalı", all: "tümü", one: "tek" };
+
 // ————————————————————————————————————— hata ve bildirim
 
 function toast(err, info = false) {
@@ -116,7 +121,9 @@ function renderQueue(view) {
   const repeat = $("btnRepeat");
   repeat.classList.toggle("on", view.repeat !== "off");
   repeat.textContent = view.repeat === "one" ? "🔂" : "🔁";
-  repeat.title = `tekrar: ${view.repeat}`;
+  // Tel değeri (`off`/`all`/`one`) İngilizce kalır — JSON anahtarıdır.
+  // Kullanıcının okuduğu metin Türkçedir (D-036).
+  repeat.title = `tekrar: ${REPEAT_LABELS[view.repeat] ?? view.repeat}`;
 
   const current = view.items[view.position];
   $("nowTitle").textContent = current ? trackName(current.track) : "—";

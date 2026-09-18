@@ -70,6 +70,8 @@ impl Resp {
         }
     }
 
+    /// Yalnızca ses gövdesi sunan testler için — onlar da `audio` arkasında.
+    #[cfg(feature = "audio")]
     fn bytes(content_type: &'static str, body: Vec<u8>) -> Self {
         Self {
             status: 200,
@@ -254,6 +256,9 @@ fn client() -> Arc<dyn HttpClient> {
     Arc::new(UreqClient::new())
 }
 
+/// Ses fixture'ının yolu. Çağıranların hepsi `audio` arkasında: feature
+/// kapalıyken bu yardımcı ölü kod uyarısı oluyordu.
+#[cfg(feature = "audio")]
 fn fixture(name: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/audio"))
         .join(name)
