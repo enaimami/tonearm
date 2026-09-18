@@ -9,14 +9,19 @@
 //! **Bu testler varsayılan koşuma dahildir** (D-043) ve iki başarısızlığı ayrı
 //! tutuyor (K9):
 //!
-//! - **Ulaşamamak** başarısızlık değil: ağ yoksa, `python3` yoksa ya da
-//!   `yt-dlp` kurulu değilse test kendini atlar ve sebebini `stderr`'e yazar.
+//! - **Ulaşamamak** başarısızlık değil: ağ yoksa ya da `python3` yoksa test
+//!   kendini atlar ve sebebini `stderr`'e yazar.
 //! - **Ulaşıp beklenmeyeni almak** düşer.
+//!
+//! `yt-dlp` artık bir ön koşul değil: motor onu manifestteki sabitlenmiş
+//! sürümden indiriyor (D-055). Ağ varken indirememek **atlama sebebi değil,
+//! düşme sebebidir** — beyan edilen adres ölmüşse (yetim) bunu sessizce
+//! geçmek, bozuk bir manifesti yeşil göstermek olurdu.
 //!
 //! Kırmızı yandığında ilk soru: **son commit'e mi baksam, yoksa
 //! `yt-dlp -J "https://music.youtube.com/watch?v=..."` mi çeksem?** İkincisi
-//! çalışıyorsa ve testler hâlâ kırmızıysa kusur bizdedir. yt-dlp eski ise
-//! kusur bizde değil, kurulumda — mesaj da bunu söylüyor.
+//! çalışıyorsa ve testler hâlâ kırmızıysa kusur bizdedir. yt-dlp eskiyse
+//! kusur da bizde: sürümü manifest sabitliyor, kullanıcı değil.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -25,7 +30,8 @@ use std::path::{Path, PathBuf};
 use tune_core::config::Config;
 use tune_core::ids::{ProviderId, ProviderTrackId};
 use tune_core::plugin::PluginProvider;
-use tune_core::plugin::manifest::PluginManifest;
+use tune_core::plugin::manifest::{PluginManifest, Requirement};
+use tune_core::plugin::runtime::Engine;
 use tune_core::provider::{AudioSource, Capabilities, Provider};
 use tune_core::secrets::Secrets;
 
@@ -43,18 +49,32 @@ fn command_runs(program: &str, args: &[&str]) -> bool {
         .is_ok_and(|status| status.success())
 }
 
-/// yt-dlp eklentinin aradığı üç yoldan birinde var mı.
+/// Motorun kuracağı yt-dlp'yi bir kez indirip testler arasında paylaşır.
 ///
-/// Sıra eklentinin `ytdlp_command()` sırasıyla aynı; burada ayrı yazılmış
-/// olması bilinçli: test, eklentinin *iddiasını* değil ortamın durumunu
-/// ölçüyor.
-fn ytdlp_available() -> bool {
-    if let Ok(path) = std::env::var("TUNE_YTDLP") {
-        return command_runs(&path, &["--version"])
-            || command_runs("python3", &[&path, "--version"]);
+/// Eklenti artık yt-dlp'yi kendi aramıyor (D-055); onu motor kuruyor. Test de
+/// **aynı yoldan** geçiyor — sınanan şey tam olarak kullanıcının yaşadığı
+/// akış. İndirme her test için tekrarlanmasın diye sonuç sabit bir dizinde
+/// tutuluyor; motor eseri karmasıyla adlandırdığı için bu önbellek bayatlayamaz.
+fn cached_ytdlp(requirement: &Requirement) -> Result<PathBuf, String> {
+    let cache = std::env::temp_dir().join("tune-test-runtime");
+    let cached = cache.join(requirement.file_name());
+    if cached.exists() {
+        return Ok(cached);
     }
-    command_runs("yt-dlp", &["--version"])
-        || command_runs("python3", &["-m", "yt_dlp", "--version"])
+
+    let engine = Engine::new(&Config::with_data_dir(
+        std::env::temp_dir().join("tune-test-runtime-home"),
+    ));
+    let http = tune_core::net::default_http_client().map_err(|err| err.chain_text())?;
+    match engine.install(&http, requirement) {
+        Ok(outcome) if outcome.is_ready() => {}
+        Ok(outcome) => return Err(outcome.describe()),
+        Err(err) => return Err(err.chain_text()),
+    }
+
+    std::fs::create_dir_all(&cache).map_err(|err| err.to_string())?;
+    std::fs::copy(engine.artifact_path(requirement), &cached).map_err(|err| err.to_string())?;
+    Ok(cached)
 }
 
 /// YouTube Music'e TCP ile ulaşılabiliyor mu.
@@ -77,11 +97,13 @@ fn prerequisites_met(test: &str) -> bool {
         eprintln!("{test}: python3 yok — atlanıyor (bu bir başarısızlık değil)");
         return false;
     }
-    if !ytdlp_available() {
+    // Motor eseri HTTP ile indiriyor; bu derlemede istemci yoksa test
+    // koşulamaz. "Koşamadım" ile "koştu ve düştü" ayrı tanılar (K9) —
+    // ve atlanan test geçmiş sayılmaz (D-043).
+    if let Err(err) = tune_core::net::default_http_client() {
         eprintln!(
-            "{test}: yt-dlp yok — atlanıyor. Kurulum: \
-             https://github.com/yt-dlp/yt-dlp#installation \
-             (ya da `TUNE_YTDLP` ile yolunu verin)."
+            "{test}: {} — atlanıyor (bu derleme yt-dlp'yi indiremez)",
+            err.chain_text().replace('\n', " ")
         );
         return false;
     }
@@ -111,6 +133,21 @@ fn install(config: &Config) -> PluginProvider {
     }
 
     let manifest = PluginManifest::load(&dir).unwrap();
+
+    // Motorun işi: eklentinin beyan ettiği eserleri kur. Test bunu
+    // kullanıcının `tune plugin install` ile yaptığının aynısı olarak
+    // yapıyor, sonra sağlayıcıyı kuruyor — el sıkışmaya giden yol haritası
+    // ancak eser yerindeyse doluyor.
+    for requirement in &manifest.requires {
+        let cached = match cached_ytdlp(requirement) {
+            Ok(path) => path,
+            Err(reason) => panic!("yt-dlp kurulamadı: {reason}"),
+        };
+        let engine = Engine::new(config);
+        std::fs::create_dir_all(engine.runtime_dir()).unwrap();
+        std::fs::copy(&cached, engine.artifact_path(requirement)).unwrap();
+    }
+
     let secrets = Secrets::load(&config.secrets_path()).unwrap();
     PluginProvider::from_manifest(config, &manifest, &dir, &secrets).unwrap()
 }

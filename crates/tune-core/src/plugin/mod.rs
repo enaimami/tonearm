@@ -34,6 +34,7 @@ pub mod client;
 pub mod consent;
 pub mod manifest;
 pub mod protocol;
+pub mod runtime;
 pub mod transport;
 
 use std::path::{Path, PathBuf};
@@ -87,19 +88,37 @@ pub struct PluginEntry {
     pub permissions: Permissions,
     /// Onay durumu (manifest okunabildiyse).
     pub consent: Option<ConsentStatus>,
+    /// Motordan istenen eserlerin durumu (D-055). **Ağa çıkılmadan** ölçülür:
+    /// yalnızca diskte var mı ve karması tutuyor mu.
+    #[serde(default)]
+    pub requires: Vec<runtime::RequirementStatus>,
     /// Yüklenemiyorsa sebebi — tek satır, kopyalanabilir.
     pub problem: Option<String>,
 }
 
 impl PluginEntry {
     /// Bu eklenti başlatılabilir mi.
+    ///
+    /// Eksik bir eser yüklemeyi **engeller**: eseri olmayan bir eklentiyi
+    /// başlatmak, onu ilk aramada anlaşılmaz bir hatayla düşürmek olurdu.
+    /// Eksiklik burada, süreç açılmadan söylenir (K9).
     #[must_use]
     pub fn is_loadable(&self) -> bool {
         self.problem.is_none()
+            && self.missing_requirements().is_empty()
             && self
                 .consent
                 .as_ref()
                 .is_some_and(consent::ConsentStatus::is_approved)
+    }
+
+    /// Hazır olmayan eserler. Boşsa motor tarafında eksik yok.
+    #[must_use]
+    pub fn missing_requirements(&self) -> Vec<&runtime::RequirementStatus> {
+        self.requires
+            .iter()
+            .filter(|status| !status.state.is_ready())
+            .collect()
     }
 
     /// Kullanıcıya gösterilecek tek satırlık durum.
@@ -107,6 +126,25 @@ impl PluginEntry {
     pub fn status_text(&self) -> String {
         if let Some(problem) = &self.problem {
             return problem.clone();
+        }
+        let missing = self.missing_requirements();
+        if !missing.is_empty() {
+            let detail = missing
+                .iter()
+                .map(|status| {
+                    format!(
+                        "{} {}: {}",
+                        status.name,
+                        status.version,
+                        status.state.describe()
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("; ");
+            return format!(
+                "motorun kurması gereken eser eksik ({detail}) — `tune plugin install {}`",
+                self.name
+            );
         }
         match &self.consent {
             Some(status) => status.describe(),
@@ -130,6 +168,11 @@ pub struct PluginSummary {
     pub incompatible: usize,
     /// Manifesti okunamadı/geçersiz.
     pub broken: usize,
+    /// Onaylı ve sürümü uygun ama motorun kurması gereken bir eseri eksik
+    /// (D-055). `ready`'den ayrı: kullanıcının yapacağı şey farklı — onay
+    /// değil kurulum.
+    #[serde(default)]
+    pub needs_install: usize,
 }
 
 impl PluginSummary {
@@ -142,6 +185,7 @@ impl PluginSummary {
         recorder.set("plugins.disabled", n(self.disabled));
         recorder.set("plugins.incompatible", n(self.incompatible));
         recorder.set("plugins.broken", n(self.broken));
+        recorder.set("plugins.needs_install", n(self.needs_install));
     }
 }
 
@@ -157,6 +201,7 @@ impl PluginSummary {
 pub fn discover(config: &Config) -> Result<(Vec<PluginEntry>, PluginSummary)> {
     let dir = config.plugins_dir();
     let consents = ConsentStore::load(&config.plugin_consent_path())?;
+    let engine = runtime::Engine::new(config);
 
     let entries = match std::fs::read_dir(&dir) {
         Ok(entries) => entries,
@@ -173,7 +218,7 @@ pub fn discover(config: &Config) -> Result<(Vec<PluginEntry>, PluginSummary)> {
         if !path.is_dir() || !path.join(MANIFEST_FILE).exists() {
             continue;
         }
-        found.push(describe_plugin(&path, &consents));
+        found.push(describe_plugin(&path, &consents, &engine));
     }
     // Dizin sırası dosya sistemine göre değişir; çıktı kararlı olmalı.
     found.sort_by(|a, b| a.name.cmp(&b.name));
@@ -196,6 +241,10 @@ fn summarize(entries: &[PluginEntry]) -> PluginSummary {
             }
             continue;
         }
+        if !entry.missing_requirements().is_empty() {
+            summary.needs_install += 1;
+            continue;
+        }
         match &entry.consent {
             Some(ConsentStatus::Approved) => summary.ready += 1,
             Some(ConsentStatus::Disabled) => summary.disabled += 1,
@@ -208,7 +257,7 @@ fn summarize(entries: &[PluginEntry]) -> PluginSummary {
     summary
 }
 
-fn describe_plugin(dir: &Path, consents: &ConsentStore) -> PluginEntry {
+fn describe_plugin(dir: &Path, consents: &ConsentStore, engine: &runtime::Engine) -> PluginEntry {
     let name = dir
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -225,6 +274,7 @@ fn describe_plugin(dir: &Path, consents: &ConsentStore) -> PluginEntry {
                 api: None,
                 permissions: Permissions::default(),
                 consent: None,
+                requires: Vec::new(),
                 problem: Some(err.chain_text().replace('\n', " ")),
             };
         }
@@ -239,6 +289,16 @@ fn describe_plugin(dir: &Path, consents: &ConsentStore) -> PluginEntry {
         )
     });
 
+    // Eser durumu diskten okunuyor; okunamazsa bu da bir `problem` — sessizce
+    // "eksik yok" demek, eksik bir eseri hazır göstermek olurdu.
+    let (requires, problem) = match engine.statuses(&manifest.requires) {
+        Ok(requires) => (requires, problem),
+        Err(err) => (
+            Vec::new(),
+            problem.or_else(|| Some(err.chain_text().replace('\n', " "))),
+        ),
+    };
+
     PluginEntry {
         name: name.clone(),
         dir: dir.to_path_buf(),
@@ -247,6 +307,7 @@ fn describe_plugin(dir: &Path, consents: &ConsentStore) -> PluginEntry {
         api: Some(manifest.api),
         consent: Some(consents.status(&name, &manifest.permissions)),
         permissions: manifest.permissions,
+        requires,
         problem,
     }
 }
@@ -285,6 +346,50 @@ pub fn load(config: &Config) -> Result<(Vec<Arc<dyn Provider>>, PluginSummary)> 
         )?));
     }
     Ok((providers, summary))
+}
+
+/// `exec`'i çözer ve çıplak bir `python3`/`python` adını motorun bulduğu
+/// yorumlayıcıyla değiştirir (D-050 S1).
+///
+/// Eklentinin manifesti `"exec": ["python3", "./main.py"]` yazar ve **hangi**
+/// `python3` sorusuyla işi olmaz; cevabı motor verir. Kullanıcının
+/// `TUNE_PYTHON` ile yaptığı seçim de böylece bütün eklentiler için bir kez
+/// geçerli olur.
+///
+/// Yorumlayıcı bulunamazsa manifestteki ad **olduğu gibi bırakılır.** Burada
+/// hata döndürmek bir eklentinin derdini ötekilerin yüklenmesine bulaştırırdı;
+/// ad bırakılınca işletim sisteminin kendi hatası el sıkışmada görünür ve
+/// motorun ayrıntılı tanısı `tune plugin install` ile alınır.
+fn resolve_exec_via_engine(manifest: &PluginManifest, dir: &Path) -> (PathBuf, Vec<String>) {
+    let (program, args) = manifest.resolve_exec(dir);
+    let is_bare_python = matches!(
+        program.to_str(),
+        Some("python3" | "python" | "python3.exe" | "python.exe")
+    );
+    if !is_bare_python {
+        return (program, args);
+    }
+
+    match runtime::find_python() {
+        Ok(python) => {
+            tracing::debug!(
+                plugin = %manifest.name,
+                python = %python.path.display(),
+                surum = %python.version,
+                kaynak = %python.source,
+                "yorumlayıcı motordan verildi"
+            );
+            (python.path, args)
+        }
+        Err(err) => {
+            tracing::warn!(
+                plugin = %manifest.name,
+                error = %err.chain_text().replace('\n', " "),
+                "motor bir Python bulamadı; manifestteki ad olduğu gibi denenecek"
+            );
+            (program, args)
+        }
+    }
 }
 
 /// Alt süreçte yaşayan bir sağlayıcı.
@@ -327,7 +432,8 @@ impl PluginProvider {
         dir: &Path,
         secrets: &Secrets,
     ) -> Result<Self> {
-        let (program, args) = manifest.resolve_exec(dir);
+        let engine = runtime::Engine::new(config);
+        let (program, args) = resolve_exec_via_engine(manifest, dir);
         let factory = Arc::new(ProcessFactory::new(
             &manifest.name,
             program,
@@ -345,6 +451,7 @@ impl PluginProvider {
             data_dir: protocol::path_to_wire(&state_dir),
             secrets: secrets.namespace(&plugin_namespace(&manifest.name)),
             permissions: manifest.permissions.normalized(),
+            requirements: engine.ready_paths(&manifest.requires)?,
         };
 
         Ok(Self::new(
@@ -759,6 +866,7 @@ mod tests {
             exec: vec!["demo".to_owned()],
             capabilities: vec!["search".to_owned(), "stream".to_owned()],
             permissions: Permissions::default(),
+            requires: Vec::new(),
             description: None,
         }
     }
@@ -774,6 +882,7 @@ mod tests {
                 data_dir: "/tmp/demo/state".to_owned(),
                 secrets: std::collections::BTreeMap::new(),
                 permissions: Permissions::default(),
+                requirements: std::collections::BTreeMap::new(),
             },
         )
     }
@@ -928,6 +1037,7 @@ mod tests {
                 data_dir: "/tmp".to_owned(),
                 secrets: std::collections::BTreeMap::new(),
                 permissions: Permissions::default(),
+                requirements: std::collections::BTreeMap::new(),
             },
         );
 

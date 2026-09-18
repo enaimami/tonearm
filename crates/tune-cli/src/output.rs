@@ -5,10 +5,10 @@
 
 use tune_core::library::SearchHit;
 use tune_core::session::{
-    ImportReport, PlayReport, PluginConsentReport, PluginListReport, ProviderListReport,
-    ProviderTestReport, ResolveReport, ScanReport, SearchReport, SecretListReport,
-    SecretWriteReport, ServerAddReport, ServerListReport, ServerRemoveReport, StatsResponse,
-    WrappedResponse,
+    ImportReport, PlayReport, PluginConsentReport, PluginInstallReport, PluginListReport,
+    ProviderListReport, ProviderTestReport, ResolveReport, ScanReport, SearchReport,
+    SecretListReport, SecretWriteReport, ServerAddReport, ServerListReport, ServerRemoveReport,
+    StatsResponse, WrappedResponse,
 };
 use tune_core::stats::StatsReport;
 
@@ -291,12 +291,32 @@ pub fn plugin_list(report: &PluginListReport) -> String {
         if !entry.permissions.is_empty() {
             let _ = writeln!(out, "{:<14} istediği: {}", "", entry.permissions.describe());
         }
+        // Motorun kuracağı eserler **ayrı satırda** (D-055): indirmeyi
+        // eklenti değil motor yapıyor, o yüzden eklentinin izin listesine
+        // karışmıyor. Karışsaydı kullanıcı "bu eklenti şuraya bağlanıyor"
+        // diye okurdu, oysa bağlanan motor.
+        for requirement in &entry.requires {
+            let _ = writeln!(
+                out,
+                "{:<14} motor    : {} {} — {}",
+                "",
+                requirement.name,
+                requirement.version,
+                requirement.state.describe()
+            );
+        }
     }
     let s = &report.summary;
     let _ = writeln!(
         out,
-        "\n{} eklenti: {} hazır, {} onay bekliyor, {} kapalı, {} sürüm uyumsuz, {} bozuk",
-        s.discovered, s.ready, s.awaiting_approval, s.disabled, s.incompatible, s.broken
+        "\n{} eklenti: {} hazır, {} kurulum bekliyor, {} onay bekliyor, {} kapalı, {} sürüm uyumsuz, {} bozuk",
+        s.discovered,
+        s.ready,
+        s.needs_install,
+        s.awaiting_approval,
+        s.disabled,
+        s.incompatible,
+        s.broken
     );
     if !report.permissions_enforced {
         let _ = writeln!(out, "{}", ENFORCEMENT_NOTICE);
@@ -311,10 +331,61 @@ pub fn plugin_consent(report: &PluginConsentReport) -> String {
     let _ = writeln!(out, "eklenti : {}", report.name);
     let _ = writeln!(out, "komut   : {}", report.action);
     let _ = writeln!(out, "izinler : {}", report.permissions.describe());
+    // Motorun indireceği eserler ayrı satırda (D-055): bunu eklenti değil
+    // motor indirir, o yüzden eklentinin izin listesine karışmıyor.
+    for requirement in &report.requires {
+        let _ = writeln!(
+            out,
+            "motor   : {} {} ← {}",
+            requirement.name, requirement.version, requirement.url
+        );
+        let _ = writeln!(out, "{:<8}  sha256 {}", "", requirement.sha256);
+    }
+    if !report.requires.is_empty() {
+        let _ = writeln!(
+            out,
+            "{:<8}  kurmak için: `tune plugin install {}`",
+            "", report.name
+        );
+    }
     let _ = writeln!(out, "durum   : {}", report.status.describe());
     if !report.permissions_enforced && !report.permissions.is_empty() {
         let _ = writeln!(out, "{}", ENFORCEMENT_NOTICE);
     }
+    out
+}
+
+/// Kurulum komutu sonucu (D-055).
+pub fn plugin_install(report: &PluginInstallReport) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(out, "eklenti : {}", report.report.plugin);
+    let _ = writeln!(
+        out,
+        "python  : {} ({}, {} üzerinden)",
+        report.python.path.display(),
+        report.python.version,
+        report.python.source
+    );
+
+    if report.declared == 0 {
+        // "Hiçbir şey istemiyor" ile "bakmadım" ayrı cevaplar (K9).
+        let _ = writeln!(out, "eser    : yok — bu eklenti hiçbir şey istemiyor");
+        return out;
+    }
+
+    for (name, outcome) in &report.report.outcomes {
+        let _ = writeln!(out, "eser    : {name} — {}", outcome.describe());
+    }
+    let _ = writeln!(
+        out,
+        "\ndurum   : {}",
+        if report.ready {
+            "hazır — eklenti çalıştırılabilir"
+        } else {
+            "eksik — eklenti bu hâliyle yüklenmez"
+        }
+    );
     out
 }
 

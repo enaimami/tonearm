@@ -36,6 +36,12 @@ pub enum Stage {
     ProviderCall,
     /// Eklenti keşfi: manifest okuma, doğrulama, izin onayı (Faz 2).
     PluginLoad,
+    /// Eklenti motoru: Python'u bulma, beyan edilen eserleri çözme ve kurma.
+    ///
+    /// `PluginLoad`'dan ayrı: "manifest bozuk" ile "manifest doğru ama
+    /// istediği eser kurulu değil" farklı tanılardır ve farklı şeyler
+    /// gerektirir — biri eklentiyi düzeltmeyi, öteki bir kurulum adımını (K9).
+    PluginRuntime,
     /// Eklenti sürecini başlatma ve el sıkışma — sürüm uyumu burada denetlenir.
     ///
     /// `ProviderCall`'dan ayrı: "eklenti hiç açılmadı" ile "eklenti açıldı ama
@@ -72,6 +78,7 @@ impl Stage {
             Self::StatsCompute => "STATS_COMPUTE",
             Self::ProviderCall => "PROVIDER_CALL",
             Self::PluginLoad => "PLUGIN_LOAD",
+            Self::PluginRuntime => "PLUGIN_RUNTIME",
             Self::PluginHandshake => "PLUGIN_HANDSHAKE",
             Self::NetworkRequest => "NETWORK_REQUEST",
             Self::WrappedRender => "WRAPPED_RENDER",

@@ -216,6 +216,18 @@ enum PluginCommand {
         /// Eklenti adı (dizin adı).
         name: String,
     },
+    /// Eklentinin beyan ettiği çalışma zamanı eserlerini kur (D-055).
+    ///
+    /// İndirmeyi motor yapar, eklenti değil; her eser sabitlenmiş bir
+    /// sürümle gelir ve sha256'sı doğrulanmadan yerine konmaz. Sisteme
+    /// hiçbir şey yazılmaz, root istenmez.
+    ///
+    /// Bu komut `--online` beklemez: indirme komutun kendisidir, yan
+    /// etkisi değil. Zaten kurulu eserler için ağa çıkılmaz.
+    Install {
+        /// Eklenti adı.
+        name: String,
+    },
     /// Bir eklentiyi kapat (onay kaydı korunur).
     Disable {
         /// Eklenti adı.
@@ -437,6 +449,10 @@ async fn run(cli: &Cli) -> tune_core::Result<String> {
             PluginCommand::Approve { name } => {
                 let report = session.approve_plugin(name)?;
                 render(cli.json, &report, || output::plugin_consent(&report))
+            }
+            PluginCommand::Install { name } => {
+                let report = session.install_plugin(name)?;
+                render(cli.json, &report, || output::plugin_install(&report))
             }
             PluginCommand::Disable { name } => {
                 let report = session.disable_plugin(name)?;

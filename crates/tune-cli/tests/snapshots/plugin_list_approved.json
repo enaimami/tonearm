@@ -7,6 +7,7 @@
       "plugins.disabled": 0,
       "plugins.discovered": 1,
       "plugins.incompatible": 0,
+      "plugins.needs_install": 0,
       "plugins.ready": 1
     },
     "env": {
@@ -38,6 +39,7 @@
         ]
       },
       "problem": null,
+      "requires": [],
       "version": "0.1.0"
     }
   ],
@@ -47,6 +49,7 @@
     "disabled": 0,
     "discovered": 1,
     "incompatible": 0,
+    "needs_install": 0,
     "ready": 1
   }
 }

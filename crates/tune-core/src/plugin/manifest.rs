@@ -118,6 +118,84 @@ impl Permissions {
     }
 }
 
+/// Eklentinin motordan istediği bir eser (D-050 S2, D-055).
+///
+/// Eklenti **beyan eder, kurmaz.** İndirmeyi, karma doğrulamasını ve yerine
+/// koymayı motor yapar; eklenti el sıkışmada yalnızca hazır bir yol alır.
+/// D-049'un "elleri uzun olmasın" şartı tam olarak budur.
+///
+/// Dört alanın dördü de zorunlu ve bu bilerek katı: sürümsüz bir eser
+/// güncellendiğinde sessizce başka bir şey olur, karmasız bir eser ağdan
+/// ne geldiyse odur. Sabitleme ve doğrulama olmadan "root istemeyen kurulum"
+/// yalnızca yeri değişmiş bir güven sorunudur.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Requirement {
+    /// Eserin adı (`yt-dlp`). El sıkışmadaki yol haritasının anahtarı bu.
+    pub name: String,
+    /// Sabitlenmiş sürüm. Dosya adına girer; sürüm değişince yeni bir
+    /// dosya olur, eskisi yerinde durur.
+    pub version: String,
+    /// İndirileceği adres.
+    pub url: String,
+    /// Beklenen sha256, onaltılık. Tutmuyorsa eser **yerine konmaz**.
+    pub sha256: String,
+}
+
+impl Requirement {
+    /// Diskteki dosyanın adı: `<ad>-<sürüm>`.
+    ///
+    /// Sürüm ada giriyor ki iki eklenti aynı eserin iki sürümünü isteyince
+    /// birbirinin dosyasını ezmesin.
+    #[must_use]
+    pub fn file_name(&self) -> String {
+        format!("{}-{}", sanitize(&self.name), sanitize(&self.version))
+    }
+
+    /// Beyan kendi içinde tutarlı mı.
+    fn validate(&self) -> std::result::Result<(), String> {
+        if self.name.trim().is_empty() {
+            return Err("`requires` girdisinin `name`'i boş".to_owned());
+        }
+        if self.version.trim().is_empty() {
+            return Err(format!("`requires` girdisi `{}`: `version` boş", self.name));
+        }
+        // `https` şartı: karma doğrulaması indirileni sonradan denetler ama
+        // düz HTTP üzerinden **hangi** adresten indirildiği de doğrulanmaz.
+        if !self.url.starts_with("https://") {
+            return Err(format!(
+                "`requires` girdisi `{}`: `url` https:// ile başlamalı (bulunan: {})",
+                self.name, self.url
+            ));
+        }
+        let hash = self.sha256.trim();
+        if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(format!(
+                "`requires` girdisi `{}`: `sha256` 64 haneli onaltılık olmalı (bulunan: {} hane)",
+                self.name,
+                hash.len()
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Dosya adına girecek metni zararsızlaştırır.
+///
+/// Manifest kullanıcının indirdiği bir dosya: içindeki bir ad `../` taşırsa
+/// eser veri dizininin dışına yazılırdı.
+fn sanitize(value: &str) -> String {
+    value
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 /// `plugin.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PluginManifest {
@@ -146,6 +224,13 @@ pub struct PluginManifest {
     pub capabilities: Vec<String>,
     #[serde(default)]
     pub permissions: Permissions,
+    /// Motordan istenen eserler (D-055). Boş liste "hiçbir şey istemiyorum".
+    ///
+    /// **`api`'yi kırmaz.** §2.1'in kuralı gereği alan eklemek protokol
+    /// sürümünü artırmaz: bu alanı tanımayan eski bir manifest boş liste
+    /// olarak okunur ve bugüne kadar olduğu gibi çalışır.
+    #[serde(default)]
+    pub requires: Vec<Requirement>,
     /// İsteğe bağlı bir cümlelik açıklama.
     #[serde(default)]
     pub description: Option<String>,
@@ -203,6 +288,24 @@ impl PluginManifest {
         }
         if self.exec.is_empty() || self.exec[0].trim().is_empty() {
             return invalid("`exec` boş — çalıştırılacak bir komut yok".to_owned());
+        }
+        // Beyan **yüklemede** doğrulanıyor, kurulumda değil: sürümsüz ya da
+        // karmasız bir `requires` ile eklenti hiç listelenmemeli. Kurulum
+        // anına bırakılsaydı kusur ancak kullanıcı komutu yazınca çıkardı.
+        for requirement in &self.requires {
+            if let Err(detail) = requirement.validate() {
+                return invalid(detail);
+            }
+        }
+        let mut names: Vec<&str> = self.requires.iter().map(|r| r.name.as_str()).collect();
+        names.sort_unstable();
+        let count = names.len();
+        names.dedup();
+        if names.len() != count {
+            return invalid(
+                "`requires` aynı adı iki kez içeriyor — hangisinin kazandığı tahmin edilmemeli"
+                    .to_owned(),
+            );
         }
         Ok(())
     }
@@ -282,6 +385,73 @@ mod tests {
     }
 
     #[test]
+    fn a_requires_entry_must_be_pinned_and_verifiable() {
+        let cases = [
+            (
+                r#"{"name":"yt-dlp","version":"","url":"https://a/b","sha256":"aa"}"#,
+                "`version` boş",
+            ),
+            (
+                r#"{"name":"yt-dlp","version":"1","url":"http://a/b","sha256":"aa"}"#,
+                "https://",
+            ),
+            (
+                r#"{"name":"yt-dlp","version":"1","url":"https://a/b","sha256":"kisa"}"#,
+                "64 haneli",
+            ),
+        ];
+        for (entry, expected) in cases {
+            let dir = temp_dir("p");
+            write_manifest(
+                &dir,
+                &format!(
+                    r#"{{"name":"p","display_name":"P","api":1,"exec":["x"],"requires":[{entry}]}}"#
+                ),
+            );
+            let err = PluginManifest::load(&dir).unwrap_err();
+            assert!(
+                err.chain_text().contains(expected),
+                "beklenen {expected:?} yok: {}",
+                err.chain_text()
+            );
+        }
+    }
+
+    #[test]
+    fn the_same_requirement_twice_is_rejected_not_silently_deduplicated() {
+        let dir = temp_dir("p");
+        let one = format!(
+            r#"{{"name":"yt-dlp","version":"1","url":"https://a/b","sha256":"{}"}}"#,
+            "a".repeat(64)
+        );
+        let two = format!(
+            r#"{{"name":"yt-dlp","version":"2","url":"https://a/c","sha256":"{}"}}"#,
+            "b".repeat(64)
+        );
+        write_manifest(
+            &dir,
+            &format!(
+                r#"{{"name":"p","display_name":"P","api":1,"exec":["x"],"requires":[{one},{two}]}}"#
+            ),
+        );
+        let err = PluginManifest::load(&dir).unwrap_err();
+        assert!(err.chain_text().contains("iki kez"), "{}", err.chain_text());
+    }
+
+    /// `requires` yokken manifest eskisi gibi okunur — alan eklemek `api`'yi
+    /// kırmaz (§2.1). Depodaki her eski manifest bu yoldan geçiyor.
+    #[test]
+    fn a_manifest_without_requires_still_loads_with_an_empty_list() {
+        let dir = temp_dir("eski");
+        write_manifest(
+            &dir,
+            r#"{"name":"eski","display_name":"Eski","api":1,"exec":["python3","./main.py"]}"#,
+        );
+        let manifest = PluginManifest::load(&dir).unwrap();
+        assert!(manifest.requires.is_empty());
+    }
+
+    #[test]
     fn an_empty_exec_is_rejected() {
         let dir = temp_dir("bos");
         write_manifest(
@@ -303,6 +473,7 @@ mod tests {
             exec: vec!["./main.py".to_owned(), "--json".to_owned()],
             capabilities: vec!["search".to_owned()],
             permissions: Permissions::default(),
+            requires: Vec::new(),
             description: None,
         };
         let (program, args) = manifest.resolve_exec(&dir);

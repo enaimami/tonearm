@@ -61,10 +61,16 @@ olmak zorunda; uyuşmazsa eklenti reddedilir. Sessizce dizin adına düşmüyoru
 | `exec` | evet | İlk öğe program, gerisi argüman. |
 | `capabilities` | hayır | `search`, `browse`, `stream`, `control`. |
 | `permissions` | hayır | Aşağıya bakın. |
+| `requires` | hayır | Motorun sizin için kuracağı eserler — §2.5. |
 
 `exec`'in ilk öğesinde `/` varsa eklenti dizinine göre çözülür (`./main.py`),
-yoksa `PATH`'ten aranır (`python3`). Süreç **eklenti dizininde** çalıştırılır,
-yani göreli yollar kendi dosyalarınıza işaret eder.
+yoksa `PATH`'ten aranır. Süreç **eklenti dizininde** çalıştırılır, yani göreli
+yollar kendi dosyalarınıza işaret eder.
+
+**Özel durum:** `exec`'in ilk öğesi çıplak `python3` ya da `python` ise onu
+`PATH`'ten değil **motor** çözer (D-055) — sürümü denetlenmiş tek bir
+yorumlayıcı, bütün eklentiler için aynısı. "Hangi Python" sorusuyla işiniz
+olmaz.
 
 ---
 
@@ -105,17 +111,61 @@ işletim sistemi için ayrı bir yol demek, ve o yolları eklenti yazarı değil
 proje taşır. Hata mesajınızda `apt`/`pacman`/`brew` gibi tek bir sisteme ait
 komut **yazmayın** — kullanıcıların çoğuna yanlış tavsiye olur.
 
-Uygulanış şekli **D-050'de kapandı: `tune`'un kendi eklenti motoru var.**
-Çalışma zamanı (Python) eklentinin değil host'un işi ve `tune`'un gereksinimi
-olarak bir kez ilan ediliyor. İhtiyacınız olan paketleri **siz kurmazsınız**:
-`plugin.json`'da `requires` ile beyan edersiniz, motor onları kendi ayrılmış
-ortamına kurar. Eklenti hiçbir şey indirmez, `pip` çağırmaz, sisteme dokunmaz.
+Uygulanış şekli **D-050'de kapandı, D-055'te yazıldı: `tune`'un kendi eklenti
+motoru var.** Çalışma zamanı (Python 3.9+) eklentinin değil host'un işi ve
+`tune`'un gereksinimi olarak bir kez ilan ediliyor. İhtiyacınız olan paketleri
+**siz kurmazsınız**: `plugin.json`'da `requires` ile beyan edersiniz, motor
+onları indirir. Eklenti hiçbir şey indirmez, `pip` çağırmaz, sisteme dokunmaz.
 
-`api` kırılmadı — `requires` bir **ekleme** ve eklemek sürümü artırmaz.
+```json
+"requires": [
+  {
+    "name": "yt-dlp",
+    "version": "2026.08.19",
+    "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp",
+    "sha256": "1fa6733c37ea6fb51c99ad8fe785e7b7e5f3246c9b980230329d4fb72ed8d4d6"
+  }
+]
+```
 
-**Motorun kodu henüz yazılmadı** (PLAN §2.8). Depodaki eklentiler bugün hâlâ
-eski hâlleriyle duruyor ve kurala uymuyor; bu bilerek yazılı. Kendi
-eklentinizi yazarken **kuralı** izleyin, depodaki örnekleri değil.
+Dört alanın dördü de **zorunlu.** Sürümsüz bir eser güncellendiğinde sessizce
+başka bir şey olur; karmasız bir eser ağdan ne geldiyse odur. `url` `https://`
+ile başlamak zorunda. Doğrulama tutmazsa dosya **yerine konmaz.**
+
+Eser tek dosya olmalı — motor `venv`/`pip` kullanmıyor (bkz. D-055: `ensurepip`
+her dağıtımda yok ve orada motor root'suz bir çıkış yolu sunamazdı). yt-dlp
+gibi zipapp olarak dağıtılan araçlar bu yola uyar; sıradan bir PyPI paketi
+bugün kurulamaz.
+
+**Kurulum yolunu el sıkışmada alırsınız.** `handshake` parametrelerindeki
+`requirements` haritası `ad → mutlak yol` verir ve **yalnızca hazır eserleri**
+içerir: haritada bir ad varsa o eser kurulu ve karması doğrulanmıştır, yoksa
+hiç yoktur. Boş dize dönmez.
+
+```python
+def handshake(params):
+    state["requirements"] = params.get("requirements") or {}
+    ...
+
+def ytdlp():
+    path = state["requirements"].get("yt-dlp")
+    if not path:
+        raise PluginError("yt-dlp kurulu değil: `tune plugin install <ad>`")
+    return [path]
+```
+
+Kullanıcı `tune plugin install <ad>` yazınca motor indirir, doğrular, yerine
+koyar. `tune plugin list` süreç açmadan eksiği söyler.
+
+`api` kırılmadı — `requires` da `requirements` da birer **ekleme** ve eklemek
+sürümü artırmaz (§5). Bu alanları okumayan eski bir eklenti bugüne kadar
+olduğu gibi çalışır.
+
+**Bağlantılar eskirse ne olur.** Beyan ettiğiniz adres bir gün 404 döndürür;
+motor bunu "ağ yok" değil **YETİM** diye raporlar ve düzeltmenin *sizin* işiniz
+olduğunu söyler. Zaten kurulmuş bir eser bundan etkilenmez: dosya diskte,
+karması tutuyor, çalışmaya devam eder. Yetimlik yalnızca henüz kurmamış bir
+kullanıcı için bir sorundur — yani yeni sürüm yayımlamak sizin sorumluluğunuz.
 
 ---
 
@@ -335,36 +385,36 @@ sonuç döndürmez.
 
 ## 8. YouTube Music eklentisini kurmak
 
-Depodaki `plugins/ytmusic/` doğrudan kullanılabilir, ama **yt-dlp gerekiyor**.
-yt-dlp'nin kendi kurulum sayfası işletim sistemine göre yolları sayıyor:
-<https://github.com/yt-dlp/yt-dlp#installation>. Tek dosyalık sürümü root
-yetkisi istemez; indirdiğiniz yeri `TUNE_YTDLP` ile de verebilirsiniz.
+Depodaki `plugins/ytmusic/` doğrudan kullanılabilir. **yt-dlp'yi siz
+kurmazsınız** — eklenti onu manifestinde beyan eder, motor indirir (D-055).
 
 ```bash
 mkdir -p ~/.local/share/tune/plugins/ytmusic
 cp plugins/ytmusic/{main.py,plugin.json} ~/.local/share/tune/plugins/ytmusic/
 
-tune plugin approve ytmusic
+tune plugin approve ytmusic    # izinleri ve motorun indireceğini gösterir
+tune plugin install ytmusic    # yt-dlp'yi indirir, sha256'sını doğrular
 tune provider test ytmusic     # "kullanılabilir" + yt-dlp sürümünü yazmalı
 tune play "nujabes aruarian dance"
 ```
 
-Sır **istemiyor**. yt-dlp'yi üç yerde arıyor, bu sırayla: `TUNE_YTDLP` ortam
-değişkeni (bir yol) → `PATH`'te `yt-dlp` → `python3 -m yt_dlp`. Hiçbirinde
-yoksa `tune provider test` "kullanılamıyor" der ve nereye bakacağınızı yazar —
-sessizce boş sonuç dönmez.
+Sır **istemiyor**. `install` çalıştırılmadan önce `tune plugin list` eksiği
+süreç açmadan söyler; eklenti sessizce boş sonuç dönmez.
 
-> **Bu eklenti henüz D-049'un kuralına uymuyor.** Kural şu: hiçbir eklenti
-> root yetkisi ya da sistem çapında kurulum isteyemez; ya bağımlılıklarını
-> kendisi getirir ya da onları root'suz kuran bir yordam sunar. yt-dlp'yi
-> kullanıcıya kurduran bugünkü hâl geçicidir ve nasıl düzeleceği açık bir
-> karar noktasıdır (PLAN §2.7). Kendi eklentinizi yazarken kurala **uyun**;
-> buradaki örneği değil kuralı izleyin.
+Eser `~/.local/share/tune/runtime/yt-dlp-<sürüm>` altına iner ve sisteme
+hiçbir şey yazılmaz. `install`'ı ikinci kez koşturmak ağa çıkmaz. Dosya
+bozulursa (`karma tutmuyor`) yeniden koşturmak düzeltir.
 
 **Neden alt süreç, neden kütüphane değil** (D-048): depoda hiçbir Python
 bağımlılığı yok, ve YouTube bir şeyi bozduğunda kullanıcının gördüğü mesaj
 yt-dlp'nin kendi mesajı oluyor ("Sign in to confirm you're not a bot" gibi).
-Tamiri de yt-dlp yapıyor — `pacman -Syu` yeter, bizden sürüm beklemek gerekmez.
+Tamiri de yt-dlp yapıyor, biz değil.
+
+**Ama D-055'ten sonra sürümü biz sabitliyoruz** ve bunun bir bedeli var:
+YouTube yt-dlp'yi bozduğunda kullanıcı artık kendi paket yöneticisiyle
+güncelleyip kurtulamaz, manifestte yeni bir sürüm yayımlamamızı bekler.
+Bakım yükü bir miktar bize geçti — D-049'un "güncel kalabilir" şartının
+karşılığı bu depoda `requires`'ı güncel tutmaktır.
 
 **Bilinen sınırlar**, üçü de ölçülmüş:
 

@@ -110,6 +110,17 @@ impl Config {
         self.plugins_dir().join(plugin).join("state")
     }
 
+    /// Eklenti motorunun kurduğu eserler (D-055): `<data_dir>/runtime`.
+    ///
+    /// `plugins_dir`'in **dışında** ve bilerek: bir eser tek bir eklentiye
+    /// ait değil. İki eklenti aynı `yt-dlp` sürümünü isterse aynı dosyayı
+    /// paylaşır, ve bir eklenti silindiğinde ötekinin çalışma zamanı
+    /// gitmez.
+    #[must_use]
+    pub fn runtime_dir(&self) -> PathBuf {
+        self.data_dir.join("runtime")
+    }
+
     /// Son çalıştırmanın tanı raporu.
     #[must_use]
     pub fn last_run_path(&self) -> PathBuf {

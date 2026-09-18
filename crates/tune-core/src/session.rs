@@ -119,9 +119,32 @@ pub struct PluginConsentReport {
     pub action: String,
     /// Eklentinin **beyan ettiği** izinler.
     pub permissions: Permissions,
+    /// Motorun onun için indireceği eserler (D-055).
+    ///
+    /// `permissions.net`'ten **ayrı** duruyor ve bu bilerek: indirmeyi
+    /// eklenti değil motor yapar. Aynı listeye karışsaydı kullanıcı "bu
+    /// eklenti github.com'a bağlanıyor" diye okurdu — bağlanan motor, ve
+    /// indirdiği şey karmasıyla sabitli.
+    #[serde(default)]
+    pub requires: Vec<crate::plugin::manifest::Requirement>,
     /// Komuttan sonraki durum.
     pub status: ConsentStatus,
     pub permissions_enforced: bool,
+    pub diag: DiagReport,
+}
+
+/// `tune plugin install` çıktısı (D-055).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginInstallReport {
+    /// Eklenti artık çalışabilir mi: beyan edilen eserlerin **hepsi** hazır mı.
+    pub ready: bool,
+    /// Manifestin beyan ettiği eser sayısı. `0` geçerli bir cevap: eklenti
+    /// hiçbir şey istemiyor demek, "bakmadım" demek değil (K9).
+    pub declared: usize,
+    /// Motorun bulduğu yorumlayıcı — beklenmeyen bir Python çalıştığında
+    /// hangisinin seçildiği görünsün diye.
+    pub python: crate::plugin::runtime::PythonInfo,
+    pub report: crate::plugin::runtime::InstallReport,
     pub diag: DiagReport,
 }
 
@@ -1241,6 +1264,72 @@ impl Session {
         })
     }
 
+    /// Bir eklentinin beyan ettiği eserleri motorla kurar (D-055).
+    ///
+    /// **Ağa çıkar ve bunu `--online` beklemeden yapar.** Bayrak örtük ağ
+    /// erişimini engellemek için var ("bir export'u içe aktarmak kimseyi
+    /// sessizce ağa bağlamaz"); burada indirme komutun kendisidir, yan
+    /// etkisi değil. Kullanıcı `install` yazdıysa indirilmesini istemiştir.
+    ///
+    /// Zaten kurulu eserler için ağa hiç çıkılmaz.
+    ///
+    /// # Errors
+    /// Eklenti bulunamazsa, manifesti bozuksa, HTTP istemcisi bu derlemede
+    /// yoksa ya da eser diske yazılamazsa. Ağa **ulaşamamak** hata değil:
+    /// [`crate::plugin::runtime::InstallOutcome`] içinde raporlanır, çünkü
+    /// "ulaşılamadı", "yetim" ve "karma tutmadı" ayrı tanılardır (K9).
+    pub fn install_plugin(&self, name: &str) -> Result<PluginInstallReport> {
+        let mut rec = Recorder::start(
+            format!("plugin install {name}"),
+            Some(self.config.data_dir().to_path_buf()),
+        );
+
+        let result = (|| {
+            let dir = self.config.plugins_dir().join(name);
+            let manifest = crate::plugin::manifest::PluginManifest::load(&dir)?;
+            let engine = crate::plugin::runtime::Engine::new(&self.config);
+
+            // Yorumlayıcı **önce** aranıyor ve bulunamazsa kurulum hiç
+            // başlamıyor: eseri indirip sonra "ama Python yok" demek,
+            // kullanıcıya iki turda söylenecek tek bir haberdir.
+            let python = crate::plugin::runtime::find_python()?;
+
+            let mut outcomes = Vec::new();
+            if !manifest.requires.is_empty() {
+                let http = crate::net::default_http_client()?;
+                for requirement in &manifest.requires {
+                    let outcome = engine.install(&http, requirement)?;
+                    outcomes.push((requirement.name.clone(), outcome));
+                }
+            }
+            Ok((manifest, python, outcomes))
+        })();
+
+        if let Ok((_, python, outcomes)) = &result {
+            rec.note(format!(
+                "yorumlayıcı: {} ({}, {})",
+                python.path.display(),
+                python.version,
+                python.source
+            ));
+            for (name, outcome) in outcomes {
+                rec.note(format!("{name}: {}", outcome.describe()));
+            }
+        }
+
+        let plugin = name.to_owned();
+        self.finish(rec, result, move |(manifest, python, outcomes), diag| {
+            let report = crate::plugin::runtime::InstallReport { plugin, outcomes };
+            PluginInstallReport {
+                ready: report.is_ready(),
+                declared: manifest.requires.len(),
+                report,
+                python,
+                diag,
+            }
+        })
+    }
+
     /// Bir eklentinin **beyan ettiği** izinleri onaylar (D-040).
     ///
     /// Onaylanan küme manifestten okunur: çağıran kendi izin listesini
@@ -1313,6 +1402,12 @@ impl Session {
                 "beyan edilen izinler: {}",
                 manifest.permissions.describe()
             ));
+            for requirement in &manifest.requires {
+                rec.note(format!(
+                    "motorun indireceği: {} {} ← {} (sha256 {})",
+                    requirement.name, requirement.version, requirement.url, requirement.sha256
+                ));
+            }
             rec.note(format!("durum: {}", status.describe()));
         }
 
@@ -1321,6 +1416,7 @@ impl Session {
                 name: manifest.name,
                 action,
                 permissions: manifest.permissions,
+                requires: manifest.requires,
                 status,
                 permissions_enforced: crate::plugin::PERMISSIONS_ENFORCED,
                 diag,

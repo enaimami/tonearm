@@ -132,6 +132,16 @@ pub enum ErrorKind {
     #[error("eklenti manifesti geçersiz: {path} — {detail}")]
     PluginManifest { path: PathBuf, detail: String },
 
+    /// Eklenti motorunun bir adımı tökezledi (D-055).
+    ///
+    /// `step` **hangi adımda** olduğunu söyler — Python arama, eser indirme,
+    /// karma doğrulama. Motorun bütün başarısızlıkları aynı cümleye
+    /// çıkmamalı: "yt-dlp yok" ile "yt-dlp indirilemedi" ile "indirilen
+    /// yt-dlp'nin karması tutmadı" üç ayrı tanıdır ve üçünün çözümü
+    /// farklıdır (K9).
+    #[error("eklenti motoru — {step}: {detail}")]
+    PluginRuntime { step: String, detail: String },
+
     /// Eklentinin protokol sürümü çekirdeğinkiyle uyuşmuyor.
     ///
     /// Faz 2'nin "bitti sayılır" ölçütünün yarısı bu hata: uyumsuz eklenti

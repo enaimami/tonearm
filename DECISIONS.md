@@ -2482,3 +2482,140 @@ tek`); tel değeri değişmedi ve bir test bunu kilitliyor.
 motoru hâlâ yazılmadı (D-050), izin sözlüğü hâlâ joker kabul etmiyor (D-040),
 `play` insan çıktısı hâlâ kimlik basmıyor. Dördü de PLAN §2.6'da açık borç
 olarak duruyor — bu tur onları **saymak** için açıldı, kapatmak için değil.
+
+---
+
+## D-055 — Eklenti motoru: sabitlenmiş eser, `pip` yok, ve dört ayrı tanı
+**Tarih:** 2026-09-19 · **Durum:** UYGULANDI (2026-09-19)
+
+**Soru:** D-050 motoru kararlaştırdı ama özel ortamın **nasıl** kurulacağını
+açık bıraktı (PLAN §2.8'in karar noktası): `venv` + `pip` sistem Python'una
+yaslanıyor, her dağıtımda gelmiyor, ve ağdan paket çekiliyorsa sürüm
+sabitleme + karma doğrulama + izin sözlüğü soruları cevapsızdı.
+
+### 1. Ortam: sabitlenmiş tek dosyalık eser (S1)
+
+Soruyu keskinleştiren bir ölçüm: **bu makinede sistem `pip`'i yok**
+(`python3 -m pip` → "No module named pip") ama `ensurepip` var, yani
+`python3 -m venv` 1,4 sn'de 13 MB'lık bir ortam kurup içine `pip 26.2.1`'i
+kendisi koyabiliyor. "pip yok" ile "venv kuramam" aynı şey değil.
+
+Ama Debian `python3-venv`'i ayrı paketliyor ve orada ikisi birden düşüyor —
+motorun kullanıcıya sunabileceği root'suz bir çıkış yolu kalmıyor. D-049'un
+tam kaçındığı yer burası.
+
+**Karar: `venv`/`pip` yok. Eklenti manifestinde sabitlenmiş bir eser beyan
+eder, motor onu indirir ve sha256'sını doğrular.**
+
+```json
+"requires": [{
+  "name": "yt-dlp", "version": "2026.08.19",
+  "url": "https://github.com/.../yt-dlp",
+  "sha256": "1fa6733c…"
+}]
+```
+
+Dört alanın dördü de zorunlu, `url` `https://` olmak zorunda, karma tutmazsa
+dosya **yerine konmaz**. Sabitleme ve doğrulama olmadan "root istemeyen
+kurulum" yalnızca yeri değişmiş bir güven sorunu olurdu.
+
+Beyanı **yüklemede** doğruluyoruz, kurulumda değil: sürümsüz ya da karmasız
+bir `requires` ile eklenti hiç listelenmiyor. Kurulum anına bırakılsaydı kusur
+ancak kullanıcı komutu yazınca çıkardı.
+
+**Kabul edilen bedel:** yalnızca tek dosya olarak dağıtılan şeyler kurulabilir.
+`requests` isteyen gelecek bir eklenti bu yolu kullanamaz. Bugünkü bütün
+eklentilerin toplam ihtiyacı bir tane — yt-dlp, ki zaten zipapp.
+
+**Şemaya `kind` alanı bilerek konmadı.** "İleride pip'li türü de ifade
+edebilsin" diye bir ayrım eklemek, tek varyantlı bir enum yazmak olurdu.
+Alan eklemek `api`'yi kırmıyor (§2.1); ihtiyaç doğduğunda eklenir.
+
+### 2. Yorumlayıcı: bir kez bulunur, ve seçim sessizce değiştirilmez
+
+Eklenti `"exec": ["python3", "./main.py"]` yazıyor; çıplak `python3`/`python`
+adını motor çözüyor (3.9+ şartıyla). `TUNE_PYTHON` → yoksa `python3` → `python`.
+
+**Ölçerken bir kusur çıktı ve düzeltildi:** ilk yazımda `TUNE_PYTHON` yalnızca
+aday listesinin başına konuyordu. Yanlış gösterildiğinde motor sessizce
+`python3`'e düşüp "python3 (3.14.7)" diye rapor veriyordu — kullanıcı kendi
+seçiminin uygulandığını sanırdı. Artık açık seçim **ayrı** değerlendiriliyor
+ve başarısızlığı nihai: geri düşülmüyor, sebep söyleniyor.
+
+### 3. Dört ayrı tanı (K9)
+
+Bir eserin "hazır olmaması" tek bir şey değil, ve dördü dört ayrı şey
+gerektiriyor:
+
+| durum | ne demek | kim düzeltir |
+|---|---|---|
+| `kurulu değil` | hiç kurulmadı | kullanıcı — `tune plugin install <ad>` |
+| `karma tutmuyor` | diskte var, doğrulanmıyor | kullanıcı — yeniden kur |
+| `kurulamadı` | ağa çıkılamadı | kimse — yarın tekrar dene |
+| **`YETİM`** | kaynak 404/410 dedi | **eklenti yazarı** — adres ölmüş |
+
+Yetim kavramı kullanıcının önerisiydi ("linkler eskiyince yetim bırakalım
+olur mu?") ve doğru yere oturuyor: sabitlenmiş bir adres bir gün mutlaka
+ölür, ve o gün kullanıcıya "ağını kontrol et" demek yanlış tavsiye olur.
+
+**Yetimlik diske yazılmıyor.** Bir GitHub kesintisi 404 değil 5xx döndürür,
+ama yazılsaydı tek bir kötü an bir eklentiyi kalıcı olarak yetim damgalardı.
+Tanı ölçüldüğü anda söylenir, hatırlanmaz.
+
+**Kurulu bir eserin kaynağı ölürse hiçbir şey olmaz:** dosya diskte, karması
+tutuyor, çalışmaya devam eder. Yetimlik yalnızca henüz kurmamış bir kullanıcı
+için bir sorun — yani yeni sürüm yayımlamak eklenti yazarının sorumluluğu.
+
+### 4. İzin sözlüğü: ayrı satır, karışmıyor (D-040'a dördüncü basış)
+
+**Karar: motorun indirmesi eklentinin `permissions.net` listesine girmez.**
+Onay ekranında ayrı bir `motor` satırında görünüyor — ne indirileceği, nereden
+ve hangi sha256 ile.
+
+Gerekçe: indirmeyi eklenti değil motor yapıyor. Aynı listeye karışsaydı
+kullanıcı "bu eklenti github.com'a bağlanıyor" diye okurdu ve bu **yanlış
+bilgi** olurdu. D-040'ın joker açığı bu turda kapanmadı ama **büyümedi** de.
+
+### 5. Tetik: ayrı bir komut
+
+`tune plugin install <ad>`. `approve` sırasında indirmek onayı pahalı yapardı;
+ilk kullanımda indirmek `tune play`'i beklenmedik bir indirmeyle geciktirirdi.
+Ayrı komut açık, betiklenebilir, ve ikinci kez koşturmak ücretsiz (kurulu
+eser için ağa hiç çıkılmıyor — ölçüldü: 1,27 sn → 0,19 sn).
+
+Komut `--online` **beklemiyor**. Bayrak örtük ağ erişimini engellemek için
+var ("bir export'u içe aktarmak kimseyi sessizce ağa bağlamaz"); burada
+indirme komutun kendisi, yan etkisi değil.
+
+### 6. Bağımlılık: `sha2` eklendi (sorularak)
+
+Ölçülen bedel **+8 crate** (51 → 59 benzersiz; `cfg-if` ağaçta zaten vardı)
+ve bu ağaç `uniffi` ile mobile gidiyor. `0.10` seçildi, `0.11` değil: Tauri
+kabuğu zaten `0.10.9`'u kilitliyor, workspace'te ikinci kopya olmuyor.
+
+Feature kapısının arkasına **konmadı.** Kapalı bir kapı "karma tutmuyor"
+tanısını koyamamak demekti, ve o tanının susması doğrulamanın var olma
+sebebini yok ederdi.
+
+Elle SHA-256 yazmak da masadaydı (~90 satır, NIST vektörleriyle kilitlenir,
+sıfır bağımlılık) ve reddedilmedi — kullanıcı bakımı başkasında olan crate'i
+seçti.
+
+### Ölçülen sonuç
+
+Gerçek koşum: motor yt-dlp 2026.08.19'u (3.072.469 bayt) indirdi, karmasını
+yayımlanan `SHA2-256SUMS` ile birebir doğruladı, çalıştırma biti verdi, ve
+`ytmusic` onunla canlı YouTube Music'ten ses çaldı. Dört tanının dördü de
+elle kışkırtılıp doğrulandı (404 → yetim, 503 → ulaşılamadı, bozuk dosya →
+karma tutmuyor, yanlış sha → yerine konmadı).
+
+**450 test geçiyor**, 7'si kendini atlıyor ve sebebini yazıyor. Üç kapı ve
+`core-features`'ın altı birleşimi temiz.
+
+### Yapılmayan (bilerek)
+
+**`torrent` çekirdeğe taşınmadı** (D-050 S3). Bir Rust ikilisi olduğu için
+motordan geçemez ve kullanıcıya hâlâ `cargo build --release` yaptırıyor —
+D-049'u ihlal eden tek şey artık bu. Taşıma kendi başına bir tur:
+`librqbit`'in +179 crate'i, `torrent = ["dep:librqbit"]` kapısı,
+`crates/tune-plugin-torrent`'ın sökülmesi. PLAN §2.8'in 5. maddesi açık.

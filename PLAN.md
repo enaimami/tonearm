@@ -1010,30 +1010,23 @@ uyumsuzluğunda çökmeden reddediyor (§2.1, `plugin_process.rs`).
 D-045'in açtığı tur §2.3 (D-046), §2.4 (D-047) ve §2.5 (D-048) ile bitti.
 **Faz 2'nin bütün bölümleri TAMAM.**
 
-Faz 2'den çıkarken açık kalan beş borç — biri bloklayıcı, dördü değil:
+Faz 2'den çıkarken açık kalan beş borcun biri kapandı (eklenti motoru,
+D-055), dördü duruyor ve bir tanesi küçüldü:
 
-- **Eklenti motoru (D-049 kural + D-050 tasarım) — Faz 2'nin gerçek bitmemiş
-  işi.** Bölümlerin hepsi TAMAM ama üç eklentinin üçü de kullanıcıdan sistem
-  çapında bir kurulum istiyor. Kural ve tasarım kapandı, **kod yazılmadı**:
-  §2.7 (kural) ve §2.8 (yapılacak iş).
-- **İzin sözlüğü (D-040) joker kabul etmiyor.** §2.4'ün açtığı konu §2.5'te
-  tekrar çıktı: torrent eklentisi önceden bilinemeyen tracker/peer adreslerine,
-  YouTube Music eklentisi ise her çözümde değişen bir `googlevideo.com` ana
-  bilgisayarına bağlanıyor. İkisi de beyanı eksik bırakıp `description`'da
-  anlatıyor. Artık bunu **iki** eklenti yapıyor — D-049'un indirme sorusu
-  cevaplanırsa **üç** olur.
+- **~~Eklenti motoru~~ — KAPANDI (D-055), ama torrent hâlâ dışarıda.**
+  Motor yazıldı, `ytmusic` ve `soundcloud` ondan geçiyor. Geriye tek ihlal
+  kaldı: `torrent` bir Rust ikilisi olduğu için motordan geçemez ve
+  kullanıcıya hâlâ `cargo build --release` yaptırıyor. D-050 S3'ün çözümü
+  (çekirdeğe feature'lı sağlayıcı) karar olarak duruyor, kodu yazılmadı.
 - **Gömülü AcoustID anahtarı yok** (`EMBEDDED_API_KEY` boş, D-046).
+- **İzin sözlüğü joker kabul etmiyor** (D-040) — googlevideo.com, rastgele
+  peer. D-055 buna yeni bir yük **eklemedi**: motorun indirmesi ayrı bir
+  satırda duruyor, eklentinin izin listesine karışmıyor.
 - **Gerçek zamanlı dizin izleme** (D-025) — `--if-stale` yoklaması yerinde.
 - **`play --dry-run` sağlayıcı parça kimliğini insan çıktısına yazmıyor**
-  (D-054'te ölçüldü). `output::play` yalnızca `sanatçı - başlık` basıyor;
-  kimlik ancak `--json` ile görünüyor. Yerel kütüphanede sorun değil (sorgu
-  zaten adla yapılıyor) ama kimliği **opak** olan sağlayıcılarda belgelenen
-  akışı `jq`'ya mahkûm ediyor: torrent'in iki adımlı yayım→dosya seçimi
-  (`<infohash>/<sıra>`) insan çıktısından izlenemiyor. Çıktıyı değiştirmek
-  snapshot testlerini kırar, o yüzden ölçüldü ve borç olarak yazıldı;
-  düzeltilmedi.
+  (D-054'te ölçüldü).
 
-### 2.7 Eklenti bağımlılık sözleşmesi — KURAL KAPANDI (D-049), UYGULAMA §2.8'de
+### 2.7 Eklenti bağımlılık sözleşmesi — KURAL KAPANDI (D-049), UYGULAMA §2.8'de TAMAM
 
 **Kural: hiçbir eklenti root yetkisi ya da sistem çapında kurulum isteyemez.**
 Bir eklenti ya bağımlılıklarını kendisi getirir, ya da onları root'suz kuran
@@ -1041,13 +1034,14 @@ bir yordam sunar. "Paket yöneticinle kur" bir kurulum yordamı değildir: her
 dağıtım ve her işletim sistemi için ayrı bir destek yüzeyi açar ve o yüzeyi
 eklenti yazarı değil biz taşırız.
 
-Bugünkü hâl kuralı **üç eklentide de** ihlal ediyor:
+Kural yazıldığında **üç eklenti de** ihlal ediyordu. D-055'ten sonra biri
+kaldı:
 
-| eklenti | istediği | ağırlık |
+| eklenti | istediği | durum |
 |---|---|---|
-| `soundcloud` | `PATH`'te `python3` | Linux/macOS'ta genelde hazır, Windows'ta değil |
-| `ytmusic` | `python3` + yt-dlp | paket yöneticisi → root |
-| `torrent` | `cargo build --release` | **Rust araç zinciri** — en ağırı |
+| `soundcloud` | Python | motorun yorumlayıcısı — **uyuyor** |
+| `ytmusic` | Python + yt-dlp | eser motorca kuruluyor — **uyuyor** |
+| `torrent` | `cargo build --release` | **hâlâ ihlal** — Rust ikilisi motordan geçemez, D-050 S3 bekliyor |
 
 Kuralın kaçmaması gereken yer: D-048 bilerek "yt-dlp'yi kullanıcı kendi paket
 yöneticisiyle günceller"e yaslanmıştı, çünkü YouTube onu düzenli bozuyor ve
@@ -1055,9 +1049,11 @@ tamiri yt-dlp yapıyor. Kural "depoya bir kopya dondur"a dönüşürse o bakım
 yükünü biz devralırız. Üç şart birden: **root yok + her işletim sistemi +
 güncel kalabilir.**
 
-Tanılama tarafı zaten ayakta ve öyle kalmalı: eksik bağımlılık sessizce "sonuç
-yok"a dönüşmüyor, `tune provider test` KULLANILAMIYOR deyip sebebini yazıyor
-(K9). Kırık olan **kurulabilirlik**, görünürlük değil.
+Tanılama tarafı zaten ayaktaydı: eksik bağımlılık sessizce "sonuç yok"a
+dönüşmüyor, `tune provider test` KULLANILAMIYOR deyip sebebini yazıyordu (K9).
+Kırık olan **kurulabilirlikti**, görünürlük değil — ve D-055 onu iki
+eklentide onardı. Görünürlük ayrıca ileri gitti: eksiklik artık süreç
+açılmadan, `tune plugin list` çıktısında görünüyor.
 
 > KARAR NOKTASI: kural nasıl uygulanacak? **KAPANDI — D-050: eklenti motoru.**
 > Çalışma zamanı eklentinin değil **host'un** işi. `tune`'un tek bir motoru
@@ -1079,30 +1075,51 @@ yok"a dönüşmüyor, `tune provider test` KULLANILAMIYOR deyip sebebini yazıyo
 > yol değil *kurulum gerektirmeyen desteklenen yol* olur. Depoda dağıtılan her
 > eklenti ondan geçer.
 
-### 2.8 Eklenti motoru — YAPILACAK (D-050)
+### 2.8 Eklenti motoru — TAMAM (D-050 karar, D-055 uygulama)
 
-D-050'nin kararı alındı, **kodu yazılmadı.** Kapsam:
+D-050'nin kararı yazıldı. Altı maddenin beşi bitti, biri açık:
 
-1. **Motor:** Python bulma + sürüm kontrolü, özel ortamın kurulması, `requires`
-   çözümü, ve eksiklikte **hangi adımda ne eksik** diyen tanı (K9). Bugün eksik
-   bağımlılık ancak süreç açıldıktan (`health`) ya da açılamadıktan
-   (`PLUGIN_HANDSHAKE`) sonra anlaşılıyor.
-2. **`plugin.json` → `requires`.** `api` kırılmaz; eklemek sürümü artırmaz.
-3. **`ytmusic`:** kendi yt-dlp arayışı (`TUNE_YTDLP` → `PATH` →
-   `python3 -m yt_dlp`) silinir, `requires: ["yt-dlp"]` kalır.
-4. **`soundcloud` + `echo`:** motora taşınır, `requires` boş (ikisi de stdlib).
-5. **`torrent`:** eklenti olmaktan çıkar, `crates/tune-plugin-torrent`
-   çekirdeğe feature'lı sağlayıcı olarak gider, `plugins/torrent/` kalkar.
-   CLAUDE.md'nin workspace düzeni ve eklentinin README'si güncellenir.
-6. **`python3` gereksinim olarak ilan edilir** (`README`, `CONTRIBUTING`) —
-   bugün dört eklentinin üçü onu istiyor ve **hiçbir yerde yazmıyor.**
+1. **Motor yazıldı** — `plugin/runtime.rs`. Python bulma + sürüm kontrolü
+   (3.9+), `requires` çözümü, eserin indirilip karmasının doğrulanması, ve
+   eksiklikte hangi adımda ne eksik diyen tanı (`ADIM: PLUGIN_RUNTIME`).
+   Eksik bağımlılık artık süreç açılmadan, `tune plugin list` çıktısında
+   görünüyor.
+2. **`plugin.json` → `requires`** eklendi. `api` kırılmadı; alan eklemek
+   sürümü artırmaz (§2.1). Eski manifestler boş listeyle okunuyor ve bunu
+   bir test kilitliyor.
+3. **`ytmusic`** kendi yt-dlp arayışını bıraktı. `TUNE_YTDLP` → `PATH` →
+   `python3 -m yt_dlp` üçlüsü silindi; eklenti yolu el sıkışmadaki
+   `requirements` haritasından alıyor.
+4. **`soundcloud` + `echo`** motora geçti — ikisi de `python3` yazıyor,
+   yorumlayıcıyı motor çözüyor, `requires` boş.
+5. **`torrent` — YAPILMADI.** D-050 S3 onu çekirdeğe feature'lı bir sağlayıcı
+   olarak taşımayı kararlaştırdı (`plugins/torrent/` kalkar). Bu kendi başına
+   bir tur: `librqbit`'in +179 crate'i, `torrent = ["dep:librqbit"]` kapısı,
+   `crates/tune-plugin-torrent`'ın sökülmesi ve CLAUDE.md'nin workspace
+   ağacının güncellenmesi. **D-049'u ihlal eden tek şey artık bu.**
+6. **Python 3.9+ ilan edildi** — `README` ve `CONTRIBUTING`.
 
-> KARAR NOKTASI: motorun özel ortamı nasıl kurulacak? **Sor.** `venv` + `pip`
-> sistem Python'una yaslanıyor ama her dağıtımda gelmiyor (Debian'da
-> `python3-venv` ayrı paket) — `pip` de yoksa motor ne der? Ayrıca ağdan paket
-> çekiliyorsa sürüm sabitleme + karma doğrulama ve bunun izin sözlüğünde nasıl
-> görüneceği açık (D-040'ın açığına dördüncü kez basılıyor). Ve çevrimdışı:
-> "kurulmadı" ile "kurulamadı" ayrı tanılardır (K9).
+> KARAR NOKTASI: motorun özel ortamı nasıl kurulacak? **KAPANDI — D-055.**
+> `venv` + `pip` **seçilmedi**: `ensurepip` her dağıtımda yok (Debian
+> `python3-venv`'i ayrı paketliyor) ve orada motor kullanıcıya root'suz bir
+> çıkış yolu sunamazdı — D-049'un tam kaçındığı yer. Yerine **sabitlenmiş tek
+> dosyalık eser**: eklenti manifestinde sürüm + adres + sha256 beyan eder,
+> motor indirir ve doğrular. `pip` hiç gerekmiyor.
+>
+> Ölçüm soruyu keskinleştirmişti: bu makinede sistem `pip`'i **yok**
+> (`python3 -m pip` → "No module named pip") ama `ensurepip` var, yani venv
+> 1,4 sn'de 13 MB'lık bir ortam kurabiliyordu. "pip yok" ile "venv kuramam"
+> aynı şey değil; Debian'ın paket ayrımı ikisini birden götürüyor.
+>
+> **İzin sözlüğü (D-040):** motorun indirmesi eklentinin `permissions.net`
+> listesine **karışmıyor**, onay ekranında ayrı bir `motor` satırında
+> görünüyor. Karışsaydı kullanıcı "bu eklenti github.com'a bağlanıyor" diye
+> okurdu; bağlanan motor. D-040'ın joker açığı bu turda kapanmadı ama
+> **büyümedi** de.
+>
+> **Çevrimdışı:** dört ayrı tanı var ve hiçbiri ötekine benzemiyor —
+> `kurulu değil`, `karma tutmuyor`, `kurulamadı` (ağ), `YETİM` (kaynak 404).
+> Sonuncusu kullanıcının düzeltemeyeceği tek durum ve mesaj bunu söylüyor.
 
 ---
 

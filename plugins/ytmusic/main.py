@@ -29,14 +29,13 @@ gerektirmez), ses röle edilmez (K3), DRM aşan hiçbir şey yok (D-026).
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import urllib.error
 import urllib.request
 
 API = 1
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 INNERTUBE_URL = "https://music.youtube.com/youtubei/v1/search"
 WATCH_URL = "https://music.youtube.com/watch?v="
@@ -75,6 +74,8 @@ class PluginError(Exception):
 state = {
     "secrets": {},
     "data_dir": None,
+    # Motorun kurduğu eserlerin ad → yol haritası (D-055).
+    "requirements": {},
     # yt-dlp komutu (liste) ve nereden bulunduğu; health() bunu raporluyor.
     "ytdlp": None,
     "ytdlp_source": None,
@@ -267,48 +268,34 @@ def row_to_track(row):
 
 
 def ytdlp_command():
-    """yt-dlp'yi bulur: `TUNE_YTDLP` → `PATH` → `python3 -m yt_dlp`.
+    """Motorun kurduğu yt-dlp'yi döndürür (D-055).
 
-    Bulunamazsa hata — "boş sonuç" değil. Kurulu olmayan bir araç ile
-    bulunamayan bir parça iki ayrı tanıdır (K9).
+    Eklenti **aramaz**: hangi yt-dlp, kurulu mu, nasıl kurulur soruları
+    motorun işi. El sıkışmada gelen `requirements` haritasında bir yol
+    varsa o eser kurulu ve karması doğrulanmış demektir; yoksa hiç yoktur.
+
+    Bir zamanlar burada `TUNE_YTDLP` → `PATH` → `python3 -m yt_dlp` diye
+    üç aşamalı bir arayış vardı. Üçü de kullanıcının sisteme bir şey
+    kurmuş olmasına yaslanıyordu ve D-049 bunu yasakladı.
     """
     if state["ytdlp"]:
         return state["ytdlp"]
 
-    override = os.environ.get("TUNE_YTDLP")
-    if override:
-        # Çalıştırma biti yoksa yorumlayıcıya veriyoruz: yt-dlp'nin tek dosyalık
-        # zipapp'i indirildiği gibi çalıştırılabilir olmayabilir.
-        executable = os.access(override, os.X_OK)
-        state["ytdlp"] = [override] if executable else [sys.executable, override]
-        state["ytdlp_source"] = "TUNE_YTDLP"
-        return state["ytdlp"]
+    path = (state["requirements"] or {}).get("yt-dlp")
+    if not path:
+        raise PluginError(
+            "yt-dlp kurulu değil. Bunu eklenti değil motor kurar: "
+            "`tune plugin install ytmusic`."
+        )
 
-    found = shutil.which("yt-dlp")
-    if found:
-        state["ytdlp"] = [found]
-        state["ytdlp_source"] = "PATH"
-        return state["ytdlp"]
-
-    probe = subprocess.run(
-        [sys.executable, "-m", "yt_dlp", "--version"],
-        capture_output=True,
-        timeout=YTDLP_TIMEOUT,
-        check=False,
-    )
-    if probe.returncode == 0:
-        state["ytdlp"] = [sys.executable, "-m", "yt_dlp"]
-        state["ytdlp_source"] = "python -m yt_dlp"
-        return state["ytdlp"]
-
-    # Mesaj bilerek işletim sisteminden bağımsız (D-049): burada `pacman -S`
-    # yazmak Arch dışındaki her kullanıcıya yanlış tavsiye vermek olur.
-    raise PluginError(
-        "yt-dlp bulunamadı. Kurulum yolları: "
-        "https://github.com/yt-dlp/yt-dlp#installation — tek dosyalık sürüm "
-        "root yetkisi istemez. Kuruluysa yolunu `TUNE_YTDLP` ortam "
-        "değişkeninde verebilirsiniz."
-    )
+    # Çalıştırma biti varsa doğrudan; yoksa yorumlayıcıya veriyoruz —
+    # zipapp her iki şekilde de çalışır.
+    if os.access(path, os.X_OK):
+        state["ytdlp"] = [path]
+    else:
+        state["ytdlp"] = [sys.executable, path]
+    state["ytdlp_source"] = "motor"
+    return state["ytdlp"]
 
 
 def ytdlp_json(video):
@@ -373,6 +360,7 @@ def pick_audio_url(document):
 def handshake(params):
     state["secrets"] = params.get("secrets") or {}
     state["data_dir"] = params.get("data_dir")
+    state["requirements"] = params.get("requirements") or {}
     return {
         "api": API,
         "name": "ytmusic",

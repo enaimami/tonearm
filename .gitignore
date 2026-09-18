@@ -12,6 +12,13 @@ extra.md
 # her derlemede yeniden yazılıyor.
 crates/tune/gen/
 
+# Python ara çıktıları. `plugins/` altındaki eklentiler **betik** olarak
+# dağıtılır; derlenmiş hâlleri depoya girmez. Kural bir kez girdikten sonra
+# yazıldı: `python3 -m py_compile` ile bir eklentiyi denetlemek `plugins/
+# ytmusic/__pycache__/` bırakıyor ve `git add -A` onu sessizce alıyordu.
+__pycache__/
+*.pyc
+
 # spike/ atılabilir prototipler; çıktıları versiyonlanmaz
 spike/**/__pycache__/
 spike/**/.venv/

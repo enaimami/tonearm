@@ -27,11 +27,18 @@ Tam "bitti" ölçütü PLAN.md §0.4'te. Üçü CI'da da koşuyor
 ([`.github/workflows/ci.yml`](.github/workflows/ci.yml), D-053) — ama önce
 kendi makinende geçmeli, CI bir hatırlatıcıdır, ilk savunma hattı değil.
 
+### Çalışma zamanı gereksinimi
+
+Eklentiler Python 3.9+ ister ve bu **projenin** gereksinimidir, eklentinin
+değil (D-050). Derlemek için gerekli değil; yalnızca eklenti sağlayıcılarını
+koşturan testler ve komutlar onu arar. Eklentilerin ihtiyaç duyduğu paketleri
+motor indirir — `pip`, `venv` ya da sistem paketi gerekmez.
+
 ### Kendini atlayan testler
 
 Ağa bağlı testler (D-043) ulaşamadıklarında **düşmez, kendilerini atlar ve
 sebebini `stderr`'e yazar.** Atlanan test geçmiş sayılmaz — rapor ederken
-"atlandı" de. Bugün 433 test geçiyor, 7'si kendini atlıyor.
+"atlandı" de. Bugün 450 test geçiyor, 7'si kendini atlıyor.
 
 Atlananları gerçekten koşturmak için gereken ortam değişkenleri:
 
@@ -39,7 +46,11 @@ Atlananları gerçekten koşturmak için gereken ortam değişkenleri:
 |---|---|
 | `TUNE_ACOUSTID_KEY` | AcoustID canlı sınamaları (3 test). Anahtarsız derlemede `EMBEDDED_API_KEY` boş olduğu için atlanırlar. |
 | `TUNE_TORZNAB_URL` + `TUNE_TORZNAB_KEY` | Torznab canlı sınamaları (3 test). Kendi Prowlarr/Jackett'ınızı ister; `TUNE_TORZNAB_QUERY` sorguyu değiştirir. |
-| `TUNE_YTDLP` | `ytmusic` eklentisinin yt-dlp yolu; `PATH`'te yoksa buradan verilir. |
+| `TUNE_PYTHON` | Motorun kullanacağı Python yorumlayıcısı. Verilirse **geri düşülmez**: o yorumlayıcı çalışmıyorsa motor `python3`'e kaymaz, durur ve söyler. |
+
+`TUNE_YTDLP` **kaldırıldı** (D-055): yt-dlp'yi artık eklenti aramıyor, motor
+kuruyor. `ytmusic` testleri onu manifestteki sabitlenmiş sürümden indiriyor
+ve `--features http-client` olmayan bir derlemede kendilerini atlıyor.
 
 Depo kökündeki `.env` **hiçbir kod tarafından okunmaz** — `dotenv` benzeri bir
 bağımlılık yok. Oraya yazdığınız değer kendiliğinden ortama girmez; kabuğunuza

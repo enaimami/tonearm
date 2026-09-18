@@ -116,12 +116,22 @@ flowchart LR
 
 ### 1. Kurulum
 
-Çekirdek, CLI ve masaüstü kabuğu için tek gereksinim **Rust 1.85+** (2024
-edition). Eklentiler ayrı şeyler istiyor — hangisinin neye ihtiyacı olduğu
-[Yol Haritası](#️-yol-haritası)'ndaki Faz 2 satırında ve
-[eklenti yazma rehberinde](docs/eklenti-yazma.md) yazılı. Hiçbiri `tune`'u
-çalıştırmak için gerekli değildir; kurulu değilse ilgili eklenti
-`tune provider test <ad>` çıktısında KULLANILAMIYOR der ve sebebini yazar.
+**Derlemek için:** Rust 1.85+ (2024 edition).
+
+**Eklentileri çalıştırmak için:** Python 3.9+ (`python3`). `tune`'un eklenti
+motoru Python'la koşar (D-050) ve bu, projenin ilan edilmiş bir çalışma
+zamanı gereksinimidir — eklentilerin kendi kendine keşfettiği bir şey değil.
+Python yoksa `tune`'un geri kalanı sorunsuz çalışır; yalnızca eklenti
+sağlayıcıları düşer ve sebebini yazar.
+
+Yorumlayıcı **gömülü değil**, sistemden kullanılıyor. Başka bir Python
+istiyorsanız `TUNE_PYTHON` ile yolunu verin; o yorumlayıcı çalışmıyorsa
+motor sessizce bir başkasına kaymaz, durur ve söyler.
+
+Eklentilerin ihtiyaç duyduğu **paketler** için hiçbir şey kurmanız
+gerekmiyor: onları motor indirir (`tune plugin install <ad>`), sabitlenmiş
+sürümden, sha256 doğrulayarak, sizin veri dizininize. Sisteme dokunulmaz,
+root istenmez, `pip` gerekmez.
 
 ```bash
 # 1. Depoyu klonlayın
@@ -317,6 +327,7 @@ tune play "Get Lucky" --tui
 | `tune provider servers` | | Kayıtlı uzak sunucuları listeler (kimlik bilgisi gösterilmez) |
 | `tune plugin list` | | Kurulu eklentileri ve onay durumlarını listeler |
 | `tune plugin approve <ad>` | | Eklentinin beyan ettiği izinleri onaylar |
+| `tune plugin install <ad>` | | Motorun eklenti için gereken eserleri kurmasını sağlar (sabitlenmiş sürüm, sha256 doğrulanır) |
 | `tune plugin disable\|enable <ad>` | | Eklentiyi kapatır (onay korunur) / geri açar |
 | `tune plugin forget <ad>` | | Onayı tamamen unutur; bir dahaki sefere baştan sorulur |
 | `tune secret list` | | Ad alanlarını ve anahtar adlarını listeler (değerler **gösterilmez**) |
@@ -339,17 +350,20 @@ tune play "Get Lucky" --tui
 - [x] **Faz 1: Evrensel Müzik Çalar** — Yerel dosya oynatma, Navidrome & Jellyfin akışı, dahili scrobbler, TUI oynatıcı.
 - [x] **Faz 2: Eklenti Ekosistemi & Parmak İzi** — Alt süreç + JSON-RPC eklenti protokolü ([eklenti yazma rehberi](docs/eklenti-yazma.md)); AcoustID parmak izi ile kimlik zincirinin dördüncü halkası; üç sağlayıcı eklentisi: [SoundCloud](plugins/soundcloud/), [YouTube Music](plugins/ytmusic/) ve [torrent](plugins/torrent/). Üçü de canlı serviste arıyor ve çalıyor.
 
-  **Ama üçü de kurulum istiyor ve bu Faz 2'nin bitmemiş işi** (PLAN.md §2.7–2.8):
+  **Bağımlılıkları motor taşıyor** (D-049 kural, D-050 tasarım, D-055
+  uygulama). Kural: hiçbir eklenti root ya da sistem çapında kurulum
+  isteyemez. Bugünkü durum:
 
-  | eklenti | bugün istediği |
-  | :--- | :--- |
-  | `soundcloud` | `PATH`'te `python3` (yalnızca standart kütüphane, `pip install` yok) |
-  | `ytmusic` | `python3` + `yt-dlp` |
-  | `torrent` | Rust araç zinciri — `cargo build --release -p tune-plugin-torrent` |
+  | eklenti | istediği | nasıl karşılanıyor |
+  | :--- | :--- | :--- |
+  | `soundcloud` | Python 3.9+ | motorun yorumlayıcısı; paket istemiyor |
+  | `ytmusic` | Python 3.9+ · yt-dlp | `tune plugin install ytmusic` — sabitlenmiş sürüm, sha256 doğrulanır |
+  | `torrent` | Rust araç zinciri | **hâlâ ihlal ediyor** — D-050 S3 onu çekirdeğe feature'lı sağlayıcı olarak taşıyor, kodu yazılmadı |
 
-  Kural (D-049) hiçbir eklentinin root ya da sistem çapında kurulum
-  isteyememesi; bugünkü hâl bunu **üçünde de** ihlal ediyor. Çözüm karara
-  bağlandı (D-050: eklenti motoru), kodu yazılmadı.
+  Bir eklenti kendi bağımlılığını **aramaz, indirmez, kurmaz**; manifestinde
+  beyan eder ve motorun verdiği yolu kullanır. Eksik bir eser sessizce "sonuç
+  yok"a dönüşmez: `tune plugin list` süreç açmadan eksiği söyler ve kurulum
+  için ne yazılacağını yazar.
 
   AcoustID tarafında ayrıca gömülü bir istemci anahtarı **yok**: parmak izi
   halkası yalnızca kendi anahtarınızı `tune secret set identity:acoustid

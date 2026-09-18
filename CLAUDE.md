@@ -85,7 +85,7 @@ tune/
 │   │   │   ├── wrapped/        # paylaşılabilir kart (svg + png)
 │   │   │   ├── library/        # SQLite + FTS
 │   │   │   ├── provider/       # sağlayıcı trait'leri + local + remote/{subsonic,jellyfin}
-│   │   │   ├── plugin/         # alt süreç + JSON-RPC eklentiler
+│   │   │   ├── plugin/         # alt süreç + JSON-RPC eklentiler + motor (runtime)
 │   │   │   ├── playback/       # symphonia + cpal
 │   │   │   ├── net/            # HTTP trait'i + ureq istemcisi + fake
 │   │   │   ├── diag/           # tanılama, aşağıya bak
@@ -151,7 +151,7 @@ tune wrapped [--year N] [--out <dosya>] [--format square|story]
 tune provider list | test <ad> | scan [--if-stale]
 tune provider add <tür> --url U --user K [--name AD] [--api-key A] [--verify]
 tune provider remove <ad> | servers
-tune plugin list | approve <ad> | disable <ad> | enable <ad> | forget <ad>
+tune plugin list | approve <ad> | install <ad> | disable <ad> | enable <ad> | forget <ad>
 tune secret list | set <ad-alanı> <anahtar> | remove <ad-alanı> <anahtar>
 tune play <parça> [--all] [--shuffle] [--dry-run] [--tui]
 tune diag                                   # son çalıştırmanın tanı raporu

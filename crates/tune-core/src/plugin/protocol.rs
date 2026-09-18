@@ -131,6 +131,17 @@ pub struct HandshakeParams {
     pub secrets: BTreeMap<String, String>,
     /// Kullanıcının onayladığı izinler — beyan edilenle aynı küme (D-040).
     pub permissions: super::manifest::Permissions,
+    /// Motorun kurduğu eserlerin `ad → yol` haritası (D-055).
+    ///
+    /// Yalnızca **hazır** eserler burada: yolu olan bir eser kurulu ve
+    /// karması doğrulanmış demektir. Eksik bir eser haritada hiç görünmez,
+    /// boş dize olarak değil — eklenti "var mı?" diye bakarken boş bir yolu
+    /// kazara çalıştırmaya kalkmasın.
+    ///
+    /// **`api`'yi kırmaz:** alan eklemek protokol sürümünü artırmaz (§2.1).
+    /// Bu alanı okumayan eski bir eklenti bugüne kadar olduğu gibi çalışır.
+    #[serde(default)]
+    pub requirements: std::collections::BTreeMap<String, String>,
 }
 
 /// Çekirdeğin kendini tanıtması. Eklenti buna bakıp davranış değiştirebilir.
