@@ -1516,8 +1516,11 @@ sayılarla özet; klavye kısayolları (`?` ile listelenir); kapatılabilir uyar
 panoya kopyalanan tanı raporu; her boş durumda ne yapılacağını söyleyen metin.
 
 **Yerelde doğrulandı** (Arch, WebKitGTK): `.deb` ve `.rpm` üretiliyor, paketin
-içinde ikonlar, `AudioVideo;Audio;Music;` kategorili `.desktop` girdisi ve
-`Cargo.toml`'dan gelen `0.0.1-beta` sürümü var.
+içinde ikonlar, `AudioVideo;Audio;Music;` kategorili `.desktop` girdisi,
+`/usr/share/doc/tonearm/` altında `copyright` + iki lisans dosyası ve
+`Cargo.toml`'dan gelen `0.0.1-beta` sürümü var. Lisans dosyaları
+`bundle.linux.{deb,rpm}.files` ile giriyor: `bundle.licenseFile` alanı
+Linux paketleyicilerine geçmiyor ve bu ancak paketin içi açılınca görüldü.
 
 > Kalan borç iki başlık:
 >

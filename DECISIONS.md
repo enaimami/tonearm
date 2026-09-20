@@ -2731,6 +2731,12 @@ Paketleme kapalıyken hiçbiri görünmüyordu:
 
 * İkonlar 32×32, **103 baytlık** tek renkli bir yer tutucuydu.
 * `.desktop` girdisinin kategorisi, açıklaması, lisans dosyası yoktu.
+  *(Düzeltme, 2026-09-20: ilk ikisi kapandı, **lisans kapanmamıştı.**
+  `bundle.licenseFile` yazılıydı ama Tauri onu yalnızca Windows/macOS
+  paketleyicilerine veriyor; üretilen `.deb` ve `.rpm` hiçbir lisans dosyası
+  taşımıyordu — Debian politikasının istediği `/usr/share/doc/<paket>/copyright`
+  dahil. `bundle.linux.{deb,rpm}.files` ile üçü birden eklendi: `copyright`,
+  `LICENSE-MIT`, `LICENSE-APACHE`. Paketin içi açılıp doğrulandı.)*
 * Sürüm iki yerde yazılıydı — `tauri.conf.json` `0.0.1` derken workspace
   `0.0.1-beta`'daydı. `version` alanı **kaldırıldı**; Tauri onu `Cargo.toml`'dan
   okuyor, kaynak tek.

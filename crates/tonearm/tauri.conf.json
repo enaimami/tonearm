@@ -39,10 +39,20 @@
     "licenseFile": "../../LICENSE-MIT",
     "linux": {
       "deb": {
-        "depends": ["libasound2t64 | libasound2"]
+        "depends": ["libasound2t64 | libasound2"],
+        "files": {
+          "/usr/share/doc/tonearm/copyright": "../../packaging/copyright",
+          "/usr/share/doc/tonearm/LICENSE-MIT": "../../LICENSE-MIT",
+          "/usr/share/doc/tonearm/LICENSE-APACHE": "../../LICENSE-APACHE"
+        }
       },
       "rpm": {
-        "depends": ["webkit2gtk4.1", "gtk3", "alsa-lib"]
+        "depends": ["webkit2gtk4.1", "gtk3", "alsa-lib"],
+        "files": {
+          "/usr/share/doc/tonearm/copyright": "../../packaging/copyright",
+          "/usr/share/doc/tonearm/LICENSE-MIT": "../../LICENSE-MIT",
+          "/usr/share/doc/tonearm/LICENSE-APACHE": "../../LICENSE-APACHE"
+        }
       }
     }
   }

@@ -1,0 +1,12 @@
+tonearm — Sağlayıcıdan bağımsız müzik dinleme katmanı
+https://github.com/enaimami/tonearm
+
+Telif hakkı (c) tonearm katkıcıları.
+
+Bu yazılım iki lisanstan **dilediğinizin** koşullarıyla kullanılabilir:
+
+  * MIT lisansı      — /usr/share/doc/tonearm/LICENSE-MIT
+  * Apache Lisansı 2.0 — /usr/share/doc/tonearm/LICENSE-APACHE
+
+Aksi açıkça belirtilmedikçe, katkı olarak gönderdiğiniz her çalışma da
+Apache-2.0'ın tanımladığı biçimde bu ikili lisansla dağıtılır.
