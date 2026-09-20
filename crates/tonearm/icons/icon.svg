@@ -1,17 +1,33 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Uygulama ikonu. Renkler varsayılan temanın token değerleriyle aynı
-     (bkz. `ui/style.css` içindeki tonearm-bg, tonearm-surface, tonearm-accent). İkon
-     temanın parçası değil — tema değişince değişmez — ama aynı paletten
-     çıkması gerekiyor.
+<!-- Uygulama ikonu: plak ve pikap kolu. Ad buradan geliyor — kol plağı
+     seçmez, ne koyarsan onu okur (D-058).
+
+     Renkler varsayılan temanın token değerleriyle aynı (bkz. `ui/style.css`
+     içindeki tonearm-bg, tonearm-surface, tonearm-accent). İkon temanın
+     parçası değil — tema değişince değişmez — ama aynı paletten çıkması
+     gerekiyor.
+
+     32×32'de okunmak zorunda olduğu için biçim dört kütleye indirgendi: plak,
+     tek oluk halkası, etiket, kol. İnce oluk çizgileri o boyutta gri bir
+     bulanıklığa dönüşüyor. Kol plağın ortasına değil oluk alanına iner;
+     merkeze inen bir kol, iğnesi etikete oturmuş bir pikaptır.
 
      PNG/ICO/ICNS dosyaları bundan üretilir: `icons/README.md`. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
   <rect width="512" height="512" rx="112" fill="#12100e"/>
   <rect x="56" y="56" width="400" height="400" rx="80" fill="#1b1815"/>
+
+  <!-- Plak -->
+  <circle cx="220" cy="306" r="144" fill="#0d0b0a"/>
+  <circle cx="220" cy="306" r="104" fill="none" stroke="#2e2822" stroke-width="13"/>
+  <circle cx="220" cy="306" r="50" fill="#8a5f2c"/>
+  <circle cx="220" cy="306" r="14" fill="#12100e"/>
+
+  <!-- Pikap kolu: mil, kol, kafa -->
+  <path d="M398 126 L300 224" stroke="#ffb454" stroke-width="30" stroke-linecap="round" fill="none"/>
   <g fill="#ffb454">
-    <rect x="140" y="196" width="46" height="120" rx="23"/>
-    <rect x="210" y="140" width="46" height="232" rx="23"/>
-    <rect x="280" y="176" width="46" height="160" rx="23"/>
-    <rect x="350" y="220" width="46" height="72" rx="23"/>
+    <circle cx="404" cy="120" r="42"/>
+    <rect x="283" y="192" width="38" height="76" rx="13" transform="rotate(45 302 230)"/>
   </g>
+  <circle cx="404" cy="120" r="15" fill="#12100e"/>
 </svg>

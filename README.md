@@ -1,199 +1,76 @@
 <div align="center">
 
-```
-  _                     
- | |_ _   _ _ __   ___  
- | __| | | | '_ \ / _ \ 
- | |_| |_| | | | |  __/ 
-  \__|\__,_|_| |_|\___| 
-                        
-```
+<img src="crates/tonearm/icons/128x128.png" width="104" alt="tonearm">
 
 # tonearm
-### *Sağlayıcıdan Bağımsız Dinleme Kimliği & Müzik Katmanı*
+
+### Müziğin nereden geldiği değişir. **Dinleme kimliğin sende kalır.**
 
 <p align="center">
-  <strong>Müziğin nereden geldiği değişir, müzik zevkiniz ve geçmişiniz size kalır.</strong><br>
-  Aboneliklere ve platform duvarlarına son veren açık kaynaklı kişisel müzik ekosistemi.
+  Sağlayıcıların <i>üstünde</i> duran bir müzik katmanı: geçmişin, istatistiklerin ve<br>
+  müzik zevkin bir şirketin sunucusunda değil, senin makinende yaşar.
 </p>
 
-[![License](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg?style=for-the-badge)](LICENSE-MIT)
-[![Rust](https://img.shields.io/badge/Rust-1.85%2B%20(2024)-orange.svg?style=for-the-badge&logo=rust)](https://www.rust-lang.org)
-[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg?style=for-the-badge)](PLAN.md)
-[![Status](https://img.shields.io/badge/Status-v0.0.1--beta-emerald.svg?style=for-the-badge)](PLAN.md)
-[![PRs Welcome](https://img.shields.io/badge/PRs-Welcome-brightgreen.svg?style=for-the-badge)](CONTRIBUTING.md)
+[![Lisans](https://img.shields.io/badge/lisans-MIT%20%7C%20Apache--2.0-2f6feb?style=for-the-badge)](LICENSE-MIT)
+[![Rust](https://img.shields.io/badge/rust-1.85%2B-e07b39?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org)
+[![Platform](https://img.shields.io/badge/linux%20·%20macOS%20·%20windows-3c3833?style=for-the-badge)](#kurulum)
+[![Durum](https://img.shields.io/badge/durum-v0.0.1--beta-ffb454?style=for-the-badge)](#kurulum)
+
+**[Ne yapar](#ne-yapar)** · **[Kurulum](#kurulum)** · **[Nasıl kullanılır](#nasıl-kullanılır)** · **[Nereden çalar](#nereden-çalar)** · **[Gizlilik](#gizlilik)** · **[Yol haritası](#yol-haritası)**
 
 <br>
 
-<p align="center">
-  <img src="docs/ornek-kart.svg" alt="tonearm tarafından üretilen örnek Wrapped kartı" width="480">
-</p>
+<img src="docs/ornek-kart.svg" alt="tonearm'ın ürettiği örnek Wrapped kartı" width="600">
 
-[ 🚀 Hızlı Başlangıç ](#-hızlı-başlangıç) • 
-[ 💡 Neden tonearm? ](#-neden-tonearm) • 
-[ ✨ Özellikler ](#-öne-çıkan-özellikler) • 
-[ 🖥️ Terminal Arayüzü ](#-terminal-oynatıcı-tui-deneyimi) • 
-[ 📖 Komutlar ](#-komut-satırı-kılavuzu) • 
-[ 🗺️ Yol Haritası ](#️-yol-haritası) • 
-[ ❓ SSS ](#-sıkça-sorulan-sorular-sss)
-
----
+<sub><i>Yılda bir kez değil, istediğin an. Hangi yıl istersen.</i></sub>
 
 </div>
 
-## 💡 Neden tonearm?
+---
 
-Yıllardır müzik dinliyorsunuz; ancak tüm dinleme geçmişiniz, çalma listeleriniz ve müzik kimliğiniz ticari akış servislerinin sunucularında kilitli tutuluyor. Aboneliğinizi sonlandırdığınız gün 10 yıllık müzik geçmişiniz elinizden kayıp gidiyor. Yılda bir kez gösterilen "Wrapped" özetleri ise yalnızca son 12 ayı ve platformun pazarlama hedeflerini yansıtıyor.
+## Yıllarca dinledin. Peki geçmişin kimin?
 
-**`tonearm`, müziğiniz üzerindeki egemenliğinizi geri verir:**
+Bir akış servisinde on yıl geçirirsin; her çalma, her keşif, her gece 3'te
+tekrar tekrar dinlediğin o şarkı kaydedilir. Sonra aboneliği bırakırsın ve
+hepsi orada kalır. On yıllık dinleme kimliğin, taşıyamadığın bir hesap
+ekranına dönüşür.
 
-| Karşılaştırma | Klasik Akış Servisleri | `tonearm` |
+**`tonearm` bu ilişkiyi ters çevirir.** Geçmişini kendi makinene indirir, tek
+bir kanonik kimlik altında toplar, ve müziği nereden çalarsan çal — yerel
+diskten, evindeki sunucudan, bir eklentiden — üstteki katmanı aynı tutar.
+Adı da buradan geliyor: pikap kolu plağı seçmez, ne koyarsan onu okur.
+
+|  | Akış servisi | `tonearm` |
 | :--- | :--- | :--- |
-| **Veri Mülkiyeti** | 🔒 Şirketin sunucularında hapsolmuş veri | 🏠 **%100 sizin, yerel SQLite veritabanında** |
-| **Dinleme Geçmişi** | ⏳ Yalnızca aktif abonelik boyunca erişilebilir | ♾️ **Ömür boyu, platformdan bağımsız arşiv** |
-| **Wrapped & İstatistikler** | 📅 Yılda bir kez, sadece son 12 ay | 📊 **İstediğiniz an, istediğiniz yıl veya tüm zamanlar** |
-| **Müzik Kaynağı** | 🚫 Yalnızca servisin kendi kataloğu | 🎧 **Yerel dosyalar (FLAC, MP3...), Navidrome, Subsonic, Jellyfin** |
-| **Scrobbling** | ☁️ Üçüncü taraf servis şartlarına bağlı | ⚡ **Dahili scrobbler: Geçmiş ve bugün tek zaman çizelgesinde** |
-| **Gizlilik & Güvenlik** | 👁️ Yoğun kullanıcı takibi ve telemetri | 🛡️ **Sıfır telemetri, tamamen çevrimdışı çalışabilirlik** |
+| **Geçmişin nerede** | Şirketin sunucusunda | Kendi diskinde, SQLite dosyasında |
+| **Ne kadar geriye gider** | Abonelik sürdüğü kadar | Export'un kapsadığı kadar — ömür boyu |
+| **Wrapped** | Yılda bir kez, son 12 ay | İstediğin an, istediğin yıl, tüm zamanlar |
+| **Müzik nereden gelir** | Tek katalog | Yerel dosya, Subsonic, Jellyfin, eklentiler |
+| **Telemetri** | Var | Yok — kodda tek satırı bile yok |
+| **Ağ** | Zorunlu | İsteğe bağlı; `--online` demedikçe kimseye sorulmaz |
 
 ---
 
-## 🏗️ Nasıl Çalışır?
+## Ne yapar
 
-```mermaid
-flowchart LR
-    subgraph Sources["📥 Veri & Ses Kaynakları"]
-        A["Spotify GDPR Zip (Geçmiş)"]
-        B["Yerel Müzikler (FLAC/MP3)"]
-        C["Subsonic / Navidrome / Jellyfin"]
-    end
+### 📥 Geçmişini içeri alır — API'siz, paylaşımsız
 
-    subgraph Core["⚙️ tonearm Çekirdeği (tonearm-core)"]
-        D["Kanonik Kimlik Çözümleyici<br/>(ISRC / MBID / Bulanık Eşleme)"]
-        E[("Yerel SQLite Veritabanı<br/>(listens & provider_tracks)")]
-        F["Ses Motoru & Scrobbler<br/>(Symphonia + CPAL)"]
-    end
-
-    subgraph Surfaces["🖥️ Arayüz & Çıktılar"]
-        G["📊 İstatistik Motoru"]
-        H["🎨 Wrapped Kart Üreticisi<br/>(SVG / PNG)"]
-        I["📟 Terminal Oynatıcı (TUI)"]
-        J["🖥️ Masaüstü Uygulaması (Tauri + Temalar)"]
-        K["✨ Gelecek: Mobil (uniffi)"]
-    end
-
-    A --> D --> E
-    B --> F
-    C --> F
-    F --> E
-    E --> G --> H
-    F --> I
-    E --> J
-    E --> K
-```
-
----
-
-## ✨ Öne Çıkan Özellikler
-
-### 📦 1. Eksiksiz Geçmiş İçe Aktarımı
-* Spotify genişletilmiş dinleme geçmişinizi (`Streaming_History_Audio_*.json`) tek adımda içeri aktarır.
-* Akıllı kimlik eşleme zinciri (**ISRC → MusicBrainz ID → Bulanık Metin Eşleştirme**) ile parçaları tekilleştirir.
-
-### 📊 2. Sınırsız İstatistikler & Kişisel Wrapped
-* Toplam dinleme süresi, en çok dinlenen sanatçılar, albümler, şarkılar ve keşif zaman çizelgeleri.
-* Sosyal medyada doğrudan paylaşılabilecek **Kare (1080×1080)** ve **Hikaye (1080×1920)** ölçülerinde şık kartlar üretir.
-
-### 🎧 3. Evrensel Müzik Çalar
-* **Yerel Formatlar:** `FLAC`, `MP3`, `OGG`, `M4A/AAC`, `WAV` desteği.
-* **Uzak Medya Sunucuları:** `Navidrome`, `Subsonic`, `Jellyfin` üzerinden doğrudan akış.
-* **Kalıcı İndeks & Hızlı Arama:** Kütüphanenizi SQLite FTS5 tam metin aramasıyla anında tarar.
-
-### 🖥️ 4. Güçlü Terminal Arayüzü (TUI)
-* Donanımı yormayan, klavye dostu, modern bir terminal oynatıcı.
-
-### 🎛️ 5. Masaüstü Uygulaması & Temalar
-* Kuyruk, kütüphane araması, istatistikler, wrapped kartı, sağlayıcı ve
-  eklenti yönetimi — hepsi tek pencerede. Klavye kısayolları için `?`.
-* Export arşivini pencereye sürükleyip bırakmak yeterli.
-* **Kullanıcıların yazabildiği CSS tema sistemi:** 14 semantik token,
-  sürümlenmiş sözleşme, iki referans tema ([tema yazma rehberi](crates/tonearm/themes/README.md)).
-
----
-
-## 🚀 Hızlı Başlangıç
-
-### 1. Kurulum
-
-**Derlemek için:** Rust 1.85+ (2024 edition).
-
-**Eklentileri çalıştırmak için:** Python 3.9+ (`python3`). `tonearm`'un eklenti
-motoru Python'la koşar (D-050) ve bu, projenin ilan edilmiş bir çalışma
-zamanı gereksinimidir — eklentilerin kendi kendine keşfettiği bir şey değil.
-Python yoksa `tonearm`'un geri kalanı sorunsuz çalışır; yalnızca eklenti
-sağlayıcıları düşer ve sebebini yazar.
-
-Yorumlayıcı **gömülü değil**, sistemden kullanılıyor. Başka bir Python
-istiyorsanız `TONEARM_PYTHON` ile yolunu verin; o yorumlayıcı çalışmıyorsa
-motor sessizce bir başkasına kaymaz, durur ve söyler.
-
-Eklentilerin ihtiyaç duyduğu **paketler** için hiçbir şey kurmanız
-gerekmiyor: onları motor indirir (`tonearm plugin install <ad>`), sabitlenmiş
-sürümden, sha256 doğrulayarak, sizin veri dizininize. Sisteme dokunulmaz,
-root istenmez, `pip` gerekmez.
+Spotify'ın GDPR kapsamında verdiği veri export'unu okur. Şifre istemez, API
+anahtarı istemez, hesabına bağlanmaz. Yasal olarak senin olan bir dosyayı
+okur, o kadar.
 
 ```bash
-# 1. Depoyu klonlayın
-git clone https://github.com/enaimami/tonearm.git
-cd tonearm
-
-# 2. Optimize edilmiş sürümü derleyin
-cargo build --release
-
-# 3. İkili dosyayı sistem PATH'ine ekleyin (isteğe bağlı)
-cp target/release/tonearm ~/.local/bin/
+tonearm import spotify_verilerim.zip
 ```
 
-**Masaüstü uygulaması.** Paketler (`.deb`, `.rpm`, `.AppImage`, `.dmg`, `.msi`)
-her sürüm etiketinde CI tarafından üretilir ve sürüm sayfasına eklenir — ilk
-etiket atılana kadar kaynaktan çalıştırın:
+### 🔗 Aynı parçanın bütün kopyalarını tek kimlikte toplar
 
-```bash
-cargo run -p tonearm            # pencereyi açar
-```
+Yerel FLAC'in, Jellyfin'deki kopyan ve SoundCloud'daki yükleme — üçü de aynı
+şarkı. `tonearm` bunları dört halkalı bir zincirle eşler: **ISRC →
+MusicBrainz → bulanık eşleşme → AcoustID parmak izi.** Her eşleşme bir güven
+skoru taşır, ve eşleşmeyenler **sayılır** — sessizce kaybolmaz.
 
-Paketleri kendiniz üretmek isterseniz `cargo install tauri-cli --version "^2"`
-ardından `cargo tauri build --config crates/tonearm/tauri.conf.json`. Linux'ta
-derleme bağımlılıkları: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`,
-`libasound2-dev`, `librsvg2-dev`, `patchelf`.
-
----
-
-### 2. Adım Adım Kullanım
-
-#### 📁 Adım 1: Spotify Geçmişinizi İçe Aktarın
-
-<details>
-<summary><b>🔍 Spotify'dan verinizi nasıl talep edersiniz? (Tıklayın)</b></summary>
-
-1. Spotify web sitesinde **Hesap → Gizlilik ayarları** bölümüne gidin.
-2. Sayfanın altındaki **"Verilerini indir"** bölümünden **"Genişletilmiş akış geçmişi"** kutusunu işaretleyin ve talep edin.
-3. Spotify bir iki gün içinde indirme bağlantısını e-postanıza gönderecektir (Bu yasal bir GDPR hakkıdır).
-</details>
-
-İndirdiğiniz zip arşivini doğrudan `tonearm` ile içe aktarın:
-```bash
-tonearm import my_spotify_data.zip
-```
-
-#### 📈 Adım 2: İstatistiklerinizi Görüntüleyin
-```bash
-# Genel dinleme geçmişi özeti
-tonearm stats
-
-# Belirli bir yıla ait ilk 10 sanatçı ve parça
-tonearm stats --year 2024 --top 10
-```
+### 📊 İstatistiklerin, istediğin an
 
 ```text
 $ tonearm stats --year 2024 --top 3
@@ -211,94 +88,32 @@ en çok dinlenen parçalar
    1. Pink Floyd - Time                               38 çalma  4sa 21dk
    2. Radiohead - Weird Fishes/Arpeggi                29 çalma  2sa 34dk
    3. Daft Punk - Digital Love                        27 çalma  2sa 10dk
-
-en çok dinlenen albümler
-   1. Pink Floyd - The Dark Side of the Moon         214 çalma
-   2. Radiohead - In Rainbows                        171 çalma
-   3. Daft Punk - Discovery                          142 çalma
 ```
 
-> Sayılar örnektir; biçim `tonearm-cli/src/output.rs`'in bastığının aynısıdır.
-> Atlanan kayıtlar sessizce düşmez, üçüncü satırda sayılır (K9).
+<sub>Sayılar örnek; biçim programın bastığının aynısı. Üçüncü satıra dikkat:
+atlanan ve kimliklenemeyen kayıtlar <b>sayılarak</b> raporlanır — bu proje
+"bakmadım" ile "bulamadım"ı ayrı tanılar sayar.</sub>
 
-#### 🎨 Adım 3: Wrapped Kartınızı Oluşturun
-Sosyal medyada paylaşmak üzere yüksek çözünürlüklü görsel kartınızı üretin:
+### 🎨 Paylaşılabilir Wrapped kartı
+
+Kare (1080×1080) ya da hikâye (1080×1920), SVG ya da PNG. Aralığı beklemene
+gerek yok, yılı sen seçersin.
 
 ```bash
-# Kare Formatı (Instagram / Twitter / Feed)
-tonearm wrapped --year 2024 --out wrapped2024.png
-
-# Dikey Hikaye Formatı (Instagram Story / Shorts - 1080x1920)
-tonearm wrapped --year 2024 --format story --out story2024.png
-
-# Vektörel Çıktı (SVG)
-tonearm wrapped --year 2024 --out wrapped2024.svg
+tonearm wrapped --year 2024 --format story --out 2024.png
 ```
 
----
+### 🎧 Ve çalar
 
-## 🎧 Müzik Çalma ve Kütüphane
-
-### Yerel Dosyaları Çalma
-Yerel müzik klasörlerinizi tek bir komutla indeksleyin ve çalın:
+Yerel dosyaların, evindeki Subsonic/Navidrome/Jellyfin sunucun ve eklentiler
+üzerinden. Kütüphane SQLite FTS5 ile indekslenir, arama anında döner.
 
 ```bash
-# Müzik dizininizi ayarlayın (varsayılan: ~/Müzik veya ~/Music)
-export TONEARM_MUSIC_DIRS=~/Müzik
-
-# Kütüphaneyi tarayın (tam tarama)
-tonearm provider scan
-
-# Yalnızca dizin damgası değiştiyse tara — düz `scan`'den ucuz, ama
-# yerinde yeniden etiketlenen dosyaları göremez.
-tonearm provider scan --if-stale
-
-# Arama yapın ve Terminal Arayüzü (TUI) ile çalın
 tonearm play "Pink Floyd" --all --tui
 ```
 
-### Uzak Sunucuları Bağlama (Navidrome / Subsonic / Jellyfin)
-
-```bash
-# Subsonic / Navidrome sunucusu ekleme:
-tonearm provider add subsonic --url https://muzik.evim.com --user ahmet --name ev
-
-# Jellyfin sunucusu ekleme:
-tonearm provider add jellyfin --url https://jf.evim.com --user ahmet
-
-# Kayıtlı sunucuları kontrol etme:
-tonearm provider servers
-tonearm provider test ev
-
-# Uzak sunucudan parça çalma:
-tonearm play "Get Lucky" --tui
-```
-
-> [!NOTE]
-> **Parola nereye gitmez:** komut satırına argüman olarak yazılmaz (kabuk
-> geçmişine ve `ps` çıktısına sızardı). Yankısız sorulur ya da `TONEARM_PASSWORD`
-> ortam değişkeninden okunur; log'a ve `tonearm diag` raporuna da girmez.
->
-> **Parolanın kendisi diske hiç yazılmaz.** Subsonic'te ondan bir `salt` +
-> `md5(parola+salt)` token'ı türetilir, Jellyfin'de bir erişim anahtarı
-> alınır; saklanan bunlardır. Kayıt `<veri dizini>/servers.json` dosyasında,
-> unix'te `0600` izinle, **düz metin JSON** olarak durur.
->
-> Bunu bir şifreleme vaadi olarak okumayın: türetilmiş token o sunucuya
-> erişim için parolanın yerine geçer. Koruma dosya izninin verdiği kadardır,
-> disk erişimi olan birine karşı değildir. Eklenti ve AcoustID sırları ayrı
-> bir dosyada (`secrets.json`, yine `0600` ve düz metin) durur — anahtarlığa
-> (`keyring`) yaslanmamak bilinçli bir karardı (D-042): okuma tek bir yerden
-> geçtiği için arkasına sonradan anahtarlık koymak tek dosyalık bir iş.
-
----
-
-## 🖥️ Terminal Oynatıcı (TUI) Deneyimi
-
-`tonearm play "<sorgu>" --tui` komutu zengin bir terminal arayüzü başlatır:
-
 ```text
-┌ tonearm ──────────────────────────────────────────────────────────────────────┐
+┌ tonearm ───────────────────────────────────────────────────────────────────┐
 │ ▶ Pink Floyd - Time  (çalıyor)                                             │
 └────────────────────────────────────────────────────────────────────────────┘
 ┌────────────────────────────────────────────────────────────────────────────┐
@@ -313,132 +128,234 @@ tonearm play "Get Lucky" --tui
  boşluk duraklat · n/b sonraki/önceki · ↑↓ seç · enter çal · s karıştır · r tekrar · q çık
 ```
 
-> Kuyruk satırları `sanatçı - başlık`tır; süre ve albüm sütunu **yoktur**.
-> Bir hata olursa alt satır bir çerçeveye dönüşür, ilk satırını gösterir ve
-> `tonearm diag`'a yönlendirir — hata ekranı kaplamaz ama saklanmaz da (K9).
+### 🖥️ Masaüstünde de aynısı
 
-### ⌨️ Klavye Kısayolları
+Kuyruk, arama, istatistikler, wrapped, sağlayıcı ve eklenti yönetimi tek
+pencerede. Export arşivini pencereye sürükle, bırak. Kısayolları görmek için
+<kbd>?</kbd>.
 
-| Kısayol | İşlev |
-| :---: | :--- |
-| <kbd>Boşluk</kbd> / <kbd>p</kbd> | Oynat / Duraklat |
-| <kbd>n</kbd> / <kbd>b</kbd> | Sonraki parça / Önceki parça |
-| <kbd>↑</kbd> <kbd>↓</kbd> ya da <kbd>k</kbd> <kbd>j</kbd> | Kuyrukta parça seçimi |
-| <kbd>Enter</kbd> | Seçilen parçayı hemen başlat |
-| <kbd>s</kbd> | Karıştırma modunu aç / kapat (*Shuffle*) |
-| <kbd>r</kbd> | Tekrar modunu değiştir (*Kapalı → Tümü → Tek*) |
-| <kbd>q</kbd> / <kbd>Esc</kbd> | Oynatıcıdan çık |
+Arayüz **kullanıcının yazabildiği CSS temalarını** destekler: 14 semantik
+token, sürümlenmiş bir sözleşme, iki referans tema.
+→ [tema yazma rehberi](crates/tonearm/themes/README.md)
 
 ---
 
-## 📖 Komut Satırı Kılavuzu
+## Kurulum
 
-| Alt Komut | Seçenekler | Açıklama |
-| :--- | :--- | :--- |
-| `tonearm import <zip\|dizin>` | | Export arşivini (zip ya da açılmış dizin) içe aktarır |
-| `tonearm stats` | `--year <yıl>`, `--top <n>`, `--min-ms <ms>` | Detaylı dinleme istatistiklerini listeler |
-| `tonearm wrapped` | `--year <yıl>`, `--format square\|story`, `--out <dosya>` | Paylaşılabilir görsel Wrapped kartı oluşturur |
-| `tonearm resolve` | `"<sanatçı> - <başlık>"` ya da `--file <ses>` | Tek parçayı kanonik kimlik zincirinden geçirir |
-| `tonearm play <sorgu>` | `--all`, `--shuffle`, `--dry-run`, `--tui` | Arama sonucundaki parçaları çalar |
-| `tonearm library search <sorgu>` | `--limit <n>`, `--min-ms <ms>` | Kütüphane içinde tam metin arama yapar |
-| `tonearm provider list` | | Kayıtlı sağlayıcıları listeler (süreç başlatmaz) |
-| `tonearm provider test <ad>` | | Sağlayıcının erişim durumunu ve parça sayısını sınar |
-| `tonearm provider scan` | `--if-stale` | Yerel müzik dizinlerini tarar; bayraksız hâli **tam** tarama |
-| `tonearm provider add <tür>` | `--url`, `--user`, `--name`, `--api-key`, `--verify` | Subsonic ya da Jellyfin sunucusu kaydeder |
-| `tonearm provider remove <ad>` | | Kayıtlı uzak sunucuyu siler |
-| `tonearm provider servers` | | Kayıtlı uzak sunucuları listeler (kimlik bilgisi gösterilmez) |
-| `tonearm plugin list` | | Kurulu eklentileri ve onay durumlarını listeler |
-| `tonearm plugin approve <ad>` | | Eklentinin beyan ettiği izinleri onaylar |
-| `tonearm plugin install <ad>` | | Motorun eklenti için gereken eserleri kurmasını sağlar (sabitlenmiş sürüm, sha256 doğrulanır) |
-| `tonearm plugin disable\|enable <ad>` | | Eklentiyi kapatır (onay korunur) / geri açar |
-| `tonearm plugin forget <ad>` | | Onayı tamamen unutur; bir dahaki sefere baştan sorulur |
-| `tonearm secret list` | | Ad alanlarını ve anahtar adlarını listeler (değerler **gösterilmez**) |
-| `tonearm secret set <ad-alanı> <anahtar>` | | Sır yazar (değer istemden ya da `TONEARM_SECRET`'ten) |
-| `tonearm secret remove <ad-alanı> <anahtar>` | | Bir sırrı siler |
-| `tonearm diag` | | Son çalıştırmanın ortam, aşama ve hata tanılama raporunu döker |
+> ### ⚠️ Beta ne demek
+>
+> Çekirdek yetenekler çalışıyor ve **455 test** altında duruyor; ama hiçbir
+> sürüm henüz senin makinen dışında bir yerde yaşamadı. İçe aktardığın
+> export dosyasına dokunulmaz, o yüzden veri kaybı beklenmiyor — ama
+> kütüphane şeması sürümler arasında değişebilir.
 
-> [!TIP]
-> Bütün komutlar `--json` parametresini destekler. Çıktıları `jq` veya kendi betiklerinizle kolayca işleyebilirsiniz:
-> ```bash
-> tonearm stats --year 2024 --json | jq '.report.top_artists[0]'
-> ```
+**Masaüstü paketleri** (`.deb`, `.rpm`, `.AppImage`, `.dmg`, `.msi`) her sürüm
+etiketinde üretilir ve [sürüm sayfasına](https://github.com/enaimami/tonearm/releases)
+eklenir. macOS ve Windows paketleri imzasızdır: macOS'ta sağ tık → Aç,
+Windows'ta SmartScreen → Yine de çalıştır.
 
----
-
-## 🗺️ Yol Haritası
-
-- [x] **Faz 0: Kimlik & İstatistikler** — Veri içe aktarma, kanonik kimlik eşleme, SQLite depolama, istatistik motoru.
-- [x] **Faz 0.5: Paylaşılabilir Wrapped** — SVG & PNG (1080x1080 / 1080x1920) görsel kart üretimi.
-- [x] **Faz 1: Evrensel Müzik Çalar** — Yerel dosya oynatma, Navidrome & Jellyfin akışı, dahili scrobbler, TUI oynatıcı.
-- [x] **Faz 2: Eklenti Ekosistemi & Parmak İzi** — Alt süreç + JSON-RPC eklenti protokolü ([eklenti yazma rehberi](docs/eklenti-yazma.md)); AcoustID parmak izi ile kimlik zincirinin dördüncü halkası; üç sağlayıcı eklentisi: [SoundCloud](plugins/soundcloud/), [YouTube Music](plugins/ytmusic/) ve [torrent](plugins/torrent/). Üçü de canlı serviste arıyor ve çalıyor.
-
-  **Bağımlılıkları motor taşıyor** (D-049 kural, D-050 tasarım, D-055
-  uygulama). Kural: hiçbir eklenti root ya da sistem çapında kurulum
-  isteyemez. Bugünkü durum:
-
-  | eklenti | istediği | nasıl karşılanıyor |
-  | :--- | :--- | :--- |
-  | `soundcloud` | Python 3.9+ | motorun yorumlayıcısı; paket istemiyor |
-  | `ytmusic` | Python 3.9+ · yt-dlp | `tonearm plugin install ytmusic` — sabitlenmiş sürüm, sha256 doğrulanır |
-  | `torrent` | Rust araç zinciri | **hâlâ ihlal ediyor** — çözümü ilk sürümden sonraya ertelendi (D-056) |
-
-  Bir eklenti kendi bağımlılığını **aramaz, indirmez, kurmaz**; manifestinde
-  beyan eder ve motorun verdiği yolu kullanır. Eksik bir eser sessizce "sonuç
-  yok"a dönüşmez: `tonearm plugin list` süreç açmadan eksiği söyler ve kurulum
-  için ne yazılacağını yazar.
-
-  AcoustID tarafında ayrıca gömülü bir istemci anahtarı **yok**: parmak izi
-  halkası yalnızca kendi anahtarınızı `tonearm secret set identity:acoustid
-  api_key` ile yazdığınızda çalışır, anahtarsız çağrı sessizce boş dönmez,
-  ne yapılacağını söyleyerek durur.
-- [x] **Faz 3: Masaüstü Uygulaması (GUI) & Temalar** — Tauri tabanlı masaüstü arayüzü ve sürümlenmiş CSS tema sözleşmesi ([tema yazma rehberi](crates/tonearm/themes/README.md)).
-- [ ] **Faz 4: Senkronize Odalar (Birlikte Dinleme)** — Ses akışı röle edilmeden zaman çapasıyla eşzamanlı dinleme.
-- [ ] **Faz 5: Sosyal Graf** — Arkadaşlık kurulmaz, odalardan türetilir.
-- [ ] **Faz 6: Mobil İstemciler** — `uniffi` ile iOS ve Android desteği.
-
----
-
-## ❓ Sıkça Sorulan Sorular (SSS)
-
-<details>
-<summary><b>Spotify şifremi veya API anahtarımı vermem gerekiyor mu?</b></summary>
-<b>Hayır.</b> tonearm, Spotify API'sine veya şifrenize ihtiyaç duymaz. GDPR kapsamında talep ettiğiniz veri export zip dosyasını yerel olarak okur.
-</details>
-
-<details>
-<summary><b>Bilgisayarımdan bir müzik dosyasını silersem dinleme geçmişim silinir mi?</b></summary>
-<b>Asla.</b> tonearm mimarisinde "ne dinledin" (dinleme geçmişi) ile "şu an ne çalabilirsin" (katalog) tamamen ayrı tablolarda saklanır. Dosyayı silseniz dahi dinleme geçmişiniz ve istatistikleriniz kalıcıdır.
-</details>
-
-<details>
-<summary><b>İnternet bağlantım olmadan çalışır mı?</b></summary>
-<b>Evet.</b> tonearm tamamen yerel makinenizde çalışır. İçe aktarma, yerel oynatma, TUI ve istatistik üretimi için internet bağlantısı zorunlu değildir.
-</details>
-
----
-
-## 🤝 Katkıda Bulunma
-
-`tonearm` açık kaynaklı ve topluluk odaklı bir projedir. Hata bildirimleri, yeni özellik önerileri ve katkılar memnuniyetle kabul edilir!
-
-Geliştirici kuralları ve test adımları için lütfen [`CONTRIBUTING.md`](CONTRIBUTING.md) belgesini inceleyin.
+**Kaynaktan:**
 
 ```bash
-# Test paketini çalıştırma
-cargo test --workspace
+git clone https://github.com/enaimami/tonearm.git
+cd tonearm
+cargo build --release
 
-# Kod stili ve clippy denetimleri
+cp target/release/tonearm ~/.local/bin/   # komut satırı
+cargo run -p tonearm                      # masaüstü penceresi
+```
+
+<details>
+<summary><b>Derleme gereksinimleri</b></summary>
+
+<br>
+
+Rust 1.85+ (2024 edition). Linux'ta masaüstü kabuğu için:
+`libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libasound2-dev`, `librsvg2-dev`,
+`patchelf`.
+
+Eklentiler için Python 3.9+ gerekir — gömülü değil, sistemden kullanılır.
+Python yoksa `tonearm`'un geri kalanı çalışır, yalnızca eklenti sağlayıcıları
+düşer ve sebebini söyler. Eklentilerin **paketleri** için bir şey kurman
+gerekmez: onları motor indirir (`tonearm plugin install <ad>`), sabitlenmiş
+sürümden ve sha256 doğrulayarak, senin veri dizinine. Sisteme dokunulmaz,
+root istenmez, `pip` gerekmez.
+
+</details>
+
+---
+
+## Nasıl kullanılır
+
+<details>
+<summary><b>Spotify verini nasıl istersin?</b> (tıkla)</summary>
+
+<br>
+
+1. Spotify → **Hesap → Gizlilik ayarları**
+2. **"Genişletilmiş akış geçmişi"** kutusunu işaretle, talep et
+3. Birkaç gün içinde e-postana bir indirme bağlantısı gelir
+
+Bu bir GDPR hakkı; Spotify vermek zorunda ve bunun için bir API anahtarına
+ihtiyacın yok.
+
+</details>
+
+```bash
+# 1 — geçmişini içeri al
+tonearm import spotify_verilerim.zip
+
+# 2 — bak bakalım neymiş
+tonearm stats --year 2024 --top 10
+
+# 3 — kartını üret
+tonearm wrapped --year 2024 --out 2024.png
+
+# 4 — müziğini bağla ve çal
+export TONEARM_MUSIC_DIRS=~/Müzik
+tonearm provider scan
+tonearm play "Portishead" --all --tui
+```
+
+Uzak sunucu bağlamak:
+
+```bash
+tonearm provider add subsonic --url https://muzik.evim.com --user ahmet --name ev
+tonearm provider add jellyfin --url https://jf.evim.com --user ahmet
+tonearm provider test ev
+```
+
+Bir şey ters giderse:
+
+```bash
+tonearm diag     # son çalıştırmanın ortamı, aşaması, hata zinciri — tek blok
+```
+
+<details>
+<summary><b>Bütün komutlar</b></summary>
+
+<br>
+
+| Komut | Ne yapar |
+| :--- | :--- |
+| `tonearm import <zip\|dizin>` | Export arşivini içe aktarır |
+| `tonearm stats [--year N] [--top N]` | Dinleme istatistikleri |
+| `tonearm wrapped [--year N] [--format square\|story]` | Paylaşılabilir kart üretir |
+| `tonearm resolve "<sanatçı> - <başlık>"` \| `--file <ses>` | Tek parçayı kimlik zincirinden geçirir |
+| `tonearm library search <sorgu>` | Kütüphanede tam metin arama |
+| `tonearm play <sorgu> [--all] [--shuffle] [--tui]` | Çalar |
+| `tonearm provider list \| test \| scan \| add \| remove \| servers` | Sağlayıcı yönetimi |
+| `tonearm plugin list \| approve \| install \| disable \| enable \| forget` | Eklenti yönetimi |
+| `tonearm secret list \| set \| remove` | Sır deposu (değerler asla gösterilmez) |
+| `tonearm diag` | Tanı raporu |
+
+Her komut `--json` destekler:
+
+```bash
+tonearm stats --year 2024 --json | jq '.report.top_artists[0]'
+```
+
+</details>
+
+---
+
+## Nereden çalar
+
+| Kaynak | Durum | Not |
+| :--- | :--- | :--- |
+| **Yerel dosyalar** | ✅ Çekirdekte | FLAC, MP3, OGG/Vorbis, M4A/AAC |
+| **Subsonic / Navidrome** | ✅ Çekirdekte | Gerçek sunucuda doğrulandı |
+| **Jellyfin** | ✅ Çekirdekte | Gerçek sunucuda doğrulandı |
+| **SoundCloud** | ✅ Eklenti | Python 3.9+, başka bir şey gerekmez |
+| **YouTube Music** | ✅ Eklenti | yt-dlp'yi motor indirir, sha256 doğrular |
+| **Torrent (Torznab)** | ⚠️ Eklenti | Çalışıyor, ama **kaynaktan derlenmesi** gerekiyor |
+| **Spotify çalma** | ❌ Yok | Ve olmayacak — içe aktarma zaten export dosyasından |
+
+Eklentiler **ayrı süreçte**, JSON-RPC ile konuşur: biri çökerse uygulama
+düşmez, ve eklenti herhangi bir dilde yazılabilir. Her eklenti kurulmadan
+önce neye erişeceğini beyan eder ve onayını ister.
+→ [eklenti yazma rehberi](docs/eklenti-yazma.md)
+
+---
+
+## Gizlilik
+
+* **Telemetri yok.** Kodda böyle bir şey yok; arayabilirsin.
+* **Ağ varsayılan kapalı.** `--online` demedikçe kimlik çözümlemesi hiçbir
+  servise sormaz. Bir export'u içe aktarmak seni sessizce ağa bağlamaz.
+* **Parolan diske yazılmaz.** Komut satırına da yazılmaz (kabuk geçmişine ve
+  `ps` çıktısına sızardı). Subsonic'te ondan bir token türetilir, Jellyfin'de
+  bir erişim anahtarı alınır; saklanan bunlardır.
+* **Ama bir şifreleme vaadi verilmiyor:** türetilmiş token o sunucu için
+  parolanın yerine geçer ve `servers.json` içinde `0600` izinli düz metin
+  olarak durur. Koruma dosya izninin verdiği kadar; diskine erişen birine
+  karşı değil.
+
+---
+
+## Yol haritası
+
+- [x] **Kimlik & istatistik** — içe aktarma, kanonik kimlik zinciri, SQLite, istatistik motoru
+- [x] **Wrapped** — SVG/PNG kart, kare ve hikâye
+- [x] **Çalma** — yerel dosyalar, Subsonic, Jellyfin, scrobbler, TUI
+- [x] **Eklentiler** — alt süreç + JSON-RPC protokolü, üç sağlayıcı, AcoustID parmak izi
+- [x] **Masaüstü** — Tauri arayüzü ve sürümlenmiş CSS tema sözleşmesi
+- [ ] **Odalar** — birlikte senkron dinleme; ses röle edilmez, yalnızca zaman çapası geçer
+- [ ] **Sosyal graf** — arkadaşlık kurulmaz, birlikte dinlemelerden türetilir
+- [ ] **Mobil** — `uniffi` ile iOS ve Android
+
+---
+
+## Sıkça sorulanlar
+
+<details>
+<summary><b>Spotify şifremi ya da API anahtarımı vermem gerekiyor mu?</b></summary>
+<br>
+Hayır. <code>tonearm</code> Spotify API'sine hiç bağlanmaz. GDPR kapsamında
+talep ettiğin export zip'ini yerelden okur — bu, sağlayıcının geliştirici
+şartlarıyla kısıtlayamayacağı bir hak.
+</details>
+
+<details>
+<summary><b>Bir müzik dosyasını silersem dinleme geçmişim gider mi?</b></summary>
+<br>
+Hayır. "Ne dinledin" ile "şu an ne çalabilirsin" ayrı tablolarda durur.
+Dosyayı silsen de, sunucuyu kapatsan da, bir eklentiyi kaldırsan da geçmişin
+ve istatistiklerin yerinde kalır.
+</details>
+
+<details>
+<summary><b>İnternetsiz çalışır mı?</b></summary>
+<br>
+Evet. İçe aktarma, yerel çalma, istatistik ve wrapped üretimi tamamen
+çevrimdışı çalışır. Ağ yalnızca uzak sunucular, eklentiler ve
+<code>--online</code> ile açılan kimlik halkaları için gerekir.
+</details>
+
+<details>
+<summary><b>Neden bir "müzik uygulaması" daha?</b></summary>
+<br>
+Çünkü bu bir müzik uygulaması değil, bir <b>dinleme kimliği</b> katmanı.
+Altındaki ses kaynağı değişebilir — hatta değişmesi bekleniyor. Değişmeyen
+şey, kimin ne dinlediğinin kayıtlı olduğu yer.
+</details>
+
+---
+
+## Katkı
+
+Hata bildirimleri, öneriler ve yamalar açık. Geliştirici kuralları ve test
+adımları: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+
+```bash
+cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 ```
 
----
+Üçü de temiz geçmeden hiçbir değişiklik "bitti" sayılmaz.
 
-## 📜 Lisans
+## Lisans
 
-Bu proje özgür yazılım ilkelerine uygun olarak **çift lisans** altındadır:
-
-* **MIT Lisansı** ([LICENSE-MIT](LICENSE-MIT))
-* **Apache Lisansı, Sürüm 2.0** ([LICENSE-APACHE](LICENSE-APACHE))
-
-Dilediğiniz lisans koşulları altında kullanabilir, dağıtabilir veya katkıda bulunabilirsiniz.
+**MIT** ([LICENSE-MIT](LICENSE-MIT)) **veya** **Apache-2.0**
+([LICENSE-APACHE](LICENSE-APACHE)) — dilediğini seç.
