@@ -78,7 +78,8 @@ flowchart LR
         G["📊 İstatistik Motoru"]
         H["🎨 Wrapped Kart Üreticisi<br/>(SVG / PNG)"]
         I["📟 Terminal Oynatıcı (TUI)"]
-        J["✨ Gelecek: Tauri GUI & Mobil"]
+        J["🖥️ Masaüstü Uygulaması (Tauri + Temalar)"]
+        K["✨ Gelecek: Mobil (uniffi)"]
     end
 
     A --> D --> E
@@ -88,6 +89,7 @@ flowchart LR
     E --> G --> H
     F --> I
     E --> J
+    E --> K
 ```
 
 ---
@@ -109,6 +111,13 @@ flowchart LR
 
 ### 🖥️ 4. Güçlü Terminal Arayüzü (TUI)
 * Donanımı yormayan, klavye dostu, modern bir terminal oynatıcı.
+
+### 🎛️ 5. Masaüstü Uygulaması & Temalar
+* Kuyruk, kütüphane araması, istatistikler, wrapped kartı, sağlayıcı ve
+  eklenti yönetimi — hepsi tek pencerede. Klavye kısayolları için `?`.
+* Export arşivini pencereye sürükleyip bırakmak yeterli.
+* **Kullanıcıların yazabildiği CSS tema sistemi:** 14 semantik token,
+  sürümlenmiş sözleşme, iki referans tema ([tema yazma rehberi](crates/tune/themes/README.md)).
 
 ---
 
@@ -144,6 +153,19 @@ cargo build --release
 # 3. İkili dosyayı sistem PATH'ine ekleyin (isteğe bağlı)
 cp target/release/tune ~/.local/bin/
 ```
+
+**Masaüstü uygulaması.** Paketler (`.deb`, `.rpm`, `.AppImage`, `.dmg`, `.msi`)
+her sürüm etiketinde CI tarafından üretilir ve sürüm sayfasına eklenir — ilk
+etiket atılana kadar kaynaktan çalıştırın:
+
+```bash
+cargo run -p tune            # pencereyi açar
+```
+
+Paketleri kendiniz üretmek isterseniz `cargo install tauri-cli --version "^2"`
+ardından `cargo tauri build --config crates/tune/tauri.conf.json`. Linux'ta
+derleme bağımlılıkları: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`,
+`libasound2-dev`, `librsvg2-dev`, `patchelf`.
 
 ---
 

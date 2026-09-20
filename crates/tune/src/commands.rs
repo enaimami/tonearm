@@ -27,9 +27,10 @@ use tune_core::model::PlayRule;
 use tune_core::playback::{PlaybackAnchor, QueueView, RepeatMode};
 use tune_core::provider::remote::{self, NewServer, ServerKind};
 use tune_core::session::{
-    self, ImportReport, PlayOptions, ProviderListReport, ProviderTestReport, ResolveReport,
-    ScanReport, SearchReport, ServerAddReport, ServerListReport, ServerRemoveReport, StatsResponse,
-    WrappedResponse,
+    self, ImportReport, PlayOptions, PluginConsentReport, PluginInstallReport, PluginListReport,
+    ProviderListReport, ProviderTestReport, ResolveReport, ScanReport, SearchReport,
+    SecretListReport, SecretWriteReport, ServerAddReport, ServerListReport, ServerRemoveReport,
+    StatsResponse, WrappedResponse,
 };
 use tune_core::stats::StatsQuery;
 use tune_core::wrapped::CardPreset;
@@ -118,6 +119,44 @@ pub async fn wrapped(
                 };
                 let path = out.map(std::path::PathBuf::from);
                 core.live.session().wrapped(query, size, path.as_deref())
+            })
+        })
+        .await
+}
+
+/// Wrapped kartının **önizlemesi** — dosya yazmaz.
+///
+/// `wrapped` ile aynı hesabı çalıştırıp çekirdeğin kendi çizicisini
+/// (`wrapped::render_svg`) döndürüyor. Kartı burada çizmek K1 ihlali olurdu:
+/// aynı kartın ikinci bir çizimi JS'te yaşar ve sessizce kayardı.
+#[tauri::command]
+pub async fn wrapped_svg(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    year: Option<i16>,
+    story: bool,
+) -> CommandResult<String> {
+    state
+        .run_on_core(move |core| {
+            Box::pin(async move {
+                let query = StatsQuery {
+                    year,
+                    top: 10,
+                    min_ms_played: tune_core::stats::DEFAULT_MIN_MS_PLAYED,
+                };
+                let size = if story {
+                    CardPreset::Story.size()
+                } else {
+                    CardPreset::Square.size()
+                };
+                busy(&app, "kart hazırlanıyor", async {
+                    let response = core.live.session().wrapped(query, size, None)?;
+                    Ok(tune_core::wrapped::render_svg(
+                        &response.data,
+                        response.size,
+                    ))
+                })
+                .await
             })
         })
         .await
@@ -458,6 +497,124 @@ pub async fn theme_select(
     id: Option<String>,
 ) -> CommandResult<ActiveTheme> {
     state.themes().select(id).map_err(theme_error)
+}
+
+// ————————————————————————————————————— Eklentiler (Faz 2)
+//
+// Eklenti yüzeyi GUI'ye Faz 3'ten **sonra** açıldı: arayüz yazıldığında Faz 2
+// henüz ertelenmişti (D-027) ve kabuk onun yeteneklerinden habersiz kaldı.
+// Komutlar CLI'nin `tune plugin ...` alt komutlarıyla birebir aynı çekirdek
+// çağrılarını yapıyor — ikisi de aynı çekirdeğin kabuğu.
+//
+// **İzinler zorlanmıyor** (D-040) ve bu her listede `permissions_enforced`
+// alanıyla yazıyor. Arayüz bunu gizlemez: olmayan bir korumaya güven
+// verilmez.
+
+#[tauri::command]
+pub async fn plugins(state: State<'_, AppState>) -> CommandResult<PluginListReport> {
+    state
+        .run_on_core(move |core| Box::pin(async move { core.live.session().plugins() }))
+        .await
+}
+
+/// Eklentinin beyan ettiği izinleri onaylar (D-040).
+#[tauri::command]
+pub async fn plugin_approve(
+    state: State<'_, AppState>,
+    name: String,
+) -> CommandResult<PluginConsentReport> {
+    state
+        .run_on_core(move |core| Box::pin(async move { core.live.session().approve_plugin(&name) }))
+        .await
+}
+
+#[tauri::command]
+pub async fn plugin_disable(
+    state: State<'_, AppState>,
+    name: String,
+) -> CommandResult<PluginConsentReport> {
+    state
+        .run_on_core(move |core| Box::pin(async move { core.live.session().disable_plugin(&name) }))
+        .await
+}
+
+#[tauri::command]
+pub async fn plugin_enable(
+    state: State<'_, AppState>,
+    name: String,
+) -> CommandResult<PluginConsentReport> {
+    state
+        .run_on_core(move |core| Box::pin(async move { core.live.session().enable_plugin(&name) }))
+        .await
+}
+
+#[tauri::command]
+pub async fn plugin_forget(
+    state: State<'_, AppState>,
+    name: String,
+) -> CommandResult<PluginConsentReport> {
+    state
+        .run_on_core(move |core| Box::pin(async move { core.live.session().forget_plugin(&name) }))
+        .await
+}
+
+/// Eklentinin çalışma zamanı eserlerini indirir (D-055). **Ağa çıkar** —
+/// bu yüzden meşguliyet olayı gönderiyor.
+#[tauri::command]
+pub async fn plugin_install(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+) -> CommandResult<PluginInstallReport> {
+    state
+        .run_on_core(move |core| {
+            Box::pin(async move {
+                busy(&app, format!("{name} kuruluyor").as_str(), async {
+                    core.live.session().install_plugin(&name)
+                })
+                .await
+            })
+        })
+        .await
+}
+
+// ————————————————————————————————————— Sırlar (D-042)
+//
+// Liste **anahtar adlarını** taşır, değerleri değil. Bir sırrı okuyan tek
+// taraf onu kullanan eklentidir; arayüz yalnızca yazar ve siler.
+
+#[tauri::command]
+pub async fn secrets(state: State<'_, AppState>) -> CommandResult<SecretListReport> {
+    state
+        .run_on_core(move |core| Box::pin(async move { core.live.session().secrets() }))
+        .await
+}
+
+#[tauri::command]
+pub async fn secret_set(
+    state: State<'_, AppState>,
+    namespace: String,
+    key: String,
+    value: String,
+) -> CommandResult<SecretWriteReport> {
+    state
+        .run_on_core(move |core| {
+            Box::pin(async move { core.live.session().set_secret(&namespace, &key, &value) })
+        })
+        .await
+}
+
+#[tauri::command]
+pub async fn secret_remove(
+    state: State<'_, AppState>,
+    namespace: String,
+    key: String,
+) -> CommandResult<SecretWriteReport> {
+    state
+        .run_on_core(move |core| {
+            Box::pin(async move { core.live.session().remove_secret(&namespace, &key) })
+        })
+        .await
 }
 
 // ————————————————————————————————————— Durum ve tanılama

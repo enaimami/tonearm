@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Ana pencere: olay dinleme ve sürükle-bırak. Dosya sistemi, kabuk ve ağ izni yok — hepsi çekirdekte, Rust tarafında.",
+  "description": "Ana pencere: olay dinleme, sürükle-bırak ve yol seçtiren dosya diyaloğu. Dosya sistemi, kabuk ve ağ izni yok — diyalog bir yol döndürür, o yolu okuyup yazan taraf çekirdektir.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "dialog:allow-open", "dialog:allow-save"]
 }

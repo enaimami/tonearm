@@ -1481,9 +1481,57 @@ duruyor.
 
 ---
 
-### 3.5 Faz 3 durum — KAPANDI
+### 3.5 Kabuk Faz 2'yi yakalar + paketleme — TAMAM (D-057)
 
-**235 test**, clippy ve fmt temiz.
+Faz 3 yazıldığında Faz 2 ertelenmişti (D-027) ve sıra sonradan tersine döndü:
+kabuk, sonradan gelen yeteneklerden habersiz kaldı. Bu bölüm o farkı kapatıyor
+ve masaüstünü paketlenebilir hâle getiriyor.
+
+**Arayüz Faz 2'yi kazandı.** Eklenti listesi, onay/kurulum/kapatma ve sır
+girişi artık arayüzde; `tune plugin …` ve `tune secret …` ile **aynı** çekirdek
+çağrıları. `wrapped` kartı da görünür oldu — IPC'de kayıtlıydı ama `app.js` onu
+hiç çağırmıyordu, yani Faz 0.5'in ürünü masaüstünde yoktu.
+
+**Eklenti durumu seçmeden gösteriliyor.** CLI tek satıra sığmak için manifest
+sorunu / eksik eser / onay durumu arasında öncelik seçer; arayüzde o sıkışıklık
+yok, üçü de yan yana duruyor. Böylece seçim mantığının ikinci bir kopyası
+doğmadı — kopyalanmayan mantık kayamaz.
+
+**Paketleme açıldı.** `bundle.active: false` üç şeyi gizliyordu: 103 baytlık
+yer tutucu ikonlar, eksik `.desktop` verisi, ve iki yerde yazılı sürüm.
+`tauri.conf.json`'dan `version` alanı kaldırıldı — Tauri onu `Cargo.toml`'dan
+okuyor, kaynak tek. Paketler `.github/workflows/release.yml` ile üretiliyor:
+`v*` etiketi taslak bir sürüme yüklüyor, elle tetik yalnızca artifact bırakıyor.
+
+**Arayüzün sessiz kırılması testli.** `crates/tune/tests/ui_contract.rs`:
+`app.js`'in aradığı her `id` sayfada var mı, kenar çubuğu ile `Ctrl`+sayı
+kısayolu aynı panelleri mi adlandırıyor, D-037/2'nin sınıf adları hâlâ
+ulaşılabilir mi, ilan edilen her token kullanılıyor mu. Webview'de tip denetimi
+yok: bir id yazım hatası pencereyi boş bırakır ve derleyici görmez.
+
+**Kullanıcıya dönük değişiklikler:** boş kuyruk yerine üç adımlı *başlarken*
+kartı; içe aktarma kendi sekmesinde (eskiden "tanı"nın altındaydı) ve raporu
+sayılarla özet; klavye kısayolları (`?` ile listelenir); kapatılabilir uyarılar;
+panoya kopyalanan tanı raporu; her boş durumda ne yapılacağını söyleyen metin.
+
+**Yerelde doğrulandı** (Arch, WebKitGTK): `.deb` ve `.rpm` üretiliyor, paketin
+içinde ikonlar, `AudioVideo;Audio;Music;` kategorili `.desktop` girdisi ve
+`Cargo.toml`'dan gelen `0.0.1-beta` sürümü var.
+
+> Kalan borç iki başlık:
+>
+> 1. **AppImage yerelde üretilemiyor.** linuxdeploy kendi (eski) `strip`'ini
+>    taşıyor ve Arch'ın `.relr.dyn` bölümlü kütüphanelerini tanımıyor. Ubuntu
+>    runner'da beklenen sorun değil — ama **doğrulanmadı**, yalnızca CI'da ayrı
+>    bir adıma alındı ki bir arıza deb/rpm'i de götürmesin.
+> 2. **macOS ve Windows yalnızca CI matrisinde tanımlı.** İlk etiket atılmadan
+>    önce `workflow_dispatch` ile elle koşulmalı.
+
+---
+
+### 3.6 Faz 3 durum — KAPANDI
+
+**455 test**, clippy ve fmt temiz.
 
 | Bölüm | Durum |
 |---|---|
@@ -1491,6 +1539,7 @@ duruyor.
 | 3.2 IPC sözleşmesi | TAMAM — çekirdeğin yüzeyi + serde (D-033), olaylar değişimde (D-035) |
 | 3.3 Tema API'si | TAMAM — 14 token + sınıf adları + manifest/yükleyici (D-037…D-039) |
 | 3.4 Referans temalar | TAMAM — `daylight` (renk) + `contrast` (yarıçap/süre) |
+| 3.5 Faz 2 yüzeyi + paketleme | TAMAM — eklenti/sır/wrapped arayüzde, bundle açık (D-057) |
 
 Tema yazarına dönük belge: `crates/tune/themes/README.md`.
 

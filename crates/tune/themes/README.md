@@ -67,7 +67,9 @@ En kısa çalışan tema:
 ## `:root` dışına çıkmak
 
 Sınıf adları da (`.topbar`, `.player`, `.queue`, `.toast`, …) sözleşmenin
-parçası ve habersiz yeniden adlandırılmıyorlar. Ama `:root` dışına yazan bir
+parçası ve habersiz yeniden adlandırılmıyorlar — tam liste
+`crates/tune/tests/ui_contract.rs` içindeki `CONTRACT_CLASSES` dizisidir ve
+bir test onu tutuyor. Ama `:root` dışına yazan bir
 tema listede **"genişletilmiş · garantisi yok"** diye işaretlenir.
 
 Reddedilmez — engellemiyoruz, saklamıyoruz da. Bir `api` sürüm atlamasında

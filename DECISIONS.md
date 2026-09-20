@@ -2678,3 +2678,110 @@ Bu, depoya bilerek konan **ilk** `TODO`. D-054 "kodda tek bir
 `TODO`/`FIXME`/`unimplemented!` yoktu" diye ölçmüştü ve bu tercih sürüyor:
 işaret bir *eksik uygulamayı* değil, **ertelenmiş bir kararı** gösteriyor ve
 yanında neyin neden ertelendiği yazılı.
+
+---
+
+## D-057 — Masaüstü kabuğu: paketleme açıldı, Faz 2 yüzeyi arayüze geldi
+**Tarih:** 2026-09-19 · **Durum:** UYGULANDI (2026-09-19)
+
+**Soru:** Kullanıcı: *"masaüstü arayüzüne bir el atar mısın? deploya hazır
+olsun, biraz daha kullanıcı dostu olsun."* — Üç şey belirsizdi: kapsam (yalnız
+cila mı, IPC yüzeyi de mi), dosya diyaloğu için bağımlılık, ve paketleme
+kimliğinin sabitlenmesi.
+
+**Karar (üçü de kullanıcının cevabı):**
+
+1. **Kapsam: cila + paketleme + Faz 2 yüzeyi.** Arayüz eklenti ve sır
+   yönetimini kazanıyor, `wrapped` kartı görünür oluyor.
+2. **`tauri-plugin-dialog` eklendi** — kabuğa ait bir bağımlılık, `tune-core`
+   ağacına girmiyor.
+3. **`tune` / `dev.tune.desktop` sabitlendi.** PLAN §1'in "proje adı açık"
+   satırı duruyor; sabitlenen paketleme kimliği.
+
+### Arayüz Faz 2'yi hiç görmemişti
+
+Faz 3 yazıldığında Faz 2 ertelenmişti (D-027). Sıra sonradan tersine döndü ve
+kimse geri dönüp kabuğa bakmadı: SoundCloud ve YouTube Music eklentileri
+çalışıyordu ama **arayüzden kurulamıyor, onaylanamıyordu**. Bir sır (AcoustID
+anahtarı, Torznab jetonu) girmenin tek yolu CLI'ydi. Masaüstü kullanıcısı için
+bu, özelliğin olmaması demekti.
+
+Aynı boşluğun ikinci örneği daha sessizdi: `wrapped` komutu IPC'de **kayıtlı**
+olduğu hâlde `app.js` onu hiç çağırmıyordu. Faz 0.5'in bütün ürünü — projenin
+dağıtım kancası — masaüstünde görünmüyordu ve hiçbir test bunu söylemiyordu.
+
+### Eklenti durumu: seçmeyen kopya kaymaz
+
+CLI `status_text()` ile üç şey arasında öncelik seçiyor: manifest sorunu,
+motorun kurması gereken eser (D-055), onay durumu (D-040). Tek satıra sığmak
+zorunda olduğu için seçiyor.
+
+Arayüzde o sıkışıklık yok, o yüzden **seçim mantığı kopyalanmadı**: üçü de
+yan yana gösteriliyor. Kopyalanan mantık zamanla kayar; kopyalanmayan kayamaz.
+`--tune-*` token'ları ile aynı ilke (D-033'ün çapa formülü istisnası bilerek
+tektir ve doğruluk kümesiyle kilitli).
+
+### `bundle.active: false` üç şeyi gizlemişti
+
+Paketleme kapalıyken hiçbiri görünmüyordu:
+
+* İkonlar 32×32, **103 baytlık** tek renkli bir yer tutucuydu.
+* `.desktop` girdisinin kategorisi, açıklaması, lisans dosyası yoktu.
+* Sürüm iki yerde yazılıydı — `tauri.conf.json` `0.0.1` derken workspace
+  `0.0.1-beta`'daydı. `version` alanı **kaldırıldı**; Tauri onu `Cargo.toml`'dan
+  okuyor, kaynak tek.
+
+İkon artık `icon.svg`'den üretiliyor (`icons/README.md`) ve varsayılan temanın
+paletini kullanıyor — ama temanın parçası değil, kullanıcı tema değiştirince
+değişmiyor.
+
+Paketleme `release.yml` ile iki tetikte koşuyor: `v*` etiketi (taslak sürüme
+yükler) ve elle çalıştırma. PR'da koşmuyor — on dakikalık bir iş, üç kapı
+zaten her PR'da.
+
+Yerel koşum `.deb` ve `.rpm` üretti; içinde ikonlar, `AudioVideo;Audio;Music;`
+kategorili `.desktop` girdisi ve doğru sürüm var. **AppImage düştü** ve sebebi
+yapılandırma değil host: linuxdeploy kendi eski `strip`'iyle geliyor ve Arch'ın
+`.relr.dyn` bölümlü kütüphanelerini tanımıyor. AppImage bu yüzden CI'da ayrı
+bir adım — maskelenmiyor, düşerse iş kırmızı yanıyor; ayrım yalnızca bir
+AppImage arızasının deb/rpm'i de götürmesini engelliyor. Ubuntu runner'da
+sorun beklenmiyor ama **doğrulanmadı**.
+
+### Arayüzün sessiz kırılması artık testli
+
+Webview'de tip denetimi yok: `$("playQuery")` yazım hatası `null` döndürür,
+açılışta patlar ve **pencere boş kalır** — `cargo test` bunu görmezdi.
+`tests/ui_contract.rs` dört bağı tutuyor: aranan her `id` sayfada var, kenar
+çubuğu ile `Ctrl`+sayı kısayolu aynı panelleri adlandırıyor, D-037/2'nin sınıf
+adları ulaşılabilir, ilan edilen her token kullanılıyor.
+
+Test yazılırken ilk hâli `.panel`'de düştü: sınıf `style.css`'te hiçbir kural
+taşımıyor ama DOM'da duruyor ve bir tema onu hedefleyebiliyor. Ölçüt "CSS'te
+kuralı var mı" değil, **ulaşılabilir mi** olarak düzeltildi.
+
+### Bir hatayı yalnızca ekran görüntüsü yakaladı
+
+Kısayol penceresi her açılışta **açık** geliyordu. İşaretleme doğruydu
+(`<div id="helpSheet" class="sheet" hidden>`), JavaScript doğruydu, komutlar
+doğruydu: `.sheet { display: flex }` UA stylesheet'in `[hidden] { display:
+none }` kuralından daha özgül olduğu için `hidden` özniteliği hiçbir şey
+yapmıyordu. Aynı kusur `importSummary`'de de vardı (`.summary` da `flex`).
+
+Ne derleyici, ne clippy, ne de IPC'ye bakan bir test bunu görebilirdi — hata
+CSS özgüllüğündeydi. Uygulamayı gerçekten açıp bakmak yakaladı.
+
+Düzeltme tek kural (`[hidden] { display: none !important }`) ve yanında bir
+regresyon testi. `!important` bilinçli: gizlenmiş bir öğeyi bir tema geri
+getirememeli.
+
+### Kullanıcı dostuluğun karşılığı
+
+* Boş kuyruk artık boş bir liste değil, üç adımlı bir **başlarken** kartı.
+* İçe aktarma "tanı" sekmesinden çıkıp kendi sekmesine taşındı — ilk
+  yapılacak iş en tanısal sekmenin altında duruyordu. Raporu da ham JSON değil
+  sayılarla özet; ham hâli katlanmış duruyor.
+* Klavye: boşluk, ok tuşları, `/`, `Ctrl`+1…8, `Esc`, `?`. Keşfedilmeyen
+  kısayol yok sayıldığı için `?` bir liste açıyor.
+* Uyarılar kapatılabiliyor; tanı raporu panoya kopyalanabiliyor.
+* Boş durumlar (sağlayıcı yok, sunucu yok, sır yok, dinleme yok) artık ne
+  yapılacağını yazıyor — "bakmadım" ile "bulamadım" ayrımı arayüzde de geçerli.

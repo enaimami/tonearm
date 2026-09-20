@@ -97,6 +97,7 @@ tune/
 │   ├── tune/                   # Tauri masaüstü kabuğu (ikili adı: `tune-desktop`)
 │   │   ├── src/                # main + env + state + core_thread + commands
 │   │   ├── ui/                 # düz statik webview — bundler yok, npm yok
+│   │   ├── icons/              # icon.svg kaynak, ötekiler üretilir (icons/README.md)
 │   │   └── themes/             # iki referans tema (contrast, daylight)
 │   └── tune-plugin-torrent/    # torrent sağlayıcısı — ayrı ikili, JSON-RPC (D-047)
 ├── plugins/                    # kurulabilir eklentiler: soundcloud, ytmusic, torrent
@@ -161,7 +162,9 @@ tune diag                                   # son çalıştırmanın tanı rapor
 Küresel bayraklar: `--json`, `--data-dir <DİZİN>`, `--online`, `-v/-vv`.
 
 Her komut `--json` desteklemeli — hem betiklenebilirlik hem de GUI'nin aynı veriyi
-alacağının kanıtı olarak. İnsan okunur çıktı ayrı bir biçimlendirme katmanıdır
+alacağının kanıtı olarak. Masaüstü kabuğunun IPC komutları bu listeyi birebir
+yansıtır (D-033); arayüze bir yetenek eklemek, önce burada bir alt komut
+olmasını gerektirir. İnsan okunur çıktı ayrı bir biçimlendirme katmanıdır
 (`tune-cli/src/output.rs`).
 
 `--online` varsayılan **kapalı**: bir export'u içe aktarmak kimseyi sessizce
@@ -232,6 +235,7 @@ kaç kayıt geldi, kaçı ISRC ile, kaçı bulanık, kaçı eşleşmedi.
 | Hangi platform hukuken hangi tarafta | PLAN.md — EK: Yayın platformları |
 | Eklenti nasıl yazılır | docs/eklenti-yazma.md |
 | Tema nasıl yazılır | crates/tune/themes/README.md |
+| Masaüstü paketleri nasıl üretilir | .github/workflows/release.yml, crates/tune/icons/README.md |
 
 **Faz durumunu bu dosyaya yazma.** Tek yerde dursun ki bayatlamasın: PLAN.md'nin
 faz başlıkları ve `TAMAM` / `YAPILACAK` işaretleri.

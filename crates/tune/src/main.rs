@@ -57,6 +57,9 @@ fn run() -> Result<(), String> {
     let (jobs_tx, jobs_rx) = mpsc::unbounded_channel();
 
     tauri::Builder::default()
+        // Yalnızca yol seçtiriyor. Dosyayı okuyan/yazan taraf çekirdek —
+        // `capabilities/default.json` bu yüzden `fs` izni vermiyor.
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState::new(jobs_tx, themes))
         .setup(move |app| {
             // Çekirdek kendi iş parçacığına burada taşınıyor: `AppHandle`
@@ -69,6 +72,7 @@ fn run() -> Result<(), String> {
             commands::search,
             commands::stats,
             commands::wrapped,
+            commands::wrapped_svg,
             // İçe aktarma ve kimlik
             commands::import,
             commands::resolve,
@@ -88,6 +92,16 @@ fn run() -> Result<(), String> {
             commands::jump_to,
             commands::set_shuffle,
             commands::set_repeat,
+            // Eklenti ve sır (Faz 2 yüzeyi)
+            commands::plugins,
+            commands::plugin_approve,
+            commands::plugin_disable,
+            commands::plugin_enable,
+            commands::plugin_forget,
+            commands::plugin_install,
+            commands::secrets,
+            commands::secret_set,
+            commands::secret_remove,
             // Tema
             commands::themes_list,
             commands::theme_active,

@@ -30,6 +30,12 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 # D-030: bağımlılık tek yönlü — bu paket `tune-cli`'yi görmez.
 tune-core = { workspace = true, features = ["render-png", "audio", "http-client"] }
+# Yerel dosya diyaloğu: export arşivini ve kartın kaydedileceği yeri seçmek
+# için. Kabuğa ait bir bağımlılık — `tune-core`'un ağacına girmez, mobil
+# binary boyutunu etkilemez. İzni `capabilities/default.json`'da yalnızca
+# `open`/`save` ile sınırlı: diyalog bir yol **döndürür**, dosyayı okuyup
+# yazan taraf yine çekirdektir.
+tauri-plugin-dialog = "2"
 
 [lints]
 workspace = true
