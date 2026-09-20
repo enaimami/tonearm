@@ -6694,6 +6694,75 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2"
 
 [[package]]
+name = "tonearm"
+version = "0.0.1-beta"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tokio",
+ "tonearm-core",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "tonearm-cli"
+version = "0.0.1-beta"
+dependencies = [
+ "anyhow",
+ "clap",
+ "crossterm",
+ "ratatui",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tonearm-core",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "tonearm-core"
+version = "0.0.1-beta"
+dependencies = [
+ "cpal",
+ "jiff",
+ "resvg",
+ "rusqlite",
+ "rusty-chromaprint",
+ "serde",
+ "serde_json",
+ "sha2",
+ "strsim",
+ "symphonia",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "ureq",
+ "zip",
+]
+
+[[package]]
+name = "tonearm-plugin-torrent"
+version = "0.0.1-beta"
+dependencies = [
+ "anyhow",
+ "librqbit",
+ "rand 0.10.2",
+ "reqwest",
+ "roxmltree 0.20.0",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tonearm-core",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "tower"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6836,75 +6905,6 @@ name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
-
-[[package]]
-name = "tune"
-version = "0.0.1-beta"
-dependencies = [
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "tune-core",
-]
-
-[[package]]
-name = "tune-cli"
-version = "0.0.1-beta"
-dependencies = [
- "anyhow",
- "clap",
- "crossterm",
- "ratatui",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "tune-core",
-]
-
-[[package]]
-name = "tune-core"
-version = "0.0.1-beta"
-dependencies = [
- "cpal",
- "jiff",
- "resvg",
- "rusqlite",
- "rusty-chromaprint",
- "serde",
- "serde_json",
- "sha2",
- "strsim",
- "symphonia",
- "thiserror 2.0.20",
- "tokio",
- "tracing",
- "ureq",
- "zip",
-]
-
-[[package]]
-name = "tune-plugin-torrent"
-version = "0.0.1-beta"
-dependencies = [
- "anyhow",
- "librqbit",
- "rand 0.10.2",
- "reqwest",
- "roxmltree 0.20.0",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "tune-core",
-]
 
 [[package]]
 name = "typed-path"

@@ -9,7 +9,7 @@
                         
 ```
 
-# tune (u-tune)
+# tonearm
 ### *Sağlayıcıdan Bağımsız Dinleme Kimliği & Müzik Katmanı*
 
 <p align="center">
@@ -26,11 +26,11 @@
 <br>
 
 <p align="center">
-  <img src="docs/ornek-kart.svg" alt="tune tarafından üretilen örnek Wrapped kartı" width="480">
+  <img src="docs/ornek-kart.svg" alt="tonearm tarafından üretilen örnek Wrapped kartı" width="480">
 </p>
 
 [ 🚀 Hızlı Başlangıç ](#-hızlı-başlangıç) • 
-[ 💡 Neden tune? ](#-neden-tune) • 
+[ 💡 Neden tonearm? ](#-neden-tonearm) • 
 [ ✨ Özellikler ](#-öne-çıkan-özellikler) • 
 [ 🖥️ Terminal Arayüzü ](#-terminal-oynatıcı-tui-deneyimi) • 
 [ 📖 Komutlar ](#-komut-satırı-kılavuzu) • 
@@ -41,13 +41,13 @@
 
 </div>
 
-## 💡 Neden tune?
+## 💡 Neden tonearm?
 
 Yıllardır müzik dinliyorsunuz; ancak tüm dinleme geçmişiniz, çalma listeleriniz ve müzik kimliğiniz ticari akış servislerinin sunucularında kilitli tutuluyor. Aboneliğinizi sonlandırdığınız gün 10 yıllık müzik geçmişiniz elinizden kayıp gidiyor. Yılda bir kez gösterilen "Wrapped" özetleri ise yalnızca son 12 ayı ve platformun pazarlama hedeflerini yansıtıyor.
 
-**`tune`, müziğiniz üzerindeki egemenliğinizi geri verir:**
+**`tonearm`, müziğiniz üzerindeki egemenliğinizi geri verir:**
 
-| Karşılaştırma | Klasik Akış Servisleri | `tune` |
+| Karşılaştırma | Klasik Akış Servisleri | `tonearm` |
 | :--- | :--- | :--- |
 | **Veri Mülkiyeti** | 🔒 Şirketin sunucularında hapsolmuş veri | 🏠 **%100 sizin, yerel SQLite veritabanında** |
 | **Dinleme Geçmişi** | ⏳ Yalnızca aktif abonelik boyunca erişilebilir | ♾️ **Ömür boyu, platformdan bağımsız arşiv** |
@@ -68,7 +68,7 @@ flowchart LR
         C["Subsonic / Navidrome / Jellyfin"]
     end
 
-    subgraph Core["⚙️ tune Çekirdeği (tune-core)"]
+    subgraph Core["⚙️ tonearm Çekirdeği (tonearm-core)"]
         D["Kanonik Kimlik Çözümleyici<br/>(ISRC / MBID / Bulanık Eşleme)"]
         E[("Yerel SQLite Veritabanı<br/>(listens & provider_tracks)")]
         F["Ses Motoru & Scrobbler<br/>(Symphonia + CPAL)"]
@@ -117,7 +117,7 @@ flowchart LR
   eklenti yönetimi — hepsi tek pencerede. Klavye kısayolları için `?`.
 * Export arşivini pencereye sürükleyip bırakmak yeterli.
 * **Kullanıcıların yazabildiği CSS tema sistemi:** 14 semantik token,
-  sürümlenmiş sözleşme, iki referans tema ([tema yazma rehberi](crates/tune/themes/README.md)).
+  sürümlenmiş sözleşme, iki referans tema ([tema yazma rehberi](crates/tonearm/themes/README.md)).
 
 ---
 
@@ -127,31 +127,31 @@ flowchart LR
 
 **Derlemek için:** Rust 1.85+ (2024 edition).
 
-**Eklentileri çalıştırmak için:** Python 3.9+ (`python3`). `tune`'un eklenti
+**Eklentileri çalıştırmak için:** Python 3.9+ (`python3`). `tonearm`'un eklenti
 motoru Python'la koşar (D-050) ve bu, projenin ilan edilmiş bir çalışma
 zamanı gereksinimidir — eklentilerin kendi kendine keşfettiği bir şey değil.
-Python yoksa `tune`'un geri kalanı sorunsuz çalışır; yalnızca eklenti
+Python yoksa `tonearm`'un geri kalanı sorunsuz çalışır; yalnızca eklenti
 sağlayıcıları düşer ve sebebini yazar.
 
 Yorumlayıcı **gömülü değil**, sistemden kullanılıyor. Başka bir Python
-istiyorsanız `TUNE_PYTHON` ile yolunu verin; o yorumlayıcı çalışmıyorsa
+istiyorsanız `TONEARM_PYTHON` ile yolunu verin; o yorumlayıcı çalışmıyorsa
 motor sessizce bir başkasına kaymaz, durur ve söyler.
 
 Eklentilerin ihtiyaç duyduğu **paketler** için hiçbir şey kurmanız
-gerekmiyor: onları motor indirir (`tune plugin install <ad>`), sabitlenmiş
+gerekmiyor: onları motor indirir (`tonearm plugin install <ad>`), sabitlenmiş
 sürümden, sha256 doğrulayarak, sizin veri dizininize. Sisteme dokunulmaz,
 root istenmez, `pip` gerekmez.
 
 ```bash
 # 1. Depoyu klonlayın
-git clone https://github.com/enaimami/u-tune.git
-cd u-tune
+git clone https://github.com/enaimami/tonearm.git
+cd tonearm
 
 # 2. Optimize edilmiş sürümü derleyin
 cargo build --release
 
 # 3. İkili dosyayı sistem PATH'ine ekleyin (isteğe bağlı)
-cp target/release/tune ~/.local/bin/
+cp target/release/tonearm ~/.local/bin/
 ```
 
 **Masaüstü uygulaması.** Paketler (`.deb`, `.rpm`, `.AppImage`, `.dmg`, `.msi`)
@@ -159,11 +159,11 @@ her sürüm etiketinde CI tarafından üretilir ve sürüm sayfasına eklenir �
 etiket atılana kadar kaynaktan çalıştırın:
 
 ```bash
-cargo run -p tune            # pencereyi açar
+cargo run -p tonearm            # pencereyi açar
 ```
 
 Paketleri kendiniz üretmek isterseniz `cargo install tauri-cli --version "^2"`
-ardından `cargo tauri build --config crates/tune/tauri.conf.json`. Linux'ta
+ardından `cargo tauri build --config crates/tonearm/tauri.conf.json`. Linux'ta
 derleme bağımlılıkları: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`,
 `libasound2-dev`, `librsvg2-dev`, `patchelf`.
 
@@ -181,22 +181,22 @@ derleme bağımlılıkları: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`,
 3. Spotify bir iki gün içinde indirme bağlantısını e-postanıza gönderecektir (Bu yasal bir GDPR hakkıdır).
 </details>
 
-İndirdiğiniz zip arşivini doğrudan `tune` ile içe aktarın:
+İndirdiğiniz zip arşivini doğrudan `tonearm` ile içe aktarın:
 ```bash
-tune import my_spotify_data.zip
+tonearm import my_spotify_data.zip
 ```
 
 #### 📈 Adım 2: İstatistiklerinizi Görüntüleyin
 ```bash
 # Genel dinleme geçmişi özeti
-tune stats
+tonearm stats
 
 # Belirli bir yıla ait ilk 10 sanatçı ve parça
-tune stats --year 2024 --top 10
+tonearm stats --year 2024 --top 10
 ```
 
 ```text
-$ tune stats --year 2024 --top 3
+$ tonearm stats --year 2024 --top 3
 
 dönem: 2024
 4128 çalma · 271.3 saat · 1163 parça · 402 sanatçı
@@ -218,7 +218,7 @@ en çok dinlenen albümler
    3. Daft Punk - Discovery                          142 çalma
 ```
 
-> Sayılar örnektir; biçim `tune-cli/src/output.rs`'in bastığının aynısıdır.
+> Sayılar örnektir; biçim `tonearm-cli/src/output.rs`'in bastığının aynısıdır.
 > Atlanan kayıtlar sessizce düşmez, üçüncü satırda sayılır (K9).
 
 #### 🎨 Adım 3: Wrapped Kartınızı Oluşturun
@@ -226,13 +226,13 @@ Sosyal medyada paylaşmak üzere yüksek çözünürlüklü görsel kartınızı
 
 ```bash
 # Kare Formatı (Instagram / Twitter / Feed)
-tune wrapped --year 2024 --out wrapped2024.png
+tonearm wrapped --year 2024 --out wrapped2024.png
 
 # Dikey Hikaye Formatı (Instagram Story / Shorts - 1080x1920)
-tune wrapped --year 2024 --format story --out story2024.png
+tonearm wrapped --year 2024 --format story --out story2024.png
 
 # Vektörel Çıktı (SVG)
-tune wrapped --year 2024 --out wrapped2024.svg
+tonearm wrapped --year 2024 --out wrapped2024.svg
 ```
 
 ---
@@ -244,40 +244,40 @@ Yerel müzik klasörlerinizi tek bir komutla indeksleyin ve çalın:
 
 ```bash
 # Müzik dizininizi ayarlayın (varsayılan: ~/Müzik veya ~/Music)
-export TUNE_MUSIC_DIRS=~/Müzik
+export TONEARM_MUSIC_DIRS=~/Müzik
 
 # Kütüphaneyi tarayın (tam tarama)
-tune provider scan
+tonearm provider scan
 
 # Yalnızca dizin damgası değiştiyse tara — düz `scan`'den ucuz, ama
 # yerinde yeniden etiketlenen dosyaları göremez.
-tune provider scan --if-stale
+tonearm provider scan --if-stale
 
 # Arama yapın ve Terminal Arayüzü (TUI) ile çalın
-tune play "Pink Floyd" --all --tui
+tonearm play "Pink Floyd" --all --tui
 ```
 
 ### Uzak Sunucuları Bağlama (Navidrome / Subsonic / Jellyfin)
 
 ```bash
 # Subsonic / Navidrome sunucusu ekleme:
-tune provider add subsonic --url https://muzik.evim.com --user ahmet --name ev
+tonearm provider add subsonic --url https://muzik.evim.com --user ahmet --name ev
 
 # Jellyfin sunucusu ekleme:
-tune provider add jellyfin --url https://jf.evim.com --user ahmet
+tonearm provider add jellyfin --url https://jf.evim.com --user ahmet
 
 # Kayıtlı sunucuları kontrol etme:
-tune provider servers
-tune provider test ev
+tonearm provider servers
+tonearm provider test ev
 
 # Uzak sunucudan parça çalma:
-tune play "Get Lucky" --tui
+tonearm play "Get Lucky" --tui
 ```
 
 > [!NOTE]
 > **Parola nereye gitmez:** komut satırına argüman olarak yazılmaz (kabuk
-> geçmişine ve `ps` çıktısına sızardı). Yankısız sorulur ya da `TUNE_PASSWORD`
-> ortam değişkeninden okunur; log'a ve `tune diag` raporuna da girmez.
+> geçmişine ve `ps` çıktısına sızardı). Yankısız sorulur ya da `TONEARM_PASSWORD`
+> ortam değişkeninden okunur; log'a ve `tonearm diag` raporuna da girmez.
 >
 > **Parolanın kendisi diske hiç yazılmaz.** Subsonic'te ondan bir `salt` +
 > `md5(parola+salt)` token'ı türetilir, Jellyfin'de bir erişim anahtarı
@@ -295,10 +295,10 @@ tune play "Get Lucky" --tui
 
 ## 🖥️ Terminal Oynatıcı (TUI) Deneyimi
 
-`tune play "<sorgu>" --tui` komutu zengin bir terminal arayüzü başlatır:
+`tonearm play "<sorgu>" --tui` komutu zengin bir terminal arayüzü başlatır:
 
 ```text
-┌ tune ──────────────────────────────────────────────────────────────────────┐
+┌ tonearm ──────────────────────────────────────────────────────────────────────┐
 │ ▶ Pink Floyd - Time  (çalıyor)                                             │
 └────────────────────────────────────────────────────────────────────────────┘
 ┌────────────────────────────────────────────────────────────────────────────┐
@@ -315,7 +315,7 @@ tune play "Get Lucky" --tui
 
 > Kuyruk satırları `sanatçı - başlık`tır; süre ve albüm sütunu **yoktur**.
 > Bir hata olursa alt satır bir çerçeveye dönüşür, ilk satırını gösterir ve
-> `tune diag`'a yönlendirir — hata ekranı kaplamaz ama saklanmaz da (K9).
+> `tonearm diag`'a yönlendirir — hata ekranı kaplamaz ama saklanmaz da (K9).
 
 ### ⌨️ Klavye Kısayolları
 
@@ -335,32 +335,32 @@ tune play "Get Lucky" --tui
 
 | Alt Komut | Seçenekler | Açıklama |
 | :--- | :--- | :--- |
-| `tune import <zip\|dizin>` | | Export arşivini (zip ya da açılmış dizin) içe aktarır |
-| `tune stats` | `--year <yıl>`, `--top <n>`, `--min-ms <ms>` | Detaylı dinleme istatistiklerini listeler |
-| `tune wrapped` | `--year <yıl>`, `--format square\|story`, `--out <dosya>` | Paylaşılabilir görsel Wrapped kartı oluşturur |
-| `tune resolve` | `"<sanatçı> - <başlık>"` ya da `--file <ses>` | Tek parçayı kanonik kimlik zincirinden geçirir |
-| `tune play <sorgu>` | `--all`, `--shuffle`, `--dry-run`, `--tui` | Arama sonucundaki parçaları çalar |
-| `tune library search <sorgu>` | `--limit <n>`, `--min-ms <ms>` | Kütüphane içinde tam metin arama yapar |
-| `tune provider list` | | Kayıtlı sağlayıcıları listeler (süreç başlatmaz) |
-| `tune provider test <ad>` | | Sağlayıcının erişim durumunu ve parça sayısını sınar |
-| `tune provider scan` | `--if-stale` | Yerel müzik dizinlerini tarar; bayraksız hâli **tam** tarama |
-| `tune provider add <tür>` | `--url`, `--user`, `--name`, `--api-key`, `--verify` | Subsonic ya da Jellyfin sunucusu kaydeder |
-| `tune provider remove <ad>` | | Kayıtlı uzak sunucuyu siler |
-| `tune provider servers` | | Kayıtlı uzak sunucuları listeler (kimlik bilgisi gösterilmez) |
-| `tune plugin list` | | Kurulu eklentileri ve onay durumlarını listeler |
-| `tune plugin approve <ad>` | | Eklentinin beyan ettiği izinleri onaylar |
-| `tune plugin install <ad>` | | Motorun eklenti için gereken eserleri kurmasını sağlar (sabitlenmiş sürüm, sha256 doğrulanır) |
-| `tune plugin disable\|enable <ad>` | | Eklentiyi kapatır (onay korunur) / geri açar |
-| `tune plugin forget <ad>` | | Onayı tamamen unutur; bir dahaki sefere baştan sorulur |
-| `tune secret list` | | Ad alanlarını ve anahtar adlarını listeler (değerler **gösterilmez**) |
-| `tune secret set <ad-alanı> <anahtar>` | | Sır yazar (değer istemden ya da `TUNE_SECRET`'ten) |
-| `tune secret remove <ad-alanı> <anahtar>` | | Bir sırrı siler |
-| `tune diag` | | Son çalıştırmanın ortam, aşama ve hata tanılama raporunu döker |
+| `tonearm import <zip\|dizin>` | | Export arşivini (zip ya da açılmış dizin) içe aktarır |
+| `tonearm stats` | `--year <yıl>`, `--top <n>`, `--min-ms <ms>` | Detaylı dinleme istatistiklerini listeler |
+| `tonearm wrapped` | `--year <yıl>`, `--format square\|story`, `--out <dosya>` | Paylaşılabilir görsel Wrapped kartı oluşturur |
+| `tonearm resolve` | `"<sanatçı> - <başlık>"` ya da `--file <ses>` | Tek parçayı kanonik kimlik zincirinden geçirir |
+| `tonearm play <sorgu>` | `--all`, `--shuffle`, `--dry-run`, `--tui` | Arama sonucundaki parçaları çalar |
+| `tonearm library search <sorgu>` | `--limit <n>`, `--min-ms <ms>` | Kütüphane içinde tam metin arama yapar |
+| `tonearm provider list` | | Kayıtlı sağlayıcıları listeler (süreç başlatmaz) |
+| `tonearm provider test <ad>` | | Sağlayıcının erişim durumunu ve parça sayısını sınar |
+| `tonearm provider scan` | `--if-stale` | Yerel müzik dizinlerini tarar; bayraksız hâli **tam** tarama |
+| `tonearm provider add <tür>` | `--url`, `--user`, `--name`, `--api-key`, `--verify` | Subsonic ya da Jellyfin sunucusu kaydeder |
+| `tonearm provider remove <ad>` | | Kayıtlı uzak sunucuyu siler |
+| `tonearm provider servers` | | Kayıtlı uzak sunucuları listeler (kimlik bilgisi gösterilmez) |
+| `tonearm plugin list` | | Kurulu eklentileri ve onay durumlarını listeler |
+| `tonearm plugin approve <ad>` | | Eklentinin beyan ettiği izinleri onaylar |
+| `tonearm plugin install <ad>` | | Motorun eklenti için gereken eserleri kurmasını sağlar (sabitlenmiş sürüm, sha256 doğrulanır) |
+| `tonearm plugin disable\|enable <ad>` | | Eklentiyi kapatır (onay korunur) / geri açar |
+| `tonearm plugin forget <ad>` | | Onayı tamamen unutur; bir dahaki sefere baştan sorulur |
+| `tonearm secret list` | | Ad alanlarını ve anahtar adlarını listeler (değerler **gösterilmez**) |
+| `tonearm secret set <ad-alanı> <anahtar>` | | Sır yazar (değer istemden ya da `TONEARM_SECRET`'ten) |
+| `tonearm secret remove <ad-alanı> <anahtar>` | | Bir sırrı siler |
+| `tonearm diag` | | Son çalıştırmanın ortam, aşama ve hata tanılama raporunu döker |
 
 > [!TIP]
 > Bütün komutlar `--json` parametresini destekler. Çıktıları `jq` veya kendi betiklerinizle kolayca işleyebilirsiniz:
 > ```bash
-> tune stats --year 2024 --json | jq '.report.top_artists[0]'
+> tonearm stats --year 2024 --json | jq '.report.top_artists[0]'
 > ```
 
 ---
@@ -379,19 +379,19 @@ tune play "Get Lucky" --tui
   | eklenti | istediği | nasıl karşılanıyor |
   | :--- | :--- | :--- |
   | `soundcloud` | Python 3.9+ | motorun yorumlayıcısı; paket istemiyor |
-  | `ytmusic` | Python 3.9+ · yt-dlp | `tune plugin install ytmusic` — sabitlenmiş sürüm, sha256 doğrulanır |
+  | `ytmusic` | Python 3.9+ · yt-dlp | `tonearm plugin install ytmusic` — sabitlenmiş sürüm, sha256 doğrulanır |
   | `torrent` | Rust araç zinciri | **hâlâ ihlal ediyor** — çözümü ilk sürümden sonraya ertelendi (D-056) |
 
   Bir eklenti kendi bağımlılığını **aramaz, indirmez, kurmaz**; manifestinde
   beyan eder ve motorun verdiği yolu kullanır. Eksik bir eser sessizce "sonuç
-  yok"a dönüşmez: `tune plugin list` süreç açmadan eksiği söyler ve kurulum
+  yok"a dönüşmez: `tonearm plugin list` süreç açmadan eksiği söyler ve kurulum
   için ne yazılacağını yazar.
 
   AcoustID tarafında ayrıca gömülü bir istemci anahtarı **yok**: parmak izi
-  halkası yalnızca kendi anahtarınızı `tune secret set identity:acoustid
+  halkası yalnızca kendi anahtarınızı `tonearm secret set identity:acoustid
   api_key` ile yazdığınızda çalışır, anahtarsız çağrı sessizce boş dönmez,
   ne yapılacağını söyleyerek durur.
-- [x] **Faz 3: Masaüstü Uygulaması (GUI) & Temalar** — Tauri tabanlı masaüstü arayüzü ve sürümlenmiş CSS tema sözleşmesi ([tema yazma rehberi](crates/tune/themes/README.md)).
+- [x] **Faz 3: Masaüstü Uygulaması (GUI) & Temalar** — Tauri tabanlı masaüstü arayüzü ve sürümlenmiş CSS tema sözleşmesi ([tema yazma rehberi](crates/tonearm/themes/README.md)).
 - [ ] **Faz 4: Senkronize Odalar (Birlikte Dinleme)** — Ses akışı röle edilmeden zaman çapasıyla eşzamanlı dinleme.
 - [ ] **Faz 5: Sosyal Graf** — Arkadaşlık kurulmaz, odalardan türetilir.
 - [ ] **Faz 6: Mobil İstemciler** — `uniffi` ile iOS ve Android desteği.
@@ -402,24 +402,24 @@ tune play "Get Lucky" --tui
 
 <details>
 <summary><b>Spotify şifremi veya API anahtarımı vermem gerekiyor mu?</b></summary>
-<b>Hayır.</b> tune, Spotify API'sine veya şifrenize ihtiyaç duymaz. GDPR kapsamında talep ettiğiniz veri export zip dosyasını yerel olarak okur.
+<b>Hayır.</b> tonearm, Spotify API'sine veya şifrenize ihtiyaç duymaz. GDPR kapsamında talep ettiğiniz veri export zip dosyasını yerel olarak okur.
 </details>
 
 <details>
 <summary><b>Bilgisayarımdan bir müzik dosyasını silersem dinleme geçmişim silinir mi?</b></summary>
-<b>Asla.</b> tune mimarisinde "ne dinledin" (dinleme geçmişi) ile "şu an ne çalabilirsin" (katalog) tamamen ayrı tablolarda saklanır. Dosyayı silseniz dahi dinleme geçmişiniz ve istatistikleriniz kalıcıdır.
+<b>Asla.</b> tonearm mimarisinde "ne dinledin" (dinleme geçmişi) ile "şu an ne çalabilirsin" (katalog) tamamen ayrı tablolarda saklanır. Dosyayı silseniz dahi dinleme geçmişiniz ve istatistikleriniz kalıcıdır.
 </details>
 
 <details>
 <summary><b>İnternet bağlantım olmadan çalışır mı?</b></summary>
-<b>Evet.</b> tune tamamen yerel makinenizde çalışır. İçe aktarma, yerel oynatma, TUI ve istatistik üretimi için internet bağlantısı zorunlu değildir.
+<b>Evet.</b> tonearm tamamen yerel makinenizde çalışır. İçe aktarma, yerel oynatma, TUI ve istatistik üretimi için internet bağlantısı zorunlu değildir.
 </details>
 
 ---
 
 ## 🤝 Katkıda Bulunma
 
-`tune` açık kaynaklı ve topluluk odaklı bir projedir. Hata bildirimleri, yeni özellik önerileri ve katkılar memnuniyetle kabul edilir!
+`tonearm` açık kaynaklı ve topluluk odaklı bir projedir. Hata bildirimleri, yeni özellik önerileri ve katkılar memnuniyetle kabul edilir!
 
 Geliştirici kuralları ve test adımları için lütfen [`CONTRIBUTING.md`](CONTRIBUTING.md) belgesini inceleyin.
 

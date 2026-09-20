@@ -68,7 +68,7 @@ jobs:
       # Tauri onu `Cargo.toml`'dan okuyor. İki yerde yazılsaydı biri kayardı.
       - name: Paketle (deb + rpm)
         if: matrix.name == 'linux'
-        run: cargo tauri build --config crates/tune/tauri.conf.json --bundles deb,rpm
+        run: cargo tauri build --config crates/tonearm/tauri.conf.json --bundles deb,rpm
 
       # AppImage ayrı adımda, çünkü araç zinciri host dağıtımına duyarlı:
       # linuxdeploy kendi (eski) `strip`'ini taşıyor ve yeni bir dağıtımın
@@ -80,17 +80,17 @@ jobs:
       # kaybolmasını engelliyor (artifact adımı `always()` ile koşuyor).
       - name: Paketle (AppImage)
         if: matrix.name == 'linux'
-        run: cargo tauri build --config crates/tune/tauri.conf.json --bundles appimage
+        run: cargo tauri build --config crates/tonearm/tauri.conf.json --bundles appimage
 
       - name: Paketle
         if: matrix.name != 'linux'
-        run: cargo tauri build --config crates/tune/tauri.conf.json
+        run: cargo tauri build --config crates/tonearm/tauri.conf.json
 
       - name: Paketleri yükle
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tune-${{ matrix.name }}
+          name: tonearm-${{ matrix.name }}
           if-no-files-found: error
           path: |
             target/release/bundle/deb/*.deb

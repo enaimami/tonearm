@@ -1,6 +1,6 @@
 # Eklenti yazma rehberi (protokol api 1)
 
-`tune` sağlayıcıları **alt süreç** olarak çalıştırır ve onlarla satır bazlı
+`tonearm` sağlayıcıları **alt süreç** olarak çalıştırır ve onlarla satır bazlı
 JSON-RPC 2.0 konuşur. Yani bir eklenti herhangi bir dilde yazılabilir:
 stdin'den satır okuyup stdout'a satır yazabilen her şey yeterli.
 
@@ -27,8 +27,8 @@ Bir dizin:
 └── main.py          # (ya da bir ikili, bir kabuk betiği, ne olursa)
 ```
 
-Veri dizini: `$XDG_DATA_HOME/tune` (varsayılan `~/.local/share/tune`).
-`TUNE_DATA_DIR` ile değiştirilebilir.
+Veri dizini: `$XDG_DATA_HOME/tonearm` (varsayılan `~/.local/share/tonearm`).
+`TONEARM_DATA_DIR` ile değiştirilebilir.
 
 **Dizin adı kimliktir.** `plugin.json` içindeki `name` dizin adıyla aynı
 olmak zorunda; uyuşmazsa eklenti reddedilir. Sessizce dizin adına düşmüyoruz,
@@ -78,12 +78,12 @@ olmaz.
 
 `permissions.net` erişeceğiniz ana bilgisayarları, `permissions.fs`
 dokunacağınız yol öneklerini bildirir. Kullanıcı bunları
-`tune plugin approve <ad>` ile onaylar; onay `plugins.json`'a yazılır.
+`tonearm plugin approve <ad>` ile onaylar; onay `plugins.json`'a yazılır.
 İzinleri **büyütürseniz** kullanıcıya yeniden sorulur, küçültürseniz
 sorulmaz.
 
 **Bu bir hapis değildir.** Eklenti kullanıcının bütün yetkisiyle çalışır;
-`tune` beyanınızı zorlamaz ve kullanıcıya da böyle söyler. Beyan dürüst
+`tonearm` beyanınızı zorlamaz ve kullanıcıya da böyle söyler. Beyan dürüst
 olmak içindir — yalan söyleyen bir manifest, kullanıcıyı kaybetmenin en
 hızlı yoludur. (Karar ve gerekçesi: `DECISIONS.md`, D-040.)
 
@@ -92,7 +92,7 @@ hızlı yoludur. (Karar ve gerekçesi: `DECISIONS.md`, D-040.)
 - Yazabileceğiniz dizin: `<veri-dizini>/plugins/<ad>/state` (el sıkışmada
   `data_dir` olarak gelir).
 - Görebileceğiniz sırlar: yalnızca **kendi ad alanınız**
-  (`plugin:<ad>`). Kullanıcı `tune secret set plugin:soundcloud client_id`
+  (`plugin:<ad>`). Kullanıcı `tonearm secret set plugin:soundcloud client_id`
   ile yazar; siz el sıkışmada `secrets` olarak alırsınız. Başka bir
   eklentinin sırrını göremezsiniz.
 
@@ -111,9 +111,9 @@ işletim sistemi için ayrı bir yol demek, ve o yolları eklenti yazarı değil
 proje taşır. Hata mesajınızda `apt`/`pacman`/`brew` gibi tek bir sisteme ait
 komut **yazmayın** — kullanıcıların çoğuna yanlış tavsiye olur.
 
-Uygulanış şekli **D-050'de kapandı, D-055'te yazıldı: `tune`'un kendi eklenti
+Uygulanış şekli **D-050'de kapandı, D-055'te yazıldı: `tonearm`'un kendi eklenti
 motoru var.** Çalışma zamanı (Python 3.9+) eklentinin değil host'un işi ve
-`tune`'un gereksinimi olarak bir kez ilan ediliyor. İhtiyacınız olan paketleri
+`tonearm`'un gereksinimi olarak bir kez ilan ediliyor. İhtiyacınız olan paketleri
 **siz kurmazsınız**: `plugin.json`'da `requires` ile beyan edersiniz, motor
 onları indirir. Eklenti hiçbir şey indirmez, `pip` çağırmaz, sisteme dokunmaz.
 
@@ -150,12 +150,12 @@ def handshake(params):
 def ytdlp():
     path = state["requirements"].get("yt-dlp")
     if not path:
-        raise PluginError("yt-dlp kurulu değil: `tune plugin install <ad>`")
+        raise PluginError("yt-dlp kurulu değil: `tonearm plugin install <ad>`")
     return [path]
 ```
 
-Kullanıcı `tune plugin install <ad>` yazınca motor indirir, doğrular, yerine
-koyar. `tune plugin list` süreç açmadan eksiği söyler.
+Kullanıcı `tonearm plugin install <ad>` yazınca motor indirir, doğrular, yerine
+koyar. `tonearm plugin list` süreç açmadan eksiği söyler.
 
 `api` kırılmadı — `requires` da `requirements` da birer **ekleme** ve eklemek
 sürümü artırmaz (§5). Bu alanları okumayan eski bir eklenti bugüne kadar
@@ -174,7 +174,7 @@ kullanıcı için bir sorundur — yani yeni sürüm yayımlamak sizin sorumlulu
 Her mesaj **tek satır JSON + `\n`**. Uzunluk başlığı yok.
 
 - stdout **yalnızca protokol içindir**. Hata ayıklama çıktınızı **stderr**'e
-  yazın; `tune` onu log'a aktarır. (stdout'a düşen JSON olmayan satır sizi
+  yazın; `tonearm` onu log'a aktarır. (stdout'a düşen JSON olmayan satır sizi
   öldürmez, uyarı olarak atlanır — ama ona güvenmeyin.)
 - İsteklerin `id`'si vardır, cevabınız **aynı `id`'yi** taşımalı.
 - İstemediğiniz bir metoda `-32601` (metot yok) dönün; çekirdek bunu
@@ -190,8 +190,8 @@ Her mesaj **tek satır JSON + `\n`**. Uzunluk başlığı yok.
 ```json
 {"jsonrpc":"2.0","id":1,"method":"handshake","params":{
   "api": 1,
-  "host": {"name": "tune", "version": "0.0.1-beta"},
-  "data_dir": "/home/kisi/.local/share/tune/plugins/soundcloud/state",
+  "host": {"name": "tonearm", "version": "0.0.1-beta"},
+  "data_dir": "/home/kisi/.local/share/tonearm/plugins/soundcloud/state",
   "secrets": {"client_id": "..."},
   "permissions": {"net": ["api.soundcloud.com"], "fs": []}
 }}
@@ -316,26 +316,26 @@ kullanıcıları çıktığında ve tel biçimleri ölçüldüğünde eklenecek.
 
 ```bash
 # Eklentiyi yerine koyun
-mkdir -p ~/.local/share/tune/plugins/soundcloud
-cp plugin.json main.py ~/.local/share/tune/plugins/soundcloud/
+mkdir -p ~/.local/share/tonearm/plugins/soundcloud
+cp plugin.json main.py ~/.local/share/tonearm/plugins/soundcloud/
 
 # Görünüyor mu, ne istiyor?
-tune plugin list
+tonearm plugin list
 
 # İzinleri onaylayın
-tune plugin approve soundcloud
+tonearm plugin approve soundcloud
 
 # Sır gerekiyorsa (değer komut satırına yazılmaz)
-tune secret set plugin:soundcloud client_id
+tonearm secret set plugin:soundcloud client_id
 
 # Ayakta mı?
-tune provider test soundcloud
+tonearm provider test soundcloud
 
 # Bir şey ters giderse: hangi aşamada bozulduğunu söyler
-tune diag
+tonearm diag
 ```
 
-`tune plugin disable <ad>` kapatır (onay korunur), `enable` geri açar,
+`tonearm plugin disable <ad>` kapatır (onay korunur), `enable` geri açar,
 `forget` onayı tamamen unutur.
 
 Hata mesajları aşamayı taşır: `PLUGIN_LOAD` (manifest/onay),
@@ -348,12 +348,12 @@ Hata mesajları aşamayı taşır: `PLUGIN_LOAD` (manifest/onay),
 Depodaki `plugins/soundcloud/` doğrudan kullanılabilir:
 
 ```bash
-mkdir -p ~/.local/share/tune/plugins/soundcloud
-cp plugins/soundcloud/{main.py,plugin.json} ~/.local/share/tune/plugins/soundcloud/
+mkdir -p ~/.local/share/tonearm/plugins/soundcloud
+cp plugins/soundcloud/{main.py,plugin.json} ~/.local/share/tonearm/plugins/soundcloud/
 
-tune plugin approve soundcloud
-tune provider test soundcloud     # "kullanılabilir" demeli
-tune play "nujabes aruarian dance"
+tonearm plugin approve soundcloud
+tonearm provider test soundcloud     # "kullanılabilir" demeli
+tonearm play "nujabes aruarian dance"
 ```
 
 `client_id` **istenmez**: eklenti SoundCloud'un web istemcisinden kendisi
@@ -361,10 +361,10 @@ keşfeder ve `state/client_id.txt` içine önbellekler. Kendi anahtarınız vars
 o kullanılır ve keşfe hiç gidilmez:
 
 ```bash
-tune secret set plugin:soundcloud client_id
+tonearm secret set plugin:soundcloud client_id
 ```
 
-`tune provider test soundcloud` hangi kaynağın kullanıldığını yazar
+`tonearm provider test soundcloud` hangi kaynağın kullanıldığını yazar
 (`sır` / `önbellek` / `keşif`) — yanlış anahtarla çalışan bir kurulum sessizce
 doğru görünmesin diye (D-043).
 
@@ -389,19 +389,19 @@ Depodaki `plugins/ytmusic/` doğrudan kullanılabilir. **yt-dlp'yi siz
 kurmazsınız** — eklenti onu manifestinde beyan eder, motor indirir (D-055).
 
 ```bash
-mkdir -p ~/.local/share/tune/plugins/ytmusic
-cp plugins/ytmusic/{main.py,plugin.json} ~/.local/share/tune/plugins/ytmusic/
+mkdir -p ~/.local/share/tonearm/plugins/ytmusic
+cp plugins/ytmusic/{main.py,plugin.json} ~/.local/share/tonearm/plugins/ytmusic/
 
-tune plugin approve ytmusic    # izinleri ve motorun indireceğini gösterir
-tune plugin install ytmusic    # yt-dlp'yi indirir, sha256'sını doğrular
-tune provider test ytmusic     # "kullanılabilir" + yt-dlp sürümünü yazmalı
-tune play "nujabes aruarian dance"
+tonearm plugin approve ytmusic    # izinleri ve motorun indireceğini gösterir
+tonearm plugin install ytmusic    # yt-dlp'yi indirir, sha256'sını doğrular
+tonearm provider test ytmusic     # "kullanılabilir" + yt-dlp sürümünü yazmalı
+tonearm play "nujabes aruarian dance"
 ```
 
-Sır **istemiyor**. `install` çalıştırılmadan önce `tune plugin list` eksiği
+Sır **istemiyor**. `install` çalıştırılmadan önce `tonearm plugin list` eksiği
 süreç açmadan söyler; eklenti sessizce boş sonuç dönmez.
 
-Eser `~/.local/share/tune/runtime/yt-dlp-<sürüm>` altına iner ve sisteme
+Eser `~/.local/share/tonearm/runtime/yt-dlp-<sürüm>` altına iner ve sisteme
 hiçbir şey yazılmaz. `install`'ı ikinci kez koşturmak ağa çıkmaz. Dosya
 bozulursa (`karma tutmuyor`) yeniden koşturmak düzeltir.
 

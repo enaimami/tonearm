@@ -1,0 +1,74 @@
+[package]
+name = "tonearm-core"
+description = "Sağlayıcıdan bağımsız dinleme kimliği çekirdeği. Bütün mantık burada."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+cpal = { version = "0.18", optional = true }
+jiff = { version = "0.2.35", features = ["serde"] }
+resvg = { version = "0.48", optional = true }
+rusty-chromaprint = { version = "0.3.0", optional = true }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+# D-055: motorun indirdiği eserin karmasını doğrulamak için. Ölçülen bedel
+# **+8 crate** (51 → 59 benzersiz) ve bu ağaç mobile gidiyor. Feature
+# kapısının arkasına konmadı: kapalı bir kapı, "karma tutmuyor" tanısını
+# koyamamak demekti ve bu tanının susması tam da doğrulamanın var olma
+# sebebini yok ederdi. `0.10` seçildi (0.11 değil) — Tauri kabuğu zaten
+# 0.10.9'u kilitliyor, workspace'te ikinci bir kopya olmuyor.
+sha2 = "0.10"
+strsim = "0.11.1"
+symphonia = { version = "0.6", features = ["mp3", "flac", "vorbis", "isomp4", "aac"], optional = true }
+thiserror = "2.0.20"
+ureq = { version = "3.4", default-features = false, features = ["rustls"], optional = true }
+tracing = "0.1.44"
+zip = { version = "7.2.0", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tokio = { version = "1.53.1", features = ["rt", "macros"] }
+
+# Elle çalıştırılan çalma denemesi; ses aygıtı ister, CI'da koşmaz.
+[[example]]
+name = "playback_probe"
+required-features = ["audio"]
+
+# AcoustID'ye giden parmak izi dizesini gözle görmek için (D-046).
+[[example]]
+name = "fingerprint_probe"
+required-features = ["fingerprint"]
+
+# MusicBrainz aramasının aday kümesi koşumlar arası sabit mi (D-046 eki).
+[[example]]
+name = "mb_stability_probe"
+required-features = ["http-client"]
+
+[lints]
+workspace = true
+
+[features]
+# D-011: PNG rasterizasyonu opsiyonel. Çekirdek her zaman SVG üretir;
+# `render-png` açıkken `wrapped::render_png` derlenir. CLI açar, mobil açmaz.
+render-png = ["dep:resvg"]
+
+# D-016: ses hattı (symphonia çözme + cpal çıkış) tek feature arkasında.
+# Kapalıyken `playback` modülünün trait'leri ve kuyruk mantığı yine derlenir;
+# yalnızca gerçek ses çıkışı düşer. Böylece sunucu/mobil derlemeleri ALSA'ya
+# bağlanmak zorunda kalmaz.
+audio = ["dep:symphonia", "dep:cpal"]
+
+# D-045: ses parmak izi (Chromaprint). `audio`'yu gerektiriyor çünkü PCM'i
+# symphonia üretiyor; ayrı bir feature çünkü `rustfft` + `rubato` ağacını
+# yalnızca parmak izi isteyen derlemeler taşısın. Kapalıyken zincirin 4.
+# halkası düşer ve bu **söylenir**, sessizce atlanmaz (K9).
+fingerprint = ["dep:rusty-chromaprint", "audio"]
+
+# D-020: HTTP taşıma katmanı. `net::HttpClient` trait'i her zaman derlenir;
+# bu feature yalnızca somut istemciyi (ureq + rustls) getirir. Kapalıyken
+# Subsonic/Jellyfin mantığı yine derlenir ve test edilebilir — çağıran kendi
+# `Arc<dyn HttpClient>`'ını verirse çalışır da. CLI açar, mobil açmaz.
+http-client = ["dep:ureq"]

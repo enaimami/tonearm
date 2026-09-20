@@ -274,7 +274,7 @@ def ytdlp_command():
     motorun işi. El sıkışmada gelen `requirements` haritasında bir yol
     varsa o eser kurulu ve karması doğrulanmış demektir; yoksa hiç yoktur.
 
-    Bir zamanlar burada `TUNE_YTDLP` → `PATH` → `python3 -m yt_dlp` diye
+    Bir zamanlar burada `TONEARM_YTDLP` → `PATH` → `python3 -m yt_dlp` diye
     üç aşamalı bir arayış vardı. Üçü de kullanıcının sisteme bir şey
     kurmuş olmasına yaslanıyordu ve D-049 bunu yasakladı.
     """
@@ -285,7 +285,7 @@ def ytdlp_command():
     if not path:
         raise PluginError(
             "yt-dlp kurulu değil. Bunu eklenti değil motor kurar: "
-            "`tune plugin install ytmusic`."
+            "`tonearm plugin install ytmusic`."
         )
 
     # Çalıştırma biti varsa doğrudan; yoksa yorumlayıcıya veriyoruz —

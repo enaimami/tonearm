@@ -8,7 +8,7 @@ Bu dosya şunların tek sahibidir: workspace ağacı, komutlar, CLI test yüzeyi
 kod konvansiyonları, tanılama pratiği, test düzeni. Bunları PLAN.md tekrar
 etmez, buraya işaret eder.
 
-> Proje adı `tune` bir yer tutucudur. Değiştirirsen crate adlarını da güncelle.
+> Proje adı `tonearm` (D-058). Pikap kolu: plağı seçmez, ne koyarsan onu okur.
 
 ---
 
@@ -26,7 +26,7 @@ torrent, FTP) üstteki katman aynı kalır.
 
 ## ALTIN KURAL (K1)
 
-**CLI ince bir kabuktur. Bütün mantık `tune-core` içindedir.**
+**CLI ince bir kabuktur. Bütün mantık `tonearm-core` içindedir.**
 
 Test: bir özellik CLI'den silindiğinde çekirdek onu hâlâ sunabiliyor olmalı.
 CLI yalnızca şunları yapar — argüman ayrıştırma, çekirdek çağrısı, çıktı biçimleme, çıkış kodu.
@@ -34,7 +34,7 @@ CLI yalnızca şunları yapar — argüman ayrıştırma, çekirdek çağrısı,
 CLI içinde **asla**: iş mantığı, veri dönüşümü, ağ çağrısı, SQL, eşleştirme algoritması.
 Bir şeyi CLI'de yazmak istiyorsan önce "bunu GUI de isteyecek mi?" diye sor. Cevap evetse çekirdeğe koy.
 
-Aynısı Tauri kabuğu (`crates/tune`) için de geçerlidir: o da bir kabuktur.
+Aynısı Tauri kabuğu (`crates/tonearm`) için de geçerlidir: o da bir kabuktur.
 
 > Tam metin ve gerekçe: PLAN.md §2, K1. Burada tekrarlanmasının tek sebebi,
 > kod yazarken en sık ihlal edilen kural olması.
@@ -55,7 +55,7 @@ indeksidir; bir kuralı uygulamadan önce oradaki metni oku.
 | **K5** | Eklentiler alt süreç + JSON-RPC ile konuşur |
 | **K6** | Kanonik kimlik zinciri sırası: ISRC → MBID → bulanık → AcoustID |
 | **K7** | Çekirdek API'si `uniffi` ile ifade edilebilir olmalı |
-| **K8** | `tune-core` içinde `unwrap()` / `expect()` / `panic!()` yok |
+| **K8** | `tonearm-core` içinde `unwrap()` / `expect()` / `panic!()` yok |
 | **K9** | Her başarısızlık hangi aşamada olduğunu söyler |
 | **K10** | Faz sınırı aşılmaz |
 
@@ -70,14 +70,14 @@ Bir kuralı ihlal etmen gerekiyorsa **dur ve sor** — PLAN.md §0.1.
 ## Workspace
 
 ```
-tune/
+tonearm/
 ├── Cargo.toml                  # workspace
 ├── CLAUDE.md                   # bu dosya — operasyonel özet
 ├── PLAN.md                     # kurallar, faz planı, protokol (normatif)
 ├── DECISIONS.md                # karar defteri (D-001…)
 ├── CONTRIBUTING.md             # katkıcı süreci
 ├── crates/
-│   ├── tune-core/              # BÜTÜN mantık burada
+│   ├── tonearm-core/              # BÜTÜN mantık burada
 │   │   ├── src/
 │   │   │   ├── import/         # export zip ayrıştırıcıları
 │   │   │   ├── identity/       # kanonik çözümleme (+ musicbrainz, acoustid, fuzzy)
@@ -92,14 +92,14 @@ tune/
 │   │   │   └── session.rs      # dışa açılan komut yüzeyi (Session)
 │   │   ├── examples/           # elle koşulan probe'lar (fingerprint, mb, playback)
 │   │   └── tests/              # fixtures/ üzerinden entegrasyon testleri
-│   ├── tune-cli/               # ince kabuk (ikili adı: `tune`)
+│   ├── tonearm-cli/               # ince kabuk (ikili adı: `tonearm`)
 │   │   └── tests/snapshots/    # --json çıktısının snapshot'ları
-│   ├── tune/                   # Tauri masaüstü kabuğu (ikili adı: `tune-desktop`)
+│   ├── tonearm/                   # Tauri masaüstü kabuğu (ikili adı: `tonearm-desktop`)
 │   │   ├── src/                # main + env + state + core_thread + commands
 │   │   ├── ui/                 # düz statik webview — bundler yok, npm yok
 │   │   ├── icons/              # icon.svg kaynak, ötekiler üretilir (icons/README.md)
 │   │   └── themes/             # iki referans tema (contrast, daylight)
-│   └── tune-plugin-torrent/    # torrent sağlayıcısı — ayrı ikili, JSON-RPC (D-047)
+│   └── tonearm-plugin-torrent/    # torrent sağlayıcısı — ayrı ikili, JSON-RPC (D-047)
 ├── plugins/                    # kurulabilir eklentiler: soundcloud, ytmusic, torrent
 ├── docs/                       # eklenti yazma rehberi, tanıtım sayfası
 ├── spike/                      # ATILABILIR prototipler — workspace DIŞI, CI DIŞI
@@ -109,8 +109,8 @@ tune/
 `spike/` derlenmez, test edilmez, CI'ya girmez. Eşleştirme sezgilerini önce burada
 dene; doğruluk tatmin edici olunca `identity/`'ye porta.
 
-`tune-plugin-torrent` neden `crates/` altında ama çekirdeğin dışında: eklentidir
-(K5), ama Rust yazılmıştır ve aynı workspace'te derlenir. `tune-core`'un
+`tonearm-plugin-torrent` neden `crates/` altında ama çekirdeğin dışında: eklentidir
+(K5), ama Rust yazılmıştır ve aynı workspace'te derlenir. `tonearm-core`'un
 bağımlılık ağacına girmez — D-047.
 
 > Bu düzen **kalıcı.** D-050 S3 bir zamanlar torrent'ı çekirdeğe feature'lı bir
@@ -124,8 +124,8 @@ bağımlılık ağacına girmez — D-047.
 ## Komutlar
 
 ```bash
-cargo run -p tune-cli -- <alt-komut>
-cargo run -p tune            # masaüstü arayüzü
+cargo run -p tonearm-cli -- <alt-komut>
+cargo run -p tonearm            # masaüstü arayüzü
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
@@ -134,7 +134,7 @@ cargo fmt --all
 Bir değişikliği bitmiş saymadan önce üçü de temiz geçmeli: `test`, `clippy`, `fmt`.
 Tam "bitti" ölçütü: PLAN.md §0.4.
 
-> `cargo test -p tune-core` tek başına koşulduğunda feature'lar birleşmediği için
+> `cargo test -p tonearm-core` tek başına koşulduğunda feature'lar birleşmediği için
 > workspace koşumunda görünmeyen `dead_code` uyarıları çıkar. Üç kapı **workspace**
 > üzerinden geçer; tek crate koşumu bir tanı aracıdır, kapı değil.
 
@@ -145,18 +145,18 @@ Tam "bitti" ölçütü: PLAN.md §0.4.
 CLI'nin amacı çekirdeği elle sınamak. Her çekirdek yeteneğinin bir alt komutu olmalı.
 
 ```
-tune import <zip|dizin>                     # export içe aktar
-tune stats [--year N] [--top N] [--min-ms MS]
-tune resolve "<sanatçı> - <başlık>" | --file <ses>
-tune library search <sorgu> [--limit N] [--min-ms MS]
-tune wrapped [--year N] [--out <dosya>] [--format square|story]
-tune provider list | test <ad> | scan [--if-stale]
-tune provider add <tür> --url U --user K [--name AD] [--api-key A] [--verify]
-tune provider remove <ad> | servers
-tune plugin list | approve <ad> | install <ad> | disable <ad> | enable <ad> | forget <ad>
-tune secret list | set <ad-alanı> <anahtar> | remove <ad-alanı> <anahtar>
-tune play <parça> [--all] [--shuffle] [--dry-run] [--tui]
-tune diag                                   # son çalıştırmanın tanı raporu
+tonearm import <zip|dizin>                     # export içe aktar
+tonearm stats [--year N] [--top N] [--min-ms MS]
+tonearm resolve "<sanatçı> - <başlık>" | --file <ses>
+tonearm library search <sorgu> [--limit N] [--min-ms MS]
+tonearm wrapped [--year N] [--out <dosya>] [--format square|story]
+tonearm provider list | test <ad> | scan [--if-stale]
+tonearm provider add <tür> --url U --user K [--name AD] [--api-key A] [--verify]
+tonearm provider remove <ad> | servers
+tonearm plugin list | approve <ad> | install <ad> | disable <ad> | enable <ad> | forget <ad>
+tonearm secret list | set <ad-alanı> <anahtar> | remove <ad-alanı> <anahtar>
+tonearm play <parça> [--all] [--shuffle] [--dry-run] [--tui]
+tonearm diag                                   # son çalıştırmanın tanı raporu
 ```
 
 Küresel bayraklar: `--json`, `--data-dir <DİZİN>`, `--online`, `-v/-vv`.
@@ -165,7 +165,7 @@ Her komut `--json` desteklemeli — hem betiklenebilirlik hem de GUI'nin aynı v
 alacağının kanıtı olarak. Masaüstü kabuğunun IPC komutları bu listeyi birebir
 yansıtır (D-033); arayüze bir yetenek eklemek, önce burada bir alt komut
 olmasını gerektirir. İnsan okunur çıktı ayrı bir biçimlendirme katmanıdır
-(`tune-cli/src/output.rs`).
+(`tonearm-cli/src/output.rs`).
 
 `--online` varsayılan **kapalı**: bir export'u içe aktarmak kimseyi sessizce
 ağa bağlamaz. Bayrak yokken kimlik zinciri yalnızca yerel halkaları koşar.
@@ -178,7 +178,7 @@ Bu proje bir bash prototipinden doğdu ve orada işe yarayan tek şey **her baş
 nerede olduğunu söylemesiydi.** Bunu koru (K9):
 
 - Her başarısızlık **hangi aşamada** olduğunu söylemeli (`ADIM: IDENTITY_RESOLVE`).
-- `tune diag` son çalıştırmanın ortam bilgisi, aşama, hata zinciri ve ilgili sayıları
+- `tonearm diag` son çalıştırmanın ortam bilgisi, aşama, hata zinciri ve ilgili sayıları
   tek blokta, kopyalanıp yapıştırılabilir şekilde basmalı.
 - Loglama `tracing` ile; `println!` yalnızca CLI'nin kullanıcıya dönük çıktısında.
 - Sessiz `unwrap_or_default()` yasak — veri kaybını yutar. Ya hata döndür ya say ve raporla.
@@ -197,7 +197,7 @@ kaç kayıt geldi, kaçı ISRC ile, kaçı bulanık, kaçı eşleşmedi.
   adı, tema token'ı — hepsi İngilizce. Yorum, doküman, CLI yardım metni,
   arayüz yazısı ve `ADIM:` çıktısı Türkçe. Ayrım kod dili değil, kimin
   okuduğu: tanımlayıcıyı yabancı bir katkıcı okur, metni kullanıcı.
-- `tune-core` hataları `thiserror` ile tiplenmiş; `tune-cli` `anyhow` kullanabilir.
+- `tonearm-core` hataları `thiserror` ile tiplenmiş; `tonearm-cli` `anyhow` kullanabilir.
 - Genel API'de `async` — çalışma zamanını çağıran seçsin, çekirdek `#[tokio::main]` kurmasın.
 - Yeni bağımlılık eklemeden önce sor. Ağaç küçük kalmalı (mobil binary boyutu).
   Zorunlu değilse opsiyonel bir cargo feature arkasına koy (`render-png`, `audio`,
@@ -209,7 +209,7 @@ kaç kayıt geldi, kaçı ISRC ile, kaçı bulanık, kaçı eşleşmedi.
 
 ## Test
 
-- `tune-core`: birim testleri + `fixtures/` üzerinden entegrasyon testleri.
+- `tonearm-core`: birim testleri + `fixtures/` üzerinden entegrasyon testleri.
 - Gerçek export zip'lerini kırpıp fixture yap.
 - **Ağa bağlı test yazılabilir (D-043)** ama "ulaşamamak" başarısızlık değildir:
   ağ yoksa test kendini atlar ve sebebini `stderr`'e yazar; ulaşıp beklenmeyeni
@@ -217,7 +217,7 @@ kaç kayıt geldi, kaçı ISRC ile, kaçı bulanık, kaçı eşleşmedi.
   Atlanan test **geçmiş sayılmaz** — raporlarken "atlandı" de.
 - Kimlik çözümlemesi için **etiketli bir doğruluk kümesi** tut (`fixtures/identity/cases.json`).
   Her değişiklikte doğruluk oranını ölç — bu sayı projenin en önemli metriğidir:
-  `cargo test -p tune-core --test identity_accuracy`
+  `cargo test -p tonearm-core --test identity_accuracy`
 - CLI için: alt komutların `--json` çıktısını snapshot testiyle doğrula.
 
 ---
@@ -234,8 +234,8 @@ kaç kayıt geldi, kaçı ISRC ile, kaçı bulanık, kaçı eşleşmedi.
 | Terimler (canonical id, anchor, listen…) | PLAN.md — SÖZLÜK |
 | Hangi platform hukuken hangi tarafta | PLAN.md — EK: Yayın platformları |
 | Eklenti nasıl yazılır | docs/eklenti-yazma.md |
-| Tema nasıl yazılır | crates/tune/themes/README.md |
-| Masaüstü paketleri nasıl üretilir | .github/workflows/release.yml, crates/tune/icons/README.md |
+| Tema nasıl yazılır | crates/tonearm/themes/README.md |
+| Masaüstü paketleri nasıl üretilir | .github/workflows/release.yml, crates/tonearm/icons/README.md |
 
 **Faz durumunu bu dosyaya yazma.** Tek yerde dursun ki bayatlamasın: PLAN.md'nin
 faz başlıkları ve `TAMAM` / `YAPILACAK` işaretleri.

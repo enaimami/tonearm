@@ -1,0 +1,49 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "tonearm",
+  "identifier": "dev.tonearm.desktop",
+  "build": {
+    "frontendDist": "ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "tonearm",
+        "width": 1180,
+        "height": 780,
+        "minWidth": 900,
+        "minHeight": 600,
+        "dragDropEnabled": true,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Music",
+    "shortDescription": "Sağlayıcıdan bağımsız müzik dinleme katmanı",
+    "longDescription": "Dinleme geçmişi, istatistikler ve çalma listeleri kullanıcıya ait olur, sağlayıcıya değil. Ses nereden gelirse gelsin (yerel dosya, Subsonic, Jellyfin, eklentiler) üstteki katman aynı kalır.",
+    "copyright": "MIT OR Apache-2.0",
+    "licenseFile": "../../LICENSE-MIT",
+    "linux": {
+      "deb": {
+        "depends": ["libasound2t64 | libasound2"]
+      },
+      "rpm": {
+        "depends": ["webkit2gtk4.1", "gtk3", "alsa-lib"]
+      }
+    }
+  }
+}

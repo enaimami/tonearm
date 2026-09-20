@@ -58,7 +58,7 @@ jobs:
 
   # Feature birleşmesi olmadan çekirdek tek başına temiz mi?
   #
-  # `--workspace` koşumunda tune-cli ve tune, tune-core'un audio/http-client
+  # `--workspace` koşumunda tonearm-cli ve tonearm, tonearm-core'un audio/http-client
   # feature'larını açıyor ve varsayılan derlemedeki ölü kodu gizliyor. Mobil
   # (Faz 6) çekirdeği bu feature'lar olmadan derleyecek, o yüzden ayrı bakılır.
   #
@@ -83,15 +83,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Çekirdek tek başına (varsayılan feature'lar)
-        run: cargo clippy -p tune-core --all-targets -- -D warnings
+        run: cargo clippy -p tonearm-core --all-targets -- -D warnings
 
       - name: Her feature tek tek
         run: |
           for f in audio http-client fingerprint render-png; do
             echo "::group::$f"
-            cargo clippy -p tune-core --all-targets --features "$f" -- -D warnings
+            cargo clippy -p tonearm-core --all-targets --features "$f" -- -D warnings
             echo "::endgroup::"
           done
 
       - name: Hepsi birden
-        run: cargo clippy -p tune-core --all-targets --features audio,http-client,fingerprint,render-png -- -D warnings
+        run: cargo clippy -p tonearm-core --all-targets --features audio,http-client,fingerprint,render-png -- -D warnings

@@ -2,7 +2,7 @@
 
 Faz 2 §2.4'ün sağlayıcısı. Karar kaydı: **D-047**.
 
-Bu dizin eklentinin *kurulu* hâlidir; kaynağı `crates/tune-plugin-torrent/`.
+Bu dizin eklentinin *kurulu* hâlidir; kaynağı `crates/tonearm-plugin-torrent/`.
 
 > **`TODO: AFTER FIRST RELEASE` — kurulum D-049'u ihlal ediyor.**
 > Aşağıdaki kurulum size bir **Rust araç zinciri** kurduruyor. D-049 hiçbir
@@ -17,18 +17,18 @@ Bu dizin eklentinin *kurulu* hâlidir; kaynağı `crates/tune-plugin-torrent/`.
 > kalacak. İlk sürümden sonra karara bağlanacak (PLAN §2.8 madde 5).
 
 Eklenti çekirdeğin içinde değil, **alt süreç** olarak çalışır (K5) — sebebi
-ölçüldü: `librqbit` `tune-core`'un bağımlılık ağacına 179 crate ekliyordu
+ölçüldü: `librqbit` `tonearm-core`'un bağımlılık ağacına 179 crate ekliyordu
 (77 → 256) ve o ağaç `uniffi` ile mobile de gidecekti. Bu düzen D-056 ile
 **kalıcı** oldu.
 
 ## Kurulum
 
 ```bash
-cargo build --release -p tune-plugin-torrent
-mkdir -p ~/.local/share/tune/plugins/torrent
-cp plugins/torrent/plugin.json ~/.local/share/tune/plugins/torrent/
-cp target/release/tune-plugin-torrent ~/.local/share/tune/plugins/torrent/
-tune plugin approve torrent
+cargo build --release -p tonearm-plugin-torrent
+mkdir -p ~/.local/share/tonearm/plugins/torrent
+cp plugins/torrent/plugin.json ~/.local/share/tonearm/plugins/torrent/
+cp target/release/tonearm-plugin-torrent ~/.local/share/tonearm/plugins/torrent/
+tonearm plugin approve torrent
 ```
 
 Dizin adı kimliktir (D-037): dizin `torrent` olmalı, `plugin.json`'daki
@@ -43,8 +43,8 @@ Prowlarr/Jackett'ınızda seçersiniz; bir site bozulduğunda güncellenmesi
 gereken bizim kodumuz değil, onların indeks tanımıdır.
 
 ```bash
-tune secret set plugin:torrent torznab_url      # ör. http://127.0.0.1:9696/1/api
-tune secret set plugin:torrent torznab_api_key
+tonearm secret set plugin:torrent torznab_url      # ör. http://127.0.0.1:9696/1/api
+tonearm secret set plugin:torrent torznab_api_key
 ```
 
 Yapılandırılmamışsa `search` **boş sonuç değil, açık bir hata** döndürür:
@@ -56,8 +56,8 @@ elinizde bir infohash ya da magnet varsa.
 Torznab bir **yayım** (release) döndürür, bir parça değil — genelde bir albüm.
 Protokolün `WireTrack`'i ise bir parça. api 1'i büyütmeden çözüm iki adım:
 
-**Sağlayıcıya doğrudan arama yaptıran bir CLI komutu yok** — `tune provider`
-altında `search` diye bir alt komut yoktur. Eklentinin araması `tune play`'in
+**Sağlayıcıya doğrudan arama yaptıran bir CLI komutu yok** — `tonearm provider`
+altında `search` diye bir alt komut yoktur. Eklentinin araması `tonearm play`'in
 üzerinden çalışıyor: katalogda sonuç yoksa çekirdek akıtabilen bütün
 sağlayıcılara soruyor (`Session::queue_from_search`), torrent de onlardan
 biri.
@@ -68,13 +68,13 @@ yalnızca `sanatçı - başlık` basıyor ve bir yayımın infohash'i orada
 
 ```bash
 # 1. adım — yayımlar. Kimlik = <infohash>, ve yalnızca JSON'da görünür.
-tune play "radiohead ok computer" --dry-run --json | jq -r '.queued[].id.id'
+tonearm play "radiohead ok computer" --dry-run --json | jq -r '.queued[].id.id'
 
 # 2. adım — o yayımın içindeki ses dosyaları. Kimlik = <infohash>/<sıra>
-tune play <infohash> --dry-run --json | jq -r '.queued[].id.id'
+tonearm play <infohash> --dry-run --json | jq -r '.queued[].id.id'
 
 # 3. adım — çal.
-tune play <infohash>/3
+tonearm play <infohash>/3
 ```
 
 > Bu iki adımın `--json`'a mahkûm olması eklentinin değil **CLI'nin** eksiği:
@@ -114,7 +114,7 @@ konu (D-047).
 
 | Değişken | Ne işe yarar |
 |---|---|
-| `TUNE_TORRENT_LOG` | `tracing` filtresi (varsayılan `info`). Günlük stderr'e gider, çekirdek onu `tune diag`'a taşır. |
+| `TONEARM_TORRENT_LOG` | `tracing` filtresi (varsayılan `info`). Günlük stderr'e gider, çekirdek onu `tonearm diag`'a taşır. |
 
 İndirilenler `<eklenti veri dizini>/downloads/<infohash>/` altına, her torrent
 kendi dizinine iner (PLAN §2.4: iki yayımın aynı dosya adını taşıması sık, ve

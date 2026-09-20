@@ -123,7 +123,7 @@ Rust ile SQL'in aynı cevabı verdiğini kilitliyor.
 **Adlandırma:** `SearchHit.plays` → `SearchHit.play_count`. Ham olay sayısı
 kullanıcı yüzeyinden çıktı; `SearchOutcome.listen_events` olarak yalnızca tanı
 sayaçlarına yazılıyor (`search.play_count`, `search.listen_events`).
-`tune library search` de `stats` gibi `--min-ms` alıyor ki iki yüzey aynı eşikle
+`tonearm library search` de `stats` gibi `--min-ms` alıyor ki iki yüzey aynı eşikle
 sürülebilsin.
 
 **Ölçülen etki:** `spotify_extended_mini` fixture'ında `Creep` satırı
@@ -239,7 +239,7 @@ Vakanın etiketi `expect_mbid: null` olarak düzeltilir ve oran 69/69 olur.
 
 ## D-011 — Wrapped kartı rasterizasyonu
 **Tarih:** 2026-08-29
-**Soru:** `tune wrapped --out kart.png` PNG'yi nasıl üretecek? (PLAN 0.5.3 karar noktası)
+**Soru:** `tonearm wrapped --out kart.png` PNG'yi nasıl üretecek? (PLAN 0.5.3 karar noktası)
 **Karar:** **resvg, opsiyonel `render-png` feature'ı arkasında.** Çekirdek her zaman
 SVG üretir; PNG dönüşümü yalnızca feature açıkken derlenir. CLI feature'ı açar,
 mobil bağlamalar açmaz.
@@ -248,9 +248,9 @@ fontdb, rustybuzz) büyük. Feature kapalıyken ağaç hiç büyümüyor, açık
 ölçütü (`--out kart.png`) karşılanıyor. SVG her zaman üretiliyor olduğu için
 GUI/mobil istemezse PNG üretmeden kartı alabilir.
 **Sonuç:**
-- `tune-core` → `resvg = { version = "0.48", optional = true }`,
+- `tonearm-core` → `resvg = { version = "0.48", optional = true }`,
   `[features] render-png = ["dep:resvg"]`.
-- `tune-cli` tune-core'yu `render-png` ile açar.
+- `tonearm-cli` tonearm-core'yu `render-png` ile açar.
 - Feature-gated kod `wrapped/png.rs` içinde; `render_svg` koşulsuz.
 
 **Uygulandı (2026-08-29).** `wrapped::write_card` uzantıya bakıp biçime karar
@@ -292,7 +292,7 @@ Repo `git init` edildi, ilk commit kullanıcının adı ve e-postasıyla atıld�
 **Not:** Kullanıcı "0.0.1 Beta" dedi; Cargo semver'i boşluklu biçimi kabul
 etmediği için `0.0.1-beta` yazıldı — aynı anlam, geçerli semver.
 **Sonuç:** Sürüm alanı `workspace.package`'ta tek yerde; iki crate de oradan
-alıyor. Snapshot testleri `tune_version`'ı zaten değişken sayıp normalize
+alıyor. Snapshot testleri `tonearm_version`'ı zaten değişken sayıp normalize
 ettiği için sürüm artışı testleri kırmıyor — sonraki artışlarda da kırmayacak.
 
 ---
@@ -305,7 +305,7 @@ halledelim ki üstüne bir şeyler kurabilelim."
 **Gerekçe:** Oynatma bir *taban*; GUI ve tema onun üstüne kurulur. Tersi sırada
 GUI'nin göstereceği canlı bir durum (çalan parça, kuyruk, pozisyon) olmaz ve
 tema sistemi boşluğu süslemiş olur. Ayrıca Faz 1'den itibaren scrobble'ı
-`tune` üretmeye başlar — geçmiş artık hiçbir sağlayıcıda oluşmaz, ki projenin
+`tonearm` üretmeye başlar — geçmiş artık hiçbir sağlayıcıda oluşmaz, ki projenin
 asıl iddiası bu.
 **Kabul edilen risk:** D-003 gereği geliştiricinin yerel arşivi yok, bu faz
 **dogfood edilemez**. Karşılığında telifsiz fixture'larla ve testle doğrulanır;
@@ -412,7 +412,7 @@ ise sessiz `None` değil açık hata veriyor.
 
 ## D-018 — Kalıcı sağlayıcı kataloğu (şema v2)
 **Tarih:** 2026-08-30
-**Soru:** Yerel indeks bellekteydi ve her `tune play` çağrısı diski baştan
+**Soru:** Yerel indeks bellekteydi ve her `tonearm play` çağrısı diski baştan
 tarıyordu. Nereye yazılacak?
 **Karar:** SQLite'ta **ayrı bir tablo**: `provider_tracks` + FTS5. Şema v2
 olarak eklendi; v1 tabloları değişmedi.
@@ -424,7 +424,7 @@ dosyanın geçmişini de silmek olurdu; bu, projenin en temel vaadini
 (geçmiş sana ait) çiğnerdi.
 **Sonuç:**
 - `CatalogStore` trait'i `ListenStore`'dan ayrı.
-- `tune play` **tarama yapmıyor**; `tune provider scan` bir kez çalışır.
+- `tonearm play` **tarama yapmıyor**; `tonearm provider scan` bir kez çalışır.
 - Artımlı tarama: `mtime_ms` damgası değişmemiş dosyanın etiketi yeniden
   okunmuyor. `ScanSummary.unchanged` bunu sayıyor (K9).
 - `replace_catalog` kaynakta olmayan satırları düşürüyor ve kaç satır
@@ -460,7 +460,7 @@ zorunda değil; eklenti sınırı kendi referans eklentisiyle sınanacak.
 
 ## D-020 — Ağ taşıma katmanı: trait çekirdekte, istemci feature arkasında
 **Tarih:** 2026-08-30
-**Soru:** `tune-core`'un bağımlılık ağacında bugün HTTP/TLS yok. İlk ağ
+**Soru:** `tonearm-core`'un bağımlılık ağacında bugün HTTP/TLS yok. İlk ağ
 çağrısı nasıl girsin?
 **Karar:** **Seçenek C.** `net::HttpClient` trait'i çekirdekte, Subsonic/Jellyfin
 mantığı çekirdekte; somut istemci `http-client` feature'ı arkasında (`audio` ve
@@ -479,7 +479,7 @@ edilemez ve mobil kendi HTTP yığınını kullanamaz.
   `spawn_blocking` çağıramaz; bloklamayan taşıma isteyen (GUI, mobil) kendi
   `HttpClient`'ını verir. Trait sınırı bu değiş tokuşu geri alınabilir kılıyor.
 - Ağaç ölçümü (D-011'in yaptığı gibi), yordamı yazıyorum ki tekrar ölçülebilsin:
-  `cargo tree -p tune-core --no-default-features [--features F] --prefix none |
+  `cargo tree -p tonearm-core --no-default-features [--features F] --prefix none |
   sed 's/ (\*)//' | sort -u | wc -l`.
 
   | Feature | Crate |
@@ -542,14 +542,14 @@ yolu gerçekten ses üretiyor (ses aygıtı yoksa test kendini atlıyor, nedenin
 ### Doğrulama — 2026-08-31: YAPILDI
 
 Kararın istediği ikinci yarı tamamlandı. Docker'da iki gerçek sunucu kuruldu
-ve `tune` ikisine de bağlandı:
+ve `tonearm` ikisine de bağlandı:
 
 | Sunucu | Sürüm | Sonuç |
 |---|---|---|
 | Navidrome (OpenSubsonic) | 0.63.2 | kayıt → doğrulama → arama → **akış** → scrobble |
 | Jellyfin | 10.11.11 | kayıt (parola→anahtar) → doğrulama → arama → **akış** → scrobble |
 
-Her iki sunucudan da fixture FLAC'ı gerçekten çalındı ve `tune stats`
+Her iki sunucudan da fixture FLAC'ı gerçekten çalındı ve `tonearm stats`
 çıktısında göründü — Faz 1'in bitti ölçütünün ("yerel **ve uzak** kaynaktan
 çalıyor") uzak yarısı artık varsayım değil.
 
@@ -574,9 +574,9 @@ docker run -d --name nav -p 14533:4533 \
   -v "$PWD/fixtures/audio:/music:ro" -v nav-data:/data \
   -e ND_DEVAUTOCREATEADMINPASSWORD=parola123 deluan/navidrome:latest
 
-TUNE_PASSWORD=parola123 tune provider add subsonic \
+TONEARM_PASSWORD=parola123 tonearm provider add subsonic \
   --url http://127.0.0.1:14533 --user admin --name nav
-tune provider test nav && tune play "Test" --all && tune stats
+tonearm provider test nav && tonearm play "Test" --all && tonearm stats
 ```
 
 Jellyfin'de kurulum sihirbazı API'den geçiliyor (`/Startup/Configuration`,
@@ -614,7 +614,7 @@ katmandan geldiği gövde okunmadan bilinemez, tahmin etmek yanlış tanı üret
 - Aynı kusur sınıfı iki yerde daha düzeltildi:
   - `remote::prepare_server` doğrulama hatası artık "erişilemedi" değil
     "**doğrulanamadı**" diyor (D-022 doğrulama bölümü).
-  - `tune provider test` başlığı "ERİŞİLEMİYOR" değil "**KULLANILAMIYOR**":
+  - `tonearm provider test` başlığı "ERİŞİLEMİYOR" değil "**KULLANILAMIYOR**":
     `ProviderHealth.reachable == false`'ın iki sebebi var, başlık ikisini de
     kapsayan kelimeyi seçiyor, sebebi `not` satırı söylüyor. `ProviderHealth`
     API'si değişmedi — bu bir sunum kararı, CLI'nin işi (Altın Kural).
@@ -678,9 +678,9 @@ bozuk ya da olmayan dosya, ses çıkışı bulunmayan bir ortamda (CI) da
 
 ## D-025 — Dizin izleme: bağımlılıksız bayatlık yoklaması
 **Tarih:** 2026-08-31
-**Soru:** Değişiklikler yalnızca elle `tune provider scan` ile alınıyor.
+**Soru:** Değişiklikler yalnızca elle `tonearm provider scan` ile alınıyor.
 Dizin izleme (watch) için `notify` crate'i eklensin mi?
-**Karar:** **Hayır — bağımlılık eklenmedi.** Yerine `tune provider scan
+**Karar:** **Hayır — bağımlılık eklenmedi.** Yerine `tonearm provider scan
 --if-stale`: sağlayıcıya ucuz bir soru sorulup yalnızca gerekiyorsa taranıyor.
 **Gerekçe:** Tarama zaten artımlı (D-018, mtime damgası) ve pahalı kısmı olan
 etiket okuma değişmemiş dosyalarda atlanıyordu; eksik olan "taramaya değer mi"
@@ -702,7 +702,7 @@ platform başına farklı davranır. Dizin damgaları her yerde aynı biçimde
 - **Görmediği şey açıkça yazılı:** dosyanın yerinde yeniden etiketlenmesi.
   Dosya değişir, dizin damgası değişmez. Bunu yakalamak her dosyayı `stat`
   etmek, yani zaten artımlı taramanın kendisi olurdu. O durumda düz
-  `tune provider scan` gerekiyor ve komut yardımı bunu söylüyor.
+  `tonearm provider scan` gerekiyor ve komut yardımı bunu söylüyor.
 - Şema **değişmedi**: "en son ne zaman tarandı" sorusu `provider_tracks
   .scanned_at`'in `MAX`'ından geliyor. Hiç taranmamışsa `None` — sıfır değil;
   "1970'te baktım" her şeyi bayat gösterirdi.
@@ -883,7 +883,7 @@ kurarak **23.8 → 55.6 fps** (CSS fazı). Erkenmiş.
   sessiz ortam değiştirme hata ayıklamayı imkânsız kılar (K9).
 - **Açık pürüz — `unsafe` çakışması.** Rust 2024'te `std::env::set_var` `unsafe`.
   Workspace `[workspace.lints.rust] unsafe_code = "forbid"` diyor ve `forbid`
-  paket düzeyinde `allow` ile **geçersiz kılınamaz**; `tune-core` ve `tune-cli`
+  paket düzeyinde `allow` ile **geçersiz kılınamaz**; `tonearm-core` ve `tonearm-cli`
   ikisi de `[lints] workspace = true` ile devralıyor. GUI paketi yazılırken üç
   seçenek var: (a) workspace kuralını `deny`ye çevirmek (o zaman geçersiz
   kılınabilir ama koruma zayıflar), (b) GUI paketini `lints.workspace = true`
@@ -901,15 +901,15 @@ kurarak **23.8 → 55.6 fps** (CSS fazı). Erkenmiş.
 **Tarih:** 2026-08-31
 **Soru:** GUI paketi nerede yaşasın — workspace içinde mi, ayrı workspace mi,
 ayrı depo mu?
-**Karar:** Aynı depo, aynı workspace, **üç paket**: `tune-core`, `tune-cli`,
-`tune` (GUI). Ayrı paket **gibi davranılır** ama ayrı depo olmak zorunda değil.
+**Karar:** Aynı depo, aynı workspace, **üç paket**: `tonearm-core`, `tonearm-cli`,
+`tonearm` (GUI). Ayrı paket **gibi davranılır** ama ayrı depo olmak zorunda değil.
 **Gerekçe:** Ayrılabilirlik bir yapı özelliği, dosya düzeni değil. Önemli olan
-şu: `tune-cli` ve `tune`, `tune-core` olmadan **çalışamaz** — bütün baz işlemler
+şu: `tonearm-cli` ve `tonearm`, `tonearm-core` olmadan **çalışamaz** — bütün baz işlemler
 orada (K1). Ayırmak istendiğinde ayrılabilmesi için bugünden bağımlılık yönünün
 tek yönlü olması yeterli.
 **Sonuç:**
-- Bağımlılık yönü: `tune-core` ← `tune-cli`, `tune-core` ← `tune`.
-  **`tune-cli` ile `tune` birbirini hiç görmez.** Biri diğerinden bir şey
+- Bağımlılık yönü: `tonearm-core` ← `tonearm-cli`, `tonearm-core` ← `tonearm`.
+  **`tonearm-cli` ile `tonearm` birbirini hiç görmez.** Biri diğerinden bir şey
   isterse o şey çekirdeğe aittir — Altın Kural'ın paket düzeyindeki hâli.
 - Ayrı depo şimdilik hayır: çekirdek hâlâ hızla değişiyor, iki depoyu adımda
   tutmak bu aşamada pahalı.
@@ -1039,7 +1039,7 @@ yalnızca kolay yolu kapsıyorsa kilit değildir.
 
 ## D-034 — GUI'de çekirdek kendi iş parçacığında yaşar
 **Tarih:** 2026-08-31
-**Soru:** `tune` paketi yazılırken çıktı: Tauri her async komutun future'ının
+**Soru:** `tonearm` paketi yazılırken çıktı: Tauri her async komutun future'ının
 `Send` olmasını istiyor. `LiveSession` bir `Mutex` arkasında paylaşılan durum
 olarak tutulabilir mi?
 **Karar:** **Hayır.** Çekirdek kendi iş parçacığına yerleşiyor; komutlar oraya
@@ -1061,14 +1061,14 @@ bir kapanış gönderip `oneshot` ile cevabı bekliyor. Kilit yok.
   200 ms'lik zamanlayıcı yan yana; komutlarla `tick()` arasında yarış yok,
   sıraya kanal koyuyor.
 - **Bilinen bedel:** uzun bir `import` sürerken oynatma kumandaları sırada
-  bekler. Görünmez kalmasın diye uzun komutlar `tune://busy` olayı gönderiyor
+  bekler. Görünmez kalmasın diye uzun komutlar `tonearm://busy` olayı gönderiyor
   ve arayüz hangi işin sürdüğünü yazıyor (K9). Kabul edilebilir bulundu:
   ses zaten kendi iş parçacığında çalmayı sürdürüyor.
-- **İkili adı `tune-desktop`.** Paket adı D-030'daki gibi `tune`, ama
-  `tune-cli` zaten `tune` adında bir ikili üretiyor ve aynı workspace'te iki
+- **İkili adı `tonearm-desktop`.** Paket adı D-030'daki gibi `tonearm`, ama
+  `tonearm-cli` zaten `tonearm` adında bir ikili üretiyor ve aynı workspace'te iki
   aynı adlı çıktı çakışıyor. CLI'nin adı kullanıcıya vaat edilmiş
-  (`tune import ...`), o yüzden değişen taraf GUI oldu.
-- **Hata zarfı var, veri zarfı yok.** `tune_core::Error` seri hâle
+  (`tonearm import ...`), o yüzden değişen taraf GUI oldu.
+- **Hata zarfı var, veri zarfı yok.** `tonearm_core::Error` seri hâle
   getirilemiyor (kaynak zinciri `dyn Error`); komutlar `{ stage, chain }`
   döndürüyor — CLI'nin `stderr`'e bastığının aynısı. D-033'ün yasakladığı
   şey veri tiplerinin ikizini yazmaktı; bu onun kapsamında değil.
@@ -1119,28 +1119,28 @@ olmalı? Ve arkasındaki asıl soru — bu projede hangi isim hangi dilde yazıl
   `ADIM:` ön eki. Bunlar yerelleştirme ekseni, isimlendirme ekseni değil.
 
 **Gerekçe:**
-- Çizgi zaten fiilen vardı, yazılı değildi: `tune-core`'un tamamı ve CLI alt
-  komutları İngilizceydi (`PlaybackAnchor`, `Queue::view`, `tune provider
+- Çizgi zaten fiilen vardı, yazılı değildi: `tonearm-core`'un tamamı ve CLI alt
+  komutları İngilizceydi (`PlaybackAnchor`, `Queue::view`, `tonearm provider
   scan`); Türkçe olan yalnızca GUI kabuğunun içiydi (`.ust`, `dikkate_deger`).
   Yazılmayan kural altı ay sonra tutarsız uygulanır.
 - Tema token seti bu projenin **en dışa dönük** yüzeyi olacak — onu tüketen
-  benim yazdığım kod değil, tanımadığım bir tema yazarı. `--tune-yuzey`
+  benim yazdığım kod değil, tanımadığım bir tema yazarı. `--tonearm-yuzey`
   demek tema yazarlığını Türkçe bilenlerle sınırlardı; hiçbir karşılığı
   olmayan bir daraltma.
-- CSS'in kendi sözcükleri İngilizce; `background: var(--tune-arka2)` iki dili
+- CSS'in kendi sözcükleri İngilizce; `background: var(--tonearm-arka2)` iki dili
   tek satırda karıştırıyor ve okurken duraklatıyor.
 - Aksan sorunu ayrıca var: `sanatçı`/`sanatci` ikiliği bir dosya adında ya da
   bir JSON anahtarında sessiz bir hata kaynağı.
 
 **Sonuç — bu kararla birlikte yapılan yeniden adlandırma:**
-- `crates/tune` (Rust): `duzelt→fixup`, `baslat→spawn`, `calis→run`,
+- `crates/tonearm` (Rust): `duzelt→fixup`, `baslat→spawn`, `calis→run`,
   `tur→run_tick`, `Onemli→Notable`, `dikkate_deger→worth_sending`,
   `calistir→run_on_core`, `cekirdek_dustu→core_thread_gone`.
   Tanı aşaması `ADIM: ORTAM_DUZELTME` → `ADIM: ENV_FIXUP` (çekirdeğin
   `CONFIG_LOAD`/`IDENTITY_RESOLVE` sözlüğüyle aynı yazımda).
-- `crates/tune/ui`: bütün CSS sınıfları, HTML id'leri ve JS adları
+- `crates/tonearm/ui`: bütün CSS sınıfları, HTML id'leri ve JS adları
   (`.ust→.topbar`, `.uyari→.toast`, `capa→anchor`, `cagir→call`…).
-  CSS değişkenleri de İngilizce ama **`--tune-` ön eki bilerek yok**: o ön ek
+  CSS değişkenleri de İngilizce ama **`--tonearm-` ön eki bilerek yok**: o ön ek
   vaadin kendisi ve onu §3.3 dağıtacak.
 - Paylaşılan doğruluk kümesi (`fixtures/anchor/position_cases.json`):
   anahtarlar (`vakalar→cases`, `capa→anchor`, `beklenen_ms→expected_ms`) ve
@@ -1181,7 +1181,7 @@ vaadi, temaya IPC açılıp açılmayacağı, paket biçimi. Yazmadan önce soru
 2. **Seçici vaadi: sınıf adları.** Önerim CSS custom property'lerle
    sınırlamaktı (sınıf adlarını iç detay olarak D-036 sonrası bırakmak);
    kullanıcı sınıf adlarını sözleşmenin parçası yapmayı seçti. **Sonuç:**
-   `crates/tune/ui/style.css`'teki mevcut sınıf adları (`.topbar`, `.toast`,
+   `crates/tonearm/ui/style.css`'teki mevcut sınıf adları (`.topbar`, `.toast`,
    `.queue-item` vb.) artık iç ayrıntı değil, tema yazarının hedefleyebileceği
    stabil bir yüzey. Bu, D-036'nın "class isimleri iç ayrıntı, habersiz
    değişir" varsayımını **geçersiz kılıyor** — CSS'i yeniden adlandırmadan
@@ -1218,7 +1218,7 @@ soru çıktı: `theme.css` `:root` dışına taşıp doğrudan bir seçiciyi (ö
 **Karar:** **İkisi de değil — işaretle.** Yükleyici böyle bir temayı
 reddetmez, yükler; ama tema seçim listesinde açıkça "genişletilmiş / garantisi
 yok" diye etiketler. Sözleşmenin **garanti ettiği** yüzey her zaman yalnızca
-`:root`'taki `--tune-*` token'larıdır — bir `api` sürüm atlamasında yalnızca
+`:root`'taki `--tonearm-*` token'larıdır — bir `api` sürüm atlamasında yalnızca
 bunlar için geriye dönük uyumluluk taahhüt edilir.
 **Gerekçe:** Kullanıcı katı bir ikili seçim yerine bir orta yol istedi —
 "biri yaratıcılığa engel, biri tutarlı arayüze engel." Reddetmek tema
@@ -1234,7 +1234,7 @@ var mı diye bakan basit bir kontrol yeter.
 
 ---
 
-## D-039 — Token seti eksikti: `--tune-color-scheme`
+## D-039 — Token seti eksikti: `--tonearm-color-scheme`
 **Tarih:** 2026-09-01
 **Soru:** Sorulmadı — §3.4'ün referans temaları yazılırken **ölçüldü**.
 D-037'nin dar semantik kümesi (on üç token) açık bir temayı ifade etmeye
@@ -1246,14 +1246,14 @@ Onay kutusunu, imleci ve kaydırma çubuğunu motor çiziyor ve motorun tek
 girdisi CSS'in `color-scheme` özelliği — bir renk değeri değil, "bu arayüz
 açık mı koyu mu" cevabı. Hiçbir renk token'ı bunun yerine geçemez.
 
-**Karar:** On dördüncü token, `--tune-color-scheme` (`dark` | `light`).
-`style.css`'te `html { color-scheme: var(--tune-color-scheme); }` olarak
+**Karar:** On dördüncü token, `--tonearm-color-scheme` (`dark` | `light`).
+`style.css`'te `html { color-scheme: var(--tonearm-color-scheme); }` olarak
 kullanılıyor.
 
 **`api` artmadı ve bu kasıtlı.** Kural: yeni token **eklemek** sürümü
 artırmaz — eski temalar onu yazmıyordu, varsayılanını alırlar ve çalışmaya
 devam ederler. Artıran şey var olan bir token'ı kaldırmak ya da anlamını
-değiştirmek. `--tune-color-scheme` bu kuralın ilk örneği; kural PLAN §3.3'e
+değiştirmek. `--tonearm-color-scheme` bu kuralın ilk örneği; kural PLAN §3.3'e
 ve `src/theme.rs`'e yazıldı.
 
 **Asıl kayda değer olan bulgu değil, nasıl bulunduğu.** §3.4 "en az iki
@@ -1313,7 +1313,7 @@ seviyesinde hapsetme yok** — ve bu, kullanıcıya da böyle söylenir.
   küçültürse istenmez.
 - Çekirdeğin kendi verdiği tek şey daraltılır: eklenti kendi veri alt dizinini
   (`<data_dir>/plugins/<ad>/`) ve **yalnızca kendi** sırlarını görür (D-042).
-- `tune diag` ve `tune provider list --json` beyan edilen izinleri **ve**
+- `tonearm diag` ve `tonearm provider list --json` beyan edilen izinleri **ve**
   zorlanmadığını raporlar. Kullanıcı neye güvendiğini bilir (K9).
 - Zorlama geldiğinde `api` sürümü artmaz: manifest alanları aynı kalır,
   değişen şey çekirdeğin onlarla ne yaptığıdır.
@@ -1362,7 +1362,7 @@ kopyanın izin sıkılaştırmasını unutan kopya olur.
   çalışan hâlinden oynatmak olurdu; kazancı yok.
 - Çekirdek el sıkışmada eklentiye **yalnızca kendi ad alanını** geçirir.
   Bir eklenti başka bir eklentinin sırrını istemez, göremez.
-- Sır değerleri log'a ve `tune diag`'a **girmez**; yerine anahtar adı ve
+- Sır değerleri log'a ve `tonearm diag`'a **girmez**; yerine anahtar adı ve
   "var/yok" yazılır. Tanı raporu kopyala-yapıştır edilen bir metin (K9) —
   içinde token taşıyamaz.
 - `keyring` kapısı kapanmadı: sır **okuma** tek bir yerden geçtiği için
@@ -1397,7 +1397,7 @@ Sıra bu yüzden kasıtlı — sır varsa keşfe hiç gidilmez.
   zaman aşımı 5 sn ve protokol "ağa çıkmayın" diyor.
 
 **Karar (S2 — test yolu):** **Canlı testler varsayılan koşuma dahil.**
-`crates/tune-core/tests/plugin_soundcloud.rs` gerçek SoundCloud'a bağlanır ve
+`crates/tonearm-core/tests/plugin_soundcloud.rs` gerçek SoundCloud'a bağlanır ve
 `cargo test --workspace` ile koşar.
 
 **Gerekçe:** Önerim "sahte sunucu + `--ignored` arkasında canlı test" idi;
@@ -1431,9 +1431,9 @@ bunu taşıyacak alan yok ve kullanıcı çalarken şaşırmamalı.
 **Soru:** Karar değil, D-043'ün canlı sürüşünün ortaya çıkardığı kusur ve
 düzeltmesi. Kayda geçiyor çünkü aynı aile ikinci kez tekrarlandı (D-035).
 
-**Kusur:** `tune play` SoundCloud parçasını kuyruğa alıyor, sonra
+**Kusur:** `tonearm play` SoundCloud parçasını kuyruğa alıyor, sonra
 `kaydedilen dinleme: 0` deyip **anında** çıkıyordu. Hata yok, uyarı yok,
-`tune diag` temiz. Ses hiç çalmıyordu.
+`tonearm diag` temiz. Ses hiç çalmıyordu.
 
 **Sebep:** `AudioEngine::open()` cpal akışını hemen başlatıyor; geri çağrı
 boş tampon + `idle` görüp `Stopped` basıyor. Ardından `play_source`
@@ -1514,9 +1514,9 @@ güncellenir.
 
 ### D-045 eki — §2.3'ün MusicBrainz yarısı: canlı koşumun bulduğu üç kusur
 
-**Tarih:** 2026-09-01. `crates/tune-core/src/identity/musicbrainz.rs` +
+**Tarih:** 2026-09-01. `crates/tonearm-core/src/identity/musicbrainz.rs` +
 `tests/identity_musicbrainz.rs`. Zincirin 2. ve 3. halkası artık çalışıyor;
-`tune --online resolve "..."` gerçek MusicBrainz'e bağlanıyor.
+`tonearm --online resolve "..."` gerçek MusicBrainz'e bağlanıyor.
 
 Üçü de **gerçek yanıt üzerinde** ortaya çıktı; hiçbirini sentetik katalog
 gösteremezdi. Bu, D-044'ün dersinin dördüncü tekrarı.
@@ -1620,10 +1620,10 @@ diye raporlamak, kusuru dosyada arattırırdı.
   tutuyor ve URL'ye sığmıyor; kesilen bir URL "eşleşme yok" gibi görünürdü.
 - `net::RateLimiter` musicbrainz'den `net`'e taşındı (AcoustID'nin de kotası var).
 
-**CLI:** `tune resolve --file <yol>`. `--online` kapalıyken zincir üç halkayla
+**CLI:** `tonearm resolve --file <yol>`. `--online` kapalıyken zincir üç halkayla
 biter ve bu bir kusur değil bir yapılandırmadır.
 
-**Feature:** `fingerprint` (D-045'te tanımlandı) artık `tune-cli`'de **açık**.
+**Feature:** `fingerprint` (D-045'te tanımlandı) artık `tonearm-cli`'de **açık**.
 CLI her çekirdek yeteneğinin sınandığı yüzey; ağacı büyütmesi bilinçli bedel.
 
 ### D-046 eki — canlı koşumun bulduğu iki şey
@@ -1744,7 +1744,7 @@ değil, sahte **gövde**.
   adıyla gösterip düşüyor.
 
 **Anahtar hakkında:** kullanıcının anahtarı `.env`'de (gitignore'da) duruyor ve
-testlerde `TUNE_ACOUSTID_KEY` olarak kullanıldı. `EMBEDDED_API_KEY` **hâlâ
+testlerde `TONEARM_ACOUSTID_KEY` olarak kullanıldı. `EMBEDDED_API_KEY` **hâlâ
 boş** — o anahtarı kaynağa gömmek onu herkese açık hâle getirir ve bu, sırlar
 dosyasında tutulan kişisel bir anahtar için kullanıcının ayrıca vereceği bir
 karardır. Sorulmadan yapılmadı.
@@ -1761,7 +1761,7 @@ yazılmadan kapatılacaktı (D-045'in açık bıraktığı iki alt karardan biri
 
 | | crate |
 |---|---|
-| `tune-core` bugün (`fingerprint` açık) | 77 |
+| `tonearm-core` bugün (`fingerprint` açık) | 77 |
 | `librqbit` 9.0.1 tek başına (`--no-default-features`) | 223 |
 | çekirdeğe eklenirse **yeni** gelen | **+179** (ortak yalnızca 35) |
 
@@ -1769,15 +1769,15 @@ Yani çekirdek 77 → 256, **3,3 kat**. Ve bu ağaç `uniffi` ile mobile de gide
 K7'nin ve "ağaç küçük kalmalı (mobil binary boyutu)" kuralının doğrudan konusu.
 
 **Karar (S1 — nerede yaşar): ayrı workspace crate'i, alt süreç eklentisi.**
-`crates/tune-plugin-torrent`, `librqbit` kullanan bağımsız bir Rust ikilisi,
-çekirdekle §2.1'in JSON-RPC protokolü üzerinden konuşuyor. `tune-core`'un
+`crates/tonearm-plugin-torrent`, `librqbit` kullanan bağımsız bir Rust ikilisi,
+çekirdekle §2.1'in JSON-RPC protokolü üzerinden konuşuyor. `tonearm-core`'un
 ağacı 77'de kalıyor. Çelişki K5 lehine kapandı; PLAN §2.4'ün "`librqbit`"
 tavsiyesi geçerli, **yeri** değişti.
 
 Dürüst olmak gerekirse bedelsiz değil: workspace tek `Cargo.lock` paylaştığı
 için o 179 crate kilide giriyor ve `cargo test --workspace` onları derliyor.
-Değişmeyen şey `tune-core`'un **kendi** bağımlılık ağacı — mobil bağlamanın
-taşıyacağı olan da o. Ölçü `cargo tree -p tune-core` ile her zaman doğrulanabilir.
+Değişmeyen şey `tonearm-core`'un **kendi** bağımlılık ağacı — mobil bağlamanın
+taşıyacağı olan da o. Ölçü `cargo tree -p tonearm-core` ile her zaman doğrulanabilir.
 
 **Karar (S2 — ses nasıl teslim edilir): 127.0.0.1'de sıralı HTTP akışı.**
 Eklenti `librqbit`'in `ManagedTorrent::stream(file_id)` akışını (`AsyncRead +
@@ -1785,7 +1785,7 @@ AsyncSeek`, parça önceliğini okuma konumuna göre ayarlıyor) yalnızca yerel
 arayüze bağlı küçük bir HTTP/1.1 sunucusundan sunuyor ve `resolve_source`
 `HttpStream` döndürüyor. **Protokolde tek satır değişmedi.**
 
-Alternatif "tam indir, sonra `LocalFile` döndür" idi: basit ama `tune play`
+Alternatif "tam indir, sonra `LocalFile` döndür" idi: basit ama `tonearm play`
 dakikalarca bloke olurdu ya da protokole ilerleme bildirimi eklemek gerekirdi.
 
 K3 ihlali değil: röle edilen bir şey yok, akış kullanıcının kendi makinesinde
@@ -1805,7 +1805,7 @@ Depoda hiçbir siteye özel kazıyıcı durmuyor.
 
 Bedeli kullanıcının bir kurulum yapması ve bu bedel K9 uyarınca gizlenmiyor:
 Torznab yapılandırılmamışsa `search` sessiz boş küme değil, "yapılandırılmamış
-— `tune secret set plugin:torrent torznab_url ...`" diyen açık bir hata döner.
+— `tonearm secret set plugin:torrent torznab_url ...`" diyen açık bir hata döner.
 "Bulamadım" ile "bakmadım" ayrı tanılardır.
 
 **Torznab bir *release* döndürür, bir parça değil** — ve bu, tel biçimindeki
@@ -1821,7 +1821,7 @@ sessizce ilk dosyayı seçmekten iyidir).
 
 **Yeni bağımlılık:** `roxmltree` (Torznab RSS ayrıştırma) ve `reqwest` — ikisi
 de workspace kilidinde zaten var (`roxmltree` resvg'den, `reqwest` librqbit ve
-Tauri'den), yani kilide yeni bir isim eklemiyorlar. `tune-core`'a hiçbiri
+Tauri'den), yani kilide yeni bir isim eklemiyorlar. `tonearm-core`'a hiçbiri
 girmiyor.
 
 ### D-047 eki — inşanın bulduğu üç şey
@@ -1875,8 +1875,8 @@ derler" diyordu ama sayı vermemişti. Sayı şu: bu makinede `target/` 45 GB'ye
 incremental` tek başına 12 GB'ydi (saf önbellek, silinince hiçbir çıktı
 kaybolmaz). Silindikten sonra tur temiz geçti.
 
-Bu bir kusur değil, ölçülmüş bir bedel: torrent eklentisi `tune-core`'un
-ağacını büyütmüyor (77'de kaldı, `cargo tree -p tune-core` ile doğrulandı)
+Bu bir kusur değil, ölçülmüş bir bedel: torrent eklentisi `tonearm-core`'un
+ağacını büyütmüyor (77'de kaldı, `cargo tree -p tonearm-core` ile doğrulandı)
 ama **workspace'in derleme yükünü** büyütüyor. Geliştirici makinesinde
 `CARGO_INCREMENTAL=0` ya da düzenli `cargo clean` gerekebilir; CI'da tek bir
 `--workspace` koşumu için disk ayırırken bu hesaba katılmalı.
@@ -1929,7 +1929,7 @@ süre (`4:11`) ve `videoId` var.
 InnerTube üstveriyi verir, yt-dlp sesi çözer. İkisi de kendi güçlü olduğu işi
 yapıyor.
 
-**Ölçüm 3 — `bestaudio` çalınamaz.** `tune-core`'un symphonia feature'ları:
+**Ölçüm 3 — `bestaudio` çalınamaz.** `tonearm-core`'un symphonia feature'ları:
 `mp3, flac, vorbis, isomp4, aac`. Yani **ne webm kabı ne opus çözücüsü var.**
 yt-dlp'nin `bestaudio` seçimi format 251'i (opus/webm, 136 kbps) veriyor —
 indirilir, çalınmaz. Mevcut ses formatları:
@@ -1982,7 +1982,7 @@ standart bir HTTP başlığı gönderiliyor.
    bozduğu şeyi biz değil yt-dlp tamir eder — ve bu, EK'in "bakım maliyeti en
    yükseği" uyarısına verilen cevabın ta kendisi.
 
-yt-dlp aranma sırası: `TUNE_YTDLP` (yol) → `PATH`'te `yt-dlp` →
+yt-dlp aranma sırası: `TONEARM_YTDLP` (yol) → `PATH`'te `yt-dlp` →
 `python3 -m yt_dlp`. Hiçbiri yoksa `health` `reachable: false` diyor ve
 `search`/`resolve_source` nasıl kurulacağını yazan bir hata döndürüyor —
 sessiz boş sonuç değil.
@@ -2044,7 +2044,7 @@ gösterdiği de o. Test artık oraya bakıyor ve **iki şeyi birden** doğruluyo
 mesaj yt-dlp'nin kendi cümlesini taşıyor **ve** hangi aşamada olduğunu
 söylüyor.
 
-**Uçtan uca kanıt:** `tune play "hopeless_0taku_guitar Aruarian Dance Guitar
+**Uçtan uca kanıt:** `tonearm play "hopeless_0taku_guitar Aruarian Dance Guitar
 with Rain"` — 69 saniyelik parça 88 saniyede baştan sona çaldı (aradaki ~19 sn
 yt-dlp'nin çözümü ve ilk tamponlama), çıkış kodu 0, ve dinleme kaydı
 veritabanına yazıldı. §2.5'in aradığı kanıt buydu.
@@ -2065,7 +2065,7 @@ var ve hiçbiri yazılı değil.
 |---|---|---|
 | `soundcloud` | `PATH`'te `python3` | Linux/macOS'ta genelde hazır; **Windows'ta yok** |
 | `ytmusic` | `python3` **+ yt-dlp** | paket yöneticisi → **root** |
-| `torrent` | `exec` hedefi (`./tune-plugin-torrent`) **depoda yok** | `cargo build --release`, yani **Rust araç zinciri** |
+| `torrent` | `exec` hedefi (`./tonearm-plugin-torrent`) **depoda yok** | `cargo build --release`, yani **Rust araç zinciri** |
 
 Yani en ağır bağımlılığı olan eklenti, bu turda yazılan değil: torrent bir
 ikiliyi çalıştırabilmek için önce derleyici kurduruyor.
@@ -2084,7 +2084,7 @@ yükseği" uyarısının anlattığı şey tam olarak budur. Kuralın üç şart
 sağlanmalı: **root yok + her işletim sistemi + güncel kalabilir.**
 
 **Ölçülen iyi haber:** tanılama tarafı zaten ayakta. Eksik bağımlılık sessizce
-"sonuç yok"a dönüşmüyor; `tune provider test` her iki durumda da KULLANILAMIYOR
+"sonuç yok"a dönüşmüyor; `tonearm provider test` her iki durumda da KULLANILAMIYOR
 diyor ve sebebini yazıyor (eksik `exec` için `PLUGIN_HANDSHAKE` + işletim
 sisteminin hatası, eksik yt-dlp için `health`'in cümlesi). K9 raporlama
 düzeyinde karşılanıyor; kırık olan **kurulabilirlik**, görünürlük değil.
@@ -2118,7 +2118,7 @@ karar ve hiçbiri bu turda alınmadı:
 **Bir de sorulacak bir ekleme var:** manifeste makine okunur bir `requires`
 alanı. Bugün eksik bağımlılık ancak süreç başlatıldıktan sonra (`health`) ya da
 başlatılamayınca (`PLUGIN_HANDSHAKE`) anlaşılıyor; beyan edilmiş bir gereksinim
-listesi `tune plugin list`'in daha süreç açmadan "eksik: yt-dlp" demesini
+listesi `tonearm plugin list`'in daha süreç açmadan "eksik: yt-dlp" demesini
 sağlardı. api'yi kırmaz — D-039/§2.1'in kuralı gereği **eklemek sürümü
 artırmaz.**
 
@@ -2136,8 +2136,8 @@ eklentinin üçünün gereksinimi ve hiçbir yerde yazılı değil** — ne `REA
 ne `CONTRIBUTING`'de, ne `Cargo.toml`'da. Yani projenin fiilen bir çalışma
 zamanı gereksinimi zaten var; eksik olan onu **sahiplenmek**.
 
-**Karar (S1 — motor): `tune`'un tek bir eklenti motoru olur, çalışma zamanı
-Python'dur ve bu `tune`'un kendi gereksinimi olarak bir kez ilan edilir.**
+**Karar (S1 — motor): `tonearm`'un tek bir eklenti motoru olur, çalışma zamanı
+Python'dur ve bu `tonearm`'un kendi gereksinimi olarak bir kez ilan edilir.**
 Derleme/kurulum belgesinde yazar. Eklentiler o motorun üstünde koşan
 betiklerdir. Bir eklentinin "hangi Python", "kurulu mu", "nasıl kurulur"
 sorularıyla işi olmaz — bunlar host'un soruları.
@@ -2169,7 +2169,7 @@ gerekçedir, S1/S2/S4 etkilenmedi. Sebep tutarlılık: torrent bir Rust ikilisi,
 geçemez — ve bugünkü hâli D-049'u en ağır ihlal eden şey (kullanıcıya
 `cargo build --release` yaptırıyor).
 
-D-047'nin ölçümü hâlâ geçerli ve göz ardı edilmiyor: `librqbit` `tune-core`'un
+D-047'nin ölçümü hâlâ geçerli ve göz ardı edilmiyor: `librqbit` `tonearm-core`'un
 ağacına **+179 crate** ekliyor (77 → 256, 3,3 kat) ve o ağaç `uniffi` ile
 mobile gidecek. Bu yüzden taşımanın **şekli** feature kapısı:
 
@@ -2180,7 +2180,7 @@ torrent = ["dep:librqbit"]   # varsayılan kapalı
 Depo bunu zaten üç kez yaptı (`audio` D-016, `http-client` D-020,
 `fingerprint` D-045): ağır bir yeteneği açık bir kapının arkasına koymak.
 Masaüstü derlemesi kapıyı açar ve kullanıcı hiçbir şey derlemez; mobil ve
-sunucu derlemeleri açmaz ve **`cargo tree -p tune-core` yine 77 der.**
+sunucu derlemeleri açmaz ve **`cargo tree -p tonearm-core` yine 77 der.**
 Koşulsuz taşıma da mümkündü ve reddedilmedi — ölçülmüş bir bedeli sebepsiz
 ödemek olurdu.
 
@@ -2204,11 +2204,11 @@ Hiçbiri bu turda yapılmadı; hepsi §2.8'in kapsamı:
    tanı (K9). Eksik bağımlılık bugün ancak süreç açıldıktan sonra anlaşılıyor.
 2. **`plugin.json`'a `requires` alanı** — `api` kırılmaz, eklemek sürümü
    artırmaz (§2.1'in kuralı).
-3. **`ytmusic`** kendi yt-dlp arayışını bırakır (`TUNE_YTDLP` → `PATH` →
+3. **`ytmusic`** kendi yt-dlp arayışını bırakır (`TONEARM_YTDLP` → `PATH` →
    `python3 -m yt_dlp` üçlüsü silinir), `requires: ["yt-dlp"]` der ve motorun
    verdiğini kullanır.
 4. **`soundcloud`** ve `echo` motora taşınır — ikisi de stdlib, `requires` boş.
-5. ~~**`torrent`** eklenti olmaktan çıkar; `crates/tune-plugin-torrent`
+5. ~~**`torrent`** eklenti olmaktan çıkar; `crates/tonearm-plugin-torrent`
    çekirdeğe feature'lı bir sağlayıcı olarak gider, `plugins/torrent/` kalkar.~~
    **İPTAL — D-056.** Yapılmadı ve yapılmayacak.
 6. **`python3` `README`/`CONTRIBUTING`'de gereksinim olarak ilan edilir.**
@@ -2238,7 +2238,7 @@ sessiz değildi — birbirini yalanlıyorlardı:
 | K7 | "trait object olmasın" | D-006 bunu gevşetti: `Arc<dyn Trait>` ve `async fn` serbest |
 | faz numaraları | Faz 3 = odalar | PLAN: Faz 3 = GUI, Faz 4 = odalar, 5 = sosyal, 6 = mobil |
 | şu anki faz | "Şu an Faz 0" | Faz 0–3 kapandı, §2.8 açık |
-| workspace ağacı | olmayan `sync/` listeleniyor | `net/`, `wrapped/`, `session.rs`, `tune-plugin-torrent`, `plugins/` hiç yok |
+| workspace ağacı | olmayan `sync/` listeleniyor | `net/`, `wrapped/`, `session.rs`, `tonearm-plugin-torrent`, `plugins/` hiç yok |
 | CLI yüzeyi | 8 komut | gerçekte `wrapped`, `scan`, `server`, `library` dahil daha fazlası |
 
 En tehlikelisi K7'ydi: **ihlal edilemez denen bir kuralın geçersiz yazımı**,
@@ -2309,7 +2309,7 @@ yerine `.to_owned()` ektirirdi; kazanç yok, ergonomi kaybı var.
 **Karar 2 — `PlayOptions` sahipli `String` taşır.** `query: &'a str` →
 `query: String`, `Copy` düştü. Bedeli komut başına tek bir kısa metin kopyası.
 
-**Karar 3 — kural artık kodda denetleniyor.** `crates/tune-core/tests/
+**Karar 3 — kural artık kodda denetleniyor.** `crates/tonearm-core/tests/
 k7_surface.rs`: public bir `struct`/`enum`/`type` lifetime aldıysa ya da
 public bir imza closure parametresi alıyorsa test düşer, `ADIM: K7_SURFACE`
 ile hangi dosya:satır olduğunu söyler (K9).
@@ -2361,7 +2361,7 @@ testi "ulaşamadım" değil, "ulaşıp beklenmeyeni aldım" demektir (K9) — ve
 zaten bilinmesi gereken şeydir.
 
 **İkinci iş `core-alone`, ve bugün kırmızı.** `--workspace` koşumunda
-`tune-cli` ile `tune`, `tune-core`'un `audio`/`http-client` feature'larını
+`tonearm-cli` ile `tonearm`, `tonearm-core`'un `audio`/`http-client` feature'larını
 açıyor ve varsayılan derlemedeki ölü kodu gizliyor. Mobil (Faz 6) çekirdeği
 bu feature'lar olmadan derleyecek. Bugün üç kusur var: `net::network_err`
 ölü, `net::fake::last_request` ölü, `playback/player.rs:228`'de karşılanmayan
@@ -2420,28 +2420,28 @@ dönüştü: varsayılan + her feature tek tek + hepsi birden.
   anlatmaktı.** Bir güvenlik vaadinin yanlış olması, olmayan bir özelliği
   anlatmaktan kötüdür: kullanıcı diskini paylaşırken buna göre karar verir.
   Metin ne koruduğunu ve neyi korumadığını söyleyecek şekilde yeniden yazıldı.
-- **`tune stats` örnek çıktısı uydurmaydı** — emoji başlıklar, yüzdeler ve
+- **`tonearm stats` örnek çıktısı uydurmaydı** — emoji başlıklar, yüzdeler ve
   `─────` çubukları. `output.rs` böyle bir şey basmıyor. Örnek, biçimleyicinin
   hizalamasıyla birebir üretilip değiştirildi.
 - **TUI maketi gerçek çizimle uyuşmuyordu** — satır başına süre ve albüm
   sütunu, `Kuyruk (3/10)` sayacı, `[Tekrar: TÜMÜ]` rozetleri. Gerçek kuyruk
   satırı yalnızca `sanatçı - başlık`. Maket `draw_*` fonksiyonlarına göre
   yeniden çizildi.
-- **`tune provider scan` "artımlı" diye anlatılıyordu.** Bayraksız hâli tam
+- **`tonearm provider scan` "artımlı" diye anlatılıyordu.** Bayraksız hâli tam
   tarama; artımlı olan `--if-stale` ve o da dizin damgasına bakıyor, yerinde
   yeniden etiketlenen dosyayı görmüyor. CLAUDE.md'de aynı komut
   `--incremental` diye yazılıydı — öyle bir bayrak hiç olmadı.
 
-Ayrıca: depo adresi `kullanici-adi/tune` yer tutucusuydu; `python3`/`yt-dlp`
+Ayrıca: depo adresi `kullanici-adi/tonearm` yer tutucusuydu; `python3`/`yt-dlp`
 gereksinimi hiçbir kullanıcı belgesinde yazmıyordu (PLAN §2.8'in 6. maddesi
 bunu kendisi itiraf ediyordu); komut tablosunda `provider remove/servers`,
 `plugin disable/enable/forget`, `secret list/remove` eksikti.
 
-### 3. `tune provider search` diye bir komut yok
+### 3. `tonearm provider search` diye bir komut yok
 
-`plugins/torrent/README.md` iki adımlı arama akışını `tune provider search`
+`plugins/torrent/README.md` iki adımlı arama akışını `tonearm provider search`
 ile anlatıyordu. `ProviderCommand` = `list | test | scan | add | remove |
-servers`; `search` hiç yazılmadı. Eklentinin araması `tune play` üzerinden
+servers`; `search` hiç yazılmadı. Eklentinin araması `tonearm play` üzerinden
 çalışıyor (`Session::queue_from_search`, katalog boşsa akıtabilen bütün
 sağlayıcılara sorar).
 
@@ -2536,9 +2536,9 @@ Alan eklemek `api`'yi kırmıyor (§2.1); ihtiyaç doğduğunda eklenir.
 ### 2. Yorumlayıcı: bir kez bulunur, ve seçim sessizce değiştirilmez
 
 Eklenti `"exec": ["python3", "./main.py"]` yazıyor; çıplak `python3`/`python`
-adını motor çözüyor (3.9+ şartıyla). `TUNE_PYTHON` → yoksa `python3` → `python`.
+adını motor çözüyor (3.9+ şartıyla). `TONEARM_PYTHON` → yoksa `python3` → `python`.
 
-**Ölçerken bir kusur çıktı ve düzeltildi:** ilk yazımda `TUNE_PYTHON` yalnızca
+**Ölçerken bir kusur çıktı ve düzeltildi:** ilk yazımda `TONEARM_PYTHON` yalnızca
 aday listesinin başına konuyordu. Yanlış gösterildiğinde motor sessizce
 `python3`'e düşüp "python3 (3.14.7)" diye rapor veriyordu — kullanıcı kendi
 seçiminin uygulandığını sanırdı. Artık açık seçim **ayrı** değerlendiriliyor
@@ -2551,7 +2551,7 @@ gerektiriyor:
 
 | durum | ne demek | kim düzeltir |
 |---|---|---|
-| `kurulu değil` | hiç kurulmadı | kullanıcı — `tune plugin install <ad>` |
+| `kurulu değil` | hiç kurulmadı | kullanıcı — `tonearm plugin install <ad>` |
 | `karma tutmuyor` | diskte var, doğrulanmıyor | kullanıcı — yeniden kur |
 | `kurulamadı` | ağa çıkılamadı | kimse — yarın tekrar dene |
 | **`YETİM`** | kaynak 404/410 dedi | **eklenti yazarı** — adres ölmüş |
@@ -2580,8 +2580,8 @@ bilgi** olurdu. D-040'ın joker açığı bu turda kapanmadı ama **büyümedi**
 
 ### 5. Tetik: ayrı bir komut
 
-`tune plugin install <ad>`. `approve` sırasında indirmek onayı pahalı yapardı;
-ilk kullanımda indirmek `tune play`'i beklenmedik bir indirmeyle geciktirirdi.
+`tonearm plugin install <ad>`. `approve` sırasında indirmek onayı pahalı yapardı;
+ilk kullanımda indirmek `tonearm play`'i beklenmedik bir indirmeyle geciktirirdi.
 Ayrı komut açık, betiklenebilir, ve ikinci kez koşturmak ücretsiz (kurulu
 eser için ağa hiç çıkılmıyor — ölçüldü: 1,27 sn → 0,19 sn).
 
@@ -2620,7 +2620,7 @@ karma tutmuyor, yanlış sha → yerine konmadı).
 motordan geçemez ve kullanıcıya hâlâ `cargo build --release` yaptırıyor —
 D-049'u ihlal eden tek şey artık bu. Taşıma kendi başına bir tur:
 `librqbit`'in +179 crate'i, `torrent = ["dep:librqbit"]` kapısı,
-`crates/tune-plugin-torrent`'ın sökülmesi. PLAN §2.8'in 5. maddesi açık.
+`crates/tonearm-plugin-torrent`'ın sökülmesi. PLAN §2.8'in 5. maddesi açık.
 
 ---
 
@@ -2639,7 +2639,7 @@ Kullanıcının ikinci cümlesi bir şarta bağlıydı — "çok yazılmamış i
 
 | | satır |
 |---|---|
-| `crates/tune-plugin-torrent/src/` | 2.335 |
+| `crates/tonearm-plugin-torrent/src/` | 2.335 |
 | testleri | 647 |
 | test sayısı | 56 |
 
@@ -2656,7 +2656,7 @@ motorundan (D-055) geçemez — ve bugünkü hâli D-049'u en ağır ihlal eden 
 Çözüm olarak çekirdeğe `torrent = ["dep:librqbit"]` kapısıyla taşınacaktı.
 
 Geri alma gerekçesi **iptal edilen şeyin bedeli**: D-047'nin ölçtüğü
-mimari karşılığını vermişti (`tune-core` ağacı 77'de kaldı, mobil temiz),
+mimari karşılığını vermişti (`tonearm-core` ağacı 77'de kaldı, mobil temiz),
 eklenti çalışıyordu, ve taşıma 3 bin satırı sökmek demekti. İlk sürümden
 önce çalışan bir mimariyi bir *tutarlılık* uğruna sökmenin karşılığı yok.
 
@@ -2693,10 +2693,14 @@ kimliğinin sabitlenmesi.
 
 1. **Kapsam: cila + paketleme + Faz 2 yüzeyi.** Arayüz eklenti ve sır
    yönetimini kazanıyor, `wrapped` kartı görünür oluyor.
-2. **`tauri-plugin-dialog` eklendi** — kabuğa ait bir bağımlılık, `tune-core`
+2. **`tauri-plugin-dialog` eklendi** — kabuğa ait bir bağımlılık, `tonearm-core`
    ağacına girmiyor.
 3. **`tune` / `dev.tune.desktop` sabitlendi.** PLAN §1'in "proje adı açık"
    satırı duruyor; sabitlenen paketleme kimliği.
+   *(Bu madde kasten eski adıyla duruyor: ad **D-058** ile `tonearm` oldu.
+   Defterin geri kalanındaki `tune-core` gibi yollar yeni ada göre
+   yenilendi, ama adın kendisinden söz eden bir karar, verildiği günkü adla
+   okunmazsa D-058 anlamsız kalır.)*
 
 ### Arayüz Faz 2'yi hiç görmemişti
 
@@ -2718,7 +2722,7 @@ zorunda olduğu için seçiyor.
 
 Arayüzde o sıkışıklık yok, o yüzden **seçim mantığı kopyalanmadı**: üçü de
 yan yana gösteriliyor. Kopyalanan mantık zamanla kayar; kopyalanmayan kayamaz.
-`--tune-*` token'ları ile aynı ilke (D-033'ün çapa formülü istisnası bilerek
+`--tonearm-*` token'ları ile aynı ilke (D-033'ün çapa formülü istisnası bilerek
 tektir ve doğruluk kümesiyle kilitli).
 
 ### `bundle.active: false` üç şeyi gizlemişti
@@ -2785,3 +2789,72 @@ getirememeli.
 * Uyarılar kapatılabiliyor; tanı raporu panoya kopyalanabiliyor.
 * Boş durumlar (sağlayıcı yok, sunucu yok, sır yok, dinleme yok) artık ne
   yapılacağını yazıyor — "bakmadım" ile "bulamadım" ayrımı arayüzde de geçerli.
+
+---
+
+## D-058 — Proje adı: `tune` yer tutucusu `tonearm` oldu
+**Tarih:** 2026-09-20 · **Durum:** UYGULANDI (2026-09-20)
+
+**Soru:** İlk sürüm hattı açıldı (kullanıcı: *"ilk sürüm hattı"*). Etiket
+atılması adı fiilen sabitler — indirilen paketin adı, `.desktop` girdisi, veri
+dizini, depo adresi. PLAN §1 ise ilk günden beri *"Hâlâ açık: proje adı
+(`tune` yer tutucu)"* diyordu. Ad şimdi mi kapanacak, yoksa 1.0'a mı kalacak?
+
+**Karar:** Şimdi. Ad **`tonearm`**, GitHub deposu da `enaimami/tonearm`.
+
+### Neden `tonearm`
+
+Pikap kolu plağı seçmez — ne koyarsan onu okur. Projenin tek cümlelik tezi
+zaten bu: ses nereden gelirse gelsin (yerel dosya, Subsonic, SoundCloud,
+YouTube Music, torrent) üstteki katman aynı kalır. Ad, mimariyi anlatıyor.
+Türkiye'de pikap meraklısının zaten "tonarm" demesi ikinci bir kazanç.
+
+Müsaitlik ölçüldü, hatırlanmadı: `crates.io` boş, GitHub'daki en büyük
+çakışma 2★ bir vinil gürültü simülasyonu, `enaimami/tonearm` boş. Elenen
+adaylar ve sebepleri: `earmark` (895★ Elixir markdown), `phono` (2743★
+Phonograph — aynı alan, karışır), `deepcut` (428★ Thai tokenizer), `stylus` /
+`cadence` / `groove` / `motif` (crates.io dolu ya da yerleşik ses yazılımı
+adı), `sidetrack` (hem 62★ kütüphane hem olumsuz çağrışım). Finale kalan
+`refrain`, `longplay` ve `dubplate` ölçümde temizdi; seçim metafora göre
+yapıldı.
+
+### Neden bugün, neden dün değil
+
+Ad değişimi 110 dosyaya ve ~950 satıra dokundu. Bunların bir kısmı **sözleşme**:
+
+* tema token'ları `--tune-*` → `--tonearm-*` (D-037'nin 14 token'ı),
+* tanı raporunun JSON anahtarı `tune_version` → `tonearm_version`,
+* ortam değişkenleri `TUNE_*` → `TONEARM_*` (11 tane),
+* paketleme kimliği `dev.tune.desktop` → `dev.tonearm.desktop`,
+* veri dizini `~/.local/share/tune` → `~/.local/share/tonearm`.
+
+Hiçbiri yayınlanmamıştı. Bir etiket atıldıktan **sonra** aynı değişiklik,
+kurulu her kullanıcının kütüphanesini sahipsiz bırakır ve yazılmış her temayı
+kırar. Bedeli sıfır olduğu tek an buydu — D-057'nin paketlemeyi açmış olması
+bu anı başlattı ve etiket onu kapatacaktı.
+
+Geliştirme makinesindeki veri dizini elle taşındı (kütüphane, sırlar, eklenti
+kayıtları korundu); `tonearm stats` taşımadan sonra aynı sayıları veriyor.
+
+### Deftere dokunma ölçüsü
+
+Bu dosyadaki eski kayıtlarda `tune-core` gibi **yollar ve tanımlayıcılar**
+yeni ada göre yenilendi: karar defteri okunmak için var, olmayan bir dizini
+gösteren kayıt okunamaz.
+
+Tek istisna **D-057'nin 3. maddesi**, çünkü o madde adın kendisi hakkında bir
+karardır (*"`tune` / `dev.tune.desktop` sabitlendi"*). Verildiği günkü adla
+okunmazsa bu karar anlamsız kalır. Orada eski ad duruyor ve yanında bir not
+var. Ayrım şu: *bir adı kullanan* kayıt yenilenir, *bir ad hakkında olan*
+kayıt dondurulur.
+
+### Yanında kapanan borç
+
+MusicBrainz istemci kimliği `https://github.com/kullanici-adi/tune` yer
+tutucusunu gönderiyordu — D-054 bunu işaretlemiş, kimse kapatmamıştı. Artık
+gerçek depo adresini gönderiyor. MB'nin kuralı ulaşılabilir bir iletişim
+adresi istiyor; e-posta yerine depo seçildi, çünkü e-posta ikilinin içinde
+açık metin olarak dağıtılır.
+
+**455 test, üç kapı temiz.** Ad değişimi davranış değiştirmedi: testler
+yeniden adlandırmadan önce ve sonra aynı sayıda geçti.

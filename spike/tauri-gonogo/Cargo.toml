@@ -1,6 +1,6 @@
 # PLAN §3.1 GO/NO-GO ölçümü — ATILABILIR.
 # `spike/` workspace dışıdır (kök Cargo.toml `exclude`); buradaki hiçbir
-# bağımlılık tune-core'un ağacına girmez. Ölçüm bitince bu dizin silinebilir,
+# bağımlılık tonearm-core'un ağacına girmez. Ölçüm bitince bu dizin silinebilir,
 # kalan tek şey DECISIONS.md'deki sayılar olmalı.
 [package]
 name = "tauri-gonogo"

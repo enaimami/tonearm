@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Sınama eklentisi: protokolün Rust dışında da yürüdüğünün kanıtı.
 
-Bu dosya `tune-core`'un eklenti protokolünü (api 1) **eksiksiz** uygulayan
+Bu dosya `tonearm-core`'un eklenti protokolünü (api 1) **eksiksiz** uygulayan
 en küçük örnektir; §2.2'nin gerçek SoundCloud eklentisi de aynı iskeleti
 kullanacak. Ağa çıkmaz, dosya okumaz — sabit bir katalogla cevap verir.
 
