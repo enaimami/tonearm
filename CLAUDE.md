@@ -82,7 +82,7 @@ tonearm/
 │   │   │   ├── import/         # export zip ayrıştırıcıları
 │   │   │   ├── identity/       # kanonik çözümleme (+ musicbrainz, acoustid, fuzzy)
 │   │   │   ├── stats/          # dinleme istatistikleri
-│   │   │   ├── wrapped/        # paylaşılabilir kart (svg + png)
+│   │   │   ├── sleeve/         # paylaşılabilir kart (svg + png)
 │   │   │   ├── library/        # SQLite + FTS
 │   │   │   ├── provider/       # sağlayıcı trait'leri + local + remote/{subsonic,jellyfin}
 │   │   │   ├── plugin/         # alt süreç + JSON-RPC eklentiler + motor (runtime)
@@ -149,7 +149,7 @@ tonearm import <zip|dizin>                     # export içe aktar
 tonearm stats [--year N] [--top N] [--min-ms MS]
 tonearm resolve "<sanatçı> - <başlık>" | --file <ses>
 tonearm library search <sorgu> [--limit N] [--min-ms MS]
-tonearm wrapped [--year N] [--out <dosya>] [--format square|story]
+tonearm sleeve [--year N] [--out <dosya>] [--format square|story]
 tonearm provider list | test <ad> | scan [--if-stale]
 tonearm provider add <tür> --url U --user K [--name AD] [--api-key A] [--verify]
 tonearm provider remove <ad> | servers

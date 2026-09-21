@@ -8,7 +8,7 @@ use tonearm_core::session::{
     ImportReport, PlayReport, PluginConsentReport, PluginInstallReport, PluginListReport,
     ProviderListReport, ProviderTestReport, ResolveReport, ScanReport, SearchReport,
     SecretListReport, SecretWriteReport, ServerAddReport, ServerListReport, ServerRemoveReport,
-    StatsResponse, WrappedResponse,
+    SleeveResponse, StatsResponse,
 };
 use tonearm_core::stats::StatsReport;
 
@@ -213,8 +213,8 @@ pub fn search(report: &SearchReport) -> String {
     out
 }
 
-/// Wrapped kartı çıktısı.
-pub fn wrapped(response: &WrappedResponse) -> String {
+/// Sleeve kartı çıktısı.
+pub fn sleeve(response: &SleeveResponse) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
     let d = &response.data;

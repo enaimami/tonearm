@@ -30,10 +30,10 @@ use tonearm_core::session::{
     self, ImportReport, PlayOptions, PluginConsentReport, PluginInstallReport, PluginListReport,
     ProviderListReport, ProviderTestReport, ResolveReport, ScanReport, SearchReport,
     SecretListReport, SecretWriteReport, ServerAddReport, ServerListReport, ServerRemoveReport,
-    StatsResponse, WrappedResponse,
+    SleeveResponse, StatsResponse,
 };
+use tonearm_core::sleeve::CardPreset;
 use tonearm_core::stats::StatsQuery;
-use tonearm_core::wrapped::CardPreset;
 
 use crate::state::{AppState, CommandError, CommandResult};
 use crate::theme::{ActiveTheme, ThemeList};
@@ -96,14 +96,14 @@ pub async fn stats(
         .await
 }
 
-/// Wrapped kartı. `out` verilirse dosyaya da yazılır (uzantı biçimi belirler).
+/// Sleeve kartı. `out` verilirse dosyaya da yazılır (uzantı biçimi belirler).
 #[tauri::command]
-pub async fn wrapped(
+pub async fn sleeve(
     state: State<'_, AppState>,
     year: Option<i16>,
     story: bool,
     out: Option<String>,
-) -> CommandResult<WrappedResponse> {
+) -> CommandResult<SleeveResponse> {
     state
         .run_on_core(move |core| {
             Box::pin(async move {
@@ -118,19 +118,19 @@ pub async fn wrapped(
                     CardPreset::Square.size()
                 };
                 let path = out.map(std::path::PathBuf::from);
-                core.live.session().wrapped(query, size, path.as_deref())
+                core.live.session().sleeve(query, size, path.as_deref())
             })
         })
         .await
 }
 
-/// Wrapped kartının **önizlemesi** — dosya yazmaz.
+/// Sleeve kartının **önizlemesi** — dosya yazmaz.
 ///
-/// `wrapped` ile aynı hesabı çalıştırıp çekirdeğin kendi çizicisini
-/// (`wrapped::render_svg`) döndürüyor. Kartı burada çizmek K1 ihlali olurdu:
+/// `sleeve` ile aynı hesabı çalıştırıp çekirdeğin kendi çizicisini
+/// (`sleeve::render_svg`) döndürüyor. Kartı burada çizmek K1 ihlali olurdu:
 /// aynı kartın ikinci bir çizimi JS'te yaşar ve sessizce kayardı.
 #[tauri::command]
-pub async fn wrapped_svg(
+pub async fn sleeve_svg(
     app: AppHandle,
     state: State<'_, AppState>,
     year: Option<i16>,
@@ -150,8 +150,8 @@ pub async fn wrapped_svg(
                     CardPreset::Square.size()
                 };
                 busy(&app, "kart hazırlanıyor", async {
-                    let response = core.live.session().wrapped(query, size, None)?;
-                    Ok(tonearm_core::wrapped::render_svg(
+                    let response = core.live.session().sleeve(query, size, None)?;
+                    Ok(tonearm_core::sleeve::render_svg(
                         &response.data,
                         response.size,
                     ))

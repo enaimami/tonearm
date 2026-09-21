@@ -84,7 +84,7 @@ Aynı soru iki kez sorulmaz. Bir şeye karar vermeden önce `DECISIONS.md`'yi ok
 | **Mobil** | Evet, sonraki fazlarda — ama API **bugünden** uyumlu (D-001) | K7 bağlayıcıdır, taviz yok |
 | **Dağıtım** | Yayınlanacak, topluluk hedefleniyor (D-002) | Faz 4 kapsamda; public repo hijyeni gerekli |
 | **Yerel arşiv** | Yok, test fixture'ı üretilebilir (D-003) | Faz 1 dogfood edilemez, sıra buna göre |
-| **Wrapped** | Açık hedef, aralık sezonu takvimi belirliyor (D-004) | **Faz 0.5 eklendi** |
+| **Sleeve** | Açık hedef, aralık sezonu takvimi belirliyor (D-004) | **Faz 0.5 eklendi** |
 
 **Açık kalan yok.** Proje adı **D-058: `tonearm`** ile kapandı; lisans
 **D-005: MIT OR Apache-2.0**.
@@ -166,7 +166,7 @@ Sonraki fazın kodunu "hazır olsun diye" yazma. Faz 4 gelmeden sunucu kodu yok.
 
 Bu üç başlığın tek sahibi [`CLAUDE.md`](CLAUDE.md)'dir; burada tekrarlanmaz.
 Sebebi kayma: aynı ağaç iki dosyada durunca biri bayatladı ve olmayan bir
-`sync/` dizinini aylarca listeledi, var olan `net/` ile `wrapped/`'ı hiç
+`sync/` dizinini aylarca listeledi, var olan `net/` ile `sleeve/`'ı hiç
 göstermedi.
 
 - **Kod konvansiyonları** (hata tipleri, `async`, newtype kimlikler, isimlendirme
@@ -288,23 +288,23 @@ Kalan tek vaka (radio edit) bir kusur değil cevaplanmamış bir soruydu; **D-01
 ile "radio edit ayrı bir kayıttır" diye karara bağlandı. Kod değişmedi, vaka
 yeniden etiketlendi.
 
-**Faz 0 kapandı.** Sıradaki iş Faz 0.5 (Wrapped). Rasterizasyon kararı bağlandı
+**Faz 0 kapandı.** Sıradaki iş Faz 0.5 (Sleeve). Rasterizasyon kararı bağlandı
 (**D-011**: resvg, opsiyonel `render-png` feature'ı), kart tasarımı kararı bağlandı
 (**D-012**: sabit tasarım) ve **D-005 (lisans)** kapandı: MIT OR Apache-2.0.
 
 ---
 
-# FAZ 0.5 — Paylaşılabilir Wrapped
+# FAZ 0.5 — Paylaşılabilir Sleeve
 
 **Amaç:** Faz 0'ın çıktısı terminal metni; terminal metni yayılmaz. Topluluk hedefi (D-002, D-004)
-paylaşılabilir bir görsel artefakt gerektiriyor. Aralık Wrapped sezonu yılda bir açılıyor
+paylaşılabilir bir görsel artefakt gerektiriyor. Aralık yıl sonu kartı sezonu (Spotify Wrapped®) yılda bir açılıyor
 ve bedava dikkat penceresi.
 
-**Bitti sayılır:** `tonearm wrapped --year 2026 --out kart.png` çalışıyor ve çıkan görsel
+**Bitti sayılır:** `tonearm sleeve --year 2026 --out kart.png` çalışıyor ve çıkan görsel
 sosyal medyada açıklamasız paylaşılabilir kalitede.
 
 ### 0.5.1 Kart üreticisi çekirdekte yaşar
-SVG üret, PNG'ye rasterize et. **`stats/` üstünde, `wrapped/` modülü olarak çekirdekte.**
+SVG üret, PNG'ye rasterize et. **`stats/` üstünde, `sleeve/` modülü olarak çekirdekte.**
 CLI yalnızca sürer. GUI ve mobil aynı üreticiyi çağıracak — burada yazılan kod üç kez yazılmaz.
 
 ### 0.5.2 Biçimler
@@ -312,7 +312,7 @@ Kare (feed) ve dikey 9:16 (story) en az. Ölçüler parametre, gömülü sabit d
 
 ### 0.5.3 İçerik
 Toplam süre, en çok dinlenen sanatçı/parça/albüm, keşif zaman çizelgesi, ilk dinleme tarihi.
-**Ayırt edici nokta:** "8 yıllık geçmişin" — sağlayıcının 12 ayla sınırlı Wrapped'ının
+**Ayırt edici nokta:** "8 yıllık geçmişin" — sağlayıcının 12 ayla sınırlı yıl sonu kartının (Spotify Wrapped®)
 yapamadığı şey. Kart bunu görünür kılmalı.
 
 > KARAR NOKTASI: Rasterizasyon nasıl yapılacak? **KAPANDI — D-011:** resvg opsiyonel
@@ -332,19 +332,19 @@ Faz 0.5 muhtemelen ilk public sürüm olacak — repo o gün hazır olmalı.
 
 ### 0.5.5 Faz 0.5 durum — TAMAM (`v0.0.1-beta`)
 
-Kart üreticisi çekirdekte (`wrapped/`), CLI yalnızca sürüyor. Üç kapı temiz
+Kart üreticisi çekirdekte (`sleeve/`), CLI yalnızca sürüyor. Üç kapı temiz
 (**87 test**, clippy, fmt).
 
-- [x] **0.5.1** — `wrapped/` modülü üç katman: `data` (veri türetme),
+- [x] **0.5.1** — `sleeve/` modülü üç katman: `data` (veri türetme),
       `svg` (çizim), `png` (rasterizasyon, feature'lı). CLI'de yalnızca
-      argüman ayrıştırma + `Session::wrapped` çağrısı + çıktı biçimleme var.
+      argüman ayrıştırma + `Session::sleeve` çağrısı + çıktı biçimleme var.
       `CardFormat` (clap `ValueEnum`) CLI'de duruyor ki `clap` çekirdeğe sızmasın.
 - [x] **0.5.2** — `CardSize` parametre; `square()` 1080×1080, `story()` 1080×1920.
       Ölçüler gömülü sabit değil, `CardSize::new` ile herhangi bir ölçü verilebilir.
 - [x] **0.5.3** — Toplam süre, en çok dinlenen sanatçı/parça/albüm, keşif
       çizelgesi, ilk dinleme tarihi, yıllara göre bar grafiği. Alt bilgi
       arşivin yaşını basıyor ("1 Ocak 2023'dan beri (2 yıl)") — sağlayıcının
-      12 aylık Wrapped'ının yapamadığı şey burada görünür.
+      Spotify Wrapped®'ın 12 aylık penceresinin yapamadığı şey burada görünür.
 - [x] **0.5.4** — Yayın hijyeni tamam. README (ne/neden/nasıl + örnek kart),
       `LICENSE-MIT` + `LICENSE-APACHE` (D-005), CONTRIBUTING (üç kapı,
       Altın Kural, değişmez kurallar, doğruluk kümesi yordamı).
@@ -372,7 +372,7 @@ koordinatını ölçüp kart yüksekliğiyle karşılaştırıyor — taşma ses
 geri gelemez.
 
 **Faz 0.5 kapandı.** Sıradaki iş bir karar: Faz 1 (oynatma) mı önce gelecek,
-Faz 3 (GUI + tema) mi — aşağıdaki Faz 1 karar noktası. Bu, aralık Wrapped
+Faz 3 (GUI + tema) mi — aşağıdaki Faz 1 karar noktası. Bu, aralık yıl sonu kartı
 penceresine ne yetişeceğini belirliyor ve **cevaplanmadan kod yazılmaz.**
 
 ---
@@ -393,7 +393,7 @@ Sonuçları:
    kısa kayıtlar, farklı formatlar: FLAC, MP3, OGG, bozuk etiketli örnekler dahil).
 2. Yerel sağlayıcı ile Subsonic sağlayıcısından hangisinin önce geleceği, hangi ortamın
    gerçekten test edilebildiğine bağlı.
-3. **Faz sırası sorgulanabilir.** Wrapped + topluluk hedefi (D-004) göz önüne alındığında
+3. **Faz sırası sorgulanabilir.** Sleeve + topluluk hedefi (D-004) göz önüne alındığında
    Faz 3 (GUI + tema) Faz 1'den önce gelebilir — çünkü topluluk motoru temalar, ve
    oynatma geliştirici tarafından denenemiyor. Karşı argüman: müzik çalmayan bir müzik
    uygulamasının kimliği zayıf.
@@ -1213,7 +1213,7 @@ katmanı iki tipi zamanla kaydırırdı ve kaymayı hiçbir şey yakalamazdı.
 
 | Alan | Komutlar |
 |---|---|
-| Kütüphane | `search`, `stats`, `wrapped` |
+| Kütüphane | `search`, `stats`, `sleeve` |
 | İçe aktarma | `import` |
 | Kimlik | `resolve` |
 | Sağlayıcı | `providers`, `provider_test`, `provider_scan`, `servers_list`, `server_add`, `server_remove` |
@@ -1490,7 +1490,7 @@ ve masaüstünü paketlenebilir hâle getiriyor.
 
 **Arayüz Faz 2'yi kazandı.** Eklenti listesi, onay/kurulum/kapatma ve sır
 girişi artık arayüzde; `tonearm plugin …` ve `tonearm secret …` ile **aynı** çekirdek
-çağrıları. `wrapped` kartı da görünür oldu — IPC'de kayıtlıydı ama `app.js` onu
+çağrıları. `sleeve` kartı da görünür oldu — IPC'de kayıtlıydı ama `app.js` onu
 hiç çağırmıyordu, yani Faz 0.5'in ürünü masaüstünde yoktu.
 
 **Eklenti durumu seçmeden gösteriliyor.** CLI tek satıra sığmak için manifest
@@ -1543,7 +1543,7 @@ Linux paketleyicilerine geçmiyor ve bu ancak paketin içi açılınca görüld�
 | 3.2 IPC sözleşmesi | TAMAM — çekirdeğin yüzeyi + serde (D-033), olaylar değişimde (D-035) |
 | 3.3 Tema API'si | TAMAM — 14 token + sınıf adları + manifest/yükleyici (D-037…D-039) |
 | 3.4 Referans temalar | TAMAM — `daylight` (renk) + `contrast` (yarıçap/süre) |
-| 3.5 Faz 2 yüzeyi + paketleme | TAMAM — eklenti/sır/wrapped arayüzde, bundle açık (D-057) |
+| 3.5 Faz 2 yüzeyi + paketleme | TAMAM — eklenti/sır/sleeve arayüzde, bundle açık (D-057) |
 
 Tema yazarına dönük belge: `crates/tonearm/themes/README.md`.
 

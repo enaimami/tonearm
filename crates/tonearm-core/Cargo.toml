@@ -52,7 +52,7 @@ workspace = true
 
 [features]
 # D-011: PNG rasterizasyonu opsiyonel. Çekirdek her zaman SVG üretir;
-# `render-png` açıkken `wrapped::render_png` derlenir. CLI açar, mobil açmaz.
+# `render-png` açıkken `sleeve::render_png` derlenir. CLI açar, mobil açmaz.
 render-png = ["dep:resvg"]
 
 # D-016: ses hattı (symphonia çözme + cpal çıkış) tek feature arkasında.

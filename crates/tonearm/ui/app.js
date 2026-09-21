@@ -459,47 +459,47 @@ function renderRanking(list, entries, format) {
   }
 }
 
-// ————————————————————————————————————— wrapped kartı (Faz 0.5)
+// ————————————————————————————————————— sleeve kartı (Faz 0.5)
 //
-// Kartı **çekirdek** çiziyor (`wrapped::render_svg`); burada yapılan tek şey
+// Kartı **çekirdek** çiziyor (`sleeve::render_svg`); burada yapılan tek şey
 // gelen SVG'yi göstermek. İkinci bir çizici arayüzde yaşasaydı kaydedilen
 // dosya ile ekrandaki kart zamanla ayrışırdı.
 
-function wrappedArgs() {
-  const yearText = $("wrappedYear").value.trim();
+function sleeveArgs() {
+  const yearText = $("sleeveYear").value.trim();
   return {
     year: yearText ? Number(yearText) : null,
-    story: $("wrappedFormat").value === "story",
+    story: $("sleeveFormat").value === "story",
   };
 }
 
-$("wrappedForm").addEventListener("submit", async (event) => {
+$("sleeveForm").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const svg = await call("wrapped_svg", wrappedArgs());
+  const svg = await call("sleeve_svg", sleeveArgs());
   if (svg === undefined) return;
-  const box = $("wrappedPreview");
+  const box = $("sleevePreview");
   const image = document.createElement("img");
   // `data:` URI — CSP `img-src 'self' data:` buna izin veriyor. SVG bir
   // resim olarak yükleniyor, belgeye karışmıyor.
   image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-  image.alt = "wrapped kartı önizlemesi";
+  image.alt = "sleeve kartı önizlemesi";
   box.replaceChildren(image);
   box.hidden = false;
-  $("btnWrappedSave").disabled = false;
+  $("btnSleeveSave").disabled = false;
 });
 
-$("btnWrappedSave").addEventListener("click", async () => {
-  const story = $("wrappedFormat").value === "story";
+$("btnSleeveSave").addEventListener("click", async () => {
+  const story = $("sleeveFormat").value === "story";
   const path = await pickSavePath({
-    title: "wrapped kartını kaydet",
-    defaultPath: `tonearm-wrapped${story ? "-story" : ""}.png`,
+    title: "sleeve kartını kaydet",
+    defaultPath: `tonearm-sleeve${story ? "-story" : ""}.png`,
     filters: [
       { name: "PNG", extensions: ["png"] },
       { name: "SVG", extensions: ["svg"] },
     ],
   });
   if (!path) return;
-  const response = await call("wrapped", { ...wrappedArgs(), out: path });
+  const response = await call("sleeve", { ...sleeveArgs(), out: path });
   if (!response) return;
   const written = response.written;
   toast(

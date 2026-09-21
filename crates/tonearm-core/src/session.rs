@@ -29,8 +29,8 @@ use crate::plugin::{PluginEntry, PluginSummary};
 use crate::provider::remote::{self, NewServer, RemoteServer, ServerKind, StoredAuth};
 use crate::provider::{ProviderHealth, ProviderInfo, ProviderRegistry, ScanSummary};
 use crate::secrets::Secrets;
+use crate::sleeve::{self, CardSize, SleeveData};
 use crate::stats::{self, StatsQuery, StatsReport};
-use crate::wrapped::{self, CardSize, WrappedData};
 
 /// Bir içe aktarma komutunun tam sonucu.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -66,10 +66,10 @@ pub struct StatsResponse {
     pub diag: DiagReport,
 }
 
-/// Wrapped kartı sonucu.
+/// Sleeve kartı sonucu.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct WrappedResponse {
-    pub data: WrappedData,
+pub struct SleeveResponse {
+    pub data: SleeveData,
     pub size: CardSize,
     /// Dosya yazıldıysa biçim, yol ve bayt sayısı.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -82,7 +82,7 @@ pub struct WrappedResponse {
 pub struct WrittenCard {
     pub path: std::path::PathBuf,
     pub bytes: u64,
-    pub kind: wrapped::CardFileKind,
+    pub kind: sleeve::CardFileKind,
 }
 
 /// Kayıtlı sağlayıcıların listesi.
@@ -581,22 +581,22 @@ impl Session {
         self.finish(rec, result, |report, diag| StatsResponse { report, diag })
     }
 
-    /// Paylaşılabilir Wrapped kartı üretir ve isteğe bağlı olarak dosyaya yazar.
+    /// Paylaşılabilir Sleeve kartı üretir ve isteğe bağlı olarak dosyaya yazar.
     ///
     /// `out` verilirse uzantıya göre SVG veya PNG yazar; verilmezse yalnızca
     /// veri döner (JSON çıktısı veya başka bir tüketici için).
     ///
     /// # Errors
     /// Kütüphane okunamazsa, rasterizasyon veya dosya yazma başarısız olursa.
-    pub fn wrapped(
+    pub fn sleeve(
         &self,
         query: StatsQuery,
         size: CardSize,
         out: Option<&Path>,
-    ) -> Result<WrappedResponse> {
+    ) -> Result<SleeveResponse> {
         let mut rec = Recorder::start(
             format!(
-                "wrapped{}",
+                "sleeve{}",
                 query.year.map_or(String::new(), |y| format!(" {y}"))
             ),
             Some(self.config.data_dir().to_path_buf()),
@@ -605,25 +605,25 @@ impl Session {
         let result = self.library.all_listens().and_then(|listens| {
             let report = stats::compute(&listens, query);
             report.record_into(&mut rec);
-            let data = wrapped::card_data(&report, &listens);
+            let data = sleeve::card_data(&report, &listens);
             rec.set(
-                "wrapped.hours",
+                "sleeve.hours",
                 i64::try_from(data.plays).unwrap_or(i64::MAX),
             );
             rec.set(
-                "wrapped.discoveries",
+                "sleeve.discoveries",
                 i64::try_from(data.discoveries.len()).unwrap_or(i64::MAX),
             );
             rec.set(
-                "wrapped.timeline_years",
+                "sleeve.timeline_years",
                 i64::try_from(data.by_year.len()).unwrap_or(i64::MAX),
             );
 
             let written = match out {
                 Some(path) => {
-                    let (kind, bytes) = wrapped::write_card(&data, size, path)?;
+                    let (kind, bytes) = sleeve::write_card(&data, size, path)?;
                     rec.set(
-                        "wrapped.bytes_written",
+                        "sleeve.bytes_written",
                         i64::try_from(bytes).unwrap_or(i64::MAX),
                     );
                     rec.note(format!("çıktı: {}", path.display()));
@@ -639,7 +639,7 @@ impl Session {
             Ok((data, written))
         });
 
-        self.finish(rec, result, |(data, written), diag| WrappedResponse {
+        self.finish(rec, result, |(data, written), diag| SleeveResponse {
             data,
             size,
             written,

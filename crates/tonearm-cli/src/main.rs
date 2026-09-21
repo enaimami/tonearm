@@ -17,8 +17,8 @@ use tonearm_core::model::PlayRule;
 use tonearm_core::playback::LiveSession;
 use tonearm_core::provider;
 use tonearm_core::session::{self, LookupMode, Session};
+use tonearm_core::sleeve::CardPreset;
 use tonearm_core::stats::StatsQuery;
-use tonearm_core::wrapped::CardPreset;
 
 /// Çıkış kodları: 0 başarı, 1 çekirdek hatası, 2 kullanım hatası (clap).
 const EXIT_FAILURE: u8 = 1;
@@ -105,8 +105,8 @@ enum Command {
         #[command(subcommand)]
         command: LibraryCommand,
     },
-    /// Paylaşılabilir dinleme kartı (Wrapped) üret.
-    Wrapped {
+    /// Paylaşılabilir dinleme kartı (Sleeve) üret.
+    Sleeve {
         /// Yalnızca bu yıl (UTC).
         #[arg(long, value_name = "YIL")]
         year: Option<i16>,
@@ -367,15 +367,15 @@ async fn run(cli: &Cli) -> tonearm_core::Result<String> {
                 render(cli.json, &report, || output::search(&report))
             }
         },
-        Command::Wrapped { year, out, format } => {
+        Command::Sleeve { year, out, format } => {
             let query = StatsQuery {
                 year: *year,
                 top: 10,
                 min_ms_played: tonearm_core::stats::DEFAULT_MIN_MS_PLAYED,
             };
             let size = format.to_preset().size();
-            let response = session.wrapped(query, size, out.as_deref())?;
-            render(cli.json, &response, || output::wrapped(&response))
+            let response = session.sleeve(query, size, out.as_deref())?;
+            render(cli.json, &response, || output::sleeve(&response))
         }
         Command::Provider { command } => {
             let registry = provider::default_registry(session.config())?;

@@ -14,7 +14,7 @@ use crate::stats::{AlbumStat, ArtistStat, StatsReport, TrackStat, YearStat};
 /// SVG üretimi [`super::svg`] yalnızca bunu okur — veri toplama ve çizim
 /// ayrı katmanlar, GUI ileride aynı veriyle kendi çizimini yapabilir.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WrappedData {
+pub struct SleeveData {
     /// Kartın dönemi: `Some(2026)` → yıl kartı, `None` → tüm zamanlar.
     pub year: Option<i16>,
     pub total_ms_played: u64,
@@ -27,8 +27,8 @@ pub struct WrappedData {
     /// Kapsam içindeki ilk dinleme anı. Boş kütüphanede `None`.
     pub first_listen: Option<jiff::Timestamp>,
     /// Tüm arşivin (yıl filtresinden bağımsız) ilk ve son dinleme yılı.
-    /// "8 yıllık arşiv" anlatısının kaynağı — Wrapped'ın sağlayıcının
-    /// 12 aylık hafızasından ayrıldığı yer.
+    /// "8 yıllık arşiv" anlatısının kaynağı — Sleeve'ın, sağlayıcıların
+    /// 12 aylık hafızasından (Spotify Wrapped®) ayrıldığı yer.
     pub archive_start_year: Option<i16>,
     pub archive_end_year: Option<i16>,
     /// Yıllara göre çalma sayıları (kapsam içinde). Tek yıl varsa zaman
@@ -68,7 +68,7 @@ fn year_of(listen: &Listen) -> i16 {
 /// `report` kapsamın istatistikleri, `listens` ise **filtresiz** tüm dinlemeler:
 /// keşif ve arşiv kapsamı yalnızca tüm arşive bakarak doğru hesaplanır.
 #[must_use]
-pub fn card_data(report: &StatsReport, listens: &[Listen]) -> WrappedData {
+pub fn card_data(report: &StatsReport, listens: &[Listen]) -> SleeveData {
     // Tüm arşivin kapsamı — yıl filtresinden bağımsız.
     let archive_start_year = listens.iter().map(year_of).min();
     let archive_end_year = listens.iter().map(year_of).max();
@@ -137,7 +137,7 @@ pub fn card_data(report: &StatsReport, listens: &[Listen]) -> WrappedData {
     }
     discoveries.truncate(TOP_DISCOVERIES);
 
-    WrappedData {
+    SleeveData {
         year: report.query.year,
         total_ms_played: report.total_ms_played,
         plays: report.plays,

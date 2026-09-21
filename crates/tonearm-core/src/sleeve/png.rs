@@ -30,7 +30,7 @@ pub fn render(svg: &str, size: CardSize) -> Result<Vec<u8>> {
 
     let tree = resvg::usvg::Tree::from_str(svg, &opts).map_err(|e| {
         Error::new(
-            Stage::WrappedRender,
+            Stage::SleeveRender,
             ErrorKind::CardRender {
                 detail: format!("SVG ayrıştırılamadı: {e}"),
             },
@@ -39,7 +39,7 @@ pub fn render(svg: &str, size: CardSize) -> Result<Vec<u8>> {
 
     let mut pixmap = resvg::tiny_skia::Pixmap::new(size.width, size.height).ok_or_else(|| {
         Error::new(
-            Stage::WrappedRender,
+            Stage::SleeveRender,
             ErrorKind::CardRender {
                 detail: format!("{}×{} pixmap oluşturulamadı", size.width, size.height),
             },
@@ -54,7 +54,7 @@ pub fn render(svg: &str, size: CardSize) -> Result<Vec<u8>> {
 
     pixmap.encode_png().map_err(|e| {
         Error::new(
-            Stage::WrappedRender,
+            Stage::SleeveRender,
             ErrorKind::CardRender {
                 detail: format!("PNG kodlanamadı: {e}"),
             },
@@ -95,8 +95,8 @@ fn pick_sans(db: &resvg::usvg::fontdb::Database) -> Option<String> {
 mod tests {
     use super::*;
     use crate::model::{ExportKind, Listen, ListenSource, TrackRef};
+    use crate::sleeve::{CardSize, card_data};
     use crate::stats::{self, StatsQuery};
-    use crate::wrapped::{CardSize, card_data};
 
     fn listen(artist: &str, title: &str, ts: &str, ms: u64) -> Listen {
         Listen {
@@ -120,7 +120,7 @@ mod tests {
         let data = card_data(&report, &listens);
         let size = CardSize::square();
 
-        let svg = crate::wrapped::render_svg(&data, size);
+        let svg = crate::sleeve::render_svg(&data, size);
         let png = render(&svg, size).expect("png üretilemedi");
         // PNG başlık kontrolü.
         assert_eq!(&png[0..8], b"\x89PNG\r\n\x1a\n");

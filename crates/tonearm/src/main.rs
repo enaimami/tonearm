@@ -71,8 +71,8 @@ fn run() -> Result<(), String> {
             // Kütüphane
             commands::search,
             commands::stats,
-            commands::wrapped,
-            commands::wrapped_svg,
+            commands::sleeve,
+            commands::sleeve_svg,
             // İçe aktarma ve kimlik
             commands::import,
             commands::resolve,

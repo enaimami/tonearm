@@ -52,8 +52,8 @@ pub enum Stage {
     /// `ProviderCall`'dan ayrı: "sunucuya ulaşamadım" ile "sunucu isteğimi
     /// reddetti" farklı sorunlardır ve farklı çözümleri vardır (K9).
     NetworkRequest,
-    /// Wrapped kartı üretimi veya yazımı.
-    WrappedRender,
+    /// Sleeve kartı üretimi veya yazımı.
+    SleeveRender,
     /// Çalınacak kaynağı bulma (sağlayıcıdan `AudioSource` alma).
     PlaybackResolve,
     /// Ses çözme (symphonia): kap açma, kod çözücü kurma.
@@ -81,7 +81,7 @@ impl Stage {
             Self::PluginRuntime => "PLUGIN_RUNTIME",
             Self::PluginHandshake => "PLUGIN_HANDSHAKE",
             Self::NetworkRequest => "NETWORK_REQUEST",
-            Self::WrappedRender => "WRAPPED_RENDER",
+            Self::SleeveRender => "SLEEVE_RENDER",
             Self::PlaybackResolve => "PLAYBACK_RESOLVE",
             Self::PlaybackDecode => "PLAYBACK_DECODE",
             Self::PlaybackOutput => "PLAYBACK_OUTPUT",

@@ -20,7 +20,7 @@ pub mod plugin;
 pub mod provider;
 pub mod secrets;
 pub mod session;
+pub mod sleeve;
 pub mod stats;
-pub mod wrapped;
 
 pub use error::{Error, ErrorKind, Result};

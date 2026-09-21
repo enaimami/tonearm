@@ -20,7 +20,7 @@
 
 <br>
 
-<img src="docs/ornek-kart.svg" alt="tonearm'ın ürettiği örnek Wrapped kartı" width="600">
+<img src="docs/ornek-kart.svg" alt="tonearm'ın ürettiği örnek Sleeve kartı" width="600">
 
 <sub><i>Yılda bir kez değil, istediğin an. Hangi yıl istersen.</i></sub>
 
@@ -44,7 +44,7 @@ Adı da buradan geliyor: pikap kolu plağı seçmez, ne koyarsan onu okur.
 | :--- | :--- | :--- |
 | **Geçmişin nerede** | Şirketin sunucusunda | Kendi diskinde, SQLite dosyasında |
 | **Ne kadar geriye gider** | Abonelik sürdüğü kadar | Export'un kapsadığı kadar — ömür boyu |
-| **Wrapped** | Yılda bir kez, son 12 ay | İstediğin an, istediğin yıl, tüm zamanlar |
+| **Yıl sonu kartı** | Yılda bir kez, son 12 ay (Spotify Wrapped®) | İstediğin an, istediğin yıl, tüm zamanlar |
 | **Müzik nereden gelir** | Tek katalog | Yerel dosya, Subsonic, Jellyfin, eklentiler |
 | **Telemetri** | Var | Yok — kodda tek satırı bile yok |
 | **Ağ** | Zorunlu | İsteğe bağlı; `--online` demedikçe kimseye sorulmaz |
@@ -94,13 +94,13 @@ en çok dinlenen parçalar
 atlanan ve kimliklenemeyen kayıtlar <b>sayılarak</b> raporlanır — bu proje
 "bakmadım" ile "bulamadım"ı ayrı tanılar sayar.</sub>
 
-### 🎨 Paylaşılabilir Wrapped kartı
+### 🎨 Paylaşılabilir Sleeve kartı
 
 Kare (1080×1080) ya da hikâye (1080×1920), SVG ya da PNG. Aralığı beklemene
 gerek yok, yılı sen seçersin.
 
 ```bash
-tonearm wrapped --year 2024 --format story --out 2024.png
+tonearm sleeve --year 2024 --format story --out 2024.png
 ```
 
 ### 🎧 Ve çalar
@@ -130,7 +130,7 @@ tonearm play "Pink Floyd" --all --tui
 
 ### 🖥️ Masaüstünde de aynısı
 
-Kuyruk, arama, istatistikler, wrapped, sağlayıcı ve eklenti yönetimi tek
+Kuyruk, arama, istatistikler, sleeve, sağlayıcı ve eklenti yönetimi tek
 pencerede. Export arşivini pencereye sürükle, bırak. Kısayolları görmek için
 <kbd>?</kbd>.
 
@@ -209,7 +209,7 @@ tonearm import spotify_verilerim.zip
 tonearm stats --year 2024 --top 10
 
 # 3 — kartını üret
-tonearm wrapped --year 2024 --out 2024.png
+tonearm sleeve --year 2024 --out 2024.png
 
 # 4 — müziğini bağla ve çal
 export TONEARM_MUSIC_DIRS=~/Müzik
@@ -240,7 +240,7 @@ tonearm diag     # son çalıştırmanın ortamı, aşaması, hata zinciri — t
 | :--- | :--- |
 | `tonearm import <zip\|dizin>` | Export arşivini içe aktarır |
 | `tonearm stats [--year N] [--top N]` | Dinleme istatistikleri |
-| `tonearm wrapped [--year N] [--format square\|story]` | Paylaşılabilir kart üretir |
+| `tonearm sleeve [--year N] [--format square\|story]` | Paylaşılabilir kart üretir |
 | `tonearm resolve "<sanatçı> - <başlık>"` \| `--file <ses>` | Tek parçayı kimlik zincirinden geçirir |
 | `tonearm library search <sorgu>` | Kütüphanede tam metin arama |
 | `tonearm play <sorgu> [--all] [--shuffle] [--tui]` | Çalar |
@@ -296,7 +296,7 @@ düşmez, ve eklenti herhangi bir dilde yazılabilir. Her eklenti kurulmadan
 ## Yol haritası
 
 - [x] **Kimlik & istatistik** — içe aktarma, kanonik kimlik zinciri, SQLite, istatistik motoru
-- [x] **Wrapped** — SVG/PNG kart, kare ve hikâye
+- [x] **Sleeve** — SVG/PNG kart, kare ve hikâye
 - [x] **Çalma** — yerel dosyalar, Subsonic, Jellyfin, scrobbler, TUI
 - [x] **Eklentiler** — alt süreç + JSON-RPC protokolü, üç sağlayıcı, AcoustID parmak izi
 - [x] **Masaüstü** — Tauri arayüzü ve sürümlenmiş CSS tema sözleşmesi
@@ -327,7 +327,7 @@ ve istatistiklerin yerinde kalır.
 <details>
 <summary><b>İnternetsiz çalışır mı?</b></summary>
 <br>
-Evet. İçe aktarma, yerel çalma, istatistik ve wrapped üretimi tamamen
+Evet. İçe aktarma, yerel çalma, istatistik ve sleeve üretimi tamamen
 çevrimdışı çalışır. Ağ yalnızca uzak sunucular, eklentiler ve
 <code>--online</code> ile açılan kimlik halkaları için gerekir.
 </details>

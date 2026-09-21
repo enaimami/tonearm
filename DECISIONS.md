@@ -34,11 +34,11 @@ Bir şeye karar vermeden önce bu dosyayı oku.
 
 ---
 
-## D-004 — Wrapped ve topluluk hedefi, faz sırası
+## D-004 — Sleeve ve topluluk hedefi, faz sırası
 **Tarih:** 2026-08-28
-**Karar:** Wrapped açık bir hedef. Aralık sezonu takvimi belirliyor.
+**Karar:** Sleeve açık bir hedef. Aralık yıl sonu kartı sezonu (Spotify Wrapped®) takvimi belirliyor.
 **Sonuç:**
-- **Yeni Faz 0.5 eklendi:** paylaşılabilir Wrapped kartı üretimi.
+- **Yeni Faz 0.5 eklendi:** paylaşılabilir Sleeve kartı üretimi.
 - Gerekçe: Faz 0'ın çıktısı terminal metni. Terminal metni yayılmaz. Topluluk
   hedefi paylaşılabilir bir görsel artefakt gerektiriyor ve o şu an planda yoktu.
 - Faz 0.5 çekirdekte yaşar (GUI ve mobil aynı üreticiyi kullanacak), CLI'den sürülür.
@@ -222,7 +222,7 @@ süre bilinmiyor) eşleşiyor.
 **Seçenek A — radio edit orijinaliyle birleşsin.** Kullanıcı "aynı şarkıyı
 dinledim" der; istatistikte tek satır görmek ister. Uygulaması: süre cezası
 başlıklardan biri bir uzunluk eki taşıyorsa gevşetilir.
-*Artı:* kullanıcı sezgisine uyar, Wrapped'da parça sayısı bölünmez.
+*Artı:* kullanıcı sezgisine uyar, Sleeve'da parça sayısı bölünmez.
 *Eksi:* süre cezası kimlik zincirinin canlı kayıt/cover yakalayan en güçlü
 sinyali; gevşetmek D-009'da yeni kazanılan `live` ve `cover` sınıflarını
 riske atar.
@@ -237,9 +237,9 @@ Vakanın etiketi `expect_mbid: null` olarak düzeltilir ve oran 69/69 olur.
 
 ---
 
-## D-011 — Wrapped kartı rasterizasyonu
+## D-011 — Sleeve kartı rasterizasyonu
 **Tarih:** 2026-08-29
-**Soru:** `tonearm wrapped --out kart.png` PNG'yi nasıl üretecek? (PLAN 0.5.3 karar noktası)
+**Soru:** `tonearm sleeve --out kart.png` PNG'yi nasıl üretecek? (PLAN 0.5.3 karar noktası)
 **Karar:** **resvg, opsiyonel `render-png` feature'ı arkasında.** Çekirdek her zaman
 SVG üretir; PNG dönüşümü yalnızca feature açıkken derlenir. CLI feature'ı açar,
 mobil bağlamalar açmaz.
@@ -251,9 +251,9 @@ GUI/mobil istemezse PNG üretmeden kartı alabilir.
 - `tonearm-core` → `resvg = { version = "0.48", optional = true }`,
   `[features] render-png = ["dep:resvg"]`.
 - `tonearm-cli` tonearm-core'yu `render-png` ile açar.
-- Feature-gated kod `wrapped/png.rs` içinde; `render_svg` koşulsuz.
+- Feature-gated kod `sleeve/png.rs` içinde; `render_svg` koşulsuz.
 
-**Uygulandı (2026-08-29).** `wrapped::write_card` uzantıya bakıp biçime karar
+**Uygulandı (2026-08-29).** `sleeve::write_card` uzantıya bakıp biçime karar
 veriyor: `.svg` koşulsuz çalışır, `.png` feature kapalıysa "bu derlemede yok,
 SVG kullanın" diye **açıkça** hata verir — sessizce yanlış biçim yazmaz.
 Rasterizasyon `usvg` + `tiny-skia` üzerinden; `usvg::Options::default()` boş
@@ -263,7 +263,7 @@ somut bir aileye bağlanıyor (yoksa metin hiç çizilmiyordu).
 **Ölçülen etki:** ağaç feature kapalıyken **56 crate**, açıkken **114**.
 Kararın gerekçesi doğrulandı: 58 crate'lik fark mobil bağlamaların dışında kalıyor.
 
-## D-012 — Wrapped kartı tasarımı
+## D-012 — Sleeve kartı tasarımı
 **Tarih:** 2026-08-29
 **Soru:** Kart, tema sisteminin (Faz 3) önizlemesi mi, sabit tasarım mı? (PLAN 0.5.3 karar noktası)
 **Karar:** **Sabit tasarım, isimli iç sabitlerle.** Renkler ve ölçüler isimli sabitlerde
@@ -277,7 +277,7 @@ sabitler (`palette`, `metrics`). Faz 3'te tema API'si tasarlanırken bunlar toke
 setine taşınır.
 
 **Uygulandı (2026-08-29).** `palette` beş renk (zemin, metin, soluk, vurgu,
-bar rayı), `metrics` on ölçü. İkisi de `wrapped/svg.rs` içinde `mod`, dışa
+bar rayı), `metrics` on ölçü. İkisi de `sleeve/svg.rs` içinde `mod`, dışa
 açık değil — yani bugün kimse bu isimlere bağımlı olamaz ve Faz 3'te token
 setine taşımak geriye dönük uyumluluk borcu doğurmaz. Kararın amacı buydu.
 
@@ -309,7 +309,7 @@ tema sistemi boşluğu süslemiş olur. Ayrıca Faz 1'den itibaren scrobble'ı
 asıl iddiası bu.
 **Kabul edilen risk:** D-003 gereği geliştiricinin yerel arşivi yok, bu faz
 **dogfood edilemez**. Karşılığında telifsiz fixture'larla ve testle doğrulanır;
-aralık Wrapped penceresine GUI yetişmeyebilir.
+aralık yıl sonu kartı penceresine (Spotify Wrapped®) GUI yetişmeyebilir.
 **Sonuç:** Faz 3 (GUI + tema) Faz 1'den sonraya kaldı. Faz 1'in ilk işi §1.1
 provider trait tasarımı — imzalar **yazılmadan önce sunulur** (K7: geri dönüşü
 pahalı).
@@ -999,7 +999,7 @@ tipini döndürüyor, `serde` ile geçiyor. **Sürüm anlaşması yok.** Kayma
   öğretmek olurdu. **§3.3'ün tema API'siyle karıştırılmamalı** — o dış bir
   sözleşme ve sürümlenmek zorunda.
 **Sonuç:**
-- Komut listesi CLI'nin alt komutlarıyla birebir: `search`, `stats`, `wrapped`,
+- Komut listesi CLI'nin alt komutlarıyla birebir: `search`, `stats`, `sleeve`,
   `import`, `resolve`, `providers`, `provider_test`, `provider_scan`,
   `servers_list`, `server_add`, `server_remove`, `play`, `toggle_pause`,
   `stop`, `next`, `previous`, `jump_to`, `set_shuffle`, `set_repeat`,
@@ -2238,8 +2238,8 @@ sessiz değildi — birbirini yalanlıyorlardı:
 | K7 | "trait object olmasın" | D-006 bunu gevşetti: `Arc<dyn Trait>` ve `async fn` serbest |
 | faz numaraları | Faz 3 = odalar | PLAN: Faz 3 = GUI, Faz 4 = odalar, 5 = sosyal, 6 = mobil |
 | şu anki faz | "Şu an Faz 0" | Faz 0–3 kapandı, §2.8 açık |
-| workspace ağacı | olmayan `sync/` listeleniyor | `net/`, `wrapped/`, `session.rs`, `tonearm-plugin-torrent`, `plugins/` hiç yok |
-| CLI yüzeyi | 8 komut | gerçekte `wrapped`, `scan`, `server`, `library` dahil daha fazlası |
+| workspace ağacı | olmayan `sync/` listeleniyor | `net/`, `sleeve/`, `session.rs`, `tonearm-plugin-torrent`, `plugins/` hiç yok |
+| CLI yüzeyi | 8 komut | gerçekte `sleeve`, `scan`, `server`, `library` dahil daha fazlası |
 
 En tehlikelisi K7'ydi: **ihlal edilemez denen bir kuralın geçersiz yazımı**,
 her oturumda okunan dosyada duruyordu. README'nin yol haritası da Faz 5'i
@@ -2692,7 +2692,7 @@ kimliğinin sabitlenmesi.
 **Karar (üçü de kullanıcının cevabı):**
 
 1. **Kapsam: cila + paketleme + Faz 2 yüzeyi.** Arayüz eklenti ve sır
-   yönetimini kazanıyor, `wrapped` kartı görünür oluyor.
+   yönetimini kazanıyor, `sleeve` kartı görünür oluyor.
 2. **`tauri-plugin-dialog` eklendi** — kabuğa ait bir bağımlılık, `tonearm-core`
    ağacına girmiyor.
 3. **`tune` / `dev.tune.desktop` sabitlendi.** PLAN §1'in "proje adı açık"
@@ -2710,7 +2710,7 @@ kimse geri dönüp kabuğa bakmadı: SoundCloud ve YouTube Music eklentileri
 anahtarı, Torznab jetonu) girmenin tek yolu CLI'ydi. Masaüstü kullanıcısı için
 bu, özelliğin olmaması demekti.
 
-Aynı boşluğun ikinci örneği daha sessizdi: `wrapped` komutu IPC'de **kayıtlı**
+Aynı boşluğun ikinci örneği daha sessizdi: `sleeve` komutu IPC'de **kayıtlı**
 olduğu hâlde `app.js` onu hiç çağırmıyordu. Faz 0.5'in bütün ürünü — projenin
 dağıtım kancası — masaüstünde görünmüyordu ve hiçbir test bunu söylemiyordu.
 
@@ -3131,3 +3131,63 @@ Windows hiç denenmedi. `bundle_contract.rs` bu ölçümü paketleme gününden
 alıp her kapı koşumuna taşıyor.
 
 **458 test, üç kapı temiz** (456 + iki yeni denetim).
+
+## D-064 — `wrapped` özelliği `sleeve` oldu: marka başkasının
+**Tarih:** 2026-09-21 · **Durum:** UYGULANDI (2026-09-21)
+
+**Soru:** Paylaşılabilir yıl kartı özelliğinin adı ilk günden beri `wrapped`'dı
+(D-004, Faz 0.5). Kullanıcı ilk sürüm hattında durdurdu: *"wrapped'ın ismini
+baştan geçirelim çünkü direkt wrapped olarak bırakmak yasal sorun yaratacak."*
+
+**Karar:** Özelliğin adı **`sleeve`**.
+
+### Neden bir sorun
+
+**Wrapped** Spotify'ın yıl sonu özelliğinin markası ve bu proje aynı alanda —
+üstelik Spotify export'unu içe aktarıyor, yani yan yana görülecek. Aynı tuzağın
+komşuları da elendi: Apple'ın **Replay**'i, YouTube Music'in **Recap**'i,
+YouTube **Rewind**. Güvenli olan, markalaşmış bir ada benzemek değil işi tarif
+etmek.
+
+### Neden `sleeve`
+
+Plak kabı: başkasına gösterdiğin, üstünde bilgi yazan şey. Üretilen artefakt
+zaten paylaşılmak için var olan bir kart görseli, yani metafor işin kendisini
+anlatıyor — ve [[headshell]] ile aynı aileden kalıyor.
+
+### Atıf kuralı (kullanıcı düzeltmesi)
+
+Başka bir şirketin markasına metinde atıf yapılırken **sahibiyle ve işaretiyle**
+yazılır: çıplak "Wrapped" değil, **Spotify Wrapped®**. Çıplak marka adı, o adı
+kendi özelliğinmiş gibi kullanıyormuş izlenimi verir; sahibiyle yazmak atfı
+açık eder. Başkasının ürününe adıyla atıf yapmak serbesttir — sorun onu kendi
+özelliğinin adı yapmaktır.
+
+Depoda kalan beş "Wrapped" geçişinin hepsi bu biçimde ve hepsi kasıtlı.
+
+### Körlemesine değiştirmenin yakalanan hatası
+
+167 geçiş vardı ve hepsi bizim değildi. Düz bir bul-değiştir iki yeri
+bozdu, ikisi de **Spotify'ın sınırını** anlatan cümlelerdi:
+
+* `sleeve/data.rs` — "sağlayıcının 12 aylık hafızasından ayrıldığı yer",
+* `docs/index.html` — karşılaştırma tablosunun **Spotify sütunundaki** satır.
+
+İkisinde de "Sleeve yılda bir kez sunulur" gibi kendi ürününe iftira atan
+cümleler doğmuştu. Ders: bir ad değiştirilirken her geçiş üç kategoriye
+ayrılır — bizim özelliğimiz, başkasının ürünü, belirsiz. Üçüncüsü açık hale
+getirilir, ikincisi dokunulmaz.
+
+### Sözleşme yüzeyi
+
+Değişen şeyler yalnızca iç isimlendirme değil: CLI alt komutu (`tonearm
+sleeve`), `--json` anahtarları, tanı sayaçları (`sleeve.*`), tanı aşaması
+(`ADIM: SLEEVE_RENDER`), masaüstü IPC komutu, HTML id'leri ve CSS sınıfı.
+Hiçbiri yayınlanmamıştı — taslak sürüm duruyor, kurulu kullanıcı yok. D-058'in
+mantığı burada da geçerli: bedelin sıfır olduğu an bu andı.
+
+Snapshot testi değişimi yakaladı — sayaç anahtarları alfabetik yazıldığı için
+`sleeve.*`, `stats.*`'ın önüne geçti. Yeniden üretildi ve farkın yalnızca ad
+ve sıra olduğu, tek bir değerin oynamadığı doğrulandı.
+
+**458 test, üç kapı temiz.**

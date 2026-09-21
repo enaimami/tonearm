@@ -1,4 +1,4 @@
-//! Paylaşılabilir Wrapped kartı üretimi (Faz 0.5).
+//! Paylaşılabilir Sleeve kartı üretimi (Faz 0.5).
 //!
 //! Çekirdekte yaşar; CLI yalnızca sürer. GUI ve mobil aynı
 //! üreticiyi çağırır — burada yazılan kod üç kez yazılmaz (Altın Kural).
@@ -13,11 +13,11 @@
 //!
 //! ```ignore
 //! let report = stats::compute(&listens, query);
-//! let data = wrapped::card_data(&report, &listens);
-//! let svg = wrapped::render_svg(&data, CardSize::square());
+//! let data = sleeve::card_data(&report, &listens);
+//! let svg = sleeve::render_svg(&data, CardSize::square());
 //!
 //! #[cfg(feature = "render-png")]
-//! let png = wrapped::render_png(&svg)?;
+//! let png = sleeve::render_png(&svg)?;
 //! ```
 
 mod data;
@@ -25,7 +25,7 @@ mod data;
 mod png;
 mod svg;
 
-pub use data::{Discovery, WrappedData, card_data};
+pub use data::{Discovery, SleeveData, card_data};
 #[cfg(feature = "render-png")]
 pub use png::render as render_png;
 pub use svg::render as render_svg;
@@ -122,7 +122,7 @@ pub enum CardFileKind {
 /// # Errors
 /// Biçim tanınamazsa, PNG istenip feature kapalıysa, rasterizasyon başarısız
 /// olursa veya dosya yazılamazsa.
-pub fn write_card(data: &WrappedData, size: CardSize, path: &Path) -> Result<(CardFileKind, u64)> {
+pub fn write_card(data: &SleeveData, size: CardSize, path: &Path) -> Result<(CardFileKind, u64)> {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -134,7 +134,7 @@ pub fn write_card(data: &WrappedData, size: CardSize, path: &Path) -> Result<(Ca
             let bytes = svg.len() as u64;
             std::fs::write(path, &svg).map_err(|e| {
                 Error::new(
-                    Stage::WrappedRender,
+                    Stage::SleeveRender,
                     ErrorKind::Io {
                         path: path.to_owned(),
                         source: e,
@@ -150,7 +150,7 @@ pub fn write_card(data: &WrappedData, size: CardSize, path: &Path) -> Result<(Ca
                 let bytes = png::render(&svg, size)?;
                 std::fs::write(path, &bytes).map_err(|e| {
                     Error::new(
-                        Stage::WrappedRender,
+                        Stage::SleeveRender,
                         ErrorKind::Io {
                             path: path.to_owned(),
                             source: e,
@@ -162,7 +162,7 @@ pub fn write_card(data: &WrappedData, size: CardSize, path: &Path) -> Result<(Ca
             #[cfg(not(feature = "render-png"))]
             {
                 Err(Error::new(
-                    Stage::WrappedRender,
+                    Stage::SleeveRender,
                     ErrorKind::InvalidInput {
                         detail: "PNG çıktısı bu derlemede yok (render-png feature'ı kapalı); SVG kullanın".to_owned(),
                     },
@@ -170,13 +170,13 @@ pub fn write_card(data: &WrappedData, size: CardSize, path: &Path) -> Result<(Ca
             }
         }
         Some(ext) => Err(Error::new(
-            Stage::WrappedRender,
+            Stage::SleeveRender,
             ErrorKind::InvalidInput {
                 detail: format!("desteklenmeyen uzantı: .{ext} (svg veya png kullanın)"),
             },
         )),
         None => Err(Error::new(
-            Stage::WrappedRender,
+            Stage::SleeveRender,
             ErrorKind::InvalidInput {
                 detail: "çıktı dosyasının uzantısı yok (svg veya png kullanın)".to_owned(),
             },

@@ -72,7 +72,7 @@
                 <span class="step-text">
                   <b>Geçmişini içe aktar.</b>
                   Spotify/Apple/Google export arşivini ver — istatistikler ve
-                  wrapped kartı bundan çıkar.
+                  sleeve kartı bundan çıkar.
                 </span>
                 <button class="go" data-go="import">içe aktar</button>
               </li>
@@ -144,24 +144,24 @@
           </div>
 
           <!-- Faz 0.5'in ürünü buraya kadar arayüzde hiç görünmüyordu:
-               `wrapped` komutu IPC'de kayıtlıydı ama kimse çağırmıyordu. -->
-          <h2>wrapped kartı</h2>
-          <form id="wrappedForm" class="row">
-            <label>yıl <input id="wrappedYear" type="number" min="1900" max="2999" placeholder="tümü" /></label>
+               `sleeve` komutu IPC'de kayıtlıydı ama kimse çağırmıyordu. -->
+          <h2>sleeve kartı</h2>
+          <form id="sleeveForm" class="row">
+            <label>yıl <input id="sleeveYear" type="number" min="1900" max="2999" placeholder="tümü" /></label>
             <label>biçim
-              <select id="wrappedFormat">
+              <select id="sleeveFormat">
                 <option value="square">kare</option>
                 <option value="story">hikâye</option>
               </select>
             </label>
             <button type="submit">önizle</button>
-            <button id="btnWrappedSave" type="button" disabled>farklı kaydet…</button>
+            <button id="btnSleeveSave" type="button" disabled>farklı kaydet…</button>
           </form>
           <p class="hint">
             Kart çekirdeğin kendi çizicisinden geliyor — kaydedilen dosya ekranda
             gördüğünüzle aynı. Uzantı biçimi belirler: <code>.svg</code> ya da <code>.png</code>.
           </p>
-          <div id="wrappedPreview" class="card-preview" hidden></div>
+          <div id="sleevePreview" class="card-preview" hidden></div>
         </section>
 
         <!-- ————————————————— içe aktarma -->

@@ -157,9 +157,9 @@ fn json_output_is_stable_across_subcommands() {
     assert!(ok, "search başarısız: {stderr}");
     assert_snapshot("search", &stdout);
 
-    let (stdout, stderr, ok) = run(&dir, &["--json", "wrapped", "--year", "2024"]);
-    assert!(ok, "wrapped başarısız: {stderr}");
-    assert_snapshot("wrapped_2024", &stdout);
+    let (stdout, stderr, ok) = run(&dir, &["--json", "sleeve", "--year", "2024"]);
+    assert!(ok, "sleeve başarısız: {stderr}");
+    assert_snapshot("sleeve_2024", &stdout);
 
     let (stdout, stderr, ok) = run(&dir, &["--json", "diag"]);
     assert!(ok, "diag başarısız: {stderr}");
@@ -168,17 +168,17 @@ fn json_output_is_stable_across_subcommands() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-/// Faz 0.5'in bitti ölçütü: `tonearm wrapped --out kart.png` gerçek bir PNG üretmeli.
+/// Faz 0.5'in bitti ölçütü: `tonearm sleeve --out kart.png` gerçek bir PNG üretmeli.
 #[test]
-fn wrapped_writes_a_real_png_and_svg() {
-    let dir = temp_dir("wrapped");
+fn sleeve_writes_a_real_png_and_svg() {
+    let dir = temp_dir("sleeve");
     let zip = fixtures().join("spotify_extended_mini.zip");
     let (_, stderr, ok) = run(&dir, &["import", zip.to_str().unwrap()]);
     assert!(ok, "{stderr}");
 
     let png = dir.join("kart.png");
-    let (stdout, stderr, ok) = run(&dir, &["wrapped", "--out", png.to_str().unwrap()]);
-    assert!(ok, "wrapped --out png başarısız: {stderr}");
+    let (stdout, stderr, ok) = run(&dir, &["sleeve", "--out", png.to_str().unwrap()]);
+    assert!(ok, "sleeve --out png başarısız: {stderr}");
     assert!(stdout.contains("yazıldı"), "{stdout}");
     let bytes = std::fs::read(&png).expect("png dosyası yazılmalı");
     assert_eq!(&bytes[0..8], b"\x89PNG\r\n\x1a\n", "gerçek PNG olmalı");
@@ -187,14 +187,14 @@ fn wrapped_writes_a_real_png_and_svg() {
     let (_, stderr, ok) = run(
         &dir,
         &[
-            "wrapped",
+            "sleeve",
             "--format",
             "story",
             "--out",
             svg.to_str().unwrap(),
         ],
     );
-    assert!(ok, "wrapped --out svg başarısız: {stderr}");
+    assert!(ok, "sleeve --out svg başarısız: {stderr}");
     let text = std::fs::read_to_string(&svg).expect("svg dosyası yazılmalı");
     assert!(text.contains("height=\"1920\""), "story ölçüsü: {text}");
 
@@ -203,16 +203,16 @@ fn wrapped_writes_a_real_png_and_svg() {
 
 /// Tanınmayan uzantı sessizce yanlış biçim yazmamalı; aşamayı söyleyerek düşmeli.
 #[test]
-fn wrapped_rejects_an_unknown_extension() {
-    let dir = temp_dir("wrappedext");
+fn sleeve_rejects_an_unknown_extension() {
+    let dir = temp_dir("sleeveext");
     let zip = fixtures().join("spotify_account_mini.zip");
     let (_, stderr, ok) = run(&dir, &["import", zip.to_str().unwrap()]);
     assert!(ok, "{stderr}");
 
     let bad = dir.join("kart.gif");
-    let (_, stderr, ok) = run(&dir, &["wrapped", "--out", bad.to_str().unwrap()]);
+    let (_, stderr, ok) = run(&dir, &["sleeve", "--out", bad.to_str().unwrap()]);
     assert!(!ok, "tanınmayan uzantı başarısız olmalı");
-    assert!(stderr.contains("ADIM: WRAPPED_RENDER"), "{stderr}");
+    assert!(stderr.contains("ADIM: SLEEVE_RENDER"), "{stderr}");
     assert!(!bad.exists(), "hatalı biçimde dosya yazılmamalı");
 
     std::fs::remove_dir_all(&dir).ok();

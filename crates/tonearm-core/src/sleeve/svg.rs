@@ -9,7 +9,7 @@
 //! kırılır. Piksel noktası doğruluğu değil, paylaşılabilir kalite hedefi.
 
 use super::CardSize;
-use super::data::WrappedData;
+use super::data::SleeveData;
 
 /// Renkler. Koyu zemin, tek vurgu rengi.
 mod palette {
@@ -49,7 +49,7 @@ const MONTHS_TR: [&str; 12] = [
 
 /// Kartı SVG olarak çizer.
 #[must_use]
-pub fn render(data: &WrappedData, size: CardSize) -> String {
+pub fn render(data: &SleeveData, size: CardSize) -> String {
     let w = f64::from(size.width);
     let h = f64::from(size.height);
     let content_w = w - 2.0 * metrics::MARGIN;
@@ -384,7 +384,7 @@ fn hero_value(total_ms: u64) -> (String, &'static str) {
 }
 
 /// Alt bilgi metni: "12 Mart 2019'dan beri (8 yıl) · tonearm".
-fn footer_text(data: &WrappedData) -> String {
+fn footer_text(data: &SleeveData) -> String {
     let span = match (data.archive_start_year, data.archive_end_year) {
         (Some(start), Some(end)) => {
             let years = end.saturating_sub(start).saturating_add(1);
@@ -585,7 +585,7 @@ mod tests {
         listens
     }
 
-    fn full_data() -> WrappedData {
+    fn full_data() -> SleeveData {
         let report = stats::compute(&archive(), StatsQuery::default());
         card_data(&report, &archive())
     }
