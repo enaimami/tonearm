@@ -3075,3 +3075,59 @@ Gerçek sınav CI. Bu, D-059/D-060'ın dersini bir kez daha söylüyor:
 
 **456 test, üç kapı temiz** (CI'nın ses aygıtsız koşulunda ölçüldü;
 `playback_local` bu makinede HDMI hattındaki EIO yüzünden kararsız, D-059).
+
+## D-063 — MSI sürümü ayrı yazılır, ama kaymasına izin verilmez
+**Tarih:** 2026-09-21 · **Durum:** UYGULANDI (2026-09-21)
+
+**Soru:** §3.5'in ikinci borcu kapatılırken — macOS ve Windows paketlemesi
+ilk kez elle koşturuldu — Windows düştü:
+
+```
+Error failed to bundle project: `optional pre-release identifier in app
+version must be numeric-only and cannot be greater than 65535 for msi target`
+```
+
+Windows Installer ön-yayın etiketi kabul etmiyor; `0.0.1-beta` MSI hedefinde
+geçersiz. Sürüm şeması nasıl değişsin?
+
+**Karar (kullanıcı):** `bundle.windows.wix.version = "0.0.1"`. `Cargo.toml`
+`0.0.1-beta` kalıyor, görünür her yerde beta yazısı korunuyor. Kayma bir
+testle imkânsız kılınıyor.
+
+### D-057 ile gerilim, ve nasıl kapatıldığı
+
+D-057 sürümün **tek yerde** yaşamasına karar vermişti: `tauri.conf.json`'dan
+`version` alanı o gün bilerek kaldırıldı, "iki yerde yazılsaydı biri kayardı"
+gerekçesiyle. `wix.version` o ikinci yeri geri getiriyor.
+
+Gerekçe geçerli olduğu için kural iptal edilmedi, **zorunlu kılındı**:
+`crates/tonearm/tests/bundle_contract.rs` `wix.version`'ın Cargo sürümünün
+ön-yayın eki atılmış hâline eşit olduğunu ve üç alanının da Windows'un
+sınırları içinde (ilk iki alan ≤255, sonrakiler ≤65535) kaldığını denetliyor.
+İki yerde yazılı, ama ayrışamaz: ayrışırsa kapı kırmızı yanar. Ölçüldü —
+`wix.version` kasten `0.0.2` yapıldığında test düştü ve neyin neyle
+ayrıştığını yazdı.
+
+Seçenek "`-beta` ekini tamamen düşür" idi ve reddedildi: paket sürümünün
+kendisi beta olduğunu söylemeli, bu bilgi yalnızca README'de kalmamalı.
+
+### Kuru koşum neden işe yaradı
+
+PLAN §3.5 "ilk etiket atılmadan önce `workflow_dispatch` ile elle koşulmalı"
+diyordu ve bu tam olarak karşılığını verdi. Etiketle gidilseydi `draft` işi
+`needs: bundle` yüzünden atlanırdı (koşumda `skipped` göründü), sürüm hiç
+oluşmazdı ve etiketi silip yeniden atmak gerekirdi.
+
+Aynı koşum §3.5'in **birinci** borcunu da kapattı: AppImage Ubuntu runner'da
+sorunsuz üretiliyor. Arch'ta linuxdeploy'un eski `strip`'i yüzünden yerelde
+denenemiyordu ve "beklenen sorun değil ama doğrulanmadı" diye yazılmıştı —
+artık doğrulandı.
+
+### Ailenin beşinci üyesi
+
+D-059, D-060, D-061, D-062 ile aynı kalıp: kural doğruydu, ölçüm o platformda
+hiç yapılmamıştı. `bundle.active` uzun süre `false`'tu; D-057 onu açtı ama
+Windows hiç denenmedi. `bundle_contract.rs` bu ölçümü paketleme gününden
+alıp her kapı koşumuna taşıyor.
+
+**458 test, üç kapı temiz** (456 + iki yeni denetim).
