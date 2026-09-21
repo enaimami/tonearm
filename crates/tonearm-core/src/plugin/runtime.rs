@@ -493,12 +493,29 @@ impl Engine {
         std::fs::create_dir_all(&self.runtime_dir)
             .map_err(|err| io_err(Stage::PluginRuntime, &self.runtime_dir, err))?;
 
-        let temp = self
-            .runtime_dir
-            .join(format!("{}.indiriliyor", requirement.file_name()));
+        // Geçici ad **koşuma özgü**. Sabit bir addı ve aynı eseri aynı anda
+        // kuran iki süreç aynı dosyayı yazıyordu: biri `rename` ile alıp
+        // götürünce öteki `make_executable`'ın `metadata` çağrısında ENOENT
+        // alıyordu. Son ek `.indiriliyor` olarak kalıyor — yarım kalmış
+        // indirmeyi tanıyan denetim ona bakıyor.
+        let temp = self.runtime_dir.join(format!(
+            "{}.{}-{}.indiriliyor",
+            requirement.file_name(),
+            std::process::id(),
+            jiff::Timestamp::now().as_nanosecond()
+        ));
         std::fs::write(&temp, &bytes).map_err(|err| io_err(Stage::PluginRuntime, &temp, err))?;
-        make_executable(&temp)?;
-        std::fs::rename(&temp, &path).map_err(|err| io_err(Stage::PluginRuntime, &path, err))?;
+
+        // Bundan sonraki her hata yolunda geçici dosya siliniyor: yarıda
+        // kalan bir kurulum ortalıkta dosya bırakmamalı.
+        if let Err(err) = make_executable(&temp) {
+            let _ = std::fs::remove_file(&temp);
+            return Err(err);
+        }
+        if let Err(err) = std::fs::rename(&temp, &path) {
+            let _ = std::fs::remove_file(&temp);
+            return Err(io_err(Stage::PluginRuntime, &path, err));
+        }
 
         tracing::info!(
             eser = %requirement.name,
@@ -827,6 +844,56 @@ mod tests {
             let mode = std::fs::metadata(&path).unwrap().permissions().mode();
             assert_eq!(mode & 0o111, 0o111, "çalıştırma biti verilmemiş");
         }
+    }
+
+    /// Aynı eseri aynı anda kuran koşumlar birbirinin dosyasını çekmemeli.
+    ///
+    /// Geçici ad bir zamanlar sabitti (`<eser>.indiriliyor`) ve paralel iki
+    /// kurulum aynı dosyayı yazıyordu; biri `rename` ile alıp götürünce
+    /// öteki ENOENT alıyordu. Dört çekirdekli bir makinede hiç görülmedi,
+    /// CI'nın iki çekirdeğinde `plugin_ytmusic`'i düşürdü (D-060).
+    #[test]
+    fn installing_the_same_artifact_concurrently_does_not_collide() {
+        let dir = temp_dir("yaris");
+        let body = "eser";
+        let requirement = requirement(&sha256_hex(body.as_bytes()));
+        let runtime_dir = engine(&dir).runtime_dir().to_path_buf();
+
+        // Sekiz iş parçacığı: sabit adla çakışma neredeyse kesin.
+        let results: Vec<_> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    let requirement = requirement.clone();
+                    let runtime_dir = runtime_dir.clone();
+                    scope.spawn(move || {
+                        let engine = Engine { runtime_dir };
+                        let http: Arc<dyn HttpClient> =
+                            Arc::new(crate::net::fake::FakeHttp::new().route("yt-dlp", body));
+                        engine.install(&http, &requirement)
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().unwrap())
+                .collect()
+        });
+
+        for result in &results {
+            let outcome = result.as_ref().unwrap_or_else(|err| {
+                panic!("paralel kurulum düştü:\n{}", err.chain_text());
+            });
+            assert!(outcome.is_ready(), "kurulum hazır değil: {outcome:?}");
+        }
+
+        // Ve hiçbiri arkasında yarım dosya bırakmamalı.
+        let leftovers: Vec<_> = std::fs::read_dir(&runtime_dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.ends_with(".indiriliyor"))
+            .collect();
+        assert!(leftovers.is_empty(), "geçici dosya kaldı: {leftovers:?}");
     }
 
     /// İkinci kurulum ağa **hiç** çıkmamalı.

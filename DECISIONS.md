@@ -2919,3 +2919,49 @@ kararsız (6 koşumda 3 düşüş): `snd_pcm_avail_delay → I/O error (5)`. Tek
 durumu atlıyor — aygıt yok, aygıt açılamadı — ama bu üçüncüsü: aygıt açıldı,
 sonra altından çekildi. CI'da aygıt hiç olmadığı için orada atlanıyor.
 Ayrı bir tur; bu kararın kapsamında değil.
+
+## D-060 — Eklenti motoru: geçici indirme adı koşuma özgü olmalı
+**Tarih:** 2026-09-21 · **Durum:** UYGULANDI (2026-09-21)
+
+**Soru:** D-059 CI'nın ilk kırmızısını kapattı ve altından ikincisi çıktı:
+`plugin_ytmusic` iki testi düşüyordu. Sebep neydi ve nereye ait?
+
+**Karar:** Ürün yarışı. `Engine::install` geçici dosyayı **koşuma özgü** bir
+adla yazıyor: `<eser>.<pid>-<nanosaniye>.indiriliyor`.
+
+### Yarış
+
+İndirme iki adımlıydı — önce `.indiriliyor` geçici dosyası, sonra `rename`
+(D-055). Geçici ad sabitti: `<eser>.indiriliyor`. Aynı eseri aynı anda kuran
+iki koşum aynı dosyayı yazıyor; biri `rename` ile alıp götürünce öteki
+`make_executable`'ın `metadata` çağrısında ENOENT alıyor.
+
+Bu bir test kusuru değil. Gerçek kullanımda da iki `tonearm plugin install`
+aynı anda koşarsa aynı şey olur. Testte görünmesinin sebebi `plugin_ytmusic`'in
+beş testinin paralel koşması ve hepsinin aynı sabit önbellek dizinini
+paylaşması — yani testin yaptığı şey gerçekçiydi, kusurlu değil.
+
+`.indiriliyor` **son ek olarak** kalıyor: yarım kalmış indirmeyi tanıyan
+denetim ona bakıyor. Ayrıca `make_executable` ve `rename` hata yollarında
+geçici dosya artık siliniyor — yarıda kalan bir kurulum ortalıkta dosya
+bırakmamalı.
+
+### Neden dört çekirdekte hiç görülmedi
+
+Geliştirme makinesinde temiz önbellekle üç koşumun üçü de geçti; CI'nın iki
+çekirdeğinde düştü. Zamanlamaya bağlı bir arıza "yok" demek değildir —
+**ölçülmedi** demektir (K9'un ayrımı burada da geçerli).
+
+Regresyon testi bu yüzden zamanlamaya bırakılmadı:
+`installing_the_same_artifact_concurrently_does_not_collide` sekiz iş
+parçacığıyla aynı eseri aynı dizine kuruyor. Deterministik ölçüldü —
+düzeltme geri alındığında üç koşumun **üçü de** düştü, düzeltmeyle geçti.
+
+**456 test, üç kapı temiz** (455 + bu regresyon testi).
+
+### Açık kalan
+
+`plugin_ytmusic`'in ikinci testi CI'da `PROVIDER_CALL` ile düşüyordu. Eser
+kurulamadığı için mi, yoksa YouTube CI adreslerini engellediği için mi —
+ayrım ancak bu düzeltmeden sonraki koşumda görülür. D-043'e göre ikincisi
+meşru bir kırmızıdır ve ayrı bir karar gerektirir.
