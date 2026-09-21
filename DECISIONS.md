@@ -3443,3 +3443,17 @@ fonksiyonuna sarılıydı ve 16 satırı da buluyordu; `make`in çağırdığı
 Bu projenin geliştiricisi Türkçe yerelde çalışıyor, yani tuzak bir kez daha
 kurulabilir: kabuk betiklerinde harf aralığı yazarken ya `LC_ALL=C` ya da
 `[[:alnum:]]` kullan.
+
+### Ek: `aur-test` konteynere sabitlenmişti
+
+İlk yazımda hedef doğrudan `podman` çağırıyordu ve bir Arch makinesinde
+`podman: Böyle bir dosya ya da dizin yok` ile düşüyordu — oysa orada
+konteyner **gereksiz**, `makepkg` zaten var. Konteyner bu Makefile'ın yazıldığı
+Debian kutusunun bir ihtiyacıydı ve o ihtiyaç hedefin tanımına sızmıştı.
+
+Artık motor otomatik seçiliyor (`makepkg` varsa yerel, yoksa konteyner) ve
+`ENGINE=` ile zorlanabiliyor. Eksik araç varsa hedef ne eksik olduğunu ve
+hangi komutun kuracağını söylüyor — K9.
+
+Aynı turda ikinci bir hata: eksik araç mesajları çift tırnak içinde ters
+tırnak kullanıyordu, yani `updpkgsums`'u basmak yerine **çalıştırıyorlardı**.

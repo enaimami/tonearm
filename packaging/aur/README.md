@@ -81,7 +81,9 @@ sessizce bayatlardı.
 
 ## Konteynerde sınamak
 
-Arch makinen yoksa depo kökündeki `Makefile` bunu konteynerde yapıyor:
+PKGBUILD'ler **depo kökünde değil**, yukarıdaki dizinlerin altında — kökte
+`makepkg` koşarsan "PKGBUILD mevcut değil" dersin. Depo kökündeki `Makefile`
+doğru dizine kendisi giriyor:
 
 ```bash
 make aur-test PKG=headshell
@@ -89,6 +91,12 @@ make aur-test PKG=headshell-bin
 make aur-test PKG=headshell-cli-bin
 make aur-clean                     # artıkları sil
 ```
+
+Arch makinesinde `makepkg` **doğrudan** koşar; `makepkg` olmayan bir makinede
+aynı iş bir Arch konteynerinde yapılır (bu Makefile Debian'da yazıldı).
+Seçim otomatik, zorlamak için `ENGINE=native` ya da `ENGINE=container`.
+Yerel koşum `pacman-contrib` (`updpkgsums`) ve `namcap` istiyor; yoksa hedef
+ne eksik olduğunu ve ne yazacağını söyleyip duruyor.
 
 Hedef şunları sırayla yapıyor: çalışma ağacından **etiket-eşi** bir kaynak
 arşivi üretir, `-bin` paketleri için sürüm varlıklarını `gh` ile çeker,
@@ -102,9 +110,9 @@ istediğin şey henüz itilmemiş çalışma ağacın. Arşiv PKGBUILD'in yanın
 durunca `makepkg` indirmeyi atlar.
 
 Elle koşacaksan iki tuzak var: `makepkg` root koşmaz ve `-s` `sudo` ister —
-konteynerde makedepends'i önce root olarak kur. Ve `fakeroot`un bıraktığı
-dosyalar ana makinede root'a ait olur; temizlik `podman unshare rm -rf` ile
-(`make aur-clean` bunu yapıyor).
+konteynerde makedepends'i önce root olarak kur. Ve konteynerde `fakeroot`un
+bıraktığı dosyalar ana makinede root'a ait olur; temizlik
+`podman unshare rm -rf` ile (`make aur-clean` ikisini de deniyor).
 
 ## Neden `cargo tauri build` değil
 

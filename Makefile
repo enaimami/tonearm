@@ -17,6 +17,10 @@ ARGS ?=
 # make aur-test PKG=headshell-bin
 PKG  ?= headshell
 
+# Arch makinesinde `makepkg` doğrudan koşar. Olmayan bir makinede (bu dosya
+# Debian'da yazıldı) aynı iş bir Arch konteynerinde yapılır. Zorlamak için:
+# `make aur-test ENGINE=container`.
+ENGINE    ?= $(if $(shell command -v makepkg 2>/dev/null),native,container)
 CONTAINER ?= podman
 IMAGE     ?= docker.io/library/archlinux:base-devel
 AUR_DIR   := packaging/aur
@@ -25,7 +29,7 @@ BUILD_DIR := target/aur
 .DEFAULT_GOAL := help
 
 .PHONY: help gates fmt fmt-check clippy test core-features accuracy snapshots \
-        cli desktop diag aur-tarball aur-test aur-clean clean
+        cli desktop diag aur-tarball aur-stage aur-test aur-clean clean
 
 # `LC_ALL=C` şart, süs değil: `[a-z]` aralığı yerele göre harmanlama düzenini
 # kullanıyor ve tr_TR'de `i` o aralığın dışında kalıyor. Bu satır yerelsiz
@@ -103,9 +107,15 @@ aur-tarball: ## Çalışma ağacından etiket-eşi kaynak arşivi üret
 	  --transform 's|^|headshell-$(VERSION)/|' -T $(BUILD_DIR)/filelist
 	@echo "$(BUILD_DIR)/headshell-$(PKGVER).tar.gz — $$(wc -l < $(BUILD_DIR)/filelist) dosya"
 
-aur-test: aur-tarball ## Bir AUR paketini Arch konteynerinde derle (PKG=...)
-	@test -d $(AUR_DIR)/$(PKG) || { echo "yok: $(AUR_DIR)/$(PKG)"; exit 1; }
-	@$(CONTAINER) unshare rm -rf $(BUILD_DIR)/$(PKG)
+# PKGBUILD'ler depo kökünde **değil**, `$(AUR_DIR)/<paket>/` altında — kökte
+# `makepkg` koşarsan "PKGBUILD mevcut değil" dersin. Hazırlık hep aynı:
+# paketi `$(BUILD_DIR)/<paket>/` altına kur, kaynakları yanına koy.
+aur-stage: aur-tarball
+	@test -d $(AUR_DIR)/$(PKG) || { \
+	  echo "ADIM: AUR_STAGE — böyle bir paket yok: $(AUR_DIR)/$(PKG)"; \
+	  echo "seçenekler: $$(ls $(AUR_DIR) | grep -v README | tr '\n' ' ')"; exit 1; }
+	@rm -rf $(BUILD_DIR)/$(PKG) 2>/dev/null \
+	  || { command -v $(CONTAINER) >/dev/null && $(CONTAINER) unshare rm -rf $(BUILD_DIR)/$(PKG); }
 	@mkdir -p $(BUILD_DIR)/$(PKG)
 	@cp $(AUR_DIR)/$(PKG)/PKGBUILD $(BUILD_DIR)/$(PKG)/
 	@cp $(BUILD_DIR)/headshell-$(PKGVER).tar.gz $(BUILD_DIR)/$(PKG)/
@@ -119,6 +129,29 @@ aur-test: aur-tarball ## Bir AUR paketini Arch konteynerinde derle (PKG=...)
 	    mv $(BUILD_DIR)/$(PKG)/headshell-cli-linux-x86_64.tar.gz \
 	       $(BUILD_DIR)/$(PKG)/headshell-cli-$(PKGVER).tar.gz ;; \
 	esac
+
+aur-test: aur-stage ## Bir AUR paketini derle ve namcap'le (PKG=...)
+ifeq ($(ENGINE),native)
+	@command -v updpkgsums >/dev/null || { \
+	  echo 'ADIM: AUR_TEST — `updpkgsums` yok: pacman -S pacman-contrib'; exit 1; }
+	@command -v namcap >/dev/null || { \
+	  echo 'ADIM: AUR_TEST — `namcap` yok: pacman -S namcap'; exit 1; }
+	cd $(BUILD_DIR)/$(PKG) && updpkgsums \
+	  && makepkg --printsrcinfo > .SRCINFO \
+	  && makepkg -sf --noconfirm
+	@echo; echo "=== namcap: PKGBUILD (boşsa temiz) ==="
+	@namcap $(BUILD_DIR)/$(PKG)/PKGBUILD
+	@echo "=== namcap: paketler ==="
+	@for p in $(BUILD_DIR)/$(PKG)/*.pkg.tar.zst; do namcap "$$p"; done
+	@echo "=== içerik ==="
+	@for p in $(BUILD_DIR)/$(PKG)/*.pkg.tar.zst; do \
+	  echo "-- $$(basename $$p)"; bsdtar tf "$$p" | grep -v "^\." | grep -v "/$$"; \
+	done
+else
+	@command -v $(CONTAINER) >/dev/null || { \
+	  echo 'ADIM: AUR_TEST — ne `makepkg` ne `$(CONTAINER)` var.'; \
+	  echo "Arch'ta: pacman -S pacman-contrib namcap   —   başka yerde: podman kur"; \
+	  exit 1; }
 	$(CONTAINER) run --rm -v "$(CURDIR)/$(BUILD_DIR)/$(PKG):/build:z" $(IMAGE) bash -c '\
 	  set -e; \
 	  extra=""; \
@@ -132,11 +165,13 @@ aur-test: aur-tarball ## Bir AUR paketini Arch konteynerinde derle (PKG=...)
 	  for p in /build/*.pkg.tar.zst; do \
 	    echo "-- $$(basename $$p)"; bsdtar tf "$$p" | grep -v "^\." | grep -v "/$$"; \
 	  done'
+endif
 
 # `fakeroot`un bıraktığı dosyalar ana makinede root'a ait olur; düz `rm` onlara
 # yetişemez, `unshare` kullanıcı ad alanının içinden siler.
 aur-clean: ## AUR derleme artıklarını sil
-	@$(CONTAINER) unshare rm -rf $(BUILD_DIR)
+	@rm -rf $(BUILD_DIR) 2>/dev/null \
+	  || { command -v $(CONTAINER) >/dev/null && $(CONTAINER) unshare rm -rf $(BUILD_DIR); }
 
 clean: aur-clean ## cargo clean + AUR artıkları
 	cargo clean
