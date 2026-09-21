@@ -33,7 +33,7 @@ use tonearm_core::plugin::PluginProvider;
 use tonearm_core::plugin::manifest::{PluginManifest, Requirement};
 use tonearm_core::plugin::runtime::Engine;
 use tonearm_core::provider::{AudioSource, Capabilities, Provider};
-use tonearm_core::secrets::Secrets;
+use tonearm_core::secrets::{Secrets, plugin_namespace};
 
 /// Eklentinin repodaki kaynağı (fixture değil — kullanıcıya dağıtılan dosya).
 fn plugin_source_dir() -> PathBuf {
@@ -122,6 +122,29 @@ fn temp_config(name: &str) -> Config {
     ));
     std::fs::create_dir_all(&dir).unwrap();
     Config::with_data_dir(dir)
+}
+
+/// CI ortam değişkenindeki YouTube çerezlerini sır deposuna yazar.
+///
+/// YouTube veri merkezi adreslerine bot duvarı çıkarıyor ("Sign in to
+/// confirm you're not a bot") ve çerezsiz hiçbir akış çözülemiyor. Çerez
+/// **sır deposundan** geçiyor, çıplak bir ortam değişkeninden değil:
+/// kullanıcının `tonearm secret set plugin:ytmusic cookies` ile yaptığı
+/// yolun aynısı sınansın (D-042).
+///
+/// Dönüş: çerez verildi mi. Verilmediyse bot duvarı ölçülebilir bir şey
+/// değildir ve test kendini atlar.
+fn store_cookies(config: &Config) -> bool {
+    let Ok(raw) = std::env::var("TONEARM_TEST_YTMUSIC_COOKIES") else {
+        return false;
+    };
+    if raw.trim().is_empty() {
+        return false;
+    }
+    let mut secrets = Secrets::load(&config.secrets_path()).unwrap();
+    secrets.set(&plugin_namespace("ytmusic"), "cookies", &raw);
+    secrets.save(&config.secrets_path()).unwrap();
+    true
 }
 
 /// Eklentiyi repodan veri dizinine kurar — kullanıcının yaptığı şeyin aynısı.
@@ -253,6 +276,7 @@ async fn a_search_hit_resolves_to_a_stream_with_the_unthrottling_range_header() 
         return;
     }
     let config = temp_config("cozum");
+    let cookies_given = store_cookies(&config);
     let provider = install(&config);
 
     let hits = provider.search("nujabes aruarian dance", 5).await.unwrap();
@@ -275,8 +299,27 @@ async fn a_search_hit_resolves_to_a_stream_with_the_unthrottling_range_header() 
         }
     }
 
-    let source = resolved
-        .unwrap_or_else(|| panic!("üç adayın hiçbiri çözülmedi:\n  {}", refusals.join("\n  ")));
+    let Some(source) = resolved else {
+        let report = refusals.join("\n  ");
+
+        // YouTube veri merkezi adreslerine bot duvarı çıkarıyor. Çerez
+        // verilmişse duvarı aşmak **bizim işimiz** ve aşamamak düşme
+        // sebebidir. Çerez verilmemişse ölçülebilir bir şey yok: servis
+        // bakmamıza izin vermedi, ürün hakkında hiçbir şey söylemedi.
+        // Bu, D-043'ün "ulaşamadım" tarafıdır (D-061).
+        //
+        // Eşleşme **dar**: yalnızca bot duvarının kendi imzası. Başka her
+        // ret hâlâ düşürür, yoksa gerçek bir regresyon buraya saklanırdı.
+        if !cookies_given && report.contains("not a bot") {
+            eprintln!(
+                "kaynak çözümü: YouTube bot duvarı ve çerez verilmemiş — \
+                 atlanıyor (bu bir başarısızlık değil).\n  \
+                 Çerez vermek için: TONEARM_TEST_YTMUSIC_COOKIES\n  {report}"
+            );
+            return;
+        }
+        panic!("üç adayın hiçbiri çözülmedi:\n  {report}");
+    };
 
     match source {
         AudioSource::HttpStream { url, headers } => {

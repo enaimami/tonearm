@@ -2965,3 +2965,67 @@ düzeltme geri alındığında üç koşumun **üçü de** düştü, düzeltmeyl
 kurulamadığı için mi, yoksa YouTube CI adreslerini engellediği için mi —
 ayrım ancak bu düzeltmeden sonraki koşumda görülür. D-043'e göre ikincisi
 meşru bir kırmızıdır ve ayrı bir karar gerektirir.
+
+## D-061 — YouTube bot duvarı: çerez sırdan geçer, çerezsiz koşum atlar
+**Tarih:** 2026-09-21 · **Durum:** UYGULANDI (2026-09-21)
+
+**Soru:** D-060'ın açık bıraktığı soru cevaplandı. `plugin_ytmusic`'in akış
+çözümü CI'da düşüyordu ve sebep şuydu:
+
+```
+yt-dlp: ERROR: [youtube] qYcoJpqCha4: Sign in to confirm you're not a bot.
+```
+
+YouTube veri merkezi adreslerine bot duvarı çıkarıyor. Bu D-043'ün hangi
+tarafı — "ulaşamadım" mı, "ulaşıp beklenmeyeni aldım" mı?
+
+**Karar (kullanıcı):** Çerez verilir. `plugin:ytmusic` ad alanındaki `cookies`
+sırrı yt-dlp'ye çerez dosyası olarak geçirilir; CI'da sır
+`YTMUSIC_COOKIES` → `TONEARM_TEST_YTMUSIC_COOKIES` yolundan gelir.
+
+### Neden sırdan, ortam değişkeninden değil
+
+Eklentiye çerez **sır deposundan** geçiyor (D-042), test de onu oraya yazıp
+öyle veriyor. Böylece sınanan yol kullanıcının yaşadığı yolun aynısı:
+`tonearm secret set plugin:ytmusic cookies`. Testin kendine özel bir arka
+kapısı olsaydı, sınanan şey ürün olmazdı.
+
+Eklenti çerezi `0600` bir geçici dosyaya yazıp çıkışta siliyor — yt-dlp
+çerezi yalnızca dosyadan okuyabiliyor, ama bir hesap oturumunun diskte
+kalıcı kopyası bırakılmıyor.
+
+### Çerezsiz koşum neden atlıyor
+
+Fork'lardan gelen PR'lara GitHub secret vermiyor. Çerez orada hep boş gelir
+ve ısrar edilse test kalıcı olarak kırmızı kalırdı — CI'nın kırmızısı o anda
+anlamını yitirir, ki tek işi o.
+
+Ayrım şöyle kuruldu:
+
+* **Çerez verilmişse** duvarı aşmak bizim işimizdir; aşamamak **düşme**
+  sebebidir. `master`'daki sertlik budur.
+* **Çerez verilmemişse** ölçülebilir bir şey yoktur: servis bakmamıza izin
+  vermedi, ürün hakkında hiçbir şey söylemedi. Test atlar ve sebebini
+  `stderr`'e yazar (D-043).
+
+Eşleşme **dar**: yalnızca bot duvarının kendi imzası (`not a bot`). Başka
+her ret hâlâ düşürüyor — yoksa gerçek bir regresyon bu kapının arkasına
+saklanırdı. Geniş bir "PROVIDER_CALL hatası varsa atla" kuralı, D-043'ü
+uygulamak değil iptal etmek olurdu.
+
+### Bedeli açıkça yazılıyor
+
+Çerez bir hesap oturumudur. Depoya yazma yetkisi olan herkes onu sızdırabilir
+ve aynı depodan açılan PR'lar secret görür. yt-dlp'nin kendi belgesi hesabın
+sınırlanabileceğini söylüyor. Bu yüzden çerez **atılabilir bir hesaptan**
+alınır, kişisel hesaptan değil; ve süresi dolduğunda test yine kırmızı yanar
+— o kırmızı "ürün bozuldu" demez, "çerez öldü" der.
+
+### Nereden geldiği
+
+Sebep ancak testin hata mesajı düzeltilince görüldü: test `{err}` yazıyordu
+ve `Error`'ın `Display`'i tasarım gereği yalnızca `ADIM: {stage}` basıyor.
+Üç aday, üç aşama adı, sıfır sebep — tanıyı yutan bir hata mesajı, üzerine
+K9 kurulmuş bir projede. `chain_text()`'e geçince sebep ilk koşumda çıktı.
+
+**456 test, üç kapı temiz.**

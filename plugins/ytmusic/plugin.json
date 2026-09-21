@@ -1,7 +1,7 @@
 {
   "name": "ytmusic",
   "display_name": "YouTube Music",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "api": 1,
   "exec": ["python3", "./main.py"],
   "capabilities": ["search", "stream"],
@@ -17,5 +17,5 @@
       "sha256": "1fa6733c37ea6fb51c99ad8fe785e7b7e5f3246c9b980230329d4fb72ed8d4d6"
     }
   ],
-  "description": "YouTube Music'te arar (InnerTube) ve yt-dlp ile çözdüğü m4a akışını çalar. yt-dlp'yi motor kurar (D-055); eklenti onu aramaz, kurmaz, güncellemez. DİKKAT — izin beyanı eksiktir: ses adresi her çözümde değişen bir googlevideo.com ana bilgisayarında duruyor ve izin sözlüğü (D-040) joker kabul etmiyor. Ayrıca yt-dlp bir alt süreç olarak çalışır; onun ağ trafiği bu listede görünmez."
+  "description": "YouTube Music'te arar (InnerTube) ve yt-dlp ile çözdüğü m4a akışını çalar. yt-dlp'yi motor kurar (D-055); eklenti onu aramaz, kurmaz, güncellemez. `cookies` sırrı verilirse yt-dlp'ye çerez dosyası olarak geçirilir — YouTube veri merkezi adreslerine bot duvarı çıkarıyor (D-061). DİKKAT — izin beyanı eksiktir: ses adresi her çözümde değişen bir googlevideo.com ana bilgisayarında duruyor ve izin sözlüğü (D-040) joker kabul etmiyor. Ayrıca yt-dlp bir alt süreç olarak çalışır; onun ağ trafiği bu listede görünmez."
 }

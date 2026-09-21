@@ -26,16 +26,18 @@ gerektirmez), ses röle edilmez (K3), DRM aşan hiçbir şey yok (D-026).
    standart bir HTTP başlığı.
 """
 
+import atexit
 import json
 import os
 import re
 import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 
 API = 1
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 
 INNERTUBE_URL = "https://music.youtube.com/youtubei/v1/search"
 WATCH_URL = "https://music.youtube.com/watch?v="
@@ -79,6 +81,8 @@ state = {
     # yt-dlp komutu (liste) ve nereden bulunduğu; health() bunu raporluyor.
     "ytdlp": None,
     "ytdlp_source": None,
+    # Sırdaki çerezlerin yazıldığı geçici dosya; ilk ihtiyaçta açılır.
+    "cookie_path": None,
 }
 
 
@@ -298,6 +302,41 @@ def ytdlp_command():
     return state["ytdlp"]
 
 
+def cookie_file():
+    """Sırdaki çerezleri yt-dlp'nin okuyabileceği bir dosyaya yazar.
+
+    YouTube veri merkezi adreslerine bot duvarı çıkarıyor ("Sign in to
+    confirm you're not a bot") ve yt-dlp çerezi yalnızca **dosyadan**
+    okuyabiliyor; bayrakla ya da standart girdiden geçirilemiyor.
+
+    Dosya `0600` ile açılıyor ve süreç bittiğinde siliniyor; çerez bir
+    hesap oturumudur, diskte kalıcı bir kopyası bırakılmaz. Sır yoksa
+    `None` dönüyor ve yt-dlp çerezsiz çağrılıyor — çerez bir gereklilik
+    değil, bir kaçış yolu.
+    """
+    raw = (state["secrets"] or {}).get("cookies")
+    if not raw or not raw.strip():
+        return None
+    if state["cookie_path"]:
+        return state["cookie_path"]
+
+    handle, path = tempfile.mkstemp(prefix="tonearm-ytmusic-", suffix=".txt")
+    with os.fdopen(handle, "w", encoding="utf-8") as out:
+        out.write(raw if raw.endswith("\n") else raw + "\n")
+    os.chmod(path, 0o600)
+    atexit.register(lambda: _remove_quietly(path))
+    state["cookie_path"] = path
+    return path
+
+
+def _remove_quietly(path):
+    """Çıkışta çerez dosyasını siler; yoksa sorun değil."""
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
 def ytdlp_json(video):
     """Tek bir parçanın ses biçimini yt-dlp ile çözer."""
     command = ytdlp_command() + [
@@ -306,8 +345,11 @@ def ytdlp_json(video):
         "-f",
         AUDIO_FORMAT,
         "-J",
-        WATCH_URL + video,
     ]
+    cookies = cookie_file()
+    if cookies:
+        command += ["--cookies", cookies]
+    command.append(WATCH_URL + video)
     try:
         finished = subprocess.run(
             command, capture_output=True, timeout=YTDLP_TIMEOUT, check=False

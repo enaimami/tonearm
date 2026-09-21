@@ -53,8 +53,15 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       # K7 yüzey denetimi (tests/k7_surface.rs) bu kapının içinde koşar.
+      #
+      # `TONEARM_TEST_YTMUSIC_COOKIES`: YouTube veri merkezi adreslerine bot
+      # duvarı çıkarıyor ve çerezsiz hiçbir akış çözülemiyor (D-061). Sır
+      # yoksa değişken boş gelir ve o tek test kendini atlar — fork'lardan
+      # gelen PR'lara secret verilmediği için bu normal koşum.
       - name: Kapı 3 — test
         run: cargo test --workspace
+        env:
+          TONEARM_TEST_YTMUSIC_COOKIES: ${{ secrets.YTMUSIC_COOKIES }}
 
   # Feature birleşmesi olmadan çekirdek tek başına temiz mi?
   #
