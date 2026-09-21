@@ -2864,3 +2864,58 @@ açık metin olarak dağıtılır.
 
 **455 test, üç kapı temiz.** Ad değişimi davranış değiştirmedi: testler
 yeniden adlandırmadan önce ve sonra aynı sayıda geçti.
+
+## D-059 — `--tui` terminali ses aygıtından önce sınar; CI'nın hiç yeşil olmadığı böyle görüldü
+**Tarih:** 2026-09-21 · **Durum:** UYGULANDI (2026-09-21)
+
+**Soru:** `tonearm play --tui`, terminali olmayan bir ortamda hangi hatayı
+vermeli? Test (`the_tui_refuses_to_start_without_a_terminal`) terminal reddini
+bekliyordu; CI ses kartı hatası alıyordu ve düşüyordu.
+
+**Karar:** Sıra çevrildi. `--tui` yolunda **önce** terminal sınanır
+(`tui::require_terminal`), sonra ses çıkışı açılır.
+
+### Neden bu sıra
+
+`--tui` iki kaynak ister: bir terminal ve bir ses çıkışı. Terminal bedava
+sınanır, ses çıkışı bir donanım kaynağı açar. Ters sırada, ses kartı olmayan
+bir makinede kullanıcı `--tui` yazdığı hâlde ALSA hatası görüyordu — yanlış
+tanı. K9'un istediği, hatanın kullanıcının yaptığı şeyi anlatmasıdır.
+
+Sınama `enable_raw_mode`'un kendisiyle yapılıyor, ayrı bir `is_terminal`
+ölçütüyle değil: iki ölçüt birbirinden kayarsa "sınamada geçti, açarken
+düştü" doğar. Ham kip hemen geri veriliyor, ekran değiştirilmiyor — bu yüzden
+yavaş bir sağlayıcı aramasının çıktısı alternatif ekranda kaybolmuyor.
+
+### Asıl bulgu: CI hiç yeşil olmamıştı
+
+D-053 CI'yı kurdu. O günden beri **iki koşum** oldu (`a2cf5b6`, `c84d75a`) ve
+**ikisi de kırmızı**. Commit mesajları "455 test, üç kapı temiz" diyordu;
+ölçüm geliştirme makinesinde yapılmıştı ve orada ses kartı var. Bu tek test,
+ses kartı olan her makinede geçiyor, olmayan her makinede düşüyordu.
+
+Ders, kuralın kendisinden değil ölçüldüğü yerden geliyor: "üç kapı temiz"
+iddiası, kapıların **nerede** koşturulduğu söylenmeden eksiktir.
+
+### Nasıl doğrulandı
+
+Geliştirme makinesinde ses kartı olduğu için arıza doğrudan üretilemiyordu.
+`ALSA_CONFIG_PATH=/dev/null` runner'ın ses kartsızlığını taklit ediyor ve
+CI'nın çıktısını birebir veriyor. İki yönde de ölçüldü:
+
+| Koşul | Düzeltmesiz | Düzeltmeli |
+|---|---|---|
+| Ses kartı var | ok | ok |
+| Ses kartı yok (CI'nın hâli) | FAILED | ok |
+
+Yan kazanç: test CI'da **artık gerçekten koşuyor**. Eskiden ses aygıtına
+takılıp terminal reddine hiç varamıyordu — yani iddiasını hiç sınamıyordu.
+
+### Yanında açılan borç
+
+`playback_local::a_real_file_plays_and_the_position_advances` bu makinede
+kararsız (6 koşumda 3 düşüş): `snd_pcm_avail_delay → I/O error (5)`. Tek ses
+çıkışı HDMI ve boştaki hatta yazmak aralıklı EIO veriyor. `engine_for` iki
+durumu atlıyor — aygıt yok, aygıt açılamadı — ama bu üçüncüsü: aygıt açıldı,
+sonra altından çekildi. CI'da aygıt hiç olmadığı için orada atlanıyor.
+Ayrı bir tur; bu kararın kapsamında değil.

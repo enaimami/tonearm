@@ -31,6 +31,24 @@ use tonearm_core::playback::{LiveSession, PlayState, PlaybackAnchor, Player, Rep
 /// Ekran ne sıklıkta tazelenecek. Ses hattından bağımsız: yalnızca çizim.
 const TICK: Duration = Duration::from_millis(200);
 
+/// TUI açılmadan **önce** terminalin gerçekten alınabildiğini sınar.
+///
+/// `--tui` iki kaynak ister: bir terminal ve bir ses çıkışı. Terminal
+/// bedava sınanır, ses çıkışı bir donanım kaynağı açar — o yüzden sıra
+/// budur. Ters sırada, terminali olmayan bir ortamda kullanıcı `--tui`
+/// yazdığı hâlde ses kartı hatası görüyordu; yanlış tanı, yanlış aşama.
+///
+/// Sınama `enable_raw_mode`'un kendisiyle yapılıyor, ayrı bir `is_terminal`
+/// ölçütüyle değil: iki ölçüt birbirinden kayarsa "sınamada geçti, açarken
+/// düştü" doğar. Ham kip hemen geri veriliyor, ekran değiştirilmiyor.
+///
+/// # Errors
+/// Terminal ham kipe alınamazsa.
+pub fn require_terminal() -> io::Result<()> {
+    terminal::enable_raw_mode()?;
+    terminal::disable_raw_mode()
+}
+
 /// Terminali ham kipe alır ve çıkışta **her durumda** geri verir.
 ///
 /// `Drop` ile geri alma: panik olsa bile kullanıcının terminali bozuk

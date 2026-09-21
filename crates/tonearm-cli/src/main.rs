@@ -504,6 +504,13 @@ async fn run(cli: &Cli) -> tonearm_core::Result<String> {
             };
 
             if *use_tui {
+                // Terminal ses aygıtından **önce** sınanıyor. İkisi de
+                // gerekli, ama biri bedava bir sınama, öteki bir donanım
+                // kaynağı; ters sırada ses kartsız bir makinede kullanıcı
+                // `--tui` yazdığı hâlde ALSA hatası görüyordu (K9: hata,
+                // kullanıcının yaptığı şeyi anlatmalı).
+                tui::require_terminal().map_err(|err| anyhow_to_core(&anyhow::Error::from(err)))?;
+
                 // TUI yalnızca döngüyü sürer; tick ve dinleme kaydı
                 // `LiveSession`'ın işi (çekirdekte, K1).
                 let player = session.player_from_search(&registry, options).await?;
