@@ -132,6 +132,13 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 ```
 
+Aynılarının kısayolu `Makefile`'da; `make` ya da `make help` hedefleri listeler.
+`make gates` üç kapıyı CI sırasıyla koşar (biçim en ucuzu, en önce düşsün),
+`make core-features` çekirdeği feature'lar birleşmeden denetler (D-054),
+`make cli ARGS="stats --year 2024"` CLI'yi çağırır, `make aur-test PKG=…`
+bir AUR paketini Arch konteynerinde derler. Makefile bir kural koymuyor,
+yalnızca buradaki komutları tek yerden koşulur hâle getiriyor.
+
 Bir değişikliği bitmiş saymadan önce üçü de temiz geçmeli: `test`, `clippy`, `fmt`.
 Tam "bitti" ölçütü: PLAN.md §0.4.
 

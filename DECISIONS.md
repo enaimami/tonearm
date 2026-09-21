@@ -3402,3 +3402,44 @@ gerçek eksik: `.dmg` yalnızca arm64.
 
 **458 test, üç kapı temiz.**
 
+## D-067 — `Makefile`: kısayol katmanı, kural katmanı değil
+**Tarih:** 2026-09-21 · **Durum:** UYGULANDI (2026-09-21)
+
+**Soru:** Komutlar üç yerde yazılı (CLAUDE.md, CONTRIBUTING.md, ci.yml) ve
+elle yazılıyor. Bir `Makefile` bunları tek yerden koşulur yapar mı, yoksa
+dördüncü bir doğruluk kaynağı mı olur?
+
+**Karar:** `Makefile` var, ama **kural koymuyor** — mevcut komutları koşuyor.
+Üç kapının tanımı PLAN.md §0.4'te, komut yüzeyi CLAUDE.md'de kalıyor;
+çelişirse onlar geçerli ve bu Makefile'ın başına yazıldı.
+
+Hedef adları İngilizce, yazı Türkçe (D-036). Sürüm `Cargo.toml`'dan okunuyor,
+Makefile'a ikinci kez yazılmıyor — Arch'ın `_` yazımı da ondan türetiliyor
+(D-063'ün aynı dersi).
+
+**Ne kazandırıyor:** `make gates` kapıları **ci.yml'nin sırasıyla** koşuyor
+(fmt → clippy → test; en ucuz olan en önce düşsün — CLAUDE.md'nin listesi
+alfabetikti, CI'nınki kasıtlıydı). `make core-features` ci.yml'nin ikinci
+işini yerelde koşturuyor: çekirdek tek başına, her feature tek tek, hepsi
+birden (D-054). O iş bugüne kadar yalnızca CI'da koşuyordu.
+`make aur-test PKG=…` bir AUR paketini Arch konteynerinde uçtan uca derleyip
+`namcap`'liyor.
+
+### `LC_ALL=C` bir süs değil
+
+`make help` hedefleri kendi kaynağından `grep` ile topluyor ve ilk yazımı
+sessizce eksik listeliyordu: 16 hedeften 13'ü görünüyordu. Eksik üçünün ortak
+yanı — `cli`, `clippy`, `diag` — adında **`i` geçen** tek üç hedef olmaları.
+
+Sebep `[a-zA-Z0-9_-]` aralığı: karakter aralıkları yerelin harmanlama
+düzenini kullanıyor ve `tr_TR.UTF-8`'de `i` ile `ı` ayrı harfler, `a-z`
+aralığı `i`'yi dışarıda bırakıyor. Kalıp `LC_ALL=C` ile koşuyor artık.
+
+Hata bir süre görünmedi çünkü etkileşimli kabukta `grep` bir kabuk
+fonksiyonuna sarılıydı ve 16 satırı da buluyordu; `make`in çağırdığı
+`/usr/bin/grep` 13 buluyordu. **Aynı komut iki kabukta iki sonuç verdiğinde
+ölçtüğün şey komut değil, ortam.**
+
+Bu projenin geliştiricisi Türkçe yerelde çalışıyor, yani tuzak bir kez daha
+kurulabilir: kabuk betiklerinde harf aralığı yazarken ya `LC_ALL=C` ya da
+`[[:alnum:]]` kullan.

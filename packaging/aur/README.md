@@ -81,30 +81,30 @@ sessizce bayatlardı.
 
 ## Konteynerde sınamak
 
-Arch makinen yoksa `makepkg`'yi konteynerde koşturabilirsin. `makepkg` root
-koşmaz, o yüzden bir kullanıcı gerekiyor:
+Arch makinen yoksa depo kökündeki `Makefile` bunu konteynerde yapıyor:
 
 ```bash
-podman run --rm -v "$PWD:/build:z" archlinux:base-devel bash -c '
-  pacman -Syu --noconfirm --needed namcap >/dev/null
-  useradd -m builder && chown -R builder /build
-  su builder -c "cd /build && makepkg --printsrcinfo > .SRCINFO && makepkg -s --noconfirm"
-  namcap /build/PKGBUILD /build/*.pkg.tar.zst'
+make aur-test PKG=headshell
+make aur-test PKG=headshell-bin
+make aur-test PKG=headshell-cli-bin
+make aur-clean                     # artıkları sil
 ```
 
-İki tuzak: `makepkg -s` `sudo` ister, konteynerde yoksa makedepends'i önce
-root olarak kur. Ve `fakeroot`un bıraktığı dosyalar ana makinede root'a ait
-olur — temizlik `podman unshare rm -rf` ile.
+Hedef şunları sırayla yapıyor: çalışma ağacından **etiket-eşi** bir kaynak
+arşivi üretir, `-bin` paketleri için sürüm varlıklarını `gh` ile çeker,
+hepsini `target/aur/<paket>/` altına kopyalar, konteynerde `updpkgsums` ile
+toplamları o yerel dosyalara göre tazeler, `makepkg` koşar ve `namcap`'ler.
+**Depodaki PKGBUILD'e dokunmaz** — o gerçek etiketin toplamlarını taşımaya
+devam eder.
 
-**Yayımlanmamış bir etiketi sınamak:** `source=` etikete bakıyor, yani
-depodaki henüz itilmemiş değişiklikler orada yok. Çalışma ağacından etiket
-arşivinin eşini üretip PKGBUILD'in yanına koy, makepkg indirmeyi atlar:
+Etiket-eşi arşiv şunun için gerekli: `source=` etikete bakıyor, oysa sınamak
+istediğin şey henüz itilmemiş çalışma ağacın. Arşiv PKGBUILD'in yanında
+durunca `makepkg` indirmeyi atlar.
 
-```bash
-git ls-files > /tmp/l && tar czf headshell-0.0.1_beta.tar.gz \
-  --transform 's|^|headshell-0.0.1-beta/|' -T /tmp/l
-updpkgsums
-```
+Elle koşacaksan iki tuzak var: `makepkg` root koşmaz ve `-s` `sudo` ister —
+konteynerde makedepends'i önce root olarak kur. Ve `fakeroot`un bıraktığı
+dosyalar ana makinede root'a ait olur; temizlik `podman unshare rm -rf` ile
+(`make aur-clean` bunu yapıyor).
 
 ## Neden `cargo tauri build` değil
 
