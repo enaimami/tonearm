@@ -86,6 +86,32 @@ jobs:
         if: matrix.name != 'linux'
         run: cargo tauri build --config crates/headshell/tauri.conf.json
 
+      # CLI ikilisi Tauri bundle'ına **girmiyor**: `cargo tauri build` yalnızca
+      # masaüstü uygulamasını paketliyor. Ama CLAUDE.md'ye göre CLI, çekirdeğin
+      # elle sınandığı yüzey ve arayüzdeki her yeteneğin karşılığı orada —
+      # `.deb` kuran kullanıcının ona hiç erişememesi bir eksikti.
+      #
+      # Dosya adında sürüm yok: adres zaten etiketi taşıyor
+      # (`releases/download/v<sürüm>/...`) ve sabit ad, AUR paketinin her
+      # sürümde aynı satırla çalışmasını sağlıyor.
+      - name: CLI ikilisini derle
+        run: cargo build --release -p headshell-cli
+
+      - name: CLI ikilisini paketle (Unix)
+        if: matrix.name != 'windows'
+        run: |
+          mkdir -p dist
+          tar -czf "dist/headshell-cli-${{ matrix.name }}-$(uname -m).tar.gz" \
+            -C target/release headshell
+
+      - name: CLI ikilisini paketle (Windows)
+        if: matrix.name == 'windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path target/release/headshell.exe `
+            -DestinationPath dist/headshell-cli-windows-x86_64.zip
+
       - name: Paketleri yükle
         if: always()
         uses: actions/upload-artifact@v4
@@ -104,6 +130,7 @@ jobs:
             target/release/bundle/dmg/*.dmg
             target/release/bundle/msi/*.msi
             target/release/bundle/nsis/*.exe
+            dist/headshell-cli-*
 
   # Paketler tamamlandıktan sonra **taslak** bir sürüm açılır. Taslak, çünkü
   # yayın metnini ve neyin gerçekten çıkacağını insan onaylar.
