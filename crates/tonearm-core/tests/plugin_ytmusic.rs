@@ -267,7 +267,11 @@ async fn a_search_hit_resolves_to_a_stream_with_the_unthrottling_range_header() 
                 break;
             }
             Ok(None) => refusals.push(format!("{}: çalınamaz", hit.id)),
-            Err(err) => refusals.push(format!("{}: {err}", hit.id)),
+            // `chain_text`, düz `{err}` değil: `Error`'ın `Display`'i yalnızca
+            // `ADIM: X` basıyor ve bu test CI'da tam olarak öyle düşmüştü —
+            // üç aday, üç aşama adı, sıfır sebep. Tanıyı yutan bir hata
+            // mesajı K9'un yasakladığı şeydir.
+            Err(err) => refusals.push(format!("{}: {}", hit.id, err.chain_text())),
         }
     }
 
