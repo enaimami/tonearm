@@ -144,20 +144,29 @@ token, sürümlenmiş bir sözleşme, iki referans tema.
 
 > ### ⚠️ Beta ne demek
 >
-> Çekirdek yetenekler çalışıyor ve **455 test** altında duruyor; ama hiçbir
+> Çekirdek yetenekler çalışıyor ve **458 test** altında duruyor; ama hiçbir
 > sürüm henüz senin makinen dışında bir yerde yaşamadı. İçe aktardığın
 > export dosyasına dokunulmaz, o yüzden veri kaybı beklenmiyor — ama
 > kütüphane şeması sürümler arasında değişebilir.
 
 **Masaüstü paketleri** (`.deb`, `.rpm`, `.AppImage`, `.dmg`, `.msi`) her sürüm
-etiketinde üretilir ve [sürüm sayfasına](https://github.com/enaimami/headshell/releases)
+etiketinde üretilir ve [sürüm sayfasına](https://github.com/headshell/headshell/releases)
 eklenir. macOS ve Windows paketleri imzasızdır: macOS'ta sağ tık → Aç,
 Windows'ta SmartScreen → Yine de çalıştır.
+
+**Arch Linux** — AUR'da iki yol var; `-bin` olan derleme beklemez:
+
+```bash
+paru -S headshell          # masaüstü, kaynaktan derler
+paru -S headshell-cli      # komut satırı
+paru -S headshell-bin      # aynısının derlenmiş hâli
+paru -S headshell-cli-bin  # CLI'nin derlenmiş hâli
+```
 
 **Kaynaktan:**
 
 ```bash
-git clone https://github.com/enaimami/headshell.git
+git clone https://github.com/headshell/headshell.git
 cd headshell
 cargo build --release
 

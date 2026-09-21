@@ -1,0 +1,127 @@
+# Maintainer: enaimami <1terabyterma@gmail.com>
+#
+# Split package: tek derlemeden iki paket çıkar.
+#
+#   headshell      — masaüstü uygulaması (Tauri + WebKitGTK)
+#   headshell-cli  — komut satırı arayüzü
+#
+# İkisi aynı workspace'ten geliyor ve `build()` bir kez koşuyor. Ayrı
+# PKGBUILD'ler yazılsaydı ikisini birlikte kuran kullanıcı ~500 crate'i iki
+# kez derlerdi.
+#
+# `cargo tauri build` **kullanılmıyor**: o bir bundler ve `.deb`/`.AppImage`
+# üretiyor; Arch paketini zaten burada biz kuruyoruz. Düz `cargo build`
+# `tauri-cli`'yi yapım bağımlılığı olmaktan çıkarıyor, karşılığında `.desktop`
+# girdisi ve ikonlar elle kuruluyor.
+#
+# Derlemeyi ödemek istemeyen için önceden derlenmiş paketler var:
+# `headshell-bin` ve `headshell-cli-bin`, sürüm varlıklarını indirirler.
+# Onlar split **değil**, çünkü paylaştıkları bir derleme yok. Masaüstü girdisi
+# hepsinde aynı dosya: `packaging/headshell.desktop`.
+#
+# Torrent eklentisinin ikilisi bu pakete **girmiyor**. Eklenti motoru
+# eklentiyi `~/.local/share/headshell/plugins/<ad>/` altında arıyor ve
+# `plugin.json`'daki `exec` o dizine göreli; `/usr/bin` altındaki bir ikiliyi
+# görmez. Sistem çapında eklenti dizini bir çekirdek kararıdır ve ilk sürümden
+# sonraya ertelendi — PLAN.md §2.8 madde 5, D-049.
+
+pkgbase=headshell
+pkgname=('headshell' 'headshell-cli')
+# Sürüm tek satırda yaşıyor. Arch sürümünde `-` pkgrel ayıracı olduğu için
+# `_` yazılır; yukarı akıştaki yazım ondan türetilir (`0.0.1-beta`) ve hem
+# etikette hem açılan dizin adında o kullanılır. D-063 aynı hatanın MSI
+# tarafındaki hâliydi: sürüm iki yerde yazılırsa biri kayar.
+pkgver=0.0.1_beta
+_pkgver=${pkgver//_/-}
+pkgrel=1
+pkgdesc='Provider-independent music listening layer — your history, stats and playlists stay yours'
+arch=('x86_64')
+url='https://github.com/headshell/headshell'
+license=('MIT' 'Apache-2.0')
+makedepends=('cargo' 'pkgconf' 'webkit2gtk-4.1' 'gtk3' 'alsa-lib')
+source=("$pkgbase-$pkgver.tar.gz::$url/archive/refs/tags/v$_pkgver.tar.gz")
+# Sağlama toplamları **şu anki** `v0.0.1-beta` etiketine ait. Etiket
+# taşınırsa (yeniden kesilirse) arşivin toplamı da değişir — `updpkgsums`
+# koş, elle düzeltme. Sıra `packaging/aur/README.md`'de.
+sha256sums=('252d8c3d4ee72e93e4c8c525973a17a423ee9c004dadc52c88ca8f7339b519eb')
+
+_srcdir="$pkgbase-$_pkgver"
+
+prepare() {
+  cd "$_srcdir"
+  export RUSTUP_TOOLCHAIN=stable
+  # `--locked`: depodaki Cargo.lock neyse o. Paketin derlediği ağaç,
+  # yukarıda üç kapıdan geçen ağacın aynısı olmalı.
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/^host: //p')"
+}
+
+build() {
+  cd "$_srcdir"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  # İki ikili, tek derleme: `headshell-cli` → `headshell`,
+  # `headshell` (Tauri kabuğu) → `headshell-desktop`.
+  cargo build --frozen --release -p headshell-cli -p headshell
+}
+
+check() {
+  cd "$_srcdir"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  # Çekirdek testleri. Ağa çıkan ve ses aygıtı isteyen testler kendilerini
+  # atlıyor (D-043, D-059), yani paket derlemesi yapım ortamına bağımlı değil.
+  #
+  # Tek crate koşumu bir tanı aracı, üç kapı değil (CLAUDE.md): feature'lar
+  # birleşmediği için `dead_code` uyarıları çıkabilir. Kapılar CI'da koşuyor;
+  # buradaki koşumun işi, paketlenen ağacın makinede gerçekten çalıştığını
+  # görmek.
+  cargo test --frozen --release -p headshell-core
+}
+
+package_headshell() {
+  pkgdesc='Provider-independent music listening layer (desktop app)'
+  depends=('webkit2gtk-4.1' 'gtk3' 'alsa-lib' 'hicolor-icon-theme')
+  optdepends=('headshell-cli: command line interface'
+              'yt-dlp: YouTube Music plugin streaming'
+              'python: plugin runtime')
+
+  cd "$_srcdir"
+  install -Dm755 "target/release/headshell-desktop" "$pkgdir/usr/bin/headshell-desktop"
+
+  # Masaüstü girdisi depodan geliyor, burada yazılmıyor. İçindeki
+  # `StartupWMClass=headshell-desktop` uydurulmadı: Tauri'nin `.deb` için
+  # ürettiği girdi okundu, pencere sınıfı ikili adından türüyor. `headshell`
+  # yazılsaydı çalışan pencere başlatıcı ikonuyla eşleşmezdi.
+  install -Dm644 packaging/headshell.desktop \
+    "$pkgdir/usr/share/applications/headshell.desktop"
+
+  # İkon adı `.desktop`'taki `Icon=` ile aynı olmak zorunda.
+  local _icons="crates/headshell/icons"
+  install -Dm644 "$_icons/32x32.png" \
+    "$pkgdir/usr/share/icons/hicolor/32x32/apps/headshell-desktop.png"
+  install -Dm644 "$_icons/128x128.png" \
+    "$pkgdir/usr/share/icons/hicolor/128x128/apps/headshell-desktop.png"
+  install -Dm644 "$_icons/128x128@2x.png" \
+    "$pkgdir/usr/share/icons/hicolor/256x256/apps/headshell-desktop.png"
+  install -Dm644 "$_icons/icon.png" \
+    "$pkgdir/usr/share/icons/hicolor/512x512/apps/headshell-desktop.png"
+  install -Dm644 "$_icons/icon.svg" \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/headshell-desktop.svg"
+
+  install -Dm644 LICENSE-MIT "$pkgdir/usr/share/licenses/$pkgname/LICENSE-MIT"
+  install -Dm644 LICENSE-APACHE "$pkgdir/usr/share/licenses/$pkgname/LICENSE-APACHE"
+}
+
+package_headshell-cli() {
+  pkgdesc='Provider-independent music listening layer (command line interface)'
+  depends=('alsa-lib')
+  optdepends=('headshell: desktop application'
+              'yt-dlp: YouTube Music plugin streaming'
+              'python: plugin runtime')
+
+  cd "$_srcdir"
+  install -Dm755 "target/release/headshell" "$pkgdir/usr/bin/headshell"
+
+  install -Dm644 LICENSE-MIT "$pkgdir/usr/share/licenses/$pkgname/LICENSE-MIT"
+  install -Dm644 LICENSE-APACHE "$pkgdir/usr/share/licenses/$pkgname/LICENSE-APACHE"
+}

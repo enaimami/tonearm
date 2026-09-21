@@ -101,6 +101,7 @@ headshell/
 │   │   └── themes/             # iki referans tema (contrast, daylight)
 │   └── headshell-plugin-torrent/    # torrent sağlayıcısı — ayrı ikili, JSON-RPC (D-047)
 ├── plugins/                    # kurulabilir eklentiler: soundcloud, ytmusic, torrent
+├── packaging/                  # dağıtım: copyright, .desktop girdisi, aur/ (D-066)
 ├── docs/                       # eklenti yazma rehberi, tanıtım sayfası
 ├── spike/                      # ATILABILIR prototipler — workspace DIŞI, CI DIŞI
 └── fixtures/                   # test verisi: kırpılmış export'lar, doğruluk kümesi
@@ -236,6 +237,7 @@ kaç kayıt geldi, kaçı ISRC ile, kaçı bulanık, kaçı eşleşmedi.
 | Eklenti nasıl yazılır | docs/eklenti-yazma.md |
 | Tema nasıl yazılır | crates/headshell/themes/README.md |
 | Masaüstü paketleri nasıl üretilir | .github/workflows/release.yml, crates/headshell/icons/README.md |
+| AUR paketi nasıl yayımlanır | packaging/aur/README.md |
 
 **Faz durumunu bu dosyaya yazma.** Tek yerde dursun ki bayatlamasın: PLAN.md'nin
 faz başlıkları ve `TAMAM` / `YAPILACAK` işaretleri.

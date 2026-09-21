@@ -1,0 +1,89 @@
+# Maintainer: enaimami <1terabyterma@gmail.com>
+#
+# `headshell` masaüstü uygulamasının derlenmiş hâli. Kaynaktan derleyen paket
+# `packaging/aur/headshell/`, CLI'nin derlenmiş hâli `headshell-cli-bin/`.
+#
+# Neden ikili paket: kaynak paket Tauri kabuğunu ve ~500 crate'i derliyor.
+# Yapılacak iş doğru ama bedeli dakikalarla ölçülüyor.
+#
+# Neden CLI ile **aynı PKGBUILD'de değil**: split package'in varlık sebebi
+# paylaşılan bir derlemedir — kaynak paketin iki ikiliyi tek `cargo build`'den
+# çıkarması gibi. Burada derleme yok, iki paket hiçbir iş paylaşmıyor. Split
+# olsalardı yalnızca CLI kuran kullanıcı 10 MB'lık `.deb`i de indirirdi, ve
+# namcap haklı olarak `splitpkgmakedeps` hatası veriyordu.
+#
+# İkili `.deb`in içinden çıkıyor; `.AppImage` kullanılmıyor — 85 MB ve kendi
+# kütüphanelerini taşıyor, Arch paketi sistem kütüphanelerine bağlanmalı.
+#
+# `.desktop`, ikonlar ve lisans dosyaları **kaynak arşivinden** alınıyor
+# (1,2 MB). Sebebi: kaynak paketle bit bit aynı dosyaları kurmak. İkinci bir
+# elle yazılmış masaüstü girdisi olsaydı ikisi zamanla ayrışırdı.
+#
+# Uyumluluk: ikili ubuntu-24.04 üzerinde derleniyor, yani GLIBC_2.39 istiyor.
+# Arch her zaman daha yenisini taşır, bu yön güvenli olan yön.
+
+pkgname=headshell-bin
+# Sürüm tek satırda — komşu PKGBUILD'lerdeki gerekçenin aynısı (D-063).
+pkgver=0.0.1_beta
+_pkgver=${pkgver//_/-}
+pkgrel=1
+pkgdesc='Provider-independent music listening layer (desktop app, prebuilt)'
+arch=('x86_64')
+url='https://github.com/headshell/headshell'
+license=('MIT' 'Apache-2.0')
+depends=('webkit2gtk-4.1' 'gtk3' 'alsa-lib' 'hicolor-icon-theme')
+optdepends=('headshell-cli-bin: command line interface'
+            'yt-dlp: YouTube Music plugin streaming'
+            'python: plugin runtime')
+provides=("headshell=$pkgver")
+conflicts=('headshell')
+# İkili yukarı akıştan geliyor; `makepkg` onu yeniden `strip`'lemesin.
+# `!debug` olmadan içi anlamsız bir `headshell-bin-debug` paketi de üretiliyor
+# — semboller burada değil, derlendikleri yerde anlamlı.
+options=('!strip' '!debug')
+
+_deb="headshell_${_pkgver}_amd64.deb"
+_rel="$url/releases/download/v$_pkgver"
+_srcdir="headshell-$_pkgver"
+
+source=("headshell-$pkgver.tar.gz::$url/archive/refs/tags/v$_pkgver.tar.gz")
+source_x86_64=("$_deb::$_rel/$_deb")
+# `.deb` bir `ar` arşivi; makepkg açsa elde `data.tar.gz` kalırdı, onu yine
+# elle açmak gerekirdi. Bir adımda `prepare()` yapıyor.
+noextract=("$_deb")
+# Sağlama toplamları **şu anki** `v0.0.1-beta` etiketine ait. Etiket
+# taşınırsa (yeniden kesilirse) arşivin toplamı da değişir — `updpkgsums`
+# koş, elle düzeltme. Sıra `packaging/aur/README.md`'de.
+sha256sums=('252d8c3d4ee72e93e4c8c525973a17a423ee9c004dadc52c88ca8f7339b519eb')
+sha256sums_x86_64=('7087a1feb17ad4b19018be5a1b6635e2ac5f56b0cd3ce039e004c306fd8784e2')
+
+prepare() {
+  mkdir -p deb
+  bsdtar -xOf "$_deb" data.tar.gz | bsdtar -xf - -C deb
+}
+
+package() {
+  install -Dm755 "deb/usr/bin/headshell-desktop" "$pkgdir/usr/bin/headshell-desktop"
+
+  # `.deb`in kendi `.desktop` girdisi **kullanılmıyor**: onu Tauri üretiyor ve
+  # metni `tauri.conf.json`dan geliyor. Kaynak paketle aynı dosyayı kurmak
+  # için depodaki kanonik girdi kuruluyor.
+  install -Dm644 "$_srcdir/packaging/headshell.desktop" \
+    "$pkgdir/usr/share/applications/headshell.desktop"
+
+  # İkon adı `.desktop`'taki `Icon=` ile aynı olmak zorunda.
+  local _icons="$_srcdir/crates/headshell/icons"
+  install -Dm644 "$_icons/32x32.png" \
+    "$pkgdir/usr/share/icons/hicolor/32x32/apps/headshell-desktop.png"
+  install -Dm644 "$_icons/128x128.png" \
+    "$pkgdir/usr/share/icons/hicolor/128x128/apps/headshell-desktop.png"
+  install -Dm644 "$_icons/128x128@2x.png" \
+    "$pkgdir/usr/share/icons/hicolor/256x256/apps/headshell-desktop.png"
+  install -Dm644 "$_icons/icon.png" \
+    "$pkgdir/usr/share/icons/hicolor/512x512/apps/headshell-desktop.png"
+  install -Dm644 "$_icons/icon.svg" \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/headshell-desktop.svg"
+
+  install -Dm644 "$_srcdir/LICENSE-MIT" "$pkgdir/usr/share/licenses/$pkgname/LICENSE-MIT"
+  install -Dm644 "$_srcdir/LICENSE-APACHE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE-APACHE"
+}

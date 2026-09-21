@@ -3266,3 +3266,139 @@ Snapshot testi yine yakaladı: `headshell_version` alfabetik olarak `os`'un
 doğrulandı.
 
 **458 test, üç kapı temiz.**
+
+## D-066 — AUR: üç PKGBUILD, dört paket; kaynaktan derleme de var, derlenmiş de
+**Tarih:** 2026-09-21 · **Durum:** UYGULANDI (2026-09-21)
+
+**Soru:** İlk sürümün Arch tarafı nasıl dağıtılacak? D-065 tam bu iş
+başlarken çıkmıştı (ad AUR'da ölçülünce dolu bulundu) ve paket yarım kaldı.
+
+**Karar:** `packaging/aur/` altında **üç PKGBUILD, dört paket**:
+
+| PKGBUILD | Paket(ler) | Nereden |
+|---|---|---|
+| `headshell/` | `headshell` + `headshell-cli` | Etiket arşivi, kaynaktan derlenir |
+| `headshell-bin/` | `headshell-bin` | Sürümün `.deb`i |
+| `headshell-cli-bin/` | `headshell-cli-bin` | Sürümün CLI arşivi |
+
+**Yalnızca kaynak paket split.** İki ikili tek `cargo build`'den çıkıyor;
+ayrı PKGBUILD'ler olsaydı ikisini birlikte kuran kullanıcı ~500 crate'i iki
+kez derlerdi. `-bin` tarafında paylaşılan bir derleme **yok** — iki paket
+hiçbir iş paylaşmıyor, yalnızca dosya kopyalıyor. Split package'in varlık
+sebebi paylaşılan derlemedir; olmayan sebebi taklit etmenin iki bedeli vardı:
+yalnızca CLI kuran kullanıcı 10 MB'lık `.deb`i de indiriyordu, ve namcap
+`splitpkgmakedeps` hatası veriyordu (kural: global `makedepends` alt
+paketlerin `depends`'ini kapsamalı — `-bin` tarafında o bağımlılıklar
+yalnızca çalışma zamanına ait, derleme için gerekmiyor). Ayrılınca ikisi de
+düştü.
+
+### Neden `-bin` de var
+
+Kaynak paket Tauri kabuğunu derliyor; bedel dakikalarla ölçülüyor.
+`release.yml` zaten her platformun ikilisini üretiyor ve CLI arşivinin
+**dosya adında sürüm yok** — o sabit ad tam olarak bunun için konmuştu,
+AUR satırı her sürümde aynı kalsın diye. Yani `-bin` paketi bu depoda
+yazılmamış ama ima edilmiş bir karardı; şimdi yazıldı.
+
+`.AppImage` kullanılmıyor: 85 MB ve kendi kütüphanelerini taşıyor. Arch
+paketi sistem kütüphanelerine bağlanmalı, o yüzden masaüstü ikilisi
+`.deb`in içinden çıkarılıyor.
+
+### `cargo tauri build` kullanılmıyor
+
+O bir bundler, `.deb`/`.rpm`/`.AppImage` üretir. Arch paketini `makepkg`
+zaten kuruyor; bundler'ı çağırmak hem işi tekrarlar hem `tauri-cli`'yi yapım
+bağımlılığı yapardı. Düz `cargo build` yetiyor, karşılığında `.desktop`
+girdisi ve ikonlar elle kuruluyor.
+
+### `.desktop` girdisi depoya taşındı
+
+İki PKGBUILD de `packaging/headshell.desktop`'u kuruyor; `-bin` paketi bunun
+için kaynak arşivini de indiriyor (1,2 MB — ikonlar ve lisanslar da oradan).
+Elle yazılmış iki kopya olsaydı ayrışırlardı: bu defterde aynı arızanın
+D-062 ve D-063'te iki kaydı var.
+
+`StartupWMClass=headshell-desktop` **ölçüldü, uydurulmadı**: taslak sürümdeki
+`.deb` açıldı ve Tauri'nin ürettiği girdi okundu — pencere sınıfı ikili
+adından türüyor. Yarım kalan taslakta `headshell` yazıyordu; öyle kalsaydı
+çalışan pencere başlatıcı ikonuyla eşleşmezdi. İkon adları da aynı sebeple
+`headshell-desktop.*`.
+
+### Sürüm tek satırda
+
+`pkgver=0.0.1_beta`, yukarı akış yazımı `_pkgver=${pkgver//_/-}` ile
+türetiliyor (Arch sürümünde `-` pkgrel ayıracı). Yarım kalan taslakta sürüm
+iki yerde yazılıydı — `pkgver` ve `_srcdir` — ve bu D-063'ün MSI tarafında
+yakalanan hatasının aynısıydı.
+
+### Paket metinleri İngilizce
+
+`pkgdesc` ve `.desktop` `Comment`'ı İngilizce. D-036 "metni kullanıcı okur →
+Türkçe" diyor ve `.deb`in açıklaması gerçekten Türkçe (tauri.conf.json'dan
+geliyor). AUR paketleri bilerek ayrılıyor: orada okuyan kitle uluslararası.
+**Bilinen ve kabul edilen tutarsızlık**, kaçırılmış değil.
+
+### Torrent eklentisi pakete girmiyor
+
+Motor eklentileri `~/.local/share/headshell/plugins/<ad>/` altında arıyor ve
+`plugin.json`'daki `exec` o dizine göreli; `/usr/bin` altındaki ikiliyi
+görmez. Sistem çapında eklenti dizini bir çekirdek kararı — PLAN §2.8 madde 5
+ve D-049, ilk sürümden sonra.
+
+### Sıra: önce etiket, sonra PKGBUILD
+
+`-bin` paketi sürüm **taslaktan çıkana kadar çalışmaz**: taslak sürümün
+varlıkları anonim indirilemez, yalnızca depoya erişimi olan görür. Kaynak
+paketin böyle bir borcu yok, etiket arşivi taslaktan bağımsız.
+
+`.SRCINFO` bu depoda tutulmuyor: AUR deposunda yaşıyor ve orada
+`makepkg --printsrcinfo` üretiyor. Buraya bir kopyası konsaydı PKGBUILD
+değişince sessizce bayatlardı.
+
+### Paketler gerçekten derlendi — namcap üç bulgu verdi
+
+Bu makine Debian; `makepkg` yok. Paketler bir `archlinux:base-devel`
+konteynerinde derlendi (`podman`), ve etiket henüz düzeltmeleri taşımadığı
+için `source=` çalışma ağacından üretilen bir etiket-eşi arşivle beslendi.
+Yöntem `packaging/aur/README.md`'de yazılı — tekrarlanabilir olması lazımdı,
+çünkü namcap'in söyledikleri tahminle bulunamazdı:
+
+1. **`gcc-libs` gereksiz.** Dört pakette de yazılıydı; namcap "included, but
+   may not be needed" diyor — `base` üyesi ve örtük olarak zaten karşılanıyor.
+   Çıkarıldı.
+2. **`-bin` paketleri `-debug` paketi üretiyordu** ve yukarı akıştan gelen
+   ikilileri yeniden `strip`'liyordu. Semboller burada değil, derlendikleri
+   yerde anlamlı → `options=('!strip' '!debug')`.
+3. **`x86_64` düz yazılmıştı.** Mimariye özgü kaynaklar `source_x86_64` /
+   `sha256sums_x86_64` dizilerine taşındı, CLI arşivinin adındaki mimari
+   `$CARCH`'a çevrildi.
+
+Sonuç: üç PKGBUILD'de de `namcap` temiz. Paketlerde kalan uyarılar bilgi
+niteliğinde — "implicitly satisfied" bağımlılıklar (`glib2`, `dbus`, `cairo`,
+`libsoup3`, `gdk-pixbuf2`; hepsi `webkit2gtk-4.1` + `gtk3` üzerinden geliyor)
+ve `!strip`'in kendi sonucu olan "ELF file is unstripped".
+
+Kaynak paketin tam derlemesi (`makepkg -s`, Tauri + ~500 crate) **koşulmadı**
+— başlatıldı ve makineyi meşgul etmemek için durduruldu. PKGBUILD'i
+`makepkg --printsrcinfo` ayrıştırdı, `namcap` temiz geçti ve `package_*()`
+işlevlerinin dosya yolları sahte bir `$pkgdir`'e koşturularak doğrulandı; ama
+`build()`/`check()` gerçek bir Arch makinesinde bir kez koşmalı.
+
+### Yan bulgu: `enaimami/headshell` 404
+
+Paketin `url`'si yazılırken ölçüldü — D-065 depoyu `headshell`
+organizasyonuna taşımış, ama `README.md` (iki yer) ve `packaging/copyright`
+eski adresi taşımaya devam ediyordu ve o adres yönlendirmiyor, **404
+veriyor**. `copyright` dosyası taslak sürümdeki `.deb` ve `.rpm`in içinde
+ölü bir adres olarak duruyordu. Üçü de düzeltildi.
+
+### Yan bulgu: PLAN §3.5'in iki borcu zaten kapanmış
+
+"AppImage doğrulanmadı" ve "macOS/Windows elle koşulmadı" borçları, koşumlar
+ölçülünce kapanmış çıktı: `workflow_dispatch` koşumu 35571122203 üç
+platformda da yeşil, etiket koşumu 35597289680 da öyle, taslak sürümde dokuz
+varlık var. PLAN bunu bilmiyordu — metin ölçüme göre güncellendi. Kalan
+gerçek eksik: `.dmg` yalnızca arm64.
+
+**458 test, üç kapı temiz.**
+

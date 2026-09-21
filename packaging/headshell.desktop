@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=headshell
+Comment=Provider-independent music listening layer
+Exec=headshell-desktop
+Icon=headshell-desktop
+Terminal=false
+Categories=AudioVideo;Audio;Music;
+StartupWMClass=headshell-desktop

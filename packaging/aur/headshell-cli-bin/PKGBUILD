@@ -1,0 +1,51 @@
+# Maintainer: enaimami <1terabyterma@gmail.com>
+#
+# `headshell` komut satırı arayüzünün derlenmiş hâli. Kaynaktan derleyen paket
+# `packaging/aur/headshell/`, masaüstünün derlenmiş hâli `headshell-bin/`.
+#
+# Masaüstü ile aynı PKGBUILD'de değil, bilerek: split package paylaşılan bir
+# derleme için vardır ve burada derleme yok. Ayrı durunca CLI kuran kullanıcı
+# 10 MB'lık `.deb`i indirmiyor.
+#
+# İndirilen arşivin adında sürüm yok: `release.yml` onu sabit tutuyor ki
+# aşağıdaki satır her sürümde aynı kalsın. Sürüm adreste zaten var.
+#
+# Lisans dosyaları kaynak arşivinden geliyor (1,2 MB) — CLI arşivinin içinde
+# yalnızca ikili var.
+
+pkgname=headshell-cli-bin
+# Sürüm tek satırda — komşu PKGBUILD'lerdeki gerekçenin aynısı (D-063).
+pkgver=0.0.1_beta
+_pkgver=${pkgver//_/-}
+pkgrel=1
+pkgdesc='Provider-independent music listening layer (command line interface, prebuilt)'
+arch=('x86_64')
+url='https://github.com/headshell/headshell'
+license=('MIT' 'Apache-2.0')
+depends=('alsa-lib')
+optdepends=('headshell-bin: desktop application'
+            'yt-dlp: YouTube Music plugin streaming'
+            'python: plugin runtime')
+provides=("headshell-cli=$pkgver")
+conflicts=('headshell-cli')
+# İkili yukarı akıştan geliyor; yeniden `strip`'lenmesin, boş bir `-debug`
+# paketi de üretilmesin.
+options=('!strip' '!debug')
+
+_rel="$url/releases/download/v$_pkgver"
+_srcdir="headshell-$_pkgver"
+
+source=("headshell-$pkgver.tar.gz::$url/archive/refs/tags/v$_pkgver.tar.gz")
+source_x86_64=("headshell-cli-$pkgver.tar.gz::$_rel/headshell-cli-linux-$CARCH.tar.gz")
+# Sağlama toplamları **şu anki** `v0.0.1-beta` etiketine ait. Etiket
+# taşınırsa (yeniden kesilirse) arşivin toplamı da değişir — `updpkgsums`
+# koş, elle düzeltme. Sıra `packaging/aur/README.md`'de.
+sha256sums=('252d8c3d4ee72e93e4c8c525973a17a423ee9c004dadc52c88ca8f7339b519eb')
+sha256sums_x86_64=('83547da87fa8ba72a45d5569d6684b6646d97b2bf46cd6815ad1f3047720ae8c')
+
+package() {
+  install -Dm755 headshell "$pkgdir/usr/bin/headshell"
+
+  install -Dm644 "$_srcdir/LICENSE-MIT" "$pkgdir/usr/share/licenses/$pkgname/LICENSE-MIT"
+  install -Dm644 "$_srcdir/LICENSE-APACHE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE-APACHE"
+}

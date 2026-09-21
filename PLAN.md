@@ -1522,20 +1522,41 @@ içinde ikonlar, `AudioVideo;Audio;Music;` kategorili `.desktop` girdisi,
 `bundle.linux.{deb,rpm}.files` ile giriyor: `bundle.licenseFile` alanı
 Linux paketleyicilerine geçmiyor ve bu ancak paketin içi açılınca görüldü.
 
-> Kalan borç iki başlık:
->
-> 1. **AppImage yerelde üretilemiyor.** linuxdeploy kendi (eski) `strip`'ini
->    taşıyor ve Arch'ın `.relr.dyn` bölümlü kütüphanelerini tanımıyor. Ubuntu
->    runner'da beklenen sorun değil — ama **doğrulanmadı**, yalnızca CI'da ayrı
->    bir adıma alındı ki bir arıza deb/rpm'i de götürmesin.
-> 2. **macOS ve Windows yalnızca CI matrisinde tanımlı.** İlk etiket atılmadan
->    önce `workflow_dispatch` ile elle koşulmalı.
+**İki borç da kapandı — ölçüldü, varsayılmadı.**
+
+1. **AppImage CI'da üretiliyor.** Yerelde (Arch) düşmeye devam ediyor:
+   linuxdeploy kendi eski `strip`'ini taşıyor ve `.relr.dyn` bölümlü
+   kütüphaneleri tanımıyor. Ubuntu runner'da beklenen davranış çıktı —
+   `headshell_0.0.1-beta_amd64.AppImage`, 85 MB, taslak sürümde duruyor.
+   Ayrı adımda kalmaya devam ediyor: bir arıza deb/rpm'i de götürmesin.
+2. **macOS ve Windows elle koşuldu.** `workflow_dispatch` (koşum
+   35571122203) üç platformda da yeşil; etiket koşumu (35597289680) da öyle.
+   Taslak sürümde dokuz varlık var: `.deb`, `.rpm`, `.AppImage`, `.dmg`,
+   `.msi`, NSIS `.exe` ve üç CLI arşivi.
+
+> **macOS yalnızca arm64.** Matriste `macos-14` var, o da Apple Silicon.
+> Intel Mac kullanıcısı için `.dmg` üretilmiyor. Bilinen eksik, kapsam
+> kararı: ikinci bir runner ikinci bir derleme demek ve talep henüz ölçülmedi.
+
+### AUR paketleri
+
+Arch tarafı `packaging/aur/` altında, üç PKGBUILD ve dört paket: kaynaktan
+derleyen split package (`headshell` + `headshell-cli`), ve önceden derlenmiş
+ikisi ayrı ayrı (`headshell-bin`, `headshell-cli-bin` — orada paylaşılan bir
+derleme yok). Masaüstü girdisi tek bir dosyada, `packaging/headshell.desktop`.
+Paketler Arch konteynerinde `makepkg` ile derlendi, `namcap` üçünde de temiz;
+kaynak paketin tam derlemesi henüz gerçek bir Arch makinesinde koşulmadı.
+Karar ve gerekçe **D-066**; sürüm yayımlama sırası `packaging/aur/README.md`.
+
+> **`-bin` paketi sürüm taslaktan çıkana kadar çalışmaz:** taslak sürümün
+> varlıkları anonim indirilemez. Kaynak paketin böyle bir borcu yok, etiket
+> arşivi taslaktan bağımsız.
 
 ---
 
 ### 3.6 Faz 3 durum — KAPANDI
 
-**455 test**, clippy ve fmt temiz.
+**458 test**, clippy ve fmt temiz.
 
 | Bölüm | Durum |
 |---|---|
@@ -1553,10 +1574,13 @@ karar noktası metni orada duruyor. Tema sözleşmesi kapandığı için artık 
 bir tur olarak açılabilir. **Faz 3'ü eksik bırakmıyor:** temalar bugün
 tasarlandıkları gibi çalışıyor ve mod'lar onların üstüne değil yanına gelecek.
 
-Sıradaki iş **Faz 2** (D-027'de ertelenmişti, iptal edilmemişti): eklenti
-sınırı ve sağlayıcı genişlemesi. Faz 2'nin ilk karar noktası eklenti izin
-modeli (§2.1) ve oraya Faz 1'den iki borç taşınıyor — `keyring` (D-021) ve
-gerçek zamanlı dizin izleme (D-025).
+> Bu bölümün sonu bir zamanlar "sıradaki iş **Faz 2**" diyordu — sıra
+> D-027'de tersine dönmüş, Faz 3 önce bitmişti. **Faz 2 o cümleden sonra
+> kapandı** (§2.6); cümle bayatlayınca kaldırıldı.
+
+Faz 3 kapandığında geriye kalan iş kod değil **dağıtım**: ilk sürümün
+yayımlanması. Bkz. yukarıda §3.5 — paketler üretiliyor, AUR paketleri yazıldı,
+sürüm hâlâ taslak.
 
 ---
 
