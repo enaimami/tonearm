@@ -3029,3 +3029,49 @@ ve `Error`'ın `Display`'i tasarım gereği yalnızca `ADIM: {stage}` basıyor.
 K9 kurulmuş bir projede. `chain_text()`'e geçince sebep ilk koşumda çıktı.
 
 **456 test, üç kapı temiz.**
+
+## D-062 — Aynı yarış ikinci bir yerde: paylaşılan önbelleğe atomik yerleştirme
+**Tarih:** 2026-09-21 · **Durum:** UYGULANDI (2026-09-21)
+
+**Soru:** D-061'den sonraki CI koşumu yine düştü ama **yeni bir hatayla**:
+bot duvarı değil, `yt-dlp kurulu değil`. Eser az önce kurulmuştu; neden
+kurulu görünmüyor?
+
+**Karar:** `cached_ytdlp` paylaşılan önbelleğe artık atomik yerleştiriyor:
+önce koşuma özgü bir `.kuruluyor` adına kopyalıyor, sonra `rename`.
+
+### Zincir
+
+`std::fs::copy` atomik değil. Paralel koşan öteki test, önbellekteki
+**yarım yazılmış** dosyayı `cached.exists()` ile görüp hazır sayıyordu; onu
+kendi veri dizinine kopyalıyor, motorun karma denetimi tutmuyor, eser
+`ready_paths`'e hiç girmiyor ve eklenti "yt-dlp kurulu değil" diyordu.
+
+Hata mesajı doğruydu — eser gerçekten hazır değildi. Yanıltıcı olan, onu
+kuran adımın başarılı görünmesiydi.
+
+### Bu, D-060'ın aynısı
+
+D-060 motordaki sabit geçici adı düzeltti. Aynı desenin ikinci bir kopyası
+üç fonksiyon yukarıda, test yardımcısında duruyordu ve o tur gözden kaçtı:
+düzeltme yazılırken "başka nerede atomik olmayan bir yerleştirme var" diye
+bakılmadı. Bir yarış bulunduğunda sorulacak soru "burayı düzelttim mi"
+değil, **"aynı deseni paylaşan başka kaç yer var"**.
+
+Kural olarak: paylaşılan bir dizine konan her dosya `rename` ile konur.
+`rename` aynı dosya sisteminde atomiktir — dosya ya yoktur ya tamdır; yarım
+hâli hiçbir okuyucuya görünmez.
+
+### Doğrulama sınırı — açıkça
+
+Bu yarış geliştirme makinesinde hiç tetiklenmedi (temiz önbellekle üç koşum,
+üçü de geçti), yani düzeltme **yerelde kanıtlanmadı.** Kanıt okumada:
+`copy` atomik değil, `rename` atomik. D-060'ın regresyon testi gibi
+deterministik bir sınama buraya yazılmadı — sınanacak şey testin kendi
+yardımcısı ve onu sınayan bir test, sınadığı şeyin altına düşerdi.
+
+Gerçek sınav CI. Bu, D-059/D-060'ın dersini bir kez daha söylüyor:
+**"yerelde geçti" bir ölçüm sonucudur, kapsamı ölçüldüğü yer kadardır.**
+
+**456 test, üç kapı temiz** (CI'nın ses aygıtsız koşulunda ölçüldü;
+`playback_local` bu makinede HDMI hattındaki EIO yüzünden kararsız, D-059).

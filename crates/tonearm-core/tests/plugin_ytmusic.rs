@@ -73,7 +73,27 @@ fn cached_ytdlp(requirement: &Requirement) -> Result<PathBuf, String> {
     }
 
     std::fs::create_dir_all(&cache).map_err(|err| err.to_string())?;
-    std::fs::copy(engine.artifact_path(requirement), &cached).map_err(|err| err.to_string())?;
+
+    // Paylaşılan önbelleğe **atomik** yerleştirme. `copy` atomik değil:
+    // paralel koşan öteki test yarım yazılmış dosyayı yukarıdaki `exists()`
+    // ile görüp hazır sayıyor, kendi dizinine kopyalıyor, motorun karma
+    // denetimi tutmuyor ve eser `ready_paths`'e hiç girmiyor — eklenti de
+    // "yt-dlp kurulu değil" diyor. CI'da böyle çıktı (D-062).
+    //
+    // D-060'ın motorda düzelttiği desenin aynısı: önce koşuma özgü bir ada
+    // yaz, sonra `rename` ile yerine koy. `rename` aynı dosya sisteminde
+    // atomiktir, yani dosya ya yok ya da tam.
+    let staging = cache.join(format!(
+        "{}.{}-{}.kuruluyor",
+        requirement.file_name(),
+        std::process::id(),
+        jiff::Timestamp::now().as_nanosecond()
+    ));
+    std::fs::copy(engine.artifact_path(requirement), &staging).map_err(|err| err.to_string())?;
+    if let Err(err) = std::fs::rename(&staging, &cached) {
+        let _ = std::fs::remove_file(&staging);
+        return Err(err.to_string());
+    }
     Ok(cached)
 }
 
