@@ -44,11 +44,11 @@ Atlananları gerçekten koşturmak için gereken ortam değişkenleri:
 
 | Değişken | Neyi açar |
 |---|---|
-| `TONEARM_ACOUSTID_KEY` | AcoustID canlı sınamaları (3 test). Anahtarsız derlemede `EMBEDDED_API_KEY` boş olduğu için atlanırlar. |
-| `TONEARM_TORZNAB_URL` + `TONEARM_TORZNAB_KEY` | Torznab canlı sınamaları (3 test). Kendi Prowlarr/Jackett'ınızı ister; `TONEARM_TORZNAB_QUERY` sorguyu değiştirir. |
-| `TONEARM_PYTHON` | Motorun kullanacağı Python yorumlayıcısı. Verilirse **geri düşülmez**: o yorumlayıcı çalışmıyorsa motor `python3`'e kaymaz, durur ve söyler. |
+| `HEADSHELL_ACOUSTID_KEY` | AcoustID canlı sınamaları (3 test). Anahtarsız derlemede `EMBEDDED_API_KEY` boş olduğu için atlanırlar. |
+| `HEADSHELL_TORZNAB_URL` + `HEADSHELL_TORZNAB_KEY` | Torznab canlı sınamaları (3 test). Kendi Prowlarr/Jackett'ınızı ister; `HEADSHELL_TORZNAB_QUERY` sorguyu değiştirir. |
+| `HEADSHELL_PYTHON` | Motorun kullanacağı Python yorumlayıcısı. Verilirse **geri düşülmez**: o yorumlayıcı çalışmıyorsa motor `python3`'e kaymaz, durur ve söyler. |
 
-`TONEARM_YTDLP` **kaldırıldı** (D-055): yt-dlp'yi artık eklenti aramıyor, motor
+`HEADSHELL_YTDLP` **kaldırıldı** (D-055): yt-dlp'yi artık eklenti aramıyor, motor
 kuruyor. `ytmusic` testleri onu manifestteki sabitlenmiş sürümden indiriyor
 ve `--features http-client` olmayan bir derlemede kendilerini atlıyor.
 
@@ -64,7 +64,7 @@ Yeni bir yetenek eklediysen ayrıca:
 
 ## Altın Kural (K1)
 
-**CLI ince bir kabuktur. Bütün mantık `tonearm-core` içindedir.**
+**CLI ince bir kabuktur. Bütün mantık `headshell-core` içindedir.**
 
 Testi şu: bir özellik CLI'den silindiğinde çekirdek onu hâlâ sunabiliyor olmalı.
 CLI yalnızca argüman ayrıştırır, çekirdeği çağırır, çıktıyı biçimler, çıkış kodu
@@ -94,7 +94,7 @@ kaymasıydı.
 | **K5** | Eklentiler alt süreç + JSON-RPC ile konuşur |
 | **K6** | Kanonik kimlik zinciri sırası: ISRC → MBID → bulanık → AcoustID |
 | **K7** | Çekirdek API'si `uniffi` ile ifade edilebilir olmalı |
-| **K8** | `tonearm-core` içinde `unwrap()` / `expect()` / `panic!()` yok |
+| **K8** | `headshell-core` içinde `unwrap()` / `expect()` / `panic!()` yok |
 | **K9** | Her başarısızlık hangi aşamada olduğunu söyler |
 | **K10** | Faz sınırı aşılmaz |
 
@@ -123,7 +123,7 @@ Yeni bağımlılık eklemeden **önce sor**; ağaç küçük kalmalı (mobil bin
 oradaki oran **projenin en önemli metriğidir**. Eşleştirme koduna dokunuyorsan:
 
 ```bash
-cargo test -p tonearm-core --test identity_accuracy
+cargo test -p headshell-core --test identity_accuracy
 ```
 
 Test sınıf bazında kırılım basar — toplam oran tek bir sınıftaki çöküşü

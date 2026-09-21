@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
 <rect x="0" y="0" width="1080" height="1080" fill="#0f1218"/>
-<text x="72.0" y="106.0" font-size="34" font-weight="700" fill="#ffb454" font-family="sans-serif">tonearm</text>
+<text x="72.0" y="106.0" font-size="34" font-weight="700" fill="#ffb454" font-family="sans-serif">headshell</text>
 <text x="1008.0" y="106.0" font-size="34" font-weight="400" fill="#8b94a3" text-anchor="end" font-family="sans-serif">tüm zamanlar</text>
 <text x="72.0" y="247.8" font-size="96" font-weight="700" fill="#f4f6fa" font-family="sans-serif">3</text>
 <text x="149.6" y="247.8" font-size="40" font-weight="400" fill="#ffb454" font-family="sans-serif">saat dinleme</text>
@@ -30,5 +30,5 @@
 <rect x="545.0" y="876.0" width="463.0" height="60.0" fill="#ffb454"/>
 <rect x="545.0" y="936.0" width="463.0" height="2.0" fill="#262c36"/>
 <text x="776.5" y="968.0" font-size="22" font-weight="400" fill="#8b94a3" text-anchor="middle" font-family="sans-serif">2024</text>
-<text x="72.0" y="1008.0" font-size="28" font-weight="400" fill="#8b94a3" font-family="sans-serif">1 Ocak 2023&apos;dan beri (2 yıl) · tonearm</text>
+<text x="72.0" y="1008.0" font-size="28" font-weight="400" fill="#8b94a3" font-family="sans-serif">1 Ocak 2023&apos;dan beri (2 yıl) · headshell</text>
 </svg>

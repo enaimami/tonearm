@@ -54,18 +54,18 @@ jobs:
 
       # K7 yüzey denetimi (tests/k7_surface.rs) bu kapının içinde koşar.
       #
-      # `TONEARM_TEST_YTMUSIC_COOKIES`: YouTube veri merkezi adreslerine bot
+      # `HEADSHELL_TEST_YTMUSIC_COOKIES`: YouTube veri merkezi adreslerine bot
       # duvarı çıkarıyor ve çerezsiz hiçbir akış çözülemiyor (D-061). Sır
       # yoksa değişken boş gelir ve o tek test kendini atlar — fork'lardan
       # gelen PR'lara secret verilmediği için bu normal koşum.
       - name: Kapı 3 — test
         run: cargo test --workspace
         env:
-          TONEARM_TEST_YTMUSIC_COOKIES: ${{ secrets.YTMUSIC_COOKIES }}
+          HEADSHELL_TEST_YTMUSIC_COOKIES: ${{ secrets.YTMUSIC_COOKIES }}
 
   # Feature birleşmesi olmadan çekirdek tek başına temiz mi?
   #
-  # `--workspace` koşumunda tonearm-cli ve tonearm, tonearm-core'un audio/http-client
+  # `--workspace` koşumunda headshell-cli ve headshell, headshell-core'un audio/http-client
   # feature'larını açıyor ve varsayılan derlemedeki ölü kodu gizliyor. Mobil
   # (Faz 6) çekirdeği bu feature'lar olmadan derleyecek, o yüzden ayrı bakılır.
   #
@@ -90,15 +90,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Çekirdek tek başına (varsayılan feature'lar)
-        run: cargo clippy -p tonearm-core --all-targets -- -D warnings
+        run: cargo clippy -p headshell-core --all-targets -- -D warnings
 
       - name: Her feature tek tek
         run: |
           for f in audio http-client fingerprint render-png; do
             echo "::group::$f"
-            cargo clippy -p tonearm-core --all-targets --features "$f" -- -D warnings
+            cargo clippy -p headshell-core --all-targets --features "$f" -- -D warnings
             echo "::endgroup::"
           done
 
       - name: Hepsi birden
-        run: cargo clippy -p tonearm-core --all-targets --features audio,http-client,fingerprint,render-png -- -D warnings
+        run: cargo clippy -p headshell-core --all-targets --features audio,http-client,fingerprint,render-png -- -D warnings

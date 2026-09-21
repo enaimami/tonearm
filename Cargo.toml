@@ -1,13 +1,13 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/tonearm-core",
-    "crates/tonearm-cli",
-    "crates/tonearm",
+    "crates/headshell-core",
+    "crates/headshell-cli",
+    "crates/headshell",
     # D-047: torrent sağlayıcı workspace üyesi ama **çekirdeğin bağımlılığı
     # değil** — ayrı bir ikili, alt süreç olarak konuşuyor. `librqbit`'in
-    # 179 crate'i buradan kilide girer, `tonearm-core`'un ağacına girmez.
-    "crates/tonearm-plugin-torrent",
+    # 179 crate'i buradan kilide girer, `headshell-core`'un ağacına girmez.
+    "crates/headshell-plugin-torrent",
 ]
 exclude = ["spike"]
 
@@ -20,7 +20,7 @@ license = "MIT OR Apache-2.0"
 publish = false
 
 [workspace.dependencies]
-tonearm-core = { path = "crates/tonearm-core" }
+headshell-core = { path = "crates/headshell-core" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

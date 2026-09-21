@@ -278,7 +278,7 @@ def ytdlp_command():
     motorun işi. El sıkışmada gelen `requirements` haritasında bir yol
     varsa o eser kurulu ve karması doğrulanmış demektir; yoksa hiç yoktur.
 
-    Bir zamanlar burada `TONEARM_YTDLP` → `PATH` → `python3 -m yt_dlp` diye
+    Bir zamanlar burada `HEADSHELL_YTDLP` → `PATH` → `python3 -m yt_dlp` diye
     üç aşamalı bir arayış vardı. Üçü de kullanıcının sisteme bir şey
     kurmuş olmasına yaslanıyordu ve D-049 bunu yasakladı.
     """
@@ -289,7 +289,7 @@ def ytdlp_command():
     if not path:
         raise PluginError(
             "yt-dlp kurulu değil. Bunu eklenti değil motor kurar: "
-            "`tonearm plugin install ytmusic`."
+            "`headshell plugin install ytmusic`."
         )
 
     # Çalıştırma biti varsa doğrudan; yoksa yorumlayıcıya veriyoruz —
@@ -320,7 +320,7 @@ def cookie_file():
     if state["cookie_path"]:
         return state["cookie_path"]
 
-    handle, path = tempfile.mkstemp(prefix="tonearm-ytmusic-", suffix=".txt")
+    handle, path = tempfile.mkstemp(prefix="headshell-ytmusic-", suffix=".txt")
     with os.fdopen(handle, "w", encoding="utf-8") as out:
         out.write(raw if raw.endswith("\n") else raw + "\n")
     os.chmod(path, 0o600)

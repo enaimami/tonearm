@@ -1,0 +1,31 @@
+/* Gün Işığı — açık tema (PLAN §3.4 referans teması).
+ *
+ * Bu tema token setinin **karşı kutbu**: temel arayüz koyu yazılmıştı, bu
+ * dosya aynı sözleşmeyle açık bir arayüz üretiyor. Tek bir sınıf adı
+ * hedeflenmiyor; yalnızca `:root` token'ları — yani "genişletilmiş" değil,
+ * garantili yüzeyin içinde (D-038).
+ *
+ * `--headshell-color-scheme` bu tema yazılırken doğdu: token'lar yalnızca bizim
+ * çizdiğimiz renkleri değiştiriyor, ama onay kutusu, imleç ve kaydırma
+ * çubuğu motorun kendi çizdiği parçalar. Açık bir palette koyu kalıyorlardı.
+ */
+
+:root {
+  --headshell-color-scheme: light;
+
+  --headshell-bg: #faf7f2;
+  --headshell-surface: #ffffff;
+  --headshell-surface-raised: #f0ebe3;
+  --headshell-border: #ddd5c9;
+  --headshell-text: #241f1a;
+  --headshell-text-dim: #6d6257;
+
+  --headshell-accent: #b25e00;
+  --headshell-success: #1f7a3d;
+  --headshell-error: #c0392b;
+  --headshell-info: #1e5fbf;
+
+  --headshell-radius-sm: 6px;
+  --headshell-radius-lg: 8px;
+  --headshell-duration: 120ms;
+}

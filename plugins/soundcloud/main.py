@@ -29,7 +29,7 @@ import urllib.request
 
 API = 1
 VERSION = "0.1.0"
-USER_AGENT = f"tonearm-soundcloud/{VERSION}"
+USER_AGENT = f"headshell-soundcloud/{VERSION}"
 
 HOME_URL = "https://soundcloud.com/"
 API_BASE = "https://api-v2.soundcloud.com"
@@ -128,7 +128,7 @@ def api_get(path, **params):
         if state["client_id_source"] == "sır":
             raise PluginError(
                 "Verdiğiniz client_id reddedildi (HTTP "
-                f"{err.code}). `tonearm secret remove plugin:soundcloud client_id` "
+                f"{err.code}). `headshell secret remove plugin:soundcloud client_id` "
                 "derseniz eklenti kendisi keşfeder."
             ) from err
         log("info", f"client_id reddedildi (HTTP {err.code}), yeniden keşfediliyor")
@@ -222,7 +222,7 @@ def discover_client_id():
 
     raise PluginError(
         "client_id keşfedilemedi (SoundCloud'un web yüzeyi değişmiş olabilir). "
-        "`tonearm secret set plugin:soundcloud client_id` ile kendi anahtarınızı verebilirsiniz."
+        "`headshell secret set plugin:soundcloud client_id` ile kendi anahtarınızı verebilirsiniz."
     )
 
 

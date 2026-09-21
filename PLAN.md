@@ -9,7 +9,7 @@ test yüzeyi, kod konvansiyonları, tanılama pratiği, test düzeni.
 zaten bir kez oldu. Çelişki olursa **kurallarda bu dosya, operasyonel bilgide
 CLAUDE.md geçerlidir**.
 
-> Proje adı **`tonearm`** — D-058 ile karara bağlandı, yer tutucu değil.
+> Proje adı **`headshell`** — D-058 ile karara bağlandı, yer tutucu değil.
 
 ---
 
@@ -86,7 +86,7 @@ Aynı soru iki kez sorulmaz. Bir şeye karar vermeden önce `DECISIONS.md`'yi ok
 | **Yerel arşiv** | Yok, test fixture'ı üretilebilir (D-003) | Faz 1 dogfood edilemez, sıra buna göre |
 | **Sleeve** | Açık hedef, aralık sezonu takvimi belirliyor (D-004) | **Faz 0.5 eklendi** |
 
-**Açık kalan yok.** Proje adı **D-058: `tonearm`** ile kapandı; lisans
+**Açık kalan yok.** Proje adı **D-058: `headshell`** ile kapandı; lisans
 **D-005: MIT OR Apache-2.0**.
 
 ---
@@ -96,7 +96,7 @@ Aynı soru iki kez sorulmaz. Bir şeye karar vermeden önce `DECISIONS.md`'yi ok
 Tartışmaya kapalı. İhlal gerekiyorsa §0.1'e göre sor.
 
 ### K1 — Altın Kural: CLI ince kabuktur
-Bütün mantık `tonearm-core` içindedir. CLI yalnızca: argüman ayrıştırma, çekirdek çağrısı,
+Bütün mantık `headshell-core` içindedir. CLI yalnızca: argüman ayrıştırma, çekirdek çağrısı,
 çıktı biçimleme, çıkış kodu.
 
 **Test:** bir özellik CLI'den silindiğinde çekirdek onu hâlâ sunabiliyor olmalı.
@@ -113,7 +113,7 @@ Odalarda her istemci kendi kaynağından çalar; ağdan sadece zaman çapası ge
 Sunucudan ses akıtan tasarım önerme. (Maliyet + hukuk + çoklu sağlayıcı, üçü birden.)
 
 ### K4 — Spotify çekirdeğe girmez
-Ayrı, opsiyonel eklenti. `tonearm-core`'un bağımlılık ağacında Spotify'a ait hiçbir şey olmaz.
+Ayrı, opsiyonel eklenti. `headshell-core`'un bağımlılık ağacında Spotify'a ait hiçbir şey olmaz.
 
 ### K5 — Eklentiler alt süreç + JSON-RPC ile konuşur
 Dinamik kütüphane değil. Eklenti çökerse çekirdek düşmez; eklentiler herhangi bir dilde yazılır.
@@ -150,7 +150,7 @@ mevcut Rust çağıranları kırılmaz. Gerekçe D-052'de.
 > `uniffi`'nin kendi async makinesine göre yeniden yazılacak. Bugün
 > düzeltilebilir bir şey değil, izlenmesi gereken bir borç.
 
-### K8 — `tonearm-core` içinde `unwrap()` / `expect()` / `panic!()` yok
+### K8 — `headshell-core` içinde `unwrap()` / `expect()` / `panic!()` yok
 Testler hariç. Sessiz `unwrap_or_default()` de yasak — veri kaybını yutar.
 
 ### K9 — Her başarısızlık hangi aşamada olduğunu söyler
@@ -185,7 +185,7 @@ faz planı, ASLA YAPMA, SÖZLÜK.
 **Amaç:** Kullanıcı export zip'ini verir, ömür boyu istatistiklerini görür.
 Oynatma yok, sunucu yok, hesap yok. Bu faz tek başına değerli bir üründür.
 
-**Bitti sayılır:** `tonearm import x.zip && tonearm stats --year 2024` çalışıyor ve
+**Bitti sayılır:** `headshell import x.zip && headshell stats --year 2024` çalışıyor ve
 kimlik doğruluk oranı ölçülüp raporlanıyor.
 
 ### 0.1 Workspace iskeleti
@@ -241,15 +241,15 @@ keşif zaman çizelgesi. Hepsi ham olaylardan hesaplanır, önceden hesaplanmı�
 
 ### 0.6 CLI komutları
 ```
-tonearm import <zip> [--dry-run]
-tonearm stats [--year N] [--top N] [--artist X]
-tonearm resolve "<sanatçı> - <başlık>"
-tonearm diag
+headshell import <zip> [--dry-run]
+headshell stats [--year N] [--top N] [--artist X]
+headshell resolve "<sanatçı> - <başlık>"
+headshell diag
 ```
 Hepsi `--json` destekler.
 
 ### 0.7 Tanılama
-`tonearm diag` son çalıştırmanın ortamını, aşamasını, hata zincirini ve sayılarını
+`headshell diag` son çalıştırmanın ortamını, aşamasını, hata zincirini ve sayılarını
 tek blokta, kopyalanabilir biçimde basar.
 
 ---
@@ -300,7 +300,7 @@ yeniden etiketlendi.
 paylaşılabilir bir görsel artefakt gerektiriyor. Aralık yıl sonu kartı sezonu (Spotify Wrapped®) yılda bir açılıyor
 ve bedava dikkat penceresi.
 
-**Bitti sayılır:** `tonearm sleeve --year 2026 --out kart.png` çalışıyor ve çıkan görsel
+**Bitti sayılır:** `headshell sleeve --year 2026 --out kart.png` çalışıyor ve çıkan görsel
 sosyal medyada açıklamasız paylaşılabilir kalitede.
 
 ### 0.5.1 Kart üreticisi çekirdekte yaşar
@@ -382,7 +382,7 @@ penceresine ne yetişeceğini belirliyor ve **cevaplanmadan kod yazılmaz.**
 **Amaç:** Yerel dosyalar ve Subsonic/Jellyfin'den çalabilmek. **Bu andan sonra
 scrobble'ı sen üretirsin** — geçmiş artık hiçbir sağlayıcıda oluşmaz.
 
-**Bitti sayılır:** `tonearm play` ile yerel ve uzak kaynaktan kesintisiz çalıyor,
+**Bitti sayılır:** `headshell play` ile yerel ve uzak kaynaktan kesintisiz çalıyor,
 her çalma bir `listen` kaydı üretiyor.
 
 **Dikkat (D-003):** Geliştiricinin yerel arşivi yok. Bu fazı **dogfood edemezsin** —
@@ -428,8 +428,8 @@ Tarama K9'a uygun özet döndürüyor: `files_seen / audio_files / indexed /
 tag_fallback / failed / unreadable_dirs / unchanged`. Bozuk dosya taramayı
 düşürmüyor ama **sayılıyor**; okunamayan alt dizin de öyle.
 
-**İndeks artık kalıcı** (şema v2, `provider_tracks` + FTS5). `tonearm play`
-tarama yapmıyor; kullanıcı bir kez `tonearm provider scan` der, sonraki
+**İndeks artık kalıcı** (şema v2, `provider_tracks` + FTS5). `headshell play`
+tarama yapmıyor; kullanıcı bir kez `headshell provider scan` der, sonraki
 çalmalar katalogdan okur. Arama da doğrusal değil FTS.
 
 Üç tasarım kararı:
@@ -446,7 +446,7 @@ tarama yapmıyor; kullanıcı bir kez `tonearm provider scan` der, sonraki
   köklerin altında mı diye sınanıyor. `<kök>/../../etc/passwd` reddediliyor.
 
 **Dizin izleme yerine bayatlık yoklaması (D-025).** `notify` bağımlılığı
-eklenmedi: `tonearm provider scan --if-stale` sağlayıcıya ucuz bir soru soruyor
+eklenmedi: `headshell provider scan --if-stale` sağlayıcıya ucuz bir soru soruyor
 (`catalog_changed_since`) ve yalnızca gerekiyorsa tarıyor. Yerel sağlayıcı
 bunu **yalnızca dizinleri** gezerek cevaplıyor — dosyalar `stat` edilmiyor.
 
@@ -524,15 +524,15 @@ cümlede birleştirmekteydi**.
 **CLI yüzeyi** (Altın Kural sınavı geçildi — kabukta karar yok):
 
 ```
-tonearm provider add subsonic --url https://muzik.ev --user adin [--name ev] [--no-verify]
-tonearm provider add jellyfin --url https://jf.ev --user adin [--api-key ANAHTAR]
-tonearm provider servers      # kimlik bilgisi gösterilmez
-tonearm provider remove <ad>
+headshell provider add subsonic --url https://muzik.ev --user adin [--name ev] [--no-verify]
+headshell provider add jellyfin --url https://jf.ev --user adin [--api-key ANAHTAR]
+headshell provider servers      # kimlik bilgisi gösterilmez
+headshell provider remove <ad>
 ```
 
-Parola **argüman değil**: `TONEARM_PASSWORD`'dan ya da terminalden yankısız
+Parola **argüman değil**: `HEADSHELL_PASSWORD`'dan ya da terminalden yankısız
 okunuyor — komut satırına yazılan parola kabuk geçmişine ve `ps` çıktısına
-düşerdi. Tty yoksa sessizce yankılı okumaya düşülmüyor, `TONEARM_PASSWORD`
+düşerdi. Tty yoksa sessizce yankılı okumaya düşülmüyor, `HEADSHELL_PASSWORD`
 gösteriliyor. Yankısız okuma için yeni bağımlılık yok (`crossterm` zaten
 TUI için vardı). Ad önerisi (`https://muzik.ev:4533` → `muzik`) çekirdekte,
 CLI'de değil: GUI de aynı öneriyi gösterecek.
@@ -543,7 +543,7 @@ CLI'de değil: GUI de aynı öneriyi gösterecek.
 ```
 KARAR GEREKLİ: Faz 1.3 uzak sağlayıcı — kapsam, taşıma katmanı, kimlik, test yolu
 
-Bağlam:  tonearm-core'un bağımlılık ağacında bugün HTTP/TLS yok; `tokio` bile
+Bağlam:  headshell-core'un bağımlılık ağacında bugün HTTP/TLS yok; `tokio` bile
          yalnızca dev-dependency (genel API çalışma zamanından bağımsız, K:
          "çekirdek #[tokio::main] kurmasın"). İlk ağ çağrısı bu dengeyi
          değiştirir. Ayrıca D-017 "kullanıcının çalışan bir Subsonic/Jellyfin
@@ -654,7 +654,7 @@ dinleme kaydedildi" derken `stats` 2 gösteriyordu. Testle kilitli.
 Her çalma bir `listen` kaydı. Faz 0'daki import verisiyle aynı tabloya yazılır —
 geçmiş ve bugün tek bir zaman çizelgesi olur.
 
-**Uygulandı ve uçtan uca doğrulandı.** `tonearm play` ile çalınan parça
+**Uygulandı ve uçtan uca doğrulandı.** `headshell play` ile çalınan parça
 `stats` ve `library search` çıktısında görünüyor; CLI testi bunu kilitliyor
 (`playing_a_local_file_records_a_listen_in_the_same_table_as_imports`).
 
@@ -665,7 +665,7 @@ burada ikinci bir yorum yok.
 ### 1.7 CLI oynatıcı arayüzü — TAMAM
 `ratatui` ile TUI. Bu, GUI'nin prototipi değil; çekirdeğin tam kullanılabilir olduğunun kanıtı.
 
-**Uygulandı:** `tonearm play <sorgu> --tui`. Çalan parça + durum, ilerleme çubuğu,
+**Uygulandı:** `headshell play <sorgu> --tui`. Çalan parça + durum, ilerleme çubuğu,
 kuyruk (çalan `▸` ile işaretli), tekrar/karıştırma göstergesi, tuş yardımı.
 Tuşlar: boşluk duraklat, `n`/`b` sonraki/önceki, `↑↓`/`jk` seçim, `enter` seçileni
 çal, `s` karıştır, `r` tekrar kipi, `q`/`Esc`/`Ctrl+C` çık.
@@ -690,7 +690,7 @@ davranışın aynısı — yani TUI o tasarımın çalıştığının kanıtı o
 
 ### 1.8 Faz 1 durum — KAPANDI
 
-**203 test**, clippy ve fmt temiz. `tonearm play` ve `tonearm play --tui` uçtan uca
+**203 test**, clippy ve fmt temiz. `headshell play` ve `headshell play --tui` uçtan uca
 çalışıyor; yerel dosyadan da, Navidrome/Jellyfin'den de.
 
 | Bölüm | Durum |
@@ -742,7 +742,7 @@ sürüm uyumsuzluğunda çökmeden reddedebiliyor.
 Yaşam döngüsü, el sıkışma, **sürümleme**, zaman aşımı, çökme izolasyonu.
 Protokol sürümlenir; uyumsuz eklenti yüklenmez, hata mesajı verir.
 
-**Yapıldı** (`crates/tonearm-core/src/plugin/`). Beş dosya, beş iş: `protocol`
+**Yapıldı** (`crates/headshell-core/src/plugin/`). Beş dosya, beş iş: `protocol`
 (tel biçimi), `manifest` (`plugin.json` + izin beyanı), `consent` (onay
 defteri), `transport` (alt süreç + satır çerçeveleme), `client` (id eşleme +
 zaman aşımı). Üstünde `PluginProvider` — var olan `Provider` trait'ini
@@ -757,7 +757,7 @@ Kararlar ve sebepleri:
    yok. Kullanıcısı olmayan bir tel biçimi tahmindir. Sürüm kuralı D-039'un
    aynısı: **eklemek `api`'yi artırmaz**, eski eklentiler `-32601` döner ve
    çekirdek onu "desteklemiyor" diye okur.
-2. **Başlatma tembel.** Süreç ilk çağrıda açılıyor; `tonearm stats` yanında altı
+2. **Başlatma tembel.** Süreç ilk çağrıda açılıyor; `headshell stats` yanında altı
    süreç açmıyor, `provider list` hiç açmıyor. Bunu mümkün kılan şey
    yeteneklerin manifestte de yazması — çelişirse el sıkışma kazanır ve fark
    uyarı olarak raporlanır.
@@ -776,12 +776,12 @@ Aşamalar: `PLUGIN_LOAD` (manifest/onay), `PLUGIN_HANDSHAKE` (başlatma/sürüm)
 `PluginTimeout` / `PluginRpc` / `PluginIncompatible` — "öldü", "cevap
 vermedi", "hayır dedi" ve "konuşamıyoruz" dört farklı tanıdır (K9).
 
-CLI: `tonearm plugin list|approve|disable|enable|forget`,
-`tonearm secret list|set|remove`. Hepsi `--json`.
+CLI: `headshell plugin list|approve|disable|enable|forget`,
+`headshell secret list|set|remove`. Hepsi `--json`.
 Eklenti yazarı belgesi: `docs/eklenti-yazma.md`.
 
 **Sınama.** Birim testleri betiklenmiş bir taşımayla protokol mantığını
-sınıyor; `crates/tonearm-core/tests/plugin_process.rs` **gerçek bir Python
+sınıyor; `crates/headshell-core/tests/plugin_process.rs` **gerçek bir Python
 eklentisini** (`fixtures/plugins/echo`) çalıştırıyor: el sıkışma, arama,
 kaynak çözme, sürüm reddi, çökme + yeniden başlatma, zaman aşımı, izin
 büyümesi, sır yalıtımı. Fixture kötü eklenti taklidini komut satırı
@@ -815,7 +815,7 @@ değil.
 
 Faz 2'nin "bitti sayılır" ölçütünün **ilk yarısı** buydu ve karşılandı:
 Rust olmayan bir eklenti gerçek bir servise bağlanıp arıyor ve **çalıyor**.
-`tonearm play "nujabes aruarian dance"` SoundCloud'dan 250 saniyelik parçayı
+`headshell play "nujabes aruarian dance"` SoundCloud'dan 250 saniyelik parçayı
 baştan sona çaldı ve bir `listen` kaydı üretti — import verisiyle aynı
 tabloya (§1.6).
 
@@ -838,7 +838,7 @@ Kararlar D-043'te. Özet:
 Karşılığında eklentinin bozulduğu gün *o gün* öğreniliyor. Ağ yoksa testler
 kendini atlıyor, sebebini yazarak — "ulaşamadım" ile "hayır dedi" ayrı (K9).
 
-**Canlı koşum Faz 1'den kalan bir kusuru buldu (D-044).** `tonearm play`
+**Canlı koşum Faz 1'den kalan bir kusuru buldu (D-044).** `headshell play`
 SoundCloud parçasını kuyruğa alıp `kaydedilen dinleme: 0` deyip anında
 çıkıyordu; hata yok, `diag` temiz, ses yok. Sebep motorun yeni gönderilen işi
 bir sonraki ses geri çağrısına kadar `Stopped` göstermesiydi — pencere yerel
@@ -851,7 +851,7 @@ AcoustID / Chromaprint parmak izi. Etiketleri bozuk yerel dosyalar için.
 **AcoustID yarısı TAMAM (D-046).** `identity/fingerprint.rs` symphonia'nın
 PCM'inden Chromaprint parmak izi üretiyor, `identity/acoustid.rs` onu
 AcoustID'ye soruyor, `Resolver::resolve_file` ikisini zincire bağlıyor.
-`tonearm resolve --file <yol>` bir ses dosyasını dördünden birden geçiriyor.
+`headshell resolve --file <yol>` bir ses dosyasını dördünden birden geçiriyor.
 
 Sıra korunuyor: önce dosyanın **kendi etiketlerinden** üç metin halkası,
 yalnızca sonuç `LocalKey`'e düşerse ses. Parmak izi en pahalı halka.
@@ -873,12 +873,12 @@ canlı test kolluyor.
 > bırakıldı; `acoustid.org/new-application` adresinden proje adına bir anahtar
 > alınana kadar 4. halka yalnızca kullanıcının kendi anahtarıyla çalışır.
 > Kullanıcının kişisel anahtarı `.env`'de duruyor ve testlerde
-> `TONEARM_ACOUSTID_KEY` olarak kullanılıyor — kaynağa gömmek onu herkese açık
+> `HEADSHELL_ACOUSTID_KEY` olarak kullanılıyor — kaynağa gömmek onu herkese açık
 > yapacağı için ayrıca sorulacak.
 
 **MusicBrainz yarısı TAMAM.** `identity/musicbrainz.rs` — `MetadataLookup`'ın
 ilk gerçek uygulaması; zincirin 2. ve 3. halkası artık çalışıyor.
-`tonearm --online resolve "Şebnem Ferah - Sil Baştan"` gerçek MusicBrainz'e
+`headshell --online resolve "Şebnem Ferah - Sil Baştan"` gerçek MusicBrainz'e
 bağlanıp MBID döndürüyor. Hız sınırı (1 istek/sn), `User-Agent`, Lucene
 kaçırma ve `503` yeniden denemesi içeride; `--online` varsayılan kapalı.
 
@@ -928,9 +928,9 @@ gerçek hazır olma kontrolü, peer sayısı ve indirme hızı raporlanır.
 > KARAR NOKTASI: torrent çekirdekte mi, eklentide mi? Bu bölüm "`librqbit`"
 > diyerek çekirdeği ima ediyordu, K5 ise "sağlayıcılar alt süreç eklentisidir"
 > diyor. **KAPANDI — D-047: eklenti.** Ağaç bedeli karardan önce ölçüldü:
-> `librqbit` `tonearm-core`'a **+179 crate** ekliyordu (77 → 256) ve o ağaç
-> `uniffi` ile mobile de gidecekti. Sağlayıcı artık `crates/tonearm-plugin-torrent`,
-> ayrı bir Rust ikilisi; `tonearm-core`'un ağacı 77'de kaldı.
+> `librqbit` `headshell-core`'a **+179 crate** ekliyordu (77 → 256) ve o ağaç
+> `uniffi` ile mobile de gidecekti. Sağlayıcı artık `crates/headshell-plugin-torrent`,
+> ayrı bir Rust ikilisi; `headshell-core`'un ağacı 77'de kaldı.
 >
 > Aynı kararda iki alt soru daha kapandı. **Ses teslimi:** eklenti
 > `127.0.0.1`'de sıralı bir HTTP akışı sunuyor ve `resolve_source`
@@ -998,7 +998,7 @@ eklenti düşmeli.
 | 2.1 JSON-RPC protokolü | TAMAM — izin modeli (D-040), sırlar (D-042), gerçek süreçle sınandı |
 | 2.2 Referans eklenti (SoundCloud) | TAMAM — canlı SoundCloud'da arıyor ve çalıyor (D-043) |
 | 2.3 AcoustID | TAMAM — parmak izi + AcoustID + `resolve --file` (D-046), gerçek anahtarla canlı sınandı; tek borç: `EMBEDDED_API_KEY` hâlâ boş |
-| 2.4 Torrent sağlayıcı | TAMAM — `crates/tonearm-plugin-torrent` alt süreç eklentisi (D-047): Torznab araması, sıralı yerel akış, iki adımlı yayım→dosya kimliği |
+| 2.4 Torrent sağlayıcı | TAMAM — `crates/headshell-plugin-torrent` alt süreç eklentisi (D-047): Torznab araması, sıralı yerel akış, iki adımlı yayım→dosya kimliği |
 | 2.5 Yayın platformu eklentileri | TAMAM — `plugins/ytmusic` (D-048): InnerTube araması, yt-dlp ile m4a akışı, kısıtlamayı kaldıran `Range` başlığı; canlı serviste baştan sona çaldı |
 
 **Faz 1'den taşınan borçlar:**
@@ -1059,14 +1059,14 @@ yükünü biz devralırız. Üç şart birden: **root yok + her işletim sistemi
 güncel kalabilir.**
 
 Tanılama tarafı zaten ayaktaydı: eksik bağımlılık sessizce "sonuç yok"a
-dönüşmüyor, `tonearm provider test` KULLANILAMIYOR deyip sebebini yazıyordu (K9).
+dönüşmüyor, `headshell provider test` KULLANILAMIYOR deyip sebebini yazıyordu (K9).
 Kırık olan **kurulabilirlikti**, görünürlük değil — ve D-055 onu iki
 eklentide onardı. Görünürlük ayrıca ileri gitti: eksiklik artık süreç
-açılmadan, `tonearm plugin list` çıktısında görünüyor.
+açılmadan, `headshell plugin list` çıktısında görünüyor.
 
 > KARAR NOKTASI: kural nasıl uygulanacak? **KAPANDI — D-050: eklenti motoru.**
-> Çalışma zamanı eklentinin değil **host'un** işi. `tonearm`'un tek bir motoru
-> olur, çalışma zamanı Python'dur ve `tonearm`'un kendi gereksinimi olarak bir kez
+> Çalışma zamanı eklentinin değil **host'un** işi. `headshell`'un tek bir motoru
+> olur, çalışma zamanı Python'dur ve `headshell`'un kendi gereksinimi olarak bir kez
 > ilan edilir (yorumlayıcı gömülmez — "gerekli olduğu söylenir yeter").
 > Eklentiler o motorun üstünde koşan betiklerdir.
 >
@@ -1078,7 +1078,7 @@ açılmadan, `tonearm plugin list` çıktısında görünüyor.
 >
 > Torrent eklenti olmaktan çıkıp **feature kapılı yerleşik sağlayıcı** olur:
 > kullanıcı hiçbir şey derlemez, ama D-047'nin ölçtüğü +179 crate yalnızca
-> kapıyı açan derlemeye girer ve `cargo tree -p tonearm-core` mobilde yine 77 der.
+> kapıyı açan derlemeye girer ve `cargo tree -p headshell-core` mobilde yine 77 der.
 >
 > **K5 değişmiyor:** alt süreç + JSON-RPC sınırı herkese açık kalır, motor tek
 > yol değil *kurulum gerektirmeyen desteklenen yol* olur. Depoda dağıtılan her
@@ -1091,19 +1091,19 @@ D-050'nin kararı yazıldı. Altı maddenin beşi bitti, biri açık:
 1. **Motor yazıldı** — `plugin/runtime.rs`. Python bulma + sürüm kontrolü
    (3.9+), `requires` çözümü, eserin indirilip karmasının doğrulanması, ve
    eksiklikte hangi adımda ne eksik diyen tanı (`ADIM: PLUGIN_RUNTIME`).
-   Eksik bağımlılık artık süreç açılmadan, `tonearm plugin list` çıktısında
+   Eksik bağımlılık artık süreç açılmadan, `headshell plugin list` çıktısında
    görünüyor.
 2. **`plugin.json` → `requires`** eklendi. `api` kırılmadı; alan eklemek
    sürümü artırmaz (§2.1). Eski manifestler boş listeyle okunuyor ve bunu
    bir test kilitliyor.
-3. **`ytmusic`** kendi yt-dlp arayışını bıraktı. `TONEARM_YTDLP` → `PATH` →
+3. **`ytmusic`** kendi yt-dlp arayışını bıraktı. `HEADSHELL_YTDLP` → `PATH` →
    `python3 -m yt_dlp` üçlüsü silindi; eklenti yolu el sıkışmadaki
    `requirements` haritasından alıyor.
 4. **`soundcloud` + `echo`** motora geçti — ikisi de `python3` yazıyor,
    yorumlayıcıyı motor çözüyor, `requires` boş.
 5. **`torrent` — TAŞIMA İPTAL (D-056).** D-050 S3'ün "çekirdeğe feature'lı
    sağlayıcı olarak taşı" kararı **geri alındı**. Torrent eklenti olarak
-   kalıyor, `crates/tonearm-plugin-torrent` ve `plugins/torrent/` yerinde.
+   kalıyor, `crates/headshell-plugin-torrent` ve `plugins/torrent/` yerinde.
 
    Geriye kalan borç taşıma değil **dağıtım**: eklenti kullanıcıya
    `cargo build --release` yaptırıyor ve D-049'u ihlal eden tek şey bu.
@@ -1197,8 +1197,8 @@ Yazma artık **her turda**, çıkışta değil: saatlerce açık kalan bir aray�
 tutulup yeniden deneniyor; `store_error` ve `listens_pending` bunu görünür
 kılıyor (K9).
 
-**Paket düzeni (D-030):** üç paket — `tonearm-core`, `tonearm-cli`, `tonearm` (GUI).
-Bağımlılık tek yönlü: `tonearm-cli` ile `tonearm` birbirini hiç görmez. Biri
+**Paket düzeni (D-030):** üç paket — `headshell-core`, `headshell-cli`, `headshell` (GUI).
+Bağımlılık tek yönlü: `headshell-cli` ile `headshell` birbirini hiç görmez. Biri
 diğerinden bir şey isterse o şey çekirdeğe aittir.
 
 #### Sözleşmenin şekli
@@ -1243,7 +1243,7 @@ bırakmaz.
 Aradaki sessizlikte pozisyon çapadan tahmin edilir.
 
 Uzun komutlar (`import`, `resolve`, `provider_scan`, `provider_test`,
-`server_add`, `play`) ayrıca `tonearm://busy` gönderir — bu da bir durum
+`server_add`, `play`) ayrıca `headshell://busy` gönderir — bu da bir durum
 değişimi, zamanlayıcı değil.
 
 #### Sürümleme gerekmiyor — ve bunun bir sınırı var
@@ -1265,8 +1265,8 @@ etmediği yerde başlar — ilerleme çubuğu birkaç yüz milisaniye yalan söy
 kimse şikâyet etmez, sonra **Faz 4'te aynı formül oda senkronunu sürer.**
 
 `fixtures/anchor/position_cases.json` iki tarafın da okuduğu tek doğruluk
-kaynağı (12 vaka). Rust tarafını `tonearm-core/tests/anchor_parity.rs`, JS
-tarafını `tonearm/ui/anchor.js` + `tonearm/tests/anchor_parity.mjs` bağlıyor.
+kaynağı (12 vaka). Rust tarafını `headshell-core/tests/anchor_parity.rs`, JS
+tarafını `headshell/ui/anchor.js` + `headshell/tests/anchor_parity.mjs` bağlıyor.
 
 Kümenin en değerli vakası yazılırken bulundu: `rate = 1.001` ile 100 sn'de
 çekirdek **100099 ms** diyor, 100100 değil — `100000 × 1.001` ikilik tabanda
@@ -1279,7 +1279,7 @@ kanıtlamazdı — D-032'de tam bu yüzden bir test silinmişti.
 
 #### Paket — TAMAM
 
-`crates/tonearm/`: Tauri kabuğu, ikili adı `tonearm-desktop` (D-034). Rust tarafı
+`crates/headshell/`: Tauri kabuğu, ikili adı `headshell-desktop` (D-034). Rust tarafı
 `main.rs` + `env.rs` (D-031 ortam düzeltmesi) + `state.rs` + `core_thread.rs`
 + `commands.rs`; webview `ui/` altında düz statik dosya — bundler yok, npm
 yok, `frontendDist: "ui"`.
@@ -1310,13 +1310,13 @@ makinesinde ortaya çıkar ve suçlanan tema değil uygulama olur.
 **Dil kapandı (D-036):** token adları — ve genel olarak bütün tanımlayıcılar —
 İngilizce. Tema seti bu projenin en dışa dönük yüzeyi; onu tüketen tanımadığımız
 bir tema yazarı. Yorum ve arayüz metni Türkçe kalır. Bu karar uygulanırken
-`crates/tonearm`, paylaşılan doğruluk kümesi ve ses fixture'ları da çevrildi.
+`crates/headshell`, paylaşılan doğruluk kümesi ve ses fixture'ları da çevrildi.
 
 > KARAR NOKTASI: Token setini yazmadan önce sun. Bu bir kez yayınlandıktan sonra
 > geriye dönük uyumluluk borcu doğar.
 >
 > Cevaplanacak dört soru: (1) granülerlik — dar semantik küme mi, bölge
-> geçersiz kılmalı katmanlı küme mi; (2) seçici vaadi — `data-tonearm="..."`
+> geçersiz kılmalı katmanlı küme mi; (2) seçici vaadi — `data-headshell="..."`
 > öznitelikleri mi, sınıf adları mı, hiçbiri mi; (3) temaya IPC açılacak mı
 > (D-033 bunu buraya bıraktı: açılırsa sözleşme *dış* sözleşmeye döner ve o
 > gün sürümleme borcu doğar); (4) paket biçimi ve `api` sürüm alanı.
@@ -1340,35 +1340,35 @@ bir tema yazarı. Yorum ve arayüz metni Türkçe kalır. Bu karar uygulanırken
 
 #### Token seti v1 — TAMAM (D-037)
 
-`crates/tonearm/ui/style.css`'in `:root` bloğu artık sözleşmenin kendisi. On dört
+`crates/headshell/ui/style.css`'in `:root` bloğu artık sözleşmenin kendisi. On dört
 token, hepsi dosyada en az bir yerde kullanılıyor — kullanılmayan token yok:
 
 | Token | Değer | Anlamı |
 |---|---|---|
-| `--tonearm-color-scheme` | `dark` | motorun kendi çizdiği parçalar (onay kutusu, imleç, kaydırma çubuğu) |
-| `--tonearm-bg` | `#12100e` | sayfa arka planı |
-| `--tonearm-surface` | `#1b1815` | panel arka planı (topbar, sidebar, player, block) |
-| `--tonearm-surface-raised` | `#221e1a` | etkileşimli/hover arka planı (input, aktif nav, hover, toast) |
-| `--tonearm-border` | `#2e2925` | kenarlık, ayraç, ilerleme çubuğu izi |
-| `--tonearm-text` | `#eae2d8` | birincil metin |
-| `--tonearm-text-dim` | `#9a8f83` | ikincil/soluk metin |
-| `--tonearm-accent` | `#ffb454` | marka + etkileşim vurgusu |
-| `--tonearm-success` | `#7bd88f` | çalıyor / başarı durumu |
-| `--tonearm-error` | `#ff6b6b` | hata durumu |
-| `--tonearm-info` | `#79c0ff` | arabelleğe alma / bilgi durumu |
-| `--tonearm-radius-sm` | `6px` | kontrol köşe yarıçapı (nav, buton, girdi, kuyruk satırı) |
-| `--tonearm-radius-lg` | `8px` | panel köşe yarıçapı (block, toast, dropzone) |
-| `--tonearm-duration` | `120ms` | tek canlandırma süresi (yalnızca `opacity`/`transform`, D-028) |
+| `--headshell-color-scheme` | `dark` | motorun kendi çizdiği parçalar (onay kutusu, imleç, kaydırma çubuğu) |
+| `--headshell-bg` | `#12100e` | sayfa arka planı |
+| `--headshell-surface` | `#1b1815` | panel arka planı (topbar, sidebar, player, block) |
+| `--headshell-surface-raised` | `#221e1a` | etkileşimli/hover arka planı (input, aktif nav, hover, toast) |
+| `--headshell-border` | `#2e2925` | kenarlık, ayraç, ilerleme çubuğu izi |
+| `--headshell-text` | `#eae2d8` | birincil metin |
+| `--headshell-text-dim` | `#9a8f83` | ikincil/soluk metin |
+| `--headshell-accent` | `#ffb454` | marka + etkileşim vurgusu |
+| `--headshell-success` | `#7bd88f` | çalıyor / başarı durumu |
+| `--headshell-error` | `#ff6b6b` | hata durumu |
+| `--headshell-info` | `#79c0ff` | arabelleğe alma / bilgi durumu |
+| `--headshell-radius-sm` | `6px` | kontrol köşe yarıçapı (nav, buton, girdi, kuyruk satırı) |
+| `--headshell-radius-lg` | `8px` | panel köşe yarıçapı (block, toast, dropzone) |
+| `--headshell-duration` | `120ms` | tek canlandırma süresi (yalnızca `opacity`/`transform`, D-028) |
 
-`--tonearm-color-scheme` on üçüncü değil **on dördüncüdür**: ilk sette yoktu,
+`--headshell-color-scheme` on üçüncü değil **on dördüncüdür**: ilk sette yoktu,
 §3.4'ün açık teması yazılırken ortaya çıktı ve sonradan eklendi (D-039).
 Token'lar yalnızca *bizim* çizdiğimiz renkleri değiştiriyor; onay kutusu,
 metin imleci ve kaydırma çubuğu motorun kendi çizdiği parçalar ve açık bir
 palette koyu kalıyorlardı. Referans temanın işi tam olarak buydu.
 
 Hover/focus/disabled ayrı renk token'ı almadı — hover zaten var olan
-token'ların bileşimiyle ifade ediliyor (`.nav:hover` → `--tonearm-text`,
-`button:hover` → `--tonearm-accent` kenarlık). Şu an hiçbir kural `:focus-visible`
+token'ların bileşimiyle ifade ediliyor (`.nav:hover` → `--headshell-text`,
+`button:hover` → `--headshell-accent` kenarlık). Şu an hiçbir kural `:focus-visible`
 veya devre dışı durum tanımlamıyor; kullanılmayan bir token yazmak yerine bu
 **bilinen bir boşluk** olarak bırakıldı — gerçek bir görsel kural yazılınca
 token da gelir.
@@ -1384,7 +1384,7 @@ Sınıf adları (D-037/2) artık sözleşmenin parçası: `.topbar`, `.sidebar`,
 
 Yeni sınıf **eklemek** `api`'yi artırmaz — eski temalar onu hedeflemiyordu.
 Artıran şey var olanı kaldırmak ya da anlamını değiştirmek. Aynı kural
-token'lar için de geçerli, ve `--tonearm-color-scheme` bunun ilk örneği.
+token'lar için de geçerli, ve `--headshell-color-scheme` bunun ilk örneği.
 
 #### Manifest biçimi ve yükleyici — TAMAM
 
@@ -1393,7 +1393,7 @@ Bir tema iki dosyalı bir dizin:
 ```
 <tema-dizini>/
   theme.json   # manifest
-  theme.css    # yalnızca :root { --tonearm-*: ...; } — ek seçici yok
+  theme.css    # yalnızca :root { --headshell-*: ...; } — ek seçici yok
 ```
 
 `theme.json`:
@@ -1423,10 +1423,10 @@ adım (aşağıya bak).
 > tema listesinde "genişletilmiş / garantisi yok" diye etiketler. Garanti
 > her zaman yalnızca `:root`'taki token'lar için geçerli.
 
-**Uygulandı:** `crates/tonearm/src/theme.rs` — çekirdekte değil kabukta, çünkü bu
-tonearm-core'un taşıyacağı bir domain kavramı değil, webview'e özgü bir CSS
+**Uygulandı:** `crates/headshell/src/theme.rs` — çekirdekte değil kabukta, çünkü bu
+headshell-core'un taşıyacağı bir domain kavramı değil, webview'e özgü bir CSS
 mekanizması. Mobil bağlamalar CSS custom property kullanmayacak; Altın
-Kural'ın "çekirdek bunu sunabilir mi" testi burada `crates/tonearm`'u işaret
+Kural'ın "çekirdek bunu sunabilir mi" testi burada `crates/headshell`'u işaret
 ediyor. Üç IPC komutu: `themes_list`, `theme_active`, `theme_select`.
 
 Seçim `<data_dir>/ui.json`'da; şema değişmedi, veritabanına dokunulmadı.
@@ -1452,7 +1452,7 @@ başlatırdı; test bunu kilitliyor.
 ### 3.4 Referans temalar — TAMAM
 En az iki farklı temada tema API'sinin yeterli olduğunu kanıtla.
 
-**İkisi de `crates/tonearm/themes/` altında ve uygulamayla birlikte geliyor**
+**İkisi de `crates/headshell/themes/` altında ve uygulamayla birlikte geliyor**
 (`include_str!`) — ama **ayrıcalıkları yok**: diskteki bir tema gibi aynı
 doğrulamadan geçiyorlar. Ayrıcalıklı olsalardı sözleşmenin yeterli olduğunu
 değil yalnızca kendilerini kanıtlarlardı.
@@ -1460,7 +1460,7 @@ değil yalnızca kendilerini kanıtlarlardı.
 | Tema | Sınadığı eksen |
 |---|---|
 | **Gün Işığı** (`daylight`) | renk — temel arayüz koyu yazılmıştı, aynı sözleşmeyle açık bir arayüz çıkıyor |
-| **Yüksek Karşıtlık** (`contrast`) | renk **dışı** — `--tonearm-radius-*` sıfıra iniyor, `--tonearm-duration` `0ms` |
+| **Yüksek Karşıtlık** (`contrast`) | renk **dışı** — `--headshell-radius-*` sıfıra iniyor, `--headshell-duration` `0ms` |
 
 İkinci tema bilerek ikinci bir palet değil: iki paletle "iki tema" ölçütü
 kâğıt üstünde karşılanır ama token setinin renk dışındaki ekseni hiç
@@ -1470,7 +1470,7 @@ temada görünür — kullanılmıyorsa ölü token demektir. Test bunu kilitliy
 
 **Ve sözleşme yetmedi.** Açık tema token'ların hepsini doğru uyguladığı hâlde
 onay kutuları, metin imleci ve kaydırma çubuğu koyu kalıyordu: bunları biz
-değil motor çiziyor. Eksik `--tonearm-color-scheme` olarak kapandı (D-039).
+değil motor çiziyor. Eksik `--headshell-color-scheme` olarak kapandı (D-039).
 §3.4'ün "yeterli olduğunu kanıtla" ölçütü tam olarak bunu yakalamak içindi ve
 yakaladı — iki tema yazılmasaydı eksik, ilk tema yazarının makinesinde
 ortaya çıkardı.
@@ -1489,7 +1489,7 @@ kabuk, sonradan gelen yeteneklerden habersiz kaldı. Bu bölüm o farkı kapatı
 ve masaüstünü paketlenebilir hâle getiriyor.
 
 **Arayüz Faz 2'yi kazandı.** Eklenti listesi, onay/kurulum/kapatma ve sır
-girişi artık arayüzde; `tonearm plugin …` ve `tonearm secret …` ile **aynı** çekirdek
+girişi artık arayüzde; `headshell plugin …` ve `headshell secret …` ile **aynı** çekirdek
 çağrıları. `sleeve` kartı da görünür oldu — IPC'de kayıtlıydı ama `app.js` onu
 hiç çağırmıyordu, yani Faz 0.5'in ürünü masaüstünde yoktu.
 
@@ -1504,7 +1504,7 @@ yer tutucu ikonlar, eksik `.desktop` verisi, ve iki yerde yazılı sürüm.
 okuyor, kaynak tek. Paketler `.github/workflows/release.yml` ile üretiliyor:
 `v*` etiketi taslak bir sürüme yüklüyor, elle tetik yalnızca artifact bırakıyor.
 
-**Arayüzün sessiz kırılması testli.** `crates/tonearm/tests/ui_contract.rs`:
+**Arayüzün sessiz kırılması testli.** `crates/headshell/tests/ui_contract.rs`:
 `app.js`'in aradığı her `id` sayfada var mı, kenar çubuğu ile `Ctrl`+sayı
 kısayolu aynı panelleri mi adlandırıyor, D-037/2'nin sınıf adları hâlâ
 ulaşılabilir mi, ilan edilen her token kullanılıyor mu. Webview'de tip denetimi
@@ -1517,7 +1517,7 @@ panoya kopyalanan tanı raporu; her boş durumda ne yapılacağını söyleyen m
 
 **Yerelde doğrulandı** (Arch, WebKitGTK): `.deb` ve `.rpm` üretiliyor, paketin
 içinde ikonlar, `AudioVideo;Audio;Music;` kategorili `.desktop` girdisi,
-`/usr/share/doc/tonearm/` altında `copyright` + iki lisans dosyası ve
+`/usr/share/doc/headshell/` altında `copyright` + iki lisans dosyası ve
 `Cargo.toml`'dan gelen `0.0.1-beta` sürümü var. Lisans dosyaları
 `bundle.linux.{deb,rpm}.files` ile giriyor: `bundle.licenseFile` alanı
 Linux paketleyicilerine geçmiyor ve bu ancak paketin içi açılınca görüldü.
@@ -1545,7 +1545,7 @@ Linux paketleyicilerine geçmiyor ve bu ancak paketin içi açılınca görüld�
 | 3.4 Referans temalar | TAMAM — `daylight` (renk) + `contrast` (yarıçap/süre) |
 | 3.5 Faz 2 yüzeyi + paketleme | TAMAM — eklenti/sır/sleeve arayüzde, bundle açık (D-057) |
 
-Tema yazarına dönük belge: `crates/tonearm/themes/README.md`.
+Tema yazarına dönük belge: `crates/headshell/themes/README.md`.
 
 **Faz 3'ten devredilen açık karar:** "mod" paketleri — davranış değiştiren,
 tema paketleriyle birlikte dağıtılan eklentiler. §3.3'te bilinçli ertelendi;
@@ -1625,7 +1625,7 @@ her commit'te sorar. Aksi halde ihlaller aylarca birikir ve toplu halde ortaya �
 > tam olarak böyle birikti, aylarca dışa açılan yüzeyde lifetime taşıdı.
 >
 > Bugün konan şey **gerçek scaffolding üretimi değil**, ondan önce gelen ucuz
-> süzgeç: `crates/tonearm-core/tests/k7_surface.rs` public tiplerde lifetime ve
+> süzgeç: `crates/headshell-core/tests/k7_surface.rs` public tiplerde lifetime ve
 > public imzalarda closure arıyor, CI'ın üçüncü kapısında koşuyor (D-053).
 >
 > Gerçek `uniffi` kontrolü hâlâ bu fazın işi ve iki şey istiyor: çekirdekteki

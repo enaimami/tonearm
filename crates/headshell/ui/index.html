@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>headshell</title>
+    <link rel="stylesheet" href="style.css" />
+    <!-- Seçili temanın CSS'i buraya yazılıyor (app.js). `style.css`'ten
+         **sonra** geliyor ki `:root` token'ları onunkileri geçersiz kılsın.
+         Boşsa varsayılan tema geçerlidir. -->
+    <style id="themeCss"></style>
+  </head>
+  <body>
+    <!-- D-037/2: buradaki sınıf adları artık **sözleşmenin parçası**. Bir tema
+         bunları hedefleyebilir; habersiz yeniden adlandırılmazlar. Yeni sınıf
+         eklemek serbest, var olanı kaldırmak/anlamını değiştirmek `api`
+         sürümünü artırır (bkz. `style.css` başlığı, `src/theme.rs`).
+         Adlar İngilizce, metin Türkçe (D-036). -->
+    <header class="topbar">
+      <span class="brand">headshell</span>
+      <form id="playForm" class="play-form">
+        <input
+          id="playQuery"
+          type="search"
+          placeholder="çal: sanatçı ya da parça"
+          aria-label="çalınacak parça ya da sanatçı"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <label class="check"><input id="playAll" type="checkbox" /> tümünü kuyruğa al</label>
+        <button type="submit">çal</button>
+      </form>
+      <span id="busy" class="busy" role="status" hidden></span>
+      <button id="btnHelp" class="ghost" title="klavye kısayolları (?)" aria-label="klavye kısayolları">
+        ?
+      </button>
+    </header>
+
+    <div class="body">
+      <nav class="sidebar" aria-label="bölümler">
+        <button class="nav" data-panel="now" aria-current="true">çalan</button>
+        <button class="nav" data-panel="library">kütüphane</button>
+        <button class="nav" data-panel="stats">istatistik</button>
+        <button class="nav" data-panel="import">içe aktar</button>
+        <button class="nav" data-panel="providers">sağlayıcılar</button>
+        <button class="nav" data-panel="plugins">eklentiler</button>
+        <button class="nav" data-panel="theme">görünüm</button>
+        <button class="nav" data-panel="diag">tanı</button>
+      </nav>
+
+      <main class="content">
+        <!-- ————————————————— çalan -->
+        <section id="panel-now" class="panel">
+          <h2>kuyruk</h2>
+          <ol id="queue" class="queue"></ol>
+
+          <!-- Boş kuyruk bir hata değil, bir başlangıç. Kullanıcının hangi
+               sırayla ne yapacağını söylemek buranın işi: üç adımın hangisinde
+               olduğunu bilmeyen kişi "çal" kutusuna yazıp boş sonuç alıyordu. -->
+          <div id="onboarding" class="onboarding" hidden>
+            <h3>başlarken</h3>
+            <ol class="steps">
+              <li class="step">
+                <span class="step-text">
+                  <b>Müzik kaynağı tanımla.</b>
+                  Yerel dizinler <code>HEADSHELL_MUSIC_DIRS</code> ile gelir; uzak bir kütüphane
+                  (Subsonic, Jellyfin) sağlayıcılar bölümünden eklenir.
+                </span>
+                <button class="go" data-go="providers">sağlayıcılar</button>
+              </li>
+              <li class="step">
+                <span class="step-text">
+                  <b>Geçmişini içe aktar.</b>
+                  Spotify/Apple/Google export arşivini ver — istatistikler ve
+                  sleeve kartı bundan çıkar.
+                </span>
+                <button class="go" data-go="import">içe aktar</button>
+              </li>
+              <li class="step">
+                <span class="step-text">
+                  <b>Çal.</b>
+                  Üstteki kutuya sanatçı ya da parça yaz. Kuyruğa almak için
+                  <i>tümünü kuyruğa al</i> kutusunu işaretle.
+                </span>
+                <button class="go" data-go="focus-play">çalma kutusu</button>
+              </li>
+            </ol>
+            <p class="hint">
+              Ses gelmiyorsa ya da bir şey bulunamıyorsa <b>tanı</b> bölümü son
+              çalıştırmanın hangi aşamada durduğunu yazar.
+            </p>
+          </div>
+        </section>
+
+        <!-- ————————————————— kütüphane -->
+        <section id="panel-library" class="panel" hidden>
+          <h2>kütüphane araması</h2>
+          <form id="searchForm" class="row">
+            <input
+              id="searchQuery"
+              type="search"
+              placeholder="sanatçı, parça, albüm"
+              aria-label="kütüphanede aranacak"
+              autocomplete="off"
+            />
+            <button type="submit">ara</button>
+            <button id="btnSearchPlayAll" type="button" hidden>hepsini kuyruğa al</button>
+          </form>
+          <p class="hint">
+            Dinleme geçmişinde arar (içe aktarılan export + burada çalınanlar).
+            Sonuçtaki sayı, kayda değer dinleme sayısıdır.
+          </p>
+          <table id="searchResult" class="table" hidden>
+            <thead>
+              <tr><th>parça</th><th>sanatçı</th><th class="num">dinleme</th><th></th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <p id="searchEmpty" class="empty" hidden></p>
+        </section>
+
+        <!-- ————————————————— istatistik -->
+        <section id="panel-stats" class="panel" hidden>
+          <h2>istatistikler</h2>
+          <form id="statsForm" class="row">
+            <label>yıl <input id="statsYear" type="number" min="1900" max="2999" placeholder="tümü" /></label>
+            <label>satır <input id="statsTop" type="number" min="1" max="100" value="10" /></label>
+            <button type="submit">hesapla</button>
+          </form>
+          <div id="statsSummary" class="summary"></div>
+          <p id="statsEmpty" class="empty" hidden>
+            Sayılacak dinleme yok. Önce <b>içe aktar</b> bölümünden bir export arşivi verin
+            ya da bir şeyler çalın.
+          </p>
+          <div class="two-col">
+            <div>
+              <h3>en çok dinlenen sanatçılar</h3>
+              <ol id="statsArtists" class="ranking"></ol>
+            </div>
+            <div>
+              <h3>en çok dinlenen parçalar</h3>
+              <ol id="statsTracks" class="ranking"></ol>
+            </div>
+          </div>
+
+          <!-- Faz 0.5'in ürünü buraya kadar arayüzde hiç görünmüyordu:
+               `sleeve` komutu IPC'de kayıtlıydı ama kimse çağırmıyordu. -->
+          <h2>sleeve kartı</h2>
+          <form id="sleeveForm" class="row">
+            <label>yıl <input id="sleeveYear" type="number" min="1900" max="2999" placeholder="tümü" /></label>
+            <label>biçim
+              <select id="sleeveFormat">
+                <option value="square">kare</option>
+                <option value="story">hikâye</option>
+              </select>
+            </label>
+            <button type="submit">önizle</button>
+            <button id="btnSleeveSave" type="button" disabled>farklı kaydet…</button>
+          </form>
+          <p class="hint">
+            Kart çekirdeğin kendi çizicisinden geliyor — kaydedilen dosya ekranda
+            gördüğünüzle aynı. Uzantı biçimi belirler: <code>.svg</code> ya da <code>.png</code>.
+          </p>
+          <div id="sleevePreview" class="card-preview" hidden></div>
+        </section>
+
+        <!-- ————————————————— içe aktarma -->
+        <!-- Eskiden "tanı" bölümünün içindeydi. İlk yapılacak iş, en tanısal
+             sekmenin altında duruyordu. -->
+        <section id="panel-import" class="panel" hidden>
+          <h2>geçmişi içe aktar</h2>
+          <div id="dropzone" class="dropzone">
+            <p>Export arşivini (zip ya da açılmış dizin) buraya sürükleyin.</p>
+            <form id="importForm" class="row">
+              <input
+                id="importPath"
+                type="text"
+                placeholder="/yol/my_spotify_data.zip"
+                aria-label="export arşivinin yolu"
+              />
+              <button id="btnImportPick" type="button">dosya seç…</button>
+              <button type="submit">içe aktar</button>
+            </form>
+            <p class="hint">
+              İçe aktarma <b>API'den değil, veri export dosyalarından</b> yapılır —
+              taşınabilirlik hakkı hizmet şartlarıyla kısıtlanamaz. Aynı arşivi ikinci
+              kez vermek zarar vermez: yinelenen kayıtlar sayılır ve atlanır.
+            </p>
+          </div>
+          <div id="importSummary" class="summary" hidden></div>
+          <p id="importSkipped" class="hint" hidden></p>
+          <details id="importRaw" class="fold" hidden>
+            <summary>ham rapor</summary>
+            <pre id="importResult" class="block"></pre>
+          </details>
+        </section>
+
+        <!-- ————————————————— sağlayıcılar -->
+        <section id="panel-providers" class="panel" hidden>
+          <h2>sağlayıcılar</h2>
+          <div class="row">
+            <button id="btnScan">tara</button>
+            <button id="btnScanStale">yalnızca değiştiyse tara</button>
+          </div>
+          <table id="providerTable" class="table">
+            <thead>
+              <tr><th>ad</th><th>yetenekler</th><th>durum</th><th></th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <p id="providerEmpty" class="empty" hidden>
+            Kayıtlı sağlayıcı yok. Yerel dosyalar için <code>HEADSHELL_MUSIC_DIRS</code> tanımlayın,
+            uzak kütüphane için aşağıdan sunucu ekleyin.
+          </p>
+
+          <h3>kayıtlı sunucular</h3>
+          <table id="serverTable" class="table">
+            <thead>
+              <tr><th>ad</th><th>tür</th><th>adres</th><th>kullanıcı</th><th></th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <p id="serverEmpty" class="empty" hidden>Kayıtlı sunucu yok.</p>
+
+          <details class="fold">
+            <summary>sunucu ekle</summary>
+            <form id="serverForm" class="grid">
+              <label>tür
+                <select id="serverKind">
+                  <option value="subsonic">subsonic</option>
+                  <option value="jellyfin">jellyfin</option>
+                </select>
+              </label>
+              <label>adres <input id="serverUrl" type="url" placeholder="https://muzik.ev" required /></label>
+              <label>kullanıcı <input id="serverUser" type="text" required /></label>
+              <label>parola <input id="serverPassword" type="password" /></label>
+              <label>api anahtarı (jellyfin) <input id="serverApiKey" type="password" /></label>
+              <label>ad (boşsa adresten türetilir) <input id="serverName" type="text" /></label>
+              <label class="check"><input id="serverVerify" type="checkbox" checked /> kaydetmeden önce bağlan ve doğrula</label>
+              <button type="submit">ekle</button>
+            </form>
+          </details>
+        </section>
+
+        <!-- ————————————————— eklentiler (Faz 2 yüzeyi) -->
+        <section id="panel-plugins" class="panel" hidden>
+          <h2>eklentiler</h2>
+          <div class="row">
+            <button id="btnPluginReload">listeyi yenile</button>
+            <span id="pluginSummary" class="hint"></span>
+          </div>
+          <p id="pluginEnforce" class="warn-note" hidden>
+            <b>İzinler zorlanmıyor.</b> Aşağıdaki liste eklentinin <i>beyan ettiği</i>
+            izinlerdir; çekirdek onları teknik olarak kısıtlamaz (D-040). Onay, güvendiğiniz
+            eklentiler için verilir.
+          </p>
+          <ul id="pluginList" class="plugins"></ul>
+          <p id="pluginEmpty" class="empty" hidden>
+            Kurulu eklenti yok. Eklentiler veri dizinindeki <code>plugins/</code> klasörüne
+            konur; yolu <b>tanı</b> bölümündeki ortam bloğu yazar.
+          </p>
+
+          <h2>sırlar</h2>
+          <p class="hint">
+            Eklentilerin ve çekirdeğin kullandığı anahtarlar (API anahtarı, jeton).
+            Liste yalnızca <b>ad</b> taşır — değerler hiçbir zaman geri okunmaz (D-042).
+          </p>
+          <table id="secretTable" class="table">
+            <thead>
+              <tr><th>alan</th><th>anahtar</th><th></th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <p id="secretEmpty" class="empty" hidden>Kayıtlı sır yok.</p>
+          <form id="secretForm" class="row">
+            <input id="secretNamespace" type="text" placeholder="alan (ör. acoustid)" aria-label="sır alanı" required />
+            <input id="secretKey" type="text" placeholder="anahtar (ör. api_key)" aria-label="sır anahtarı" required />
+            <input id="secretValue" type="password" placeholder="değer" aria-label="sır değeri" required />
+            <button type="submit">kaydet</button>
+          </form>
+        </section>
+
+        <!-- ————————————————— görünüm -->
+        <section id="panel-theme" class="panel" hidden>
+          <h2>tema</h2>
+          <div class="row">
+            <button id="btnThemeReload">listeyi yenile</button>
+          </div>
+          <p class="hint">
+            Bir tema, içinde <b>theme.json</b> ve <b>theme.css</b> olan bir dizindir.
+            Aşağıdaki yola koyup <b>listeyi yenile</b> deyin — uygulamayı kapatmanız gerekmez.
+            Garanti edilen yüzey yalnızca <b>:root</b> içindeki <b>--headshell-*</b> token'larıdır;
+            bunun dışına çıkan temalar yüklenir ama <i>genişletilmiş</i> diye işaretlenir.
+          </p>
+          <pre id="themeDir" class="block"></pre>
+
+          <ul id="themeList" class="themes"></ul>
+
+          <h3>yüklenemeyen temalar</h3>
+          <ul id="themeRejected" class="rejected"></ul>
+          <p id="themeRejectedEmpty" class="empty">Reddedilen tema yok.</p>
+        </section>
+
+        <!-- ————————————————— tanı -->
+        <section id="panel-diag" class="panel" hidden>
+          <h2>kimlik çözümlemesi</h2>
+          <form id="resolveForm" class="row">
+            <input
+              id="resolveQuery"
+              type="text"
+              placeholder="Sanatçı - Başlık"
+              aria-label="çözümlenecek parça"
+            />
+            <button type="submit">çözümle</button>
+          </form>
+          <p class="hint">
+            Bir parçanın kanonik kimliğini hangi halkanın verdiğini gösterir:
+            ISRC → MBID → bulanık → parmak izi.
+          </p>
+          <pre id="resolveResult" class="block" hidden></pre>
+
+          <h2>ortam</h2>
+          <pre id="envBlock" class="block"></pre>
+
+          <h2>son çalıştırma</h2>
+          <p class="hint">
+            Son komutun aşaması, hata zinciri ve sayıları. Bir sorun bildirirken
+            bu bloğu olduğu gibi kopyalayın.
+          </p>
+          <div class="row">
+            <button id="btnDiag">tanı raporunu al</button>
+            <button id="btnDiagCopy" type="button" hidden>panoya kopyala</button>
+          </div>
+          <pre id="diagResult" class="block" hidden></pre>
+        </section>
+      </main>
+    </div>
+
+    <!-- ————————————————— oynatıcı çubuğu -->
+    <footer class="player">
+      <div class="controls">
+        <button id="btnPrev" title="önceki (←)" aria-label="önceki parça">⏮</button>
+        <button id="btnPlayPause" title="duraklat / sürdür (boşluk)" aria-label="duraklat veya sürdür">⏯</button>
+        <button id="btnNext" title="sonraki (→)" aria-label="sonraki parça">⏭</button>
+        <button id="btnStop" title="durdur" aria-label="durdur">⏹</button>
+      </div>
+      <div class="now">
+        <div class="title"><span id="nowState" class="state">■</span> <span id="nowTitle">—</span></div>
+        <div class="bar"><div id="barFill" class="fill"></div></div>
+      </div>
+      <span id="timeLabel" class="time" role="status">0:00 / 0:00</span>
+      <div class="controls">
+        <button id="btnShuffle" title="karıştır" aria-label="karıştır">🔀</button>
+        <button id="btnRepeat" title="tekrar" aria-label="tekrar kipi">🔁</button>
+      </div>
+    </footer>
+
+    <!-- Kısayol listesi: keşfedilebilir olmayan bir kısayol yok sayılır. -->
+    <div id="helpSheet" class="sheet" hidden>
+      <div class="sheet-box" role="dialog" aria-label="klavye kısayolları">
+        <h3>klavye kısayolları</h3>
+        <ul class="keys">
+          <li><kbd>boşluk</kbd> duraklat / sürdür</li>
+          <li><kbd>←</kbd> <kbd>→</kbd> önceki / sonraki parça</li>
+          <li><kbd>/</kbd> çalma kutusuna geç</li>
+          <li><kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>8</kbd> bölümler</li>
+          <li><kbd>Esc</kbd> uyarıları kapat</li>
+          <li><kbd>?</kbd> bu liste</li>
+        </ul>
+        <p class="hint">Bir yazı kutusundayken tuşlar kutuya gider, kısayola değil.</p>
+        <button id="btnHelpClose" type="button">kapat</button>
+      </div>
+    </div>
+
+    <div id="toasts" class="toasts" aria-live="polite"></div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

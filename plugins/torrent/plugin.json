@@ -3,7 +3,7 @@
   "display_name": "Torrent",
   "version": "0.0.1-beta",
   "api": 1,
-  "exec": ["./tonearm-plugin-torrent"],
+  "exec": ["./headshell-plugin-torrent"],
   "capabilities": ["search", "stream"],
   "permissions": {
     "net": ["dht.transmissionbt.com", "dht.libtorrent.org"],

@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="crates/tonearm/icons/128x128.png" width="104" alt="tonearm">
+<img src="crates/headshell/icons/128x128.png" width="104" alt="headshell">
 
-# tonearm
+# headshell
 
 ### Müziğin nereden geldiği değişir. **Dinleme kimliğin sende kalır.**
 
@@ -20,7 +20,7 @@
 
 <br>
 
-<img src="docs/ornek-kart.svg" alt="tonearm'ın ürettiği örnek Sleeve kartı" width="600">
+<img src="docs/ornek-kart.svg" alt="headshell'ın ürettiği örnek Sleeve kartı" width="600">
 
 <sub><i>Yılda bir kez değil, istediğin an. Hangi yıl istersen.</i></sub>
 
@@ -35,12 +35,12 @@ tekrar tekrar dinlediğin o şarkı kaydedilir. Sonra aboneliği bırakırsın v
 hepsi orada kalır. On yıllık dinleme kimliğin, taşıyamadığın bir hesap
 ekranına dönüşür.
 
-**`tonearm` bu ilişkiyi ters çevirir.** Geçmişini kendi makinene indirir, tek
+**`headshell` bu ilişkiyi ters çevirir.** Geçmişini kendi makinene indirir, tek
 bir kanonik kimlik altında toplar, ve müziği nereden çalarsan çal — yerel
 diskten, evindeki sunucudan, bir eklentiden — üstteki katmanı aynı tutar.
 Adı da buradan geliyor: pikap kolu plağı seçmez, ne koyarsan onu okur.
 
-|  | Akış servisi | `tonearm` |
+|  | Akış servisi | `headshell` |
 | :--- | :--- | :--- |
 | **Geçmişin nerede** | Şirketin sunucusunda | Kendi diskinde, SQLite dosyasında |
 | **Ne kadar geriye gider** | Abonelik sürdüğü kadar | Export'un kapsadığı kadar — ömür boyu |
@@ -60,20 +60,20 @@ anahtarı istemez, hesabına bağlanmaz. Yasal olarak senin olan bir dosyayı
 okur, o kadar.
 
 ```bash
-tonearm import spotify_verilerim.zip
+headshell import spotify_verilerim.zip
 ```
 
 ### 🔗 Aynı parçanın bütün kopyalarını tek kimlikte toplar
 
 Yerel FLAC'in, Jellyfin'deki kopyan ve SoundCloud'daki yükleme — üçü de aynı
-şarkı. `tonearm` bunları dört halkalı bir zincirle eşler: **ISRC →
+şarkı. `headshell` bunları dört halkalı bir zincirle eşler: **ISRC →
 MusicBrainz → bulanık eşleşme → AcoustID parmak izi.** Her eşleşme bir güven
 skoru taşır, ve eşleşmeyenler **sayılır** — sessizce kaybolmaz.
 
 ### 📊 İstatistiklerin, istediğin an
 
 ```text
-$ tonearm stats --year 2024 --top 3
+$ headshell stats --year 2024 --top 3
 
 dönem: 2024
 4128 çalma · 271.3 saat · 1163 parça · 402 sanatçı
@@ -100,7 +100,7 @@ Kare (1080×1080) ya da hikâye (1080×1920), SVG ya da PNG. Aralığı beklemen
 gerek yok, yılı sen seçersin.
 
 ```bash
-tonearm sleeve --year 2024 --format story --out 2024.png
+headshell sleeve --year 2024 --format story --out 2024.png
 ```
 
 ### 🎧 Ve çalar
@@ -109,11 +109,11 @@ Yerel dosyaların, evindeki Subsonic/Navidrome/Jellyfin sunucun ve eklentiler
 üzerinden. Kütüphane SQLite FTS5 ile indekslenir, arama anında döner.
 
 ```bash
-tonearm play "Pink Floyd" --all --tui
+headshell play "Pink Floyd" --all --tui
 ```
 
 ```text
-┌ tonearm ───────────────────────────────────────────────────────────────────┐
+┌ headshell ───────────────────────────────────────────────────────────────────┐
 │ ▶ Pink Floyd - Time  (çalıyor)                                             │
 └────────────────────────────────────────────────────────────────────────────┘
 ┌────────────────────────────────────────────────────────────────────────────┐
@@ -136,7 +136,7 @@ pencerede. Export arşivini pencereye sürükle, bırak. Kısayolları görmek i
 
 Arayüz **kullanıcının yazabildiği CSS temalarını** destekler: 14 semantik
 token, sürümlenmiş bir sözleşme, iki referans tema.
-→ [tema yazma rehberi](crates/tonearm/themes/README.md)
+→ [tema yazma rehberi](crates/headshell/themes/README.md)
 
 ---
 
@@ -150,19 +150,19 @@ token, sürümlenmiş bir sözleşme, iki referans tema.
 > kütüphane şeması sürümler arasında değişebilir.
 
 **Masaüstü paketleri** (`.deb`, `.rpm`, `.AppImage`, `.dmg`, `.msi`) her sürüm
-etiketinde üretilir ve [sürüm sayfasına](https://github.com/enaimami/tonearm/releases)
+etiketinde üretilir ve [sürüm sayfasına](https://github.com/enaimami/headshell/releases)
 eklenir. macOS ve Windows paketleri imzasızdır: macOS'ta sağ tık → Aç,
 Windows'ta SmartScreen → Yine de çalıştır.
 
 **Kaynaktan:**
 
 ```bash
-git clone https://github.com/enaimami/tonearm.git
-cd tonearm
+git clone https://github.com/enaimami/headshell.git
+cd headshell
 cargo build --release
 
-cp target/release/tonearm ~/.local/bin/   # komut satırı
-cargo run -p tonearm                      # masaüstü penceresi
+cp target/release/headshell ~/.local/bin/   # komut satırı
+cargo run -p headshell                      # masaüstü penceresi
 ```
 
 <details>
@@ -175,9 +175,9 @@ Rust 1.85+ (2024 edition). Linux'ta masaüstü kabuğu için:
 `patchelf`.
 
 Eklentiler için Python 3.9+ gerekir — gömülü değil, sistemden kullanılır.
-Python yoksa `tonearm`'un geri kalanı çalışır, yalnızca eklenti sağlayıcıları
+Python yoksa `headshell`'un geri kalanı çalışır, yalnızca eklenti sağlayıcıları
 düşer ve sebebini söyler. Eklentilerin **paketleri** için bir şey kurman
-gerekmez: onları motor indirir (`tonearm plugin install <ad>`), sabitlenmiş
+gerekmez: onları motor indirir (`headshell plugin install <ad>`), sabitlenmiş
 sürümden ve sha256 doğrulayarak, senin veri dizinine. Sisteme dokunulmaz,
 root istenmez, `pip` gerekmez.
 
@@ -203,32 +203,32 @@ ihtiyacın yok.
 
 ```bash
 # 1 — geçmişini içeri al
-tonearm import spotify_verilerim.zip
+headshell import spotify_verilerim.zip
 
 # 2 — bak bakalım neymiş
-tonearm stats --year 2024 --top 10
+headshell stats --year 2024 --top 10
 
 # 3 — kartını üret
-tonearm sleeve --year 2024 --out 2024.png
+headshell sleeve --year 2024 --out 2024.png
 
 # 4 — müziğini bağla ve çal
-export TONEARM_MUSIC_DIRS=~/Müzik
-tonearm provider scan
-tonearm play "Portishead" --all --tui
+export HEADSHELL_MUSIC_DIRS=~/Müzik
+headshell provider scan
+headshell play "Portishead" --all --tui
 ```
 
 Uzak sunucu bağlamak:
 
 ```bash
-tonearm provider add subsonic --url https://muzik.evim.com --user ahmet --name ev
-tonearm provider add jellyfin --url https://jf.evim.com --user ahmet
-tonearm provider test ev
+headshell provider add subsonic --url https://muzik.evim.com --user ahmet --name ev
+headshell provider add jellyfin --url https://jf.evim.com --user ahmet
+headshell provider test ev
 ```
 
 Bir şey ters giderse:
 
 ```bash
-tonearm diag     # son çalıştırmanın ortamı, aşaması, hata zinciri — tek blok
+headshell diag     # son çalıştırmanın ortamı, aşaması, hata zinciri — tek blok
 ```
 
 <details>
@@ -238,21 +238,21 @@ tonearm diag     # son çalıştırmanın ortamı, aşaması, hata zinciri — t
 
 | Komut | Ne yapar |
 | :--- | :--- |
-| `tonearm import <zip\|dizin>` | Export arşivini içe aktarır |
-| `tonearm stats [--year N] [--top N]` | Dinleme istatistikleri |
-| `tonearm sleeve [--year N] [--format square\|story]` | Paylaşılabilir kart üretir |
-| `tonearm resolve "<sanatçı> - <başlık>"` \| `--file <ses>` | Tek parçayı kimlik zincirinden geçirir |
-| `tonearm library search <sorgu>` | Kütüphanede tam metin arama |
-| `tonearm play <sorgu> [--all] [--shuffle] [--tui]` | Çalar |
-| `tonearm provider list \| test \| scan \| add \| remove \| servers` | Sağlayıcı yönetimi |
-| `tonearm plugin list \| approve \| install \| disable \| enable \| forget` | Eklenti yönetimi |
-| `tonearm secret list \| set \| remove` | Sır deposu (değerler asla gösterilmez) |
-| `tonearm diag` | Tanı raporu |
+| `headshell import <zip\|dizin>` | Export arşivini içe aktarır |
+| `headshell stats [--year N] [--top N]` | Dinleme istatistikleri |
+| `headshell sleeve [--year N] [--format square\|story]` | Paylaşılabilir kart üretir |
+| `headshell resolve "<sanatçı> - <başlık>"` \| `--file <ses>` | Tek parçayı kimlik zincirinden geçirir |
+| `headshell library search <sorgu>` | Kütüphanede tam metin arama |
+| `headshell play <sorgu> [--all] [--shuffle] [--tui]` | Çalar |
+| `headshell provider list \| test \| scan \| add \| remove \| servers` | Sağlayıcı yönetimi |
+| `headshell plugin list \| approve \| install \| disable \| enable \| forget` | Eklenti yönetimi |
+| `headshell secret list \| set \| remove` | Sır deposu (değerler asla gösterilmez) |
+| `headshell diag` | Tanı raporu |
 
 Her komut `--json` destekler:
 
 ```bash
-tonearm stats --year 2024 --json | jq '.report.top_artists[0]'
+headshell stats --year 2024 --json | jq '.report.top_artists[0]'
 ```
 
 </details>
@@ -311,7 +311,7 @@ düşmez, ve eklenti herhangi bir dilde yazılabilir. Her eklenti kurulmadan
 <details>
 <summary><b>Spotify şifremi ya da API anahtarımı vermem gerekiyor mu?</b></summary>
 <br>
-Hayır. <code>tonearm</code> Spotify API'sine hiç bağlanmaz. GDPR kapsamında
+Hayır. <code>headshell</code> Spotify API'sine hiç bağlanmaz. GDPR kapsamında
 talep ettiğin export zip'ini yerelden okur — bu, sağlayıcının geliştirici
 şartlarıyla kısıtlayamayacağı bir hak.
 </details>

@@ -10,7 +10,7 @@ extra.md
 
 # Tauri'nin `build.rs` sırasında ürettiği ACL şemaları — türetilmiş dosya,
 # her derlemede yeniden yazılıyor.
-crates/tonearm/gen/
+crates/headshell/gen/
 
 # Python ara çıktıları. `plugins/` altındaki eklentiler **betik** olarak
 # dağıtılır; derlenmiş hâlleri depoya girmez. Kural bir kez girdikten sonra

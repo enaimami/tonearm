@@ -1,0 +1,43 @@
+[package]
+name = "headshell-plugin-torrent"
+description = "Torrent sağlayıcı eklentisi: Torznab'da arar, librqbit ile sıralı akıtır. Alt süreç (D-047)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# `librqbit` hatalarını sebep zinciriyle taşımak için; ayrıca eklenti
+# `headshell-core`'un `thiserror` tiplerini kullanmıyor (o çekirdeğin sözleşmesi).
+anyhow = "1.0"
+
+# Protokol tipleri. Eklenti çekirdeğin *kütüphanesini* kullanıyor ama
+# çekirdek eklentiyi kullanmıyor — bağımlılık tek yönlü. Tel biçimini
+# ikinci kez yazmamak için: iki taraf aynı `serde` türevlerini paylaşınca
+# sürüklenme (drift) mümkün olmuyor. Feature yok: yalnızca `plugin::protocol`
+# ve `provider::AudioSource` gerekiyor, ses/HTTP/parmak izi değil.
+headshell-core = { path = "../headshell-core", default-features = false }
+
+# D-047: torrent motoru. `rust-tls` çünkü sistemde OpenSSL aramasın.
+librqbit = { version = "9.0.1", default-features = false, features = ["rust-tls"] }
+
+# Torznab'a giden istekler. `librqbit` zaten aynı sürümü getiriyor.
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "charset", "http2"] }
+# Torznab RSS'i. Salt okunur DOM: akış tabanlı bir ayrıştırıcıdan daha az
+# durum, dolayısıyla daha az sessiz hata. Kilitte resvg üzerinden zaten var.
+roxmltree = "0.20"
+
+# Yerel akış adresindeki jeton için. `librqbit` aynı sürümü zaten getiriyor.
+rand = "0.10"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "io-util", "io-std", "time", "sync"] }
+tracing = "0.1.44"
+# stdout **yalnızca** protokol satırlarıdır; her günlük kaydı stderr'e gider.
+# Çekirdek eklenti stderr'ini `tracing`'e aktarıyor (transport.rs), yani
+# librqbit'in "peer yok / tracker cevap vermiyor" teşhisi `headshell diag`'a ulaşır.
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "env-filter"] }
+
+[lints]
+workspace = true

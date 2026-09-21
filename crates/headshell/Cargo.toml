@@ -1,0 +1,41 @@
+[package]
+name = "headshell"
+description = "headshell-core üzerine Tauri masaüstü kabuğu. İş mantığı içermez."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Paket adı `headshell` (D-030) ama ikili adı değil: `headshell-cli` zaten `headshell` adında
+# bir ikili üretiyor ve aynı workspace'te iki `headshell` çıktısı çakışır.
+# CLI'nin adı kullanıcıya vaat edilmiş (`headshell import ...`), o yüzden değişen
+# taraf burası.
+[[bin]]
+name = "headshell-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# D-028: GO/NO-GO ölçüldü, WebKitGTK Linux'ta kabul edildi (ortam şartıyla).
+tauri = { version = "2", features = [] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+# Çalışma zamanını **kabuk** seçer, çekirdek değil (konvansiyon). Tauri zaten
+# tokio taşıyor; buradaki tek ihtiyaç tik döngüsünün uykusu.
+tokio = { version = "1.53.1", features = ["rt", "time", "sync", "macros"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+# D-030: bağımlılık tek yönlü — bu paket `headshell-cli`'yi görmez.
+headshell-core = { workspace = true, features = ["render-png", "audio", "http-client"] }
+# Yerel dosya diyaloğu: export arşivini ve kartın kaydedileceği yeri seçmek
+# için. Kabuğa ait bir bağımlılık — `headshell-core`'un ağacına girmez, mobil
+# binary boyutunu etkilemez. İzni `capabilities/default.json`'da yalnızca
+# `open`/`save` ile sınırlı: diyalog bir yol **döndürür**, dosyayı okuyup
+# yazan taraf yine çekirdektir.
+tauri-plugin-dialog = "2"
+
+[lints]
+workspace = true

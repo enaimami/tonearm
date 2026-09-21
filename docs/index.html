@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>tonearm — On yıllık müzik hafızanız. Yeniden sizin.</title>
+  <title>headshell — On yıllık müzik hafızanız. Yeniden sizin.</title>
   <meta name="description" content="Sağlayıcıdan bağımsız dinleme kimliği. 10 yıllık müzik geçmişinizi geri alın, kendi arşivinizden veya sunucunuzdan çalın.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -298,7 +298,7 @@
       background: #0d0d0f;
     }
 
-    .compare-card.tonearm {
+    .compare-card.headshell {
       background: #0d121c;
       border-color: rgba(41, 151, 255, 0.3);
     }
@@ -313,7 +313,7 @@
     }
 
     .compare-card.current .tag { color: var(--text-dim); }
-    .compare-card.tonearm .tag { color: var(--accent); }
+    .compare-card.headshell .tag { color: var(--accent); }
 
     .compare-card h3 {
       font-size: 1.5rem;
@@ -342,11 +342,11 @@
       font-weight: 700;
     }
 
-    .compare-card.tonearm .compare-list li {
+    .compare-card.headshell .compare-list li {
       color: #e4e4e7;
     }
 
-    .compare-card.tonearm .compare-list li::before {
+    .compare-card.headshell .compare-list li::before {
       content: "✓";
       color: var(--accent);
       font-weight: 700;
@@ -560,7 +560,7 @@
     
     <header>
       <div class="brand-wrap">
-        <a href="#" class="brand">tonearm</a>
+        <a href="#" class="brand">headshell</a>
         <span class="brand-pill">v0.0.1-beta</span>
       </div>
       <nav>
@@ -580,7 +580,7 @@
         <h1>On yıllık müzik hafızanız.<br><span class="gradient">Yeniden size ait.</span></h1>
         
         <p class="lead">
-          Abonelikler biter. Şirketler değişir. Fakat 10 yıl boyunca biriktirdiğiniz dinleme kimliği yalnızca size ait olmalıdır. tonearm, bu mülkiyeti geri vermek için tasarlandı.
+          Abonelikler biter. Şirketler değişir. Fakat 10 yıl boyunca biriktirdiğiniz dinleme kimliği yalnızca size ait olmalıdır. headshell, bu mülkiyeti geri vermek için tasarlandı.
         </p>
 
         <div class="hero-cta">
@@ -605,9 +605,9 @@
         </div>
 
         <div class="artifact-card">
-          <img src="ornek-kart.svg" alt="tonearm tarafından üretilen arşiv Sleeve kartı">
+          <img src="ornek-kart.svg" alt="headshell tarafından üretilen arşiv Sleeve kartı">
           <div class="caption">
-            tonearm tarafından doğrudan üretilen gerçek arşiv kartı. Yalnızca 12 ayı değil, tüm müzik ömrünüzü belgeler.
+            headshell tarafından doğrudan üretilen gerçek arşiv kartı. Yalnızca 12 ayı değil, tüm müzik ömrünüzü belgeler.
           </div>
         </div>
       </section>
@@ -615,7 +615,7 @@
       <!-- Karşılaştırma -->
       <section id="karsilastirma">
         <div class="section-header">
-          <h2>Geleneksel Servisler vs. tonearm</h2>
+          <h2>Geleneksel Servisler vs. headshell</h2>
           <p>Müzik dinleyicisine sunulan iki farklı dünya.</p>
         </div>
 
@@ -632,9 +632,9 @@
             </ul>
           </div>
 
-          <div class="compare-card tonearm">
+          <div class="compare-card headshell">
             <span class="tag">Kullanıcı Odaklı Model</span>
-            <h3>tonearm</h3>
+            <h3>headshell</h3>
             <ul class="compare-list">
               <li>Veri tamamen sizin bilgisayarınızdaki SQLite veritabanındadır; ömür boyu silinmez.</li>
               <li>İstediğiniz an, 5 yıllık veya 10 yıllık sınırsız Sleeve kartları üretilir.</li>
@@ -711,8 +711,8 @@
               <p>Arşivi yerel SQLite veritabanına taşıyın ve dinleme istatistiklerinizi anında görün:</p>
             </div>
             <div class="terminal-block">
-              <span class="cmd">tonearm import</span> my_spotify_data.zip<br>
-              <span class="cmd">tonearm stats</span> --year 2024 --top 10
+              <span class="cmd">headshell import</span> my_spotify_data.zip<br>
+              <span class="cmd">headshell stats</span> --year 2024 --top 10
             </div>
           </div>
 
@@ -725,7 +725,7 @@
               <p>Sosyal medyada paylaşmak üzere dikey veya kare formatta kartınızı oluşturun:</p>
             </div>
             <div class="terminal-block">
-              <span class="cmd">tonearm sleeve</span> --year 2024 --format story --out story.png
+              <span class="cmd">headshell sleeve</span> --year 2024 --format story --out story.png
             </div>
           </div>
 
@@ -738,8 +738,8 @@
               <p>Yerel müzik klasörlerinizi tarayın veya Navidrome/Jellyfin sunucunuzu bağlayın:</p>
             </div>
             <div class="terminal-block">
-              <span class="cmd">tonearm provider scan</span><br>
-              <span class="cmd">tonearm play</span> "Radiohead" --all --tui
+              <span class="cmd">headshell provider scan</span><br>
+              <span class="cmd">headshell play</span> "Radiohead" --all --tui
             </div>
           </div>
         </div>
@@ -749,29 +749,29 @@
       <section id="faq">
         <div class="section-header">
           <h2>Sıkça Sorulan Sorular</h2>
-          <p>tonearm hakkında aklınıza gelebilecek tüm teknik ve pratik sorular.</p>
+          <p>headshell hakkında aklınıza gelebilecek tüm teknik ve pratik sorular.</p>
         </div>
 
         <div class="faq-grid">
           
           <div class="faq-card">
             <h4>Bu bir müzik korsanlığı veya MP3 indirme aracı mı?</h4>
-            <p><strong>Kesinlikle hayır.</strong> tonearm bir ses sağlayıcısı değil, bağımsız bir dinleme kimliği katmanıdır. Kendi yasal müzik arşivinizi (FLAC, MP3) veya kişisel medya sunucunuzu (Navidrome, Subsonic, Jellyfin) dinlerken geçmişinizi ve istatistiklerinizi şirketlerin tekelinden kurtarır.</p>
+            <p><strong>Kesinlikle hayır.</strong> headshell bir ses sağlayıcısı değil, bağımsız bir dinleme kimliği katmanıdır. Kendi yasal müzik arşivinizi (FLAC, MP3) veya kişisel medya sunucunuzu (Navidrome, Subsonic, Jellyfin) dinlerken geçmişinizi ve istatistiklerinizi şirketlerin tekelinden kurtarır.</p>
           </div>
 
           <div class="faq-card">
             <h4>Spotify hesabımı kapatırsam dinleme geçmişim kaybolur mu?</h4>
-            <p><strong>Asla.</strong> tonearm ile verinizi bir kez içe aktardığınız andan itibaren tüm geçmişiniz bilgisayarınızdaki SQLite veritabanında yerel olarak mühürlenir. Spotify yarın kapansa veya aboneliğinizi iptal etseniz dahi 10 yıllık müzik hafızanız sizde kalır.</p>
+            <p><strong>Asla.</strong> headshell ile verinizi bir kez içe aktardığınız andan itibaren tüm geçmişiniz bilgisayarınızdaki SQLite veritabanında yerel olarak mühürlenir. Spotify yarın kapansa veya aboneliğinizi iptal etseniz dahi 10 yıllık müzik hafızanız sizde kalır.</p>
           </div>
 
           <div class="faq-card">
             <h4>Spotify şifremi veya API anahtarımı vermem gerekiyor mu?</h4>
-            <p><strong>Hayır.</strong> tonearm hiçbir şirketin API'sine bağlanmaz ve şifrenizi istemez. Avrupa Birliği GDPR veri taşınabilirliği kapsamında resmi olarak indirdiğiniz veri export zip dosyasını kendi bilgisayarınızda çevrimdışı olarak okur.</p>
+            <p><strong>Hayır.</strong> headshell hiçbir şirketin API'sine bağlanmaz ve şifrenizi istemez. Avrupa Birliği GDPR veri taşınabilirliği kapsamında resmi olarak indirdiğiniz veri export zip dosyasını kendi bilgisayarınızda çevrimdışı olarak okur.</p>
           </div>
 
           <div class="faq-card">
             <h4>Bilgisayarımdan bir müzik dosyasını silersem dinleme geçmişim silinir mi?</h4>
-            <p><strong>Hayır.</strong> tonearm mimarisinde "ne dinledin" (geçmiş tablosu) ile "şu an diskte ne çalabilirsin" (katalog) tamamen ayrı tutulur. Bir dosyayı silseniz dahi o parçanın geçmişteki dinleme kayıtları, scrobble'ları ve istatistikleri kalıcıdır.</p>
+            <p><strong>Hayır.</strong> headshell mimarisinde "ne dinledin" (geçmiş tablosu) ile "şu an diskte ne çalabilirsin" (katalog) tamamen ayrı tutulur. Bir dosyayı silseniz dahi o parçanın geçmişteki dinleme kayıtları, scrobble'ları ve istatistikleri kalıcıdır.</p>
           </div>
 
           <div class="faq-card">
@@ -781,17 +781,17 @@
 
           <div class="faq-card">
             <h4>Kişisel Navidrome veya Jellyfin sunucumu nasıl bağlarım?</h4>
-            <p><code>tonearm provider add subsonic --url https://... --user adiniz</code> komutuyla kolayca kaydedebilirsiniz. Parolanız komut satırına yazılmaz (böylece kabuk geçmişine düşmez); istemden yankısız okunur veya token olarak diskte güvenle saklanır.</p>
+            <p><code>headshell provider add subsonic --url https://... --user adiniz</code> komutuyla kolayca kaydedebilirsiniz. Parolanız komut satırına yazılmaz (böylece kabuk geçmişine düşmez); istemden yankısız okunur veya token olarak diskte güvenle saklanır.</p>
           </div>
 
           <div class="faq-card">
             <h4>Ses kalitesi nasıl? Hi-Res ve Kayıpsız (Lossless) destekliyor mu?</h4>
-            <p>tonearm, saf Rust ile yazılmış <code>symphonia</code> çözücüsü ve <code>cpal</code> ses çıkış hattını kullanır. FLAC, WAV, OGG, MP3 ve M4A dosyalarını doğrudan donanımınıza saf bit akışıyla iletir; herhangi bir kalite kaybı veya sıkıştırma uygulamaz.</p>
+            <p>headshell, saf Rust ile yazılmış <code>symphonia</code> çözücüsü ve <code>cpal</code> ses çıkış hattını kullanır. FLAC, WAV, OGG, MP3 ve M4A dosyalarını doğrudan donanımınıza saf bit akışıyla iletir; herhangi bir kalite kaybı veya sıkıştırma uygulamaz.</p>
           </div>
 
           <div class="faq-card">
             <h4>Etiketleri (ID3) bozuk veya eksik olan şarkılar nasıl eşleşiyor?</h4>
-            <p>tonearm katı bir <strong>Kanonik Kimlik Zinciri</strong> kullanır: Sırasıyla ISRC kodu, MusicBrainz ID, süre/sanatçı toleranslı bulanık eşleme ve ses parmak iziyle şarkıları çözümler. 69 farklı zorlu vaka üzerinde %98+ doğrulukla test edilmiştir.</p>
+            <p>headshell katı bir <strong>Kanonik Kimlik Zinciri</strong> kullanır: Sırasıyla ISRC kodu, MusicBrainz ID, süre/sanatçı toleranslı bulanık eşleme ve ses parmak iziyle şarkıları çözümler. 69 farklı zorlu vaka üzerinde %98+ doğrulukla test edilmiştir.</p>
           </div>
 
           <div class="faq-card">
@@ -801,7 +801,7 @@
 
           <div class="faq-card">
             <h4>Modern Masaüstü Arayüzü (GUI) ve Mobil Sürüm gelecek mi?</h4>
-            <p><strong>Evet.</strong> tonearm-core çekirdeği bugünden <code>uniffi</code> ile iOS/Android mobil bağlamalarına ve Tauri tabanlı masaüstü arayüzüne uyumlu olarak tasarlandı. Geliştiriciler ve kullanıcılar için CSS tabanlı topluluk temaları da yoldadır.</p>
+            <p><strong>Evet.</strong> headshell-core çekirdeği bugünden <code>uniffi</code> ile iOS/Android mobil bağlamalarına ve Tauri tabanlı masaüstü arayüzüne uyumlu olarak tasarlandı. Geliştiriciler ve kullanıcılar için CSS tabanlı topluluk temaları da yoldadır.</p>
           </div>
 
         </div>
@@ -810,7 +810,7 @@
     </main>
 
     <footer>
-      <div>tonearm · Saf Rust (2024 edition) ile inşa edilmiş özgür yazılım.</div>
+      <div>headshell · Saf Rust (2024 edition) ile inşa edilmiş özgür yazılım.</div>
       <div>
         <a href="LICENSE-MIT">MIT</a> / <a href="LICENSE-APACHE">Apache-2.0</a>
       </div>
