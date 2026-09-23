@@ -3486,3 +3486,14 @@ düzeltme aynı commit'te gider, ayrı bir depoya kopyalanmayı beklemez.
   `href="LICENSE-MIT"` — ikincisi site kökünden 404).
 - Sayfa yer tutucu: sürüm rozeti `v0.0.1-beta` diyor ve indirme bağlantısı
   yok. İlk etiketten sonra yeniden yazılacak.
+
+**Ek — açma işi depoya yazılamadı.** İlk denemede Pages'i bir iş akışı
+(`actions/configure-pages`, `enablement: true`) kendisi açsın istendi ki
+ayar depodaki bir dosyada yazılı kalsın. Olmadı: hem yerel token hem de
+iş akışının `GITHUB_TOKEN`'ı `Create Pages site` çağrısında 403 veriyor
+(`Resource not accessible by integration`) — Pages izni ikisinde de yok.
+
+İş akışı geri alındı. Kaynak, depo ayarlarından **bir kez** seçiliyor:
+Settings → Pages → *Deploy from a branch* → `master` / `/docs`. Bundan
+sonrası kendiliğinden: `docs/`'a giden her commit yayımlanıyor, ne iş
+akışı ne CI dakikası harcanıyor.
