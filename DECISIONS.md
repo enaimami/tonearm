@@ -3457,3 +3457,32 @@ hangi komutun kuracağını söylüyor — K9.
 
 Aynı turda ikinci bir hata: eksik araç mesajları çift tırnak içinde ters
 tırnak kullanıyordu, yani `updpkgsums`'u basmak yerine **çalıştırıyorlardı**.
+
+---
+
+## D-068 — Tanıtım sayfası GitHub Pages'ten yayımlanıyor (şimdilik yer tutucu)
+
+**Tarih:** 2026-09-23 · **Durum:** UYGULANDI (2026-09-23)
+
+**Soru:** `docs/index.html` aylardır depoda duruyordu ama hiçbir yerde
+yayımlanmıyordu — yani kimse görmüyordu. Bir site için ayrı bir depo, ayrı
+bir üretici (SSG) ve ayrı bir dağıtım hattı mı kurulmalı?
+
+**Karar:** Hayır. GitHub Pages **`master` dalının `docs/` klasöründen**
+doğrudan yayımlanıyor. Üretici yok, npm yok, ek iş akışı yok — sayfa zaten
+tek dosyalık düz HTML ve `crates/headshell/ui` ile aynı hatta duruyor
+(bundler yok, orada da yoktu).
+
+**Gerekçe:** Bir yer tutucu için dağıtım hattı kurmak, yer tutucudan pahalı.
+`docs/` kaynağı yayımlanan şeyin ta kendisi olduğu sürece sayfa bayatlamaz:
+düzeltme aynı commit'te gider, ayrı bir depoya kopyalanmayı beklemez.
+
+**Sonuç:**
+- Adres: <https://headshell.github.io/headshell/>
+- `docs/` bundan sonra **yayımlanan bir yüzey**. Oraya konan her dosya
+  herkese açıktır; `eklenti-yazma.md` de aynı kökten servis ediliyor.
+- Aynı turda üç ölü bağlantı düzeltildi: "Kaynak Kod" düğmesi ve iki lisans
+  bağlantısı depoya değil hiçbir yere gidiyordu (`href="https://github.com"`,
+  `href="LICENSE-MIT"` — ikincisi site kökünden 404).
+- Sayfa yer tutucu: sürüm rozeti `v0.0.1-beta` diyor ve indirme bağlantısı
+  yok. İlk etiketten sonra yeniden yazılacak.
