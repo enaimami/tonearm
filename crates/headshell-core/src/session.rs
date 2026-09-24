@@ -119,7 +119,7 @@ pub struct PluginConsentReport {
     pub action: String,
     /// Eklentinin **beyan ettiği** izinler.
     pub permissions: Permissions,
-    /// Motorun onun için indireceği eserler (D-055).
+    /// Motorun onun için indireceği eserler (D-055, D-069).
     ///
     /// `permissions.net`'ten **ayrı** duruyor ve bu bilerek: indirmeyi
     /// eklenti değil motor yapar. Aynı listeye karışsaydı kullanıcı "bu
@@ -127,13 +127,17 @@ pub struct PluginConsentReport {
     /// indirdiği şey karmasıyla sabitli.
     #[serde(default)]
     pub requires: Vec<crate::plugin::manifest::Requirement>,
+    /// Eserlerin hangi platform için çözüldüğü — onay ekranı bu platformun
+    /// yayınını gösterir.
+    #[serde(default)]
+    pub platform: String,
     /// Komuttan sonraki durum.
     pub status: ConsentStatus,
     pub permissions_enforced: bool,
     pub diag: DiagReport,
 }
 
-/// `headshell plugin install` çıktısı (D-055).
+/// `headshell plugin install` çıktısı (D-055, D-069).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PluginInstallReport {
     /// Eklenti artık çalışabilir mi: beyan edilen eserlerin **hepsi** hazır mı.
@@ -141,10 +145,11 @@ pub struct PluginInstallReport {
     /// Manifestin beyan ettiği eser sayısı. `0` geçerli bir cevap: eklenti
     /// hiçbir şey istemiyor demek, "bakmadım" demek değil (K9).
     pub declared: usize,
-    /// Motorun bulduğu yorumlayıcı — beklenmeyen bir Python çalıştığında
-    /// hangisinin seçildiği görünsün diye.
-    pub python: crate::plugin::runtime::PythonInfo,
-    pub report: crate::plugin::runtime::InstallReport,
+    /// Eserlerin çözüldüğü platform (`linux-x86_64`). api 1'de burada
+    /// motorun bulduğu Python yazıyordu; api 2'de yorumlayıcı gömülü ve
+    /// seçilecek tek şey platformun ikilisi.
+    pub platform: String,
+    pub report: crate::plugin::artifact::InstallReport,
     pub diag: DiagReport,
 }
 
@@ -1264,7 +1269,7 @@ impl Session {
         })
     }
 
-    /// Bir eklentinin beyan ettiği eserleri motorla kurar (D-055).
+    /// Bir eklentinin beyan ettiği eserleri motorla kurar (D-055, D-069).
     ///
     /// **Ağa çıkar ve bunu `--online` beklemeden yapar.** Bayrak örtük ağ
     /// erişimini engellemek için var ("bir export'u içe aktarmak kimseyi
@@ -1284,47 +1289,38 @@ impl Session {
             Some(self.config.data_dir().to_path_buf()),
         );
 
+        let store = crate::plugin::artifact::ArtifactStore::new(&self.config);
         let result = (|| {
             let dir = self.config.plugins_dir().join(name);
             let manifest = crate::plugin::manifest::PluginManifest::load(&dir)?;
-            let engine = crate::plugin::runtime::Engine::new(&self.config);
-
-            // Yorumlayıcı **önce** aranıyor ve bulunamazsa kurulum hiç
-            // başlamıyor: eseri indirip sonra "ama Python yok" demek,
-            // kullanıcıya iki turda söylenecek tek bir haberdir.
-            let python = crate::plugin::runtime::find_python()?;
 
             let mut outcomes = Vec::new();
             if !manifest.requires.is_empty() {
-                let http = crate::net::default_http_client()?;
+                let source = crate::plugin::artifact::default_artifact_source()?;
                 for requirement in &manifest.requires {
-                    let outcome = engine.install(&http, requirement)?;
+                    let outcome = store.install(source.as_ref(), requirement)?;
                     outcomes.push((requirement.name.clone(), outcome));
                 }
             }
-            Ok((manifest, python, outcomes))
+            Ok((manifest, outcomes))
         })();
 
-        if let Ok((_, python, outcomes)) = &result {
-            rec.note(format!(
-                "yorumlayıcı: {} ({}, {})",
-                python.path.display(),
-                python.version,
-                python.source
-            ));
+        rec.note(format!("platform: {}", store.platform()));
+        if let Ok((_, outcomes)) = &result {
             for (name, outcome) in outcomes {
                 rec.note(format!("{name}: {}", outcome.describe()));
             }
         }
 
         let plugin = name.to_owned();
-        self.finish(rec, result, move |(manifest, python, outcomes), diag| {
-            let report = crate::plugin::runtime::InstallReport { plugin, outcomes };
+        let platform = store.platform().to_owned();
+        self.finish(rec, result, move |(manifest, outcomes), diag| {
+            let report = crate::plugin::artifact::InstallReport { plugin, outcomes };
             PluginInstallReport {
                 ready: report.is_ready(),
                 declared: manifest.requires.len(),
+                platform,
                 report,
-                python,
                 diag,
             }
         })
@@ -1386,6 +1382,7 @@ impl Session {
         );
 
         let action = action.to_owned();
+        let platform = crate::plugin::artifact::current_platform();
         let result = (|| {
             let dir = self.config.plugins_dir().join(name);
             let manifest = crate::plugin::manifest::PluginManifest::load(&dir)?;
@@ -1403,10 +1400,16 @@ impl Session {
                 manifest.permissions.describe()
             ));
             for requirement in &manifest.requires {
-                rec.note(format!(
-                    "motorun indireceği: {} {} ← {} (sha256 {})",
-                    requirement.name, requirement.version, requirement.url, requirement.sha256
-                ));
+                match requirement.asset_for(&platform) {
+                    Some(asset) => rec.note(format!(
+                        "motorun indireceği: {} {} ({platform}) ← {} (sha256 {})",
+                        requirement.name, requirement.version, asset.url, asset.sha256
+                    )),
+                    None => rec.note(format!(
+                        "{} {}: bu platform ({platform}) için yayın yok",
+                        requirement.name, requirement.version
+                    )),
+                }
             }
             rec.note(format!("durum: {}", status.describe()));
         }
@@ -1417,6 +1420,7 @@ impl Session {
                 action,
                 permissions: manifest.permissions,
                 requires: manifest.requires,
+                platform,
                 status,
                 permissions_enforced: crate::plugin::PERMISSIONS_ENFORCED,
                 diag,

@@ -33,27 +33,107 @@ fn main() -> ExitCode {
     env::fixup();
     init_tracing();
 
-    match run() {
+    // Bağlam tek kez üretiliyor: arayüz dosyalarını ikiliye gömüyor ve iki
+    // yolda da (uygulama ya da hata penceresi) aynısı kullanılıyor.
+    let context = tauri::generate_context!();
+
+    // Kütüphane pencereden **önce** açılıyor: veri dizini yoksa ya da
+    // veritabanı bozuksa kullanıcı boş bir pencereye değil, aşamasını
+    // söyleyen bir hataya baksın.
+    let (core, themes) = match open_core() {
+        Ok(opened) => opened,
+        Err(text) => {
+            report(&text);
+            show_startup_error(context, &text);
+            return ExitCode::FAILURE;
+        }
+    };
+
+    match run(core, themes, context) {
         Ok(()) => ExitCode::SUCCESS,
         Err(text) => {
             // Pencere hiç açılamadıysa gösterilecek bir yüzey yok; hata
             // aşamasıyla birlikte `stderr`'e gider (K9).
-            eprintln!("{text}");
-            eprintln!("\nayrıntı için: headshell diag");
+            report(&text);
             ExitCode::FAILURE
         }
     }
 }
 
-fn run() -> Result<(), String> {
-    // Kütüphane pencereden **önce** açılıyor: veri dizini yoksa ya da
-    // veritabanı bozuksa kullanıcı boş bir pencereye değil, aşamasını
-    // söyleyen bir hataya baksın.
+fn report(text: &str) {
+    eprintln!("{text}");
+    eprintln!("\nayrıntı için: headshell diag");
+}
+
+fn open_core() -> Result<(Core, ThemeStore), String> {
     let config = Config::discover().map_err(|err| err.chain_text())?;
     // Tema deposu çekirdeğe gitmiyor, yalnızca veri dizinini biliyor (§3.3).
     let themes = ThemeStore::new(config.data_dir());
     let core = Core::open(config).map_err(|err| err.chain_text())?;
+    Ok((core, themes))
+}
 
+/// Açılış başarısız olduysa hatayı bir pencerede gösterir (D-070).
+///
+/// Windows'un sürüm derlemesi konsolsuz (`windows_subsystem`, dosyanın
+/// başında): `stderr`'e yazılan hata orada **hiçbir yere** gitmiyor ve
+/// uygulamaya çift tıklayan kullanıcı hiçbir şey görmüyordu. K9 bunu
+/// yasaklıyor — her başarısızlık hangi aşamada olduğunu söyler. Pencere her
+/// platformda açılıyor: tek metin, tek davranış.
+///
+/// Metin sayfaya adresin `#` kısmıyla gidiyor, IPC'yle değil: çekirdek yok,
+/// komutlar yok, ve sayfanın CSP'si (`script-src 'self'`) satır içi betiğe
+/// izin vermiyor.
+fn show_startup_error(mut context: tauri::Context, text: &str) {
+    // Ana pencere (`index.html`) açılmasın: arkasında çekirdek yok, arayüz
+    // boş ve donuk kalırdı.
+    context.config_mut().app.windows.clear();
+    let url = format!("startup-error.html#{}", encode_fragment(text));
+
+    let built = tauri::Builder::default()
+        .setup(move |app| {
+            tauri::WebviewWindowBuilder::new(
+                app,
+                "startup-error",
+                tauri::WebviewUrl::App(url.into()),
+            )
+            .title("headshell açılamadı")
+            .inner_size(760.0, 460.0)
+            .build()?;
+            Ok(())
+        })
+        .build(context);
+    match built {
+        // Pencere kapanınca döner; süreç yine başarısızlık koduyla çıkar.
+        Ok(app) => {
+            let _ = app.run_return(|_, _| {});
+        }
+        Err(err) => eprintln!("ADIM: STARTUP_ERROR — hata penceresi de açılamadı: {err}"),
+    }
+}
+
+/// Metni adresin parça (`#…`) kısmına yazılabilir hâle getirir.
+///
+/// Ayrılmamış karakterler (RFC 3986) dışındaki her bayt `%XX` olur. Elle
+/// yazılıyor, çünkü URL ayrıştırıcıları satır sonlarını sessizce siler —
+/// çok satırlı bir hata zinciri tek satıra düşerdi. Sayfa
+/// `decodeURIComponent` ile geri çeviriyor.
+fn encode_fragment(text: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut out = String::with_capacity(text.len() * 3);
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            out.push(char::from(byte));
+        } else {
+            out.push('%');
+            out.push(char::from(HEX[usize::from(byte >> 4)]));
+            out.push(char::from(HEX[usize::from(byte & 0x0f)]));
+        }
+    }
+    out
+}
+
+fn run(core: Core, themes: ThemeStore, context: tauri::Context) -> Result<(), String> {
     let (jobs_tx, jobs_rx) = mpsc::unbounded_channel();
 
     tauri::Builder::default()
@@ -112,7 +192,7 @@ fn run() -> Result<(), String> {
             commands::diag,
             commands::environment,
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .map_err(|err| format!("ADIM: PLAYBACK_OUTPUT\n  pencere açılamadı: {err}"))
 
     // `run` döndüğünde `AppState` düşer, kanal kapanır ve çekirdek iş
@@ -130,4 +210,29 @@ fn init_tracing() {
         .with_env_filter(filter)
         .with_writer(std::io::stderr)
         .init();
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+    use super::encode_fragment;
+
+    /// Kodlama, sayfanın `decodeURIComponent`'iyle geri dönmeli — satır
+    /// sonları, Türkçe harfler ve `#`/`%` dahil. Sayfanın yaptığı çözme
+    /// burada gerçek bir JS motorunda yapılıyor (QuickJS, D-070).
+    #[test]
+    fn the_error_text_survives_the_trip_through_the_url_fragment() {
+        let text = "ADIM: CONFIG_LOAD\n  → veri dizini — %LOCALAPPDATA% yok; #1 çğıöşü İ";
+        let encoded = encode_fragment(text);
+        assert!(!encoded.contains('\n') && !encoded.contains('#') && !encoded.contains(' '));
+
+        let runtime = rquickjs::Runtime::new().unwrap();
+        let context = rquickjs::Context::full(&runtime).unwrap();
+        let decoded: String = context.with(|ctx| {
+            let decode: rquickjs::Function = ctx.globals().get("decodeURIComponent").unwrap();
+            decode.call((encoded.as_str(),)).unwrap()
+        });
+        assert_eq!(decoded, text);
+    }
 }

@@ -12,10 +12,12 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # Ağ testleri (D-043) ulaşamazsa kendini atlar. CI'da SoundCloud ve
-  # MusicBrainz gerçekten koşar; AcoustID anahtarsız, ytmusic yt-dlp'siz,
-  # torznab yapılandırmasız oldukları için atlanır. Kırmızı yanan bir ağ
-  # testi "ulaşamadım" değil, "ulaşıp beklenmeyeni aldım" demektir.
+  # Ağ testleri (D-043) ulaşamazsa kendini atlar. CI'da SoundCloud,
+  # YouTube Music ve MusicBrainz gerçekten koşar; AcoustID anahtarsız olduğu
+  # için atlanır. Eklentiler için makinede hiçbir şey kurulu olması gerekmez:
+  # motor gömülü (QuickJS), yt-dlp'yi platform ikilisi olarak motor indirir
+  # (D-069). Kırmızı yanan bir ağ testi "ulaşamadım" değil, "ulaşıp
+  # beklenmeyeni aldım" demektir.
   RUST_BACKTRACE: 1
 
 jobs:
@@ -63,6 +65,38 @@ jobs:
         env:
           HEADSHELL_TEST_YTMUSIC_COOKIES: ${{ secrets.YTMUSIC_COOKIES }}
 
+  # Windows ve macOS'ta derleme + test (D-070).
+  #
+  # Kod bu işe kadar yalnızca Linux'ta sınanıyordu ve Windows'a özgü yolların
+  # hiçbiri koşmamıştı: veri dizini (`%LOCALAPPDATA%`), `;` ile bölünen müzik
+  # listesi, `cmd.exe` ile araç testleri, `.exe` uzantılı eserler, boş ortamda
+  # `SystemRoot`. Hepsi `cfg(windows)` ya da çalışma anı dalı — Linux'ta
+  # derlenmeleri bile garanti değildi. `fmt` platformdan bağımsız, burada
+  # tekrarlanmıyor.
+  platforms:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust araç zinciri
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: test
+        run: cargo test --workspace
+        env:
+          HEADSHELL_TEST_YTMUSIC_COOKIES: ${{ secrets.YTMUSIC_COOKIES }}
+
   # Feature birleşmesi olmadan çekirdek tek başına temiz mi?
   #
   # `--workspace` koşumunda headshell-cli ve headshell, headshell-core'un audio/http-client
@@ -94,11 +128,11 @@ jobs:
 
       - name: Her feature tek tek
         run: |
-          for f in audio http-client fingerprint render-png; do
+          for f in audio http-client fingerprint render-png plugin-engine; do
             echo "::group::$f"
             cargo clippy -p headshell-core --all-targets --features "$f" -- -D warnings
             echo "::endgroup::"
           done
 
       - name: Hepsi birden
-        run: cargo clippy -p headshell-core --all-targets --features audio,http-client,fingerprint,render-png -- -D warnings
+        run: cargo clippy -p headshell-core --all-targets --features audio,http-client,fingerprint,render-png,plugin-engine -- -D warnings

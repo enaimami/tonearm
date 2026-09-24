@@ -32,7 +32,14 @@ jobs:
         include:
           # Hedef kitle Linux ağırlıklı (D-028) ve WebKitGTK üç motorun en
           # zayıfı — matrisin ilk satırı bu yüzden Linux.
-          - os: ubuntu-24.04
+          #
+          # 22.04, 24.04 değil (D-070): bir ikili, derlendiği makinenin
+          # glibc'sinden eskisinde açılmaz. 24.04'te derlenen sürüm glibc 2.39
+          # istiyordu ve Debian 12'de (2.36) `GLIBC_2.39 not found` diyordu —
+          # ölçüldü. 22.04 (2.35) tabanı Debian 12'yi ve Ubuntu 22.04'ü
+          # kapsıyor. Bu koşucu emekliye ayrılınca taban bir konteynerde
+          # (sabit bir dağıtım) tutulmalı, koşucu sürümüne bırakılmamalı.
+          - os: ubuntu-22.04
             name: linux
           - os: macos-14
             name: macos
@@ -58,7 +65,11 @@ jobs:
             patchelf \
             rpm
 
+      # macOS: evrensel ikili için iki hedef — Intel ve Apple Silicon (D-070).
+      # Koşucu arm64; x86_64 ikilisi çapraz derleniyor.
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.name == 'macos' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
       - uses: Swatinem/rust-cache@v2
 
       - name: Tauri CLI
@@ -82,8 +93,13 @@ jobs:
         if: matrix.name == 'linux'
         run: cargo tauri build --config crates/headshell/tauri.conf.json --bundles appimage
 
-      - name: Paketle
-        if: matrix.name != 'linux'
+      # `.dmg` bir zamanlar yalnızca arm64'tü (D-066): Intel Mac'ler açamıyordu.
+      - name: Paketle (macOS, evrensel)
+        if: matrix.name == 'macos'
+        run: cargo tauri build --config crates/headshell/tauri.conf.json --target universal-apple-darwin
+
+      - name: Paketle (Windows)
+        if: matrix.name == 'windows'
         run: cargo tauri build --config crates/headshell/tauri.conf.json
 
       # CLI ikilisi Tauri bundle'ına **girmiyor**: `cargo tauri build` yalnızca
@@ -95,14 +111,33 @@ jobs:
       # (`releases/download/v<sürüm>/...`) ve sabit ad, AUR paketinin her
       # sürümde aynı satırla çalışmasını sağlıyor.
       - name: CLI ikilisini derle
+        if: matrix.name != 'macos'
         run: cargo build --release -p headshell-cli
 
-      - name: CLI ikilisini paketle (Unix)
-        if: matrix.name != 'windows'
+      # İki mimari ayrı derlenip `lipo` ile tek dosyada birleşiyor.
+      - name: CLI ikilisini derle (macOS, evrensel)
+        if: matrix.name == 'macos'
+        run: |
+          cargo build --release -p headshell-cli --target aarch64-apple-darwin
+          cargo build --release -p headshell-cli --target x86_64-apple-darwin
+          mkdir -p target/universal
+          lipo -create -output target/universal/headshell \
+            target/aarch64-apple-darwin/release/headshell \
+            target/x86_64-apple-darwin/release/headshell
+
+      - name: CLI ikilisini paketle (Linux)
+        if: matrix.name == 'linux'
         run: |
           mkdir -p dist
-          tar -czf "dist/headshell-cli-${{ matrix.name }}-$(uname -m).tar.gz" \
+          tar -czf "dist/headshell-cli-linux-$(uname -m).tar.gz" \
             -C target/release headshell
+
+      - name: CLI ikilisini paketle (macOS)
+        if: matrix.name == 'macos'
+        run: |
+          mkdir -p dist
+          tar -czf dist/headshell-cli-macos-universal.tar.gz \
+            -C target/universal headshell
 
       - name: CLI ikilisini paketle (Windows)
         if: matrix.name == 'windows'
@@ -127,7 +162,7 @@ jobs:
             target/release/bundle/deb/*.deb
             target/release/bundle/rpm/*.rpm
             target/release/bundle/appimage/*.AppImage
-            target/release/bundle/dmg/*.dmg
+            target/universal-apple-darwin/release/bundle/dmg/*.dmg
             target/release/bundle/msi/*.msi
             target/release/bundle/nsis/*.exe
             dist/headshell-cli-*

@@ -222,14 +222,8 @@ mod tests {
     use crate::model::{ListenSource, TrackRef};
     use crate::provider::ProviderRegistry;
 
-    fn temp_dir(label: &str) -> std::path::PathBuf {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let dir = std::env::temp_dir().join(format!("headshell-live-{label}-{unique}"));
-        std::fs::create_dir_all(&dir).expect("geçici dizin");
-        dir
+    fn temp_dir(label: &str) -> crate::test_support::TempDir {
+        crate::test_support::TempDir::new(&format!("live-{label}"))
     }
 
     fn live_at(dir: &std::path::Path) -> LiveSession {

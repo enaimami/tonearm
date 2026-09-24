@@ -654,8 +654,10 @@ async function refreshPlugins() {
       `${s.discovered} eklenti · ${s.ready} hazır · ${s.needs_install} kurulum bekliyor · ` +
       `${s.awaiting_approval} onay bekliyor · ${s.disabled} kapalı · ` +
       `${s.incompatible} sürüm uyumsuz · ${s.broken} bozuk`;
-    // Olmayan bir korumaya güven verilmez: uyarı listeyle birlikte duruyor.
+    // Olmayan bir korumaya güven verilmez, var olanın sınırı da söylenir:
+    // iki not listeyle birlikte duruyor ve biri her zaman görünüyor.
     $("pluginEnforce").hidden = list.permissions_enforced;
+    $("pluginEnforced").hidden = !list.permissions_enforced;
   }
   refreshSecrets();
 }
@@ -691,7 +693,6 @@ function pluginRow(entry) {
 
   if (entry.permissions && !isEmptyPermissions(entry.permissions)) {
     row.append(permissionLine("istediği ağ", entry.permissions.net));
-    row.append(permissionLine("istediği dosya", entry.permissions.fs));
   }
 
   // Motorun indireceği eserler ayrı satırda (D-055): indirmeyi eklenti değil
@@ -699,7 +700,9 @@ function pluginRow(entry) {
   for (const requirement of entry.requires ?? []) {
     const line = document.createElement("p");
     line.className = "plugin-need";
-    line.textContent = `motor: ${requirement.name} ${requirement.version} — ${requirementText(requirement.state)}`;
+    line.textContent =
+      `motor: ${requirement.name} ${requirement.version} (${requirement.platform}) — ` +
+      requirementText(requirement.state);
     row.append(line);
   }
 
@@ -718,7 +721,7 @@ function pluginRow(entry) {
 }
 
 function isEmptyPermissions(permissions) {
-  return (permissions.net?.length ?? 0) === 0 && (permissions.fs?.length ?? 0) === 0;
+  return (permissions.net?.length ?? 0) === 0;
 }
 
 function permissionLine(label, values) {
@@ -729,13 +732,18 @@ function permissionLine(label, values) {
 }
 
 /// Eser durumu dıştan etiketli geliyor: `"Missing"` ya da
-/// `{ Installed: { path } }` / `{ Corrupt: { expected, found } }`.
+/// `{ Installed: { path } }` / `{ Corrupt: { expected, found } }` /
+/// `{ Unsupported: { platform, available } }`.
 function requirementText(state) {
   if (state === "Missing") return "kurulmamış";
   if (typeof state === "object" && state !== null) {
     if (state.Installed) return `kurulu · ${state.Installed.path}`;
     if (state.Corrupt) {
       return `karma tutmuyor (beklenen ${short(state.Corrupt.expected)}, bulunan ${short(state.Corrupt.found)})`;
+    }
+    // Kurulum bunu düzeltmez; "kur" düğmesine basmak boşa olur.
+    if (state.Unsupported) {
+      return `bu platform (${state.Unsupported.platform}) için yayın yok · beyan edilenler: ${state.Unsupported.available.join(", ")}`;
     }
   }
   // Bilinmeyen bir durum sessizce "iyi" sayılmaz.

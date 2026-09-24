@@ -24,6 +24,8 @@
 const APP_JS: &str = include_str!("../ui/app.js");
 const INDEX_HTML: &str = include_str!("../ui/index.html");
 const STYLE_CSS: &str = include_str!("../ui/style.css");
+const STARTUP_ERROR_HTML: &str = include_str!("../ui/startup-error.html");
+const STARTUP_ERROR_JS: &str = include_str!("../ui/startup-error.js");
 
 /// `api: 1`'in taahhüt ettiği sınıf adları.
 ///
@@ -248,4 +250,33 @@ fn no_declared_token_is_dead() {
             "`--{token}` ilan edilmiş ama hiç kullanılmıyor — tema yazarına tutulmayan bir söz"
         );
     }
+}
+
+/// Açılış hatası penceresi (D-070) kendi başına bir sayfa: betiğin yazdığı
+/// öğe orada olmalı, yoksa kullanıcı yine **boş** bir pencere görür — bu
+/// sayfanın var oluş sebebinin tam tersi.
+#[test]
+fn the_startup_error_page_has_the_element_its_script_writes_to() {
+    assert!(
+        STARTUP_ERROR_HTML.contains("src=\"startup-error.js\""),
+        "sayfa betiğini yüklemiyor"
+    );
+    let ids = collect_between(STARTUP_ERROR_JS, "getElementById(\"", '"');
+    assert!(!ids.is_empty(), "betik hiçbir öğeye yazmıyor");
+    for id in ids {
+        assert!(
+            STARTUP_ERROR_HTML.contains(&format!("id=\"{id}\"")),
+            "startup-error.js `{id}` arıyor, sayfada yok"
+        );
+    }
+    // Metin işaretleme olarak yorumlanmamalı: hata zinciri kullanıcı verisi
+    // (dosya yolu, sunucu mesajı) taşıyabilir.
+    let code_uses_inner_html = STARTUP_ERROR_JS
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .any(|line| line.contains("innerHTML"));
+    assert!(
+        !code_uses_inner_html,
+        "hata metni `innerHTML` ile yazılıyor"
+    );
 }

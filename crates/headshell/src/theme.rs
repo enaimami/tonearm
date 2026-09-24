@@ -415,11 +415,32 @@ mod tests {
         ThemeStore::new(dir)
     }
 
-    fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("headshell-theme-test-{name}"));
+    /// Kendini silen geçici dizin (D-070). Ad süreç kimliği taşıyor: iki
+    /// koşum aynı anda aynı dizini silip yeniden açmasın.
+    struct TempDir(PathBuf);
+
+    impl std::ops::Deref for TempDir {
+        type Target = Path;
+
+        fn deref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn temp_dir(name: &str) -> TempDir {
+        let dir = std::env::temp_dir().join(format!(
+            "headshell-theme-test-{name}-{}",
+            std::process::id()
+        ));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("geçici dizin");
-        dir
+        TempDir(dir)
     }
 
     fn write_theme(root: &Path, id: &str, manifest: &str, css: &str) {

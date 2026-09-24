@@ -10,7 +10,7 @@
     "",
     "Bu dosya iki tarafın da okuduğu tek doğruluk kaynağı. Rust tarafı:",
     "crates/headshell-core/tests/anchor_parity.rs. JS tarafı:",
-    "crates/headshell/tests/anchor_parity.mjs (crates/headshell/ui/anchor.js üzerinden).",
+    "crates/headshell/tests/anchor_parity_js.rs (crates/headshell/ui/anchor.js'i gömülü QuickJS'te koşturarak).",
     "",
     "Anahtarlar ve vaka adları İngilizce (D-036): bu dosya iki dilden okunuyor",
     "ve kümeyi büyütecek kişi Türkçe bilmek zorunda değil.",

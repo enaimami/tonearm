@@ -1,13 +1,12 @@
 {
   "name": "soundcloud",
   "display_name": "SoundCloud",
-  "version": "0.1.0",
-  "api": 1,
-  "exec": ["python3", "./main.py"],
+  "version": "0.2.0",
+  "api": 2,
+  "main": "main.js",
   "capabilities": ["search", "stream"],
   "permissions": {
-    "net": ["soundcloud.com", "a-v2.sndcdn.com", "api-v2.soundcloud.com"],
-    "fs": []
+    "net": ["soundcloud.com", "api-v2.soundcloud.com", "*.sndcdn.com"]
   },
-  "description": "SoundCloud'da arar ve çalar. client_id'yi sırdan alır, yoksa kendisi keşfeder."
+  "description": "SoundCloud'da arar ve çalar. client_id'yi sırdan alır, yoksa kendisi keşfeder. `*.sndcdn.com`: web istemcisinin JS varlıkları (a-v2) ve ses akışı (cf-media) bu alan adının altında."
 }

@@ -30,14 +30,63 @@ fn fixtures() -> PathBuf {
     PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures"))
 }
 
-fn temp_dir(label: &str) -> PathBuf {
-    let unique = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let dir = std::env::temp_dir().join(format!("headshell-cli-{label}-{unique}"));
-    std::fs::create_dir_all(&dir).expect("geçici dizin");
-    dir
+/// Kendini silen geçici dizin — düşen bir testte de (`Drop` panikte koşar).
+///
+/// Kök Cargo'nun `CARGO_TARGET_TMPDIR`'i (`target/tmp`), işletim sisteminin
+/// ortak `/tmp`'si değil: testler bir zamanlar orada dizin bırakıyordu ve bir
+/// geliştirme makinesinde 1,2 GB birikmişti (D-070).
+struct TempDir(PathBuf);
+
+impl std::ops::Deref for TempDir {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl AsRef<Path> for TempDir {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl AsRef<std::ffi::OsStr> for TempDir {
+    fn as_ref(&self) -> &std::ffi::OsStr {
+        self.0.as_os_str()
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        if let Err(err) = std::fs::remove_dir_all(&self.0)
+            && err.kind() != std::io::ErrorKind::NotFound
+        {
+            eprintln!(
+                "uyarı: geçici dizin silinemedi ({}): {err}",
+                self.0.display()
+            );
+        }
+    }
+}
+
+fn temp_dir(label: &str) -> TempDir {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let base = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    std::fs::create_dir_all(&base).expect("test kökü açılmalı");
+    loop {
+        let dir = base.join(format!(
+            "cli-{label}-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        match std::fs::create_dir(&dir) {
+            Ok(()) => return TempDir(dir),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => panic!("geçici dizin açılamadı ({}): {err}", dir.display()),
+        }
+    }
 }
 
 /// `headshell` ikilisini çalıştırır; `(stdout, stderr, başarılı_mı)`.
@@ -164,8 +213,6 @@ fn json_output_is_stable_across_subcommands() {
     let (stdout, stderr, ok) = run(&dir, &["--json", "diag"]);
     assert!(ok, "diag başarısız: {stderr}");
     assert_snapshot("diag", &stdout);
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 /// Faz 0.5'in bitti ölçütü: `headshell sleeve --out kart.png` gerçek bir PNG üretmeli.
@@ -197,8 +244,6 @@ fn sleeve_writes_a_real_png_and_svg() {
     assert!(ok, "sleeve --out svg başarısız: {stderr}");
     let text = std::fs::read_to_string(&svg).expect("svg dosyası yazılmalı");
     assert!(text.contains("height=\"1920\""), "story ölçüsü: {text}");
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 /// Tanınmayan uzantı sessizce yanlış biçim yazmamalı; aşamayı söyleyerek düşmeli.
@@ -214,8 +259,6 @@ fn sleeve_rejects_an_unknown_extension() {
     assert!(!ok, "tanınmayan uzantı başarısız olmalı");
     assert!(stderr.contains("ADIM: SLEEVE_RENDER"), "{stderr}");
     assert!(!bad.exists(), "hatalı biçimde dosya yazılmamalı");
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 /// Faz 1'in bitti ölçütü: yerel dosya çalınıyor ve bir `listen` kaydı üretiyor.
@@ -238,7 +281,6 @@ fn playing_a_local_file_records_a_listen_in_the_same_table_as_imports() {
         // Ses aygıtı olmayan ortamda çalma kurulamaz; bunu ayırt et.
         if stderr.contains("PLAYBACK_OUTPUT") {
             eprintln!("ses çıkışı yok — çalma testi atlanıyor:\n{stderr}");
-            std::fs::remove_dir_all(&dir).ok();
             return;
         }
         panic!("çalma başarısız: {stderr}");
@@ -254,8 +296,6 @@ fn playing_a_local_file_records_a_listen_in_the_same_table_as_imports() {
         "çalınan parça istatistikte görünmeli:\n{stdout}"
     );
     assert!(stdout.contains("1 çalma"), "{stdout}");
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 /// Kuyruktaki her parça çalınır, her biri bir dinleme üretir ve
@@ -280,7 +320,6 @@ fn every_queued_track_produces_a_listen_that_stats_also_counts() {
     if !ok {
         if stderr.contains("PLAYBACK_OUTPUT") {
             eprintln!("ses çıkışı yok — gapless testi atlanıyor:\n{stderr}");
-            std::fs::remove_dir_all(&dir).ok();
             return;
         }
         panic!("çalma başarısız: {stderr}");
@@ -305,8 +344,6 @@ fn every_queued_track_produces_a_listen_that_stats_also_counts() {
         serde_json::json!(0),
         "baştan sona çalınan parça 'kısa' sayılmamalı: {report}"
     );
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 /// `--if-stale` değişmemiş dizini taramaz, değişmişi tarar (D-025).
@@ -374,9 +411,6 @@ fn scanning_if_stale_skips_an_unchanged_library_and_notices_a_new_file() {
         "yeni dosya kataloğa girmeli: {}",
         value["write"]
     );
-
-    std::fs::remove_dir_all(&dir).ok();
-    std::fs::remove_dir_all(&music).ok();
 }
 
 /// İndeks kalıcı: `play` tarama yapmaz, bir kez taranmış katalogdan okur.
@@ -420,8 +454,6 @@ fn the_catalog_persists_so_play_does_not_rescan() {
         Some(1),
         "taranmış katalogdan bulunmalı"
     );
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 /// Diskten silinen dosya katalogdan düşer ama **geçmişi** silinmez.
@@ -442,8 +474,6 @@ fn a_deleted_file_leaves_the_catalog_but_keeps_its_history() {
     let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["play", "sine"]);
     if !ok && stderr.contains("PLAYBACK_OUTPUT") {
         eprintln!("ses çıkışı yok — test atlanıyor");
-        std::fs::remove_dir_all(&dir).ok();
-        std::fs::remove_dir_all(&music).ok();
         return;
     }
     assert!(ok, "{stderr}");
@@ -471,9 +501,6 @@ fn a_deleted_file_leaves_the_catalog_but_keeps_its_history() {
         stdout.contains("Test Artist"),
         "dinleme geçmişi korunmalı:\n{stdout}"
     );
-
-    std::fs::remove_dir_all(&dir).ok();
-    std::fs::remove_dir_all(&music).ok();
 }
 
 #[test]
@@ -497,8 +524,6 @@ fn dry_run_queues_without_playing() {
         Some(1),
         "tek parça kuyruğa alınmalı"
     );
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -527,8 +552,6 @@ fn provider_commands_report_capabilities_and_scan_counts() {
         "corrupt.flac sayılmalı: {summary}"
     );
     assert!(summary["indexed"].as_u64().unwrap_or(0) >= 3, "{summary}");
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 /// §1.3'ün CLI yüzeyi: uzak sunucu kaydediliyor, listeleniyor, siliniyor —
@@ -623,8 +646,6 @@ fn remote_servers_are_registered_listed_and_removed_without_leaking_credentials(
     let (_, stderr, ok) = run(&dir, &["provider", "remove", "ev"]);
     assert!(!ok, "kayıtlı olmayan ad hata olmalı");
     assert!(stderr.contains("ADIM: CONFIG_LOAD"), "{stderr}");
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 /// Bilinmeyen sunucu türü sessizce Subsonic varsayılmamalı.
@@ -649,7 +670,6 @@ fn an_unknown_server_kind_is_rejected_not_guessed() {
         stderr.contains("subsonic"),
         "seçenekler söylenmeli:\n{stderr}"
     );
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 /// Tty yoksa parola sessizce ekrana basılmamalı; ne yapılacağı söylenmeli.
@@ -678,7 +698,6 @@ fn without_a_terminal_the_password_prompt_points_at_the_env_var() {
         !dir.join("servers.json").exists(),
         "yarım kayıt yazılmamalı"
     );
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -691,7 +710,6 @@ fn testing_an_unknown_provider_lists_the_known_ones() {
         stderr.contains("local"),
         "kullanıcıya kayıtlı sağlayıcılar söylenmeli:\n{stderr}"
     );
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -706,7 +724,6 @@ fn playing_with_no_match_says_what_to_do() {
         stderr.contains("provider scan"),
         "kullanıcıya ne yapacağı söylenmeli:\n{stderr}"
     );
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 /// TUI gerçek bir terminal ister; olmayan ortamda **aşamayı söyleyerek** düşmeli.
@@ -728,8 +745,6 @@ fn the_tui_refuses_to_start_without_a_terminal() {
         stderr.contains("terminal arayüzü"),
         "hata neyin başarısız olduğunu söylemeli:\n{stderr}"
     );
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -747,8 +762,6 @@ fn human_output_names_the_stage_on_failure() {
         stderr.contains("headshell diag"),
         "kullanıcı diag'a yönlendirilmeli:\n{stderr}"
     );
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -757,7 +770,6 @@ fn diag_without_any_run_is_not_an_error() {
     let (stdout, _, ok) = run(&dir, &["diag"]);
     assert!(ok);
     assert!(stdout.contains("henüz"), "{stdout}");
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -771,7 +783,6 @@ fn human_stats_output_is_readable() {
     assert!(ok);
     assert!(stdout.contains("en çok dinlenen sanatçılar"), "{stdout}");
     assert!(stdout.contains("Portishead"), "{stdout}");
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 /// Eklenti yaşam döngüsü CLI'den görünüyor mu (Faz 2 §2.1).
@@ -793,8 +804,9 @@ fn plugin_lifecycle_is_visible_from_the_cli() {
     assert!(ok, "approve başarısız: {stderr}");
     assert!(stdout.contains("onaylı"), "{stdout}");
     assert!(
-        stdout.contains("izinler zorlanmıyor"),
-        "onay çıktısı neyin garanti edilmediğini söylemeli (D-040):\n{stdout}"
+        stdout.contains("izinler zorlanıyor") && stdout.contains("sınırın dışındadır"),
+        "onay çıktısı neyin garanti edildiğini **ve neyin edilmediğini** söylemeli \
+         (D-040, D-069):\n{stdout}"
     );
 
     let (stdout, stderr, ok) = run(&dir, &["--json", "plugin", "list"]);
@@ -819,8 +831,6 @@ fn plugin_lifecycle_is_visible_from_the_cli() {
     let (stdout, _, ok) = run(&dir, &["plugin", "enable", "echo"]);
     assert!(ok);
     assert!(stdout.contains("onaylı"), "{stdout}");
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 /// Sır deposu: değer hiçbir çıktıda görünmüyor (D-042).
@@ -859,17 +869,61 @@ fn secrets_are_listed_by_name_and_never_by_value() {
     let (stdout, _, ok) = run(&dir, &["secret", "remove", "plugin:echo", "token"]);
     assert!(ok);
     assert!(stdout.contains("silindi"), "{stdout}");
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
-/// Fixture eklentisini veri dizinine kurar (süreç açılmıyor; `python3`
-/// gerekmez).
+/// Eklenti **boş bir `PATH` ile** çalışıyor mu (D-069).
+///
+/// api 1'in bütün derdi buydu: eklenti `python3`'ü `PATH`'te arıyordu ve
+/// "kime göndersem bir sorun" çıkıyordu. api 2'de motor ikilinin içinde;
+/// ortam boşaltıldığında da eklenti cevap vermeli. Test ikiliyi ortamı
+/// tamamen silerek çalıştırıyor — hiçbir yorumlayıcı, hiçbir araç yok.
+#[test]
+fn a_plugin_runs_with_nothing_on_the_path() {
+    let dir = temp_dir("bos-path");
+    install_echo_plugin(&dir);
+    let (_, stderr, ok) = run(&dir, &["plugin", "approve", "echo"]);
+    assert!(ok, "approve başarısız: {stderr}");
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_headshell"));
+    command
+        .arg("--data-dir")
+        .arg(&*dir)
+        .args(["--json", "provider", "test", "echo"])
+        .env_clear()
+        .env("HEADSHELL_MUSIC_DIRS", "/olmayan/dizin/headshell-test");
+    // Windows'ta tamamen boş bir ortam fazla boş: bazı sistem DLL'leri
+    // (soket yığını gibi) `SystemRoot` olmadan başlamıyor. O bir yorumlayıcı
+    // ya da araç değil, işletim sisteminin kendisi — geri konuyor, `PATH`
+    // konmuyor.
+    #[cfg(windows)]
+    for key in ["SystemRoot", "windir"] {
+        if let Some(value) = std::env::var_os(key) {
+            command.env(key, value);
+        }
+    }
+    let output = command.output().expect("headshell ikilisi çalışmalı");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "boş ortamda provider test başarısız:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_str(&stdout).expect("JSON");
+    assert_eq!(
+        report["health"]["reachable"],
+        serde_json::Value::Bool(true),
+        "{stdout}"
+    );
+    assert_eq!(report["health"]["track_count"], 2, "{stdout}");
+}
+
+/// Fixture eklentisini veri dizinine kurar — kullanıcının yapacağı gibi,
+/// dizini kopyalayarak.
 fn install_echo_plugin(data_dir: &Path) {
     let source = fixtures().join("plugins/echo");
     let target = data_dir.join("plugins/echo");
     std::fs::create_dir_all(&target).expect("eklenti dizini");
-    for file in ["plugin.json", "main.py"] {
+    for file in ["plugin.json", "main.js"] {
         std::fs::copy(source.join(file), target.join(file)).expect("eklenti dosyası");
     }
 }

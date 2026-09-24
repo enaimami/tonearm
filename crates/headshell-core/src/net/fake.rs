@@ -20,6 +20,7 @@ pub(crate) struct FakeHttp {
 pub(crate) struct Route {
     pattern: String,
     status: u16,
+    headers: Vec<super::HttpHeader>,
     body: Vec<u8>,
 }
 
@@ -36,6 +37,7 @@ impl FakeHttp {
         self.routes.push(Route {
             pattern: pattern.to_owned(),
             status: 200,
+            headers: Vec::new(),
             body: body.as_bytes().to_vec(),
         });
         self
@@ -46,7 +48,24 @@ impl FakeHttp {
         self.routes.push(Route {
             pattern: pattern.to_owned(),
             status,
+            headers: Vec::new(),
             body: body.as_bytes().to_vec(),
+        });
+        self
+    }
+
+    /// `location`'a yönlendiren yanıt (eklenti motorunun yönlendirme
+    /// denetimi bununla sınanıyor, D-069).
+    ///
+    /// Bugün tek çağıranı `plugin-engine` feature'ının arkasındaki
+    /// testler; feature kapalıyken çağrılmıyor.
+    #[allow(dead_code)]
+    pub(crate) fn route_redirect(mut self, pattern: &str, status: u16, location: &str) -> Self {
+        self.routes.push(Route {
+            pattern: pattern.to_owned(),
+            status,
+            headers: vec![super::HttpHeader::new("Location", location)],
+            body: Vec::new(),
         });
         self
     }
@@ -95,7 +114,7 @@ impl HttpClient for FakeHttp {
             match hit {
                 Some(route) => Ok(HttpResponse {
                     status: route.status,
-                    headers: Vec::new(),
+                    headers: route.headers.clone(),
                     body: route.body.clone(),
                 }),
                 // Eşleşmeyen istek sessizce boş dönmez: test yanlış URL

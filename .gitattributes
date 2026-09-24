@@ -1,0 +1,18 @@
+# D-070: depo her platformda aynı baytlarla çıkar.
+#
+# Windows'ta git, `core.autocrlf=true` ise metin dosyalarını CRLF'ye çeviriyor
+# (GitHub'ın Windows koşucularında bu varsayılan). Testler bazı dosyaları
+# bayt bayt karşılaştırıyor — `--json` snapshot'ları, arayüz sözleşmesi,
+# doğruluk kümeleri — ve CRLF'li bir kopya, kodda hiçbir şey bozulmamışken
+# kırmızı yanardı. Sonuç makinenin git ayarına değil depoya bağlı olmalı.
+* text=auto eol=lf
+
+# İkili fikstürler ve ikonlar: dönüşüm yok, satır farkı gösterilmez.
+*.png  binary
+*.ico  binary
+*.icns binary
+*.flac binary
+*.ogg  binary
+*.mp3  binary
+*.m4a  binary
+*.zip  binary

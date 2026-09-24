@@ -16,6 +16,8 @@
 #![cfg(feature = "http-client")]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod support;
+
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -716,12 +718,7 @@ async fn a_saved_server_comes_back_as_a_working_provider() {
         .await
         .expect("kayıt");
 
-    let dir = std::env::temp_dir().join(format!(
-        "headshell-remote-{}-{:?}",
-        std::process::id(),
-        std::thread::current().id()
-    ));
-    std::fs::create_dir_all(&dir).expect("geçici dizin");
+    let dir = support::TempDir::new("remote");
     let path = dir.join("servers.json");
     remote::save_servers(&path, &[stored]).expect("yazılmalı");
 

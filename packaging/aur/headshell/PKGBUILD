@@ -19,11 +19,9 @@
 # Onlar split **değil**, çünkü paylaştıkları bir derleme yok. Masaüstü girdisi
 # hepsinde aynı dosya: `packaging/headshell.desktop`.
 #
-# Torrent eklentisinin ikilisi bu pakete **girmiyor**. Eklenti motoru
-# eklentiyi `~/.local/share/headshell/plugins/<ad>/` altında arıyor ve
-# `plugin.json`'daki `exec` o dizine göreli; `/usr/bin` altındaki bir ikiliyi
-# görmez. Sistem çapında eklenti dizini bir çekirdek kararıdır ve ilk sürümden
-# sonraya ertelendi — PLAN.md §2.8 madde 5, D-049.
+# Eklentiler için hiçbir çalışma zamanı bağımlılığı yok: motor (QuickJS)
+# ikilinin içinde, yt-dlp'yi motor platform ikilisi olarak indiriyor (D-069).
+# Torrent eklentisi park edildi (`parked/`) ve pakete girmiyor.
 
 pkgbase=headshell
 pkgname=('headshell' 'headshell-cli')
@@ -81,9 +79,7 @@ check() {
 package_headshell() {
   pkgdesc='Provider-independent music listening layer (desktop app)'
   depends=('webkit2gtk-4.1' 'gtk3' 'alsa-lib' 'hicolor-icon-theme')
-  optdepends=('headshell-cli: command line interface'
-              'yt-dlp: YouTube Music plugin streaming'
-              'python: plugin runtime')
+  optdepends=('headshell-cli: command line interface')
 
   cd "$_srcdir"
   install -Dm755 "target/release/headshell-desktop" "$pkgdir/usr/bin/headshell-desktop"
@@ -115,9 +111,7 @@ package_headshell() {
 package_headshell-cli() {
   pkgdesc='Provider-independent music listening layer (command line interface)'
   depends=('alsa-lib')
-  optdepends=('headshell: desktop application'
-              'yt-dlp: YouTube Music plugin streaming'
-              'python: plugin runtime')
+  optdepends=('headshell: desktop application')
 
   cd "$_srcdir"
   install -Dm755 "target/release/headshell" "$pkgdir/usr/bin/headshell"

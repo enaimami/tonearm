@@ -4,18 +4,20 @@ members = [
     "crates/headshell-core",
     "crates/headshell-cli",
     "crates/headshell",
-    # D-047: torrent sağlayıcı workspace üyesi ama **çekirdeğin bağımlılığı
-    # değil** — ayrı bir ikili, alt süreç olarak konuşuyor. `librqbit`'in
-    # 179 crate'i buradan kilide girer, `headshell-core`'un ağacına girmez.
-    "crates/headshell-plugin-torrent",
 ]
-exclude = ["spike"]
+# `parked/`: D-069 — torrent eklentisi JSON-RPC alt süreç protokolüne
+# yazılmıştı ve o protokol QuickJS motoruna geçerken kalktı. Kod silinmedi,
+# derlenmiyor; yeni motora ne zaman ve nasıl döneceği ayrıca kararlaştırılacak.
+exclude = ["spike", "parked"]
 
 [workspace.package]
 # D-005: lisans MIT OR Apache-2.0 olarak karara bağlandı.
 version = "0.0.1-beta"
 edition = "2024"
-rust-version = "1.85"
+# D-069: 1.85 → 1.87. `rquickjs` 0.14 (eklenti motoru) 1.87 istiyor. 1.85'e
+# uyan son sürüm 0.11'di; üç sürüm geriden QuickJS-NG düzeltmelerini kaçırmak
+# yerine taban yükseltildi — CI zaten `stable` ile koşuyor.
+rust-version = "1.87"
 license = "MIT OR Apache-2.0"
 publish = false
 

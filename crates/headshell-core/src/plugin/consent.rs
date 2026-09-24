@@ -199,7 +199,6 @@ mod tests {
     fn net(hosts: &[&str]) -> Permissions {
         Permissions {
             net: hosts.iter().map(|h| (*h).to_owned()).collect(),
-            fs: Vec::new(),
         }
     }
 
@@ -264,12 +263,7 @@ mod tests {
 
     #[test]
     fn the_ledger_survives_a_file_round_trip() {
-        let dir = std::env::temp_dir().join(format!(
-            "headshell-consent-{}-{}",
-            std::process::id(),
-            jiff::Timestamp::now().as_nanosecond()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_support::TempDir::new("consent");
         let path = dir.join("plugins.json");
 
         assert_eq!(ConsentStore::load(&path).unwrap(), ConsentStore::default());
@@ -290,12 +284,7 @@ mod tests {
 
     #[test]
     fn a_broken_ledger_is_an_error_not_an_empty_one() {
-        let dir = std::env::temp_dir().join(format!(
-            "headshell-consent-broken-{}-{}",
-            std::process::id(),
-            jiff::Timestamp::now().as_nanosecond()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_support::TempDir::new("consent-broken");
         let path = dir.join("plugins.json");
         std::fs::write(&path, "{bozuk").unwrap();
         let err = ConsentStore::load(&path).unwrap_err();

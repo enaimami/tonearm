@@ -298,10 +298,11 @@ pub fn plugin_list(report: &PluginListReport) -> String {
         for requirement in &entry.requires {
             let _ = writeln!(
                 out,
-                "{:<14} motor    : {} {} — {}",
+                "{:<14} motor    : {} {} ({}) — {}",
                 "",
                 requirement.name,
                 requirement.version,
+                requirement.platform,
                 requirement.state.describe()
             );
         }
@@ -318,9 +319,7 @@ pub fn plugin_list(report: &PluginListReport) -> String {
         s.incompatible,
         s.broken
     );
-    if !report.permissions_enforced {
-        let _ = writeln!(out, "{}", ENFORCEMENT_NOTICE);
-    }
+    let _ = writeln!(out, "{}", enforcement_notice(report.permissions_enforced));
     out
 }
 
@@ -334,12 +333,23 @@ pub fn plugin_consent(report: &PluginConsentReport) -> String {
     // Motorun indireceği eserler ayrı satırda (D-055): bunu eklenti değil
     // motor indirir, o yüzden eklentinin izin listesine karışmıyor.
     for requirement in &report.requires {
-        let _ = writeln!(
-            out,
-            "motor   : {} {} ← {}",
-            requirement.name, requirement.version, requirement.url
-        );
-        let _ = writeln!(out, "{:<8}  sha256 {}", "", requirement.sha256);
+        match requirement.asset_for(&report.platform) {
+            Some(asset) => {
+                let _ = writeln!(
+                    out,
+                    "motor   : {} {} ({}) ← {}",
+                    requirement.name, requirement.version, report.platform, asset.url
+                );
+                let _ = writeln!(out, "{:<8}  sha256 {}", "", asset.sha256);
+            }
+            None => {
+                let _ = writeln!(
+                    out,
+                    "motor   : {} {} — bu platform ({}) için yayın yok",
+                    requirement.name, requirement.version, report.platform
+                );
+            }
+        }
     }
     if !report.requires.is_empty() {
         let _ = writeln!(
@@ -349,9 +359,7 @@ pub fn plugin_consent(report: &PluginConsentReport) -> String {
         );
     }
     let _ = writeln!(out, "durum   : {}", report.status.describe());
-    if !report.permissions_enforced && !report.permissions.is_empty() {
-        let _ = writeln!(out, "{}", ENFORCEMENT_NOTICE);
-    }
+    let _ = writeln!(out, "{}", enforcement_notice(report.permissions_enforced));
     out
 }
 
@@ -360,13 +368,7 @@ pub fn plugin_install(report: &PluginInstallReport) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
     let _ = writeln!(out, "eklenti : {}", report.report.plugin);
-    let _ = writeln!(
-        out,
-        "python  : {} ({}, {} üzerinden)",
-        report.python.path.display(),
-        report.python.version,
-        report.python.source
-    );
+    let _ = writeln!(out, "platform: {}", report.platform);
 
     if report.declared == 0 {
         // "Hiçbir şey istemiyor" ile "bakmadım" ayrı cevaplar (K9).
@@ -389,12 +391,21 @@ pub fn plugin_install(report: &PluginInstallReport) -> String {
     out
 }
 
-/// İzin beyanının ne olmadığını söyleyen uyarı (D-040).
+/// İzinlerin ne kadarının zorlandığını söyleyen not (D-040 → D-069).
 ///
-/// Her onay çıktısında görünüyor: kullanıcının olmayan bir korumaya
-/// güvenmemesi, bu modelin kabul edilme şartıydı.
-const ENFORCEMENT_NOTICE: &str = "not: izinler zorlanmıyor — beyan bir sözleşmedir, güvenlik duvarı değil.\n\
-     eklenti sizin bütün yetkinizle çalışır.";
+/// Her liste ve onay çıktısında görünüyor: kullanıcı olmayan bir korumaya
+/// güvenmemeli, var olanın sınırını da bilmeli. api 2'de eklentinin kendisi
+/// hapsediliyor; motorun kurduğu araçlar (yt-dlp) hapsedilmiyor.
+fn enforcement_notice(enforced: bool) -> &'static str {
+    if enforced {
+        "not: izinler zorlanıyor — eklenti yalnızca beyan ettiği ana bilgisayarlara bağlanabilir \
+         ve dosya sistemine erişemez.\n\
+         motorun kurduğu araçlar (yt-dlp gibi) ayrı programlardır ve bu sınırın dışındadır."
+    } else {
+        "not: izinler zorlanmıyor — beyan bir sözleşmedir, güvenlik duvarı değil.\n\
+         eklenti sizin bütün yetkinizle çalışır."
+    }
+}
 
 /// Sır deposundaki anahtar adları.
 pub fn secret_list(report: &SecretListReport) -> String {

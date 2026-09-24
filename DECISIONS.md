@@ -983,6 +983,11 @@ hiçbir şey yok.
 
 ## D-033 — IPC sözleşmesi: çekirdeğin yüzeyi + serde, sürümleme yok
 **Tarih:** 2026-08-31
+
+> **D-070 (2026-09-24):** JS kopyasının testi artık `node` değil, gömülü
+> QuickJS ile koşuyor (`anchor_parity_js.rs`, `anchor_parity.mjs` silindi).
+> "Atlanmaz, düşer" kuralı aynen duruyor; yalnızca makineden istediği şey
+> kalktı.
 **Soru:** §3.2 — webview ile çekirdek arasındaki sözleşme nasıl tanımlansın,
 nasıl sürümlensin, ve webview'deki çapa tahmininin çekirdekten kaymaması nasıl
 sağlansın?
@@ -1285,6 +1290,12 @@ sorulmadı; kayda geçiyor ki ikinci kez tartışılmasın):
 
 ## D-040 — Eklenti izin modeli: beyan + onay, zorlama sonraya
 **Tarih:** 2026-09-01
+
+> **D-069 (2026-09-24):** "zorlama sonraya" kapandı. Eklentiler gömülü
+> QuickJS'te koşuyor ve dışarıya yalnızca motorun kapılarından çıkabiliyor;
+> ağ izni her istekte, her yönlendirmede ve akış adresinde **zorlanıyor**,
+> joker (`*.alan.adi`) geldi, dosya izni kavramı kalktı (eklentinin dosya
+> erişimi yok). Aşağısı o güne kadarki model.
 **Soru:** (PLAN §2.1) Eklentinin ağ/dosya erişimi kısıtlanacak mı?
 
 **Karar:** **Beyan + onay.** Eklenti manifestinde izinlerini bildirir,
@@ -2124,6 +2135,11 @@ artırmaz.**
 
 ## D-050 — Eklenti motoru: çalışma zamanı host'un işi, eklentinin değil
 **Tarih:** 2026-09-09
+
+> **D-069 (2026-09-24):** S1 (çalışma zamanı Python) ve S2'nin Python kısmı
+> **geçersiz**. "Çalışma zamanı host'un işi" ilkesi duruyor ama çalışma
+> zamanı artık host'un **içinde**: gömülü QuickJS. S4 (K5 aynen kalır) da
+> geçersiz — K5 yeniden yazıldı. Aşağısı o günün gerekçesi.
 **Soru:** D-049 kuralı koydu ("eklenti root isteyemez") ama nasıl uygulanacağı
 açıktı. Kullanıcı yönü verdi: *"Programın kendi eklenti motoru olsun ve
 çalışacak scriptler onun üzerinden geçsin. Python dersen al Python olsun,
@@ -2489,6 +2505,11 @@ olarak duruyor — bu tur onları **saymak** için açıldı, kapatmak için de�
 
 ## D-055 — Eklenti motoru: sabitlenmiş eser, `pip` yok, ve dört ayrı tanı
 **Tarih:** 2026-09-19 · **Durum:** UYGULANDI (2026-09-19)
+
+> **D-069 (2026-09-24):** §2 (yorumlayıcıyı bulmak, `HEADSHELL_PYTHON`)
+> kalktı. §1 (sabitlenmiş eser + karma) ve §3 (tanılar) duruyor, ama eser
+> artık **platform başına** beyan ediliyor ve beşinci bir tanı var: "bu
+> platform için yayın yok".
 
 **Soru:** D-050 motoru kararlaştırdı ama özel ortamın **nasıl** kurulacağını
 açık bıraktı (PLAN §2.8'in karar noktası): `venv` + `pip` sistem Python'una
@@ -3270,6 +3291,10 @@ doğrulandı.
 ## D-066 — AUR: üç PKGBUILD, dört paket; kaynaktan derleme de var, derlenmiş de
 **Tarih:** 2026-09-21 · **Durum:** UYGULANDI (2026-09-21)
 
+> **D-070 (2026-09-24):** "`.dmg` yalnızca arm64" eksiği kapandı — macOS
+> paketi ve CLI arşivi evrensel ikili. Linux paketleri 22.04'te derleniyor
+> (glibc 2.35 tabanı); `-bin` paketlerin davranışı değişmedi.
+
 **Soru:** İlk sürümün Arch tarafı nasıl dağıtılacak? D-065 tam bu iş
 başlarken çıkmıştı (ad AUR'da ölçülünce dolu bulundu) ve paket yarım kaldı.
 
@@ -3497,3 +3522,341 @@ iş akışının `GITHUB_TOKEN`'ı `Create Pages site` çağrısında 403 veriyo
 Settings → Pages → *Deploy from a branch* → `master` / `/docs`. Bundan
 sonrası kendiliğinden: `docs/`'a giden her commit yayımlanıyor, ne iş
 akışı ne CI dakikası harcanıyor.
+
+## D-069 — Eklenti motoru QuickJS'e taşındı: Python yok, izinler zorlanıyor, torrent park edildi
+
+**Tarih:** 2026-09-24 · **Durum:** UYGULANDI (2026-09-24)
+
+**Soru:** Kullanıcı: *"Python olunca test için kime göndersem her türlü bir
+sorun yaşadılar. Eklenti sistemini en baştan yazacağız."* D-050 motoru
+Python'a bağlamıştı ("gerekli olduğu söylenir yeter"); pratikte Windows'ta
+Python yok, Debian'da `venv` ayrı paket, sürümler tutmuyor — ve eklentiyi
+denemek isteyen herkes önce bir çalışma zamanı kurmak zorundaydı. Dört
+seçenek sunuldu: gömülü JS motoru (QuickJS), WebAssembly, platform başına
+önceden derlenmiş alt süreç ikilileri, salt bildirimsel eklentiler.
+
+**Karar (kullanıcı):** Üç madde.
+
+1. **Eklenti süreci QuickJS'e geçer.** Eklentiler JS ile yazılır ve
+   çekirdeğe gömülü motorda koşar.
+2. **Torrent bizimle gelmez**, çok daha sonra bakılacak.
+3. **yt-dlp için platform ikilisi:** "yt-dlp arm'dan i386'ya kadar her
+   işlemci türü için yayınlıyor; sistemin türüyle eşleştirip doğru olanı
+   bulmak yeterli."
+
+Ardından: farklı işletim sistemlerinde, **hiçbir şey kurulu olmayan**
+makinelerde sınanacak (ayrı tur).
+
+### 1. Motor: `rquickjs` 0.14 (QuickJS-NG), `plugin-engine` feature'ı
+
+Bağımlılık eklenmeden önce ölçüldü (D-047'nin yöntemi):
+
+| | |
+|---|---|
+| çekirdeğin ağacı | **51 → 55 benzersiz crate** (+4: `rquickjs`, `rquickjs-core`, `rquickjs-sys`, `allocator-api2`; `hashbrown`/`foldhash`/`equivalent` zaten vardı) |
+| soyulmuş ikili | **+~1,3 MB** (boş ikili 350 KB → 1,66 MB) |
+| soğuk derleme | +~60 sn (QuickJS-NG'nin C kaynağı) |
+| derleme gereksinimi | C derleyicisi — `rusqlite`'ın `bundled`'ı onu zaten istiyordu |
+
+Feature kapısı arkasında (`plugin-engine`), çünkü çekirdek eklentisiz de
+eksiksiz. CLI ve masaüstü açıyor. Kapalı derlemede eklentiler keşfedilir,
+listelenir, onaylanır, araçları kurulur — yalnızca ilk çağrı "bu derlemede
+eklenti motoru yok" der (K9).
+
+`rquickjs` 0.14 **Rust 1.87** istiyor; 1.85'e uyan son sürüm 0.11'di.
+Workspace'in `rust-version`'ı **1.85 → 1.87** çıktı (CI zaten `stable`).
+Taban yükselince clippy `sleeve/svg.rs`'teki `% 3 == 0`'ı `is_multiple_of`'a
+çevirtti — 1.87'de kararlı olan bir yöntem.
+
+Mobil (Faz 6) notu: `rquickjs-sys`'in hazır bağlamaları masaüstü hedeflerinin
+hepsini kapsıyor ama Android/iOS'u kapsamıyor; orada `bindgen` feature'ı
+(derleme anında libclang) gerekecek. Bugün bir iş değil, izlenecek bir not.
+
+### 2. Sözleşme api 2: dışa aktarılan fonksiyonlar
+
+api 1'in tel protokolü (JSON-RPC, el sıkışma, `shutdown`) kalktı. Betik bir
+ES modülü; `health()`, `search(query, limit)`, `resolve_source(id)` dışa
+aktarır. Adlar api 1'in metot adlarıyla aynı — belge, trait ve eklenti aynı
+adı kullanıyor. Değerler JS ile Rust arasında JSON olarak geçiyor ve api
+1'in veri biçimleri (`WireTrack`, `HealthResult`, `AudioSource`) aynen
+korundu. `search` artık `{tracks: […]}` değil doğrudan dizi, `resolve_source`
+`{source: …}` değil doğrudan kaynak ya da `null` döndürüyor.
+
+Manifest: `exec` → `main` (dizin içinde, `.js`). api 1'in iki alanı
+**reddediliyor**, yok sayılmıyor: `exec` ve `permissions.fs`. api 1
+manifestleri "bozuk" değil **"protokol sürümü uyuşmuyor: api 1 … api 2
+(QuickJS) sürümünü kurun"** diye görünüyor — keşif önce sürüme bakıyor.
+
+Tek kaynak manifest: el sıkışma olmadığı için yetenekler yalnızca manifestte.
+Motor başlarken beyan edilen her yeteneğin fonksiyonunun dışa aktarıldığını
+denetliyor; eksikse sözleşme ihlali, ve yeniden denenmiyor.
+
+### 3. `host`: eklentinin tek kapısı, hepsi eşzamanlı
+
+`host.http` (get/post/request), `host.secrets.get/file`, `host.storage`,
+`host.tools.run`, `host.log`, ve `console` → `host.log`. Olay döngüsü ve
+zamanlayıcı yok; `async function` yazılabilir, motor sözü çözer. Eşzamanlı
+API bilerek seçildi: eklenti yazarı için en kısa yol ve eşzamansız bir API
+sonradan **eklenebilir** (api'yi kırmaz), tersi kırardı.
+
+- **`host.secrets.file(k)`** — yt-dlp çerezi yalnızca dosyadan okuyor
+  (D-061). Kapı dar: eklenti dosyaya kendi içeriğini değil, yalnızca kendi
+  sırrını yazdırabilir; `0600`, motor kapanınca siliniyor.
+- **`host.storage`** — SoundCloud'un `client_id` önbelleği için (api 1'de
+  `state/client_id.txt`). Eklentiye özel, 1 MB tavan; bozuk depo sıfırlanmıyor,
+  hata olarak söyleniyor.
+- Yokluk `null` döner, `undefined` değil (`rquickjs` `None`'u `undefined`
+  yapıyordu; ilk test koşumu gösterdi, sözleşmeye uyduruldu).
+- Modül yüklenirken ağ ve araç **yasak** (api 1'in "el sıkışma ağa
+  çıkmamalı" kuralının zorlanan hâli).
+
+### 4. İzinler artık zorlanıyor (D-040'ın "zorlama sonraya"sı kapandı)
+
+`PERMISSIONS_ENFORCED` `false` → `true`. Eklenti dışarıya yalnızca `host`'tan
+çıkabildiği için beyan artık bir sözleşme değil, bir sınır:
+
+- Her istekte ve **her yönlendirmede** `permissions.net` denetleniyor.
+  Eklentilere verilen HTTP istemcisi yönlendirme izlemiyor
+  (`UreqClient::without_redirects`); izleseydi izinli bir adres eklentiyi
+  izinsiz bir yere taşıyabilirdi ve motor görmezdi. Bunu bir test kilitliyor:
+  izinsiz adrese yönlendirmede ikinci istek hiç gitmiyor.
+- `resolve_source`'un döndürdüğü **akış adresi** de denetleniyor: adresi
+  eklenti seçiyor, çekirdek çekiyor (K3); denetim olmasa eklenti çekirdeği
+  beyan etmediği bir adrese gönderebilirdi. `local_file` reddediliyor.
+- **Joker geldi** (D-040'ın açığı): `*.googlevideo.com`, `*.sndcdn.com`.
+  Yalnızca alt alan adını kapsar (apex değil), çıplak `*` ve tek etiketli
+  joker reddedilir. Onay karşılaştırması jokeri hesaba katıyor.
+- Adres ayrıştırıcısı kuşkucu: URL crate'i eklenmedi, anlaşılmayan her biçim
+  (ters bölü, yüzde kodlaması, IPv6, kullanıcı bilgisi hileleri) reddediliyor
+  — iki ayrıştırıcının anlaşamadığı yer izin denetiminin kaçış kapısıdır.
+
+**Zorlanmayan tek şey motorun kurduğu araçlar**: yt-dlp ayrı bir süreç ve
+hapsedilmiyor. Her liste ve onay çıktısı bunu yazıyor.
+
+### 5. Araçlar: platform başına eser
+
+`requires[].assets`: platform anahtarı → `{url, sha256}`. Anahtar
+`<os>-<arch>[-musl]`, Rust'ın `std::env::consts` adları, ve **çekirdeğin
+derlendiği hedeften** geliyor — çalışma anında sistem yoklanmıyor. Tanınan
+anahtar listesi kapalı; yazım hatası manifesti geçersiz kılıyor.
+
+yt-dlp 2026.08.19'un yayın listesi **ölçüldü** (GitHub API) ve kullanıcının
+"arm'dan i386'ya" beklentisinden iki yerde ayrıldı:
+
+| platform | yayın |
+|---|---|
+| linux x86_64 / aarch64 (glibc + musl) | tek dosya ✓ |
+| macOS | tek evrensel ikili (Intel + Apple Silicon) ✓ |
+| Windows x86_64 / x86 / ARM64 | tek dosya ✓ |
+| **linux armv7** | **yalnızca zip** (çok dosyalı) — beyan edilmedi |
+| **linux i686** | **hiç yok** |
+
+Bu iki platformda eklenti yüklenmiyor ve durum satırı "bu platform için
+yayın yok" diyor — kurulum komutu **önermiyor**, çünkü kurulum bunu
+düzeltmez. Zip desteği (armv7 için) eklenmedi: D-055'in "`kind` alanı
+bilerek konmadı" kuralı; ihtiyaç doğunca eklenir, api kırılmaz.
+
+Kendi kendine yeten ikili **~40 MB** ve HTTP istemcisinin belleğe alan yolu
+32 MB'ta kesiyordu. İndirme artık diske **akıyor**, karma akarken
+hesaplanıyor (`ArtifactSource`); eser indirmesinin genel zaman aşımı yok,
+aşama başına süreleri var (40 MB yavaş bağlantıda 30 sn'yi geçer). Dosya adı
+`<ad>-<sürüm>-<platform>` (+ Windows'ta `.exe`). Araç ilk kullanımda karmasıyla
+yeniden doğrulanıyor — kurulumdan sonra değiştirilmiş bir ikili çalışmaz.
+
+**Ölçülen bir uyarı:** yt-dlp 2026.08.19 `JS runtimes: none` deyip YouTube
+çözümünü JS çalışma zamanı olmadan sürdürüyor ama bunun **kullanımdan
+kaldırıldığını** yazıyor. Bugün çalışıyor (canlı testler geçti). Kapandığında
+motorun bir JS çalışma zamanını da (deno ya da `qjs`) aynı `requires`
+mekanizmasıyla indirmesi gerekecek.
+
+### 6. Yalıtım takası
+
+api 1'de eklenti ayrı süreçti; ölürse çekirdek yaşardı. api 2'de eklenti
+kendi iş parçacığında, kendi QuickJS çalışma zamanında ama **çekirdeğin
+adres uzayında**. JS'in yapabileceği her şey — sonsuz döngü (`try/catch`
+içinde bile kesiliyor, ölçüldü), bellek taşması (128 MB tavan, istisnaya
+dönüyor), derin özyineleme — çekirdeği düşürmüyor ve her biri test ediliyor.
+Düşürebilecek tek şey QuickJS'in kendi C kodundaki bir kusur. Karşılığı:
+kurulum yok, izinler zorlanıyor ve motor mobile gidebiliyor (iOS alt süreç
+açtırmıyor — api 1 oraya hiç gidemezdi).
+
+Aşama ve hata adları buna göre: `PLUGIN_HANDSHAKE` → **`PLUGIN_START`**,
+`PluginRpc` → **`PluginThrew`** (mesaj + `main.js:satır:sütun`), yeni
+**`PluginContract`** ("eklenti hayır dedi" ile "eklentinin kodu motorla
+anlaşamıyor" ayrı tanılar).
+
+### 7. Torrent park edildi
+
+`crates/headshell-plugin-torrent` ve `plugins/torrent` → `parked/`,
+workspace'in `exclude`'unda. Çekirdeğin `plugin::protocol` tiplerini
+kullanıyordu ve o tipler kalktı; kod silinmedi, derlenmiyor. Geri dönüşün
+açık soruları `parked/README.md`'de. `librqbit`'in 179 crate'i workspace
+kilidinden de çıktı.
+
+### Geçersiz kılınanlar
+
+- **D-050 S1** (motor Python'dur) ve **S2**'nin Python kısmı → geçersiz.
+  "Çalışma zamanı host'un işi" ilkesi duruyor; çalışma zamanı artık host'un
+  **içinde**.
+- **D-055 §2** (yorumlayıcı bulma, `HEADSHELL_PYTHON`) → kalktı. **§1**
+  (sabitlenmiş eser, karma) ve **§3** (dört tanı) duruyor; platform başına
+  genişledi ve bir beşinci tanı eklendi (`bu platform için yayın yok`).
+- **D-040** "zorlama sonraya" → ağ için zorlanıyor, dosya izni kavramı
+  kalktı.
+- **K5** yeniden yazıldı (PLAN §2).
+- **D-047/D-056** (torrent eklenti olarak kalır) → torrent park edildi.
+
+### Sınama
+
+- Motorun 73 birim testi gerçek QuickJS'le ve sahte ağla: izin, joker,
+  yönlendirme, akış adresi, yüklemede ağ yasağı, zaman aşımı (döngü, yükleme,
+  `try/catch` içinde), bellek taşması, eksik dışa aktarım, yanlış dönüş
+  biçimi, sır dosyasının `0600` olup kapanışta silinmesi, depo, araç
+  çalıştırma/karma/süre.
+- CLI: eklenti **ortamı tamamen boşaltılmış** (`env_clear`, `PATH` yok)
+  bir süreçte `provider test echo` ile cevap veriyor.
+- Canlı: SoundCloud 5/5, YouTube Music 5/5 — ikisi de sesi gerçekten
+  çaldı; yt-dlp Python'suz Linux ikilisinden (`yt-dlp_linux`).
+- **Temiz Linux (ilk ölçüm):** `archlinux:latest` konteyneri — `python3`,
+  `python`, `yt-dlp`, `node` yok; ikilinin kendi bağımlılığı `alsa-lib`
+  dışında hiçbir şey kurulmadı. `plugin approve` → `plugin install ytmusic`
+  (motor `yt-dlp_linux`'u indirdi, karmasını doğruladı) → iki sağlayıcı da
+  `provider test`'te "kullanılabilir" (yt-dlp 2026.08.19 motorun ikilisinden
+  cevap verdi) → `play` aramayı ve **akış çözümünü** geçti, `PLAYBACK_OUTPUT`'ta
+  durdu (konteynerde ses kartı yok; oynatıcı kaynağı çözmeden sesi açmıyor).
+- Workspace: 400 test geçiyor, 3'ü kendini atlıyor (AcoustID anahtarı yok),
+  1'i yok sayılıyor. `playback_local::a_real_file_plays…` bu makinede
+  **aralıklı** düşüyor (ALSA `snd_pcm_avail_delay` I/O hatası); değişiklikten
+  önceki `HEAD`'de de 5 koşumda 1 düştü — bu turun kusuru değil, ayrı bir iş.
+
+### Açık kalanlar
+
+- **Temiz makinelerde sınama** (kullanıcının sıradaki adımı): Windows ve
+  macOS'ta Python/yt-dlp kurulu olmayan bir ortamda `plugin install ytmusic`
+  + `play`. Linux'un konteyner ölçümü yapıldı (yukarıda); gerçek bir masaüstü
+  (ses kartıyla) ve Windows/macOS ikilileri hiç çalıştırılmadı.
+- yt-dlp'nin JS çalışma zamanı ihtiyacı (yukarıda).
+- linux armv7 (zip) ve linux i686 (yayın yok).
+- Torrent'in yeni motora dönüşü (`parked/README.md`).
+
+## D-070 — Platform taşınabilirliği: Windows, macOS ve Unix-benzerleri; testler makinede iz bırakmaz
+
+**Tarih:** 2026-09-24 · **Durum:** UYGULANDI (2026-09-24)
+
+**Soru:** Kullanıcı: *"Hem DOS (Windows) hem Unix/Unix-benzeri sistemlerde
+çalışması için hem dosyaları hem de genel olarak `/tmp`'ye yazdığın dosyaları
+kontrol et, çünkü makineye bağımlı kalmış olabiliriz."* Tarama öncesinde
+bilinen: bugün çalıştığı kanıtlanmış tek platform x86_64 Linux'tu; macOS ve
+Windows paketleri derleniyor ama hiç açılmamıştı.
+
+### Karar (kullanıcı) — dört soru
+
+1. **Windows veri dizini:** `%LOCALAPPDATA%\headshell` (Roaming değil: 40 MB'lık
+   araçlar ve büyüyen veritabanı dolaşan profile taşınmasın).
+2. **macOS veri dizini:** `~/Library/Application Support/headshell` (platformun
+   kuralı; macOS'ta hiç çalıştırılmadığı için taşınacak veri yok).
+3. **`/tmp`'deki test kalıntısı silinsin** — silindi.
+4. **BSD'ler:** *"Derlenebilir olsunlar ama canary veya not tested olarak
+   yazılsın."*
+
+### Taramanın bulduğu — kod
+
+| # | Bulgu | Etkisi | Düzeltme |
+|---|---|---|---|
+| 1 | Veri dizini yalnızca `HOME`'dan | Standart Windows `HOME` tanımlamaz: CLI hata verir, **masaüstü hiçbir şey demeden kapanır** (sürüm derlemesi konsolsuz, `stderr` hiçbir yere gitmez) | Sistem başına yer; saf bir fonksiyon, üç sistemin dalı her makinede test ediliyor |
+| 2 | `HEADSHELL_MUSIC_DIRS` `:` ile bölünüyor | `C:\Müzik` ikiye ayrılır | `std::env::split_paths` (Windows'ta `;`) |
+| 3 | Olağan müzik dizini `HOME`'dan | Windows'ta yerel müzik hiç bulunmaz | `%USERPROFILE%\Music`, macOS `~/Music` |
+| 4 | Subsonic tuzu `/dev/urandom`'dan | Windows'ta hep zayıf yedek (söyleyerek) | İşletim sisteminin rastgeleliğiyle anahtarlanmış `RandomState` |
+| 5 | Açılış hatası yalnızca `stderr`'e | Windows'ta sessiz kapanma — K9 ihlali | Hata bir pencerede; her sistemde |
+| 6 | Eser dosyasının `.exe`'si derlendiği makineden | Aynı eserin adı makineye göre değişirdi | Platform anahtarından |
+
+**Açılış hatası penceresi.** Çekirdek açılamazsa aynı Tauri bağlamıyla,
+ana pencere kapatılarak, yalnızca `startup-error.html`'i gösteren bir pencere
+açılıyor. Metin adresin `#` kısmıyla gidiyor (yüzde kodlu; URL
+ayrıştırıcıları satır sonlarını sildiği için elle kodlanıyor): IPC yok,
+çekirdek yok, ve sayfanın CSP'si satır içi betiğe izin vermiyor. Doğrulama:
+Tauri'nin kullandığı `url` 2.5.8 kodlanmış parçayı hem `tauri://localhost`
+hem `http://tauri.localhost` (Windows) biçiminde birebir koruyor; geri çözme
+QuickJS'teki `decodeURIComponent` ile test ediliyor. Pencere bu makinede
+gerçekten açıldı (760×460) ama içeriği `xwd` ile yakalanamadı — WebKit'in
+çizimi her iki yolla da siyah okundu. Görsel doğrulama yapılmadı.
+
+### Taramanın bulduğu — makineye bağlılık
+
+- **Testler `/tmp`'yi dolduruyordu.** 1.100 dizin, 1,2 GB — ve bu makinede
+  `/tmp` bir tmpfs, yani bellekti (%60 doluydu, silinince %9). Hiçbir test
+  açtığı dizini silmiyordu; YouTube Music testlerinin her biri 40 MB'lık
+  yt-dlp'yi kendi dizinine kopyalayıp bırakıyordu. Artık birim testleri
+  `crate::test_support::TempDir`, entegrasyon testleri `tests/support` ile
+  kendini silen dizinler açıyor (düşen bir testte de: `Drop` panikte koşar);
+  entegrasyon testlerinin kökü Cargo'nun `target/tmp`'si. Ölçüldü: tam koşum
+  öncesi ve sonrası `/tmp`'de 0 girdi.
+- **yt-dlp önbelleği ölü bir adresi gizleyebilirdi.** `/tmp`'deki kalıcı
+  önbellek varsa indirme hiç denenmiyordu; sabitlenmiş adres ölseydi (yetim,
+  D-055) bu makine yeşil, temiz bir makine kırmızı olurdu. Önbellek artık
+  `target/tmp`'de, her koşumda karma yeniden doğrulanıyor ve adresin yaşadığı
+  soruluyor (gövde okunmadan). Testler 40 MB'ı kopyalamıyor, sabit bağ kuruyor.
+- **Bir test `node` istiyordu** (`anchor_parity_js`, D-033). Kural doğruydu
+  ("node yoksa atlama, düş") ama bedeli testi koşturan makineye çalışma zamanı
+  kurdurmaktı. `anchor.js` artık gömülü QuickJS'te değerlendiriliyor; test
+  yine hiç atlanmıyor, makineden hiçbir şey istemiyor. Kasıtlı bir kayma
+  (`Math.floor` → `Math.round`) sokulduğunda düştüğü ölçüldü
+  (`beklenen 100099, bulunan 100100`). `rquickjs` masaüstü crate'ine yalnızca
+  test bağımlılığı olarak girdi; ağaca yeni crate girmedi.
+- **Satır sonları korunmuyordu.** `core.autocrlf` açık bir Windows checkout'u
+  snapshot'ları kırardı. `.gitattributes`: her yerde LF, ikili fikstürler
+  dönüşümsüz. Depoda CRLF'li dosya yoktu; baytlar değişmedi.
+- **Linux paketleri glibc 2.39 istiyordu.** Ubuntu 24.04'te derleniyordu;
+  `v0.0.1-beta` Debian 12'de `GLIBC_2.39 not found` ile açılmıyor (ölçüldü).
+  Sürüm hattı 22.04'e alındı. Ölçüldü: 22.04 konteynerinde derlenen CLI en
+  çok `GLIBC_2.35` istiyor ve Python'suz Debian 12'de açılıp `echo` ile canlı
+  SoundCloud eklentisini koşturuyor.
+- **macOS paketi yalnızca arm64'tü** (D-066). `.dmg` ve CLI arşivi artık
+  evrensel ikili, aynı koşucuda çapraz derleniyor. İlk `workflow_dispatch`
+  koşumuna kadar doğrulanmadı.
+
+### BSD'ler — derlenebilir, DENENMEDİ (canary)
+
+`rquickjs-sys` FreeBSD/NetBSD/OpenBSD/DragonFly için hazır bağlama taşımıyor;
+o hedeflerde aynı bağımlılık `bindgen` özelliğiyle bir kez daha yazıldı ve
+bağlama derleme anında `libclang` ile üretiliyor. Ölçüldü: `bindgen`/`clang-sys`
+yalnızca FreeBSD hedefinin ağacında görünüyor, Linux/Windows/macOS'ta yok.
+Kilide 4 derleme zamanı paketi girdi (bindgen, cexpr, clang-sys,
+prettyplease). Buradan derlenemedi (BSD sistem başlıkları ve `libclang` yok);
+ses (cpal) ve masaüstü kabuğunun orada çalışıp çalışmadığı bilinmiyor.
+Belgelerde "denenmedi (canary)".
+
+### Sınama
+
+- Linux: `fmt` ve `clippy` temiz; **410 test geçti**, 1 düştü: aralıklı ALSA
+  testi (`playback_local`, D-059'da kayıtlı), konteyner derlemesi CPU'yu
+  doldururken. Tek başına 5 koşumda 5 geçti.
+- **Windows hedefine çapraz denetim** (`x86_64-pc-windows-gnu`, C kodu için
+  Zig 0.16.0, karması doğrulanarak indirildi): çekirdek ve CLI, testler
+  dahil, `clippy -D warnings` temiz. `cfg(windows)` kodunun ilk derlenmesi.
+  Testler koşturulamadı (Windows/Wine yok); masaüstü crate'i bu yolla
+  derlenemiyor (Windows kaynak derleyicisi istiyor).
+- CI'a Windows ve macOS işi eklendi (clippy + testler). **Henüz koşmadı** —
+  koşması için değişikliğin gönderilmesi gerekiyor.
+
+Windows çapraz denetimini tekrarlamak için (MinGW gerekmez): `rustup target
+add x86_64-pc-windows-gnu`, Zig'i indir, `cc`'nin geçirdiği
+`--target=x86_64-pc-windows-gnu` argümanını süzüp `zig cc -target
+x86_64-windows-gnu` çağıran bir sarmalayıcıyı `CC_x86_64_pc_windows_gnu`
+olarak ver, sonra `cargo clippy --target x86_64-pc-windows-gnu -p
+headshell-core -p headshell-cli --all-targets`. Doğrulama araçları iş
+bittikten sonra makineden kaldırıldı.
+
+### Geçersiz kılınanlar
+
+- **D-033**'ün "`node` yoksa test düşer" hükmü: kural korundu, `node` kalktı.
+- **D-066**'nın "`.dmg` yalnızca arm64" notu: evrensel ikili.
+- Veri dizininin tek kaynağı `HOME` idi (§0 dönemi): artık sistem başına.
+
+### Açık kalanlar
+
+- Windows ve macOS'ta **elle** deneme: pencere, ses, `plugin install ytmusic`.
+- CI'ın Windows/macOS işinin ilk koşumu.
+- Ubuntu 22.04 koşucusu emekliye ayrılınca glibc tabanı bir konteynerde
+  tutulmalı, koşucu sürümüne bırakılmamalı.
+- BSD'lerde gerçek bir derleme.

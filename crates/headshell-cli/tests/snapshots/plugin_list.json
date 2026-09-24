@@ -24,10 +24,10 @@
     ],
     "started_at": "<değişken>"
   },
-  "permissions_enforced": false,
+  "permissions_enforced": true,
   "plugins": [
     {
-      "api": 1,
+      "api": 2,
       "consent": {
         "state": "not_asked"
       },
@@ -35,14 +35,13 @@
       "display_name": "Echo (sınama)",
       "name": "echo",
       "permissions": {
-        "fs": [],
         "net": [
           "ornek.gecersiz"
         ]
       },
       "problem": null,
       "requires": [],
-      "version": "0.1.0"
+      "version": "0.2.0"
     }
   ],
   "summary": {

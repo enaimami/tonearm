@@ -23,36 +23,77 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 ```
 
-Üçünü birden: `make gates`.
+Üçünü birden: `make gates` (yalnızca Unix; `make` ve `sh` istiyor —
+Windows'ta yukarıdaki üç `cargo` komutu doğrudan koşulur).
 
 Tam "bitti" ölçütü PLAN.md §0.4'te. Üçü CI'da da koşuyor
-([`.github/workflows/ci.yml`](.github/workflows/ci.yml), D-053) — ama önce
-kendi makinende geçmeli, CI bir hatırlatıcıdır, ilk savunma hattı değil.
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml), D-053): Linux'ta
+üçü, Windows ve macOS'ta clippy ile testler (D-070). Ama önce kendi
+makinende geçmeli — CI bir hatırlatıcıdır, ilk savunma hattı değil.
 
 ### Çalışma zamanı gereksinimi
 
-Eklentiler Python 3.9+ ister ve bu **projenin** gereksinimidir, eklentinin
-değil (D-050). Derlemek için gerekli değil; yalnızca eklenti sağlayıcılarını
-koşturan testler ve komutlar onu arar. Eklentilerin ihtiyaç duyduğu paketleri
-motor indirir — `pip`, `venv` ya da sistem paketi gerekmez.
+Yok. Eklenti motoru (QuickJS) çekirdeğe gömülü (D-069); eklentileri koşturan
+testler ve komutlar makinede hiçbir yorumlayıcı aramaz. Eklentilerin ihtiyaç
+duyduğu araçları (yt-dlp) motor, platformun kendi kendine yeten ikilisi
+olarak indirir. Derleme için bir C derleyicisi gerekir — ama SQLite
+(`rusqlite` `bundled`) onu zaten istiyordu.
+
+Testler de dışarıda bir şey istemiyor: webview'in çapa formülünü sınayan
+test eskiden `node` çalıştırıyordu, artık aynı dosyayı gömülü QuickJS'te
+değerlendiriyor (D-070).
+
+### Testler makinede iz bırakmaz
+
+Her test açtığı geçici dizini **siler** — düşen bir test de (`Drop` panikte
+koşar). Birim testleri işletim sisteminin geçici dizinini, entegrasyon
+testleri Cargo'nun `target/tmp`'sini kullanır; öldürülmüş bir koşumun artığı
+bile ortak `/tmp`'ye değil projeye düşer ve `cargo clean` ile gider. Yeni bir
+test yazarken `std::env::temp_dir()`'e doğrudan dizin açma: çekirdekte
+`crate::test_support::TempDir`, entegrasyon testlerinde
+`tests/support/mod.rs` var. Kural bir ölçümden doğdu: testler bir geliştirme
+makinesinin tmpfs'i olan `/tmp`'sinde 1.100 dizin, 1,2 GB bırakmıştı.
+
+YouTube Music testlerinin indirdiği yt-dlp (~40 MB) `target/tmp`'de
+önbellekte tutulur, ama önbellek körü körüne kullanılmaz: her koşumda karması
+ve indirme adresinin hâlâ yaşadığı denetlenir — önbellek, ölmüş bir adresi bu
+makinede yeşil göstermesin.
+
+### Windows ve macOS'ta geliştirme
+
+Derleme ve testler aynı `cargo` komutlarıyla koşar. Farklar:
+
+- Veri dizini Windows'ta `%LOCALAPPDATA%\headshell`, macOS'ta
+  `~/Library/Application Support/headshell`. Denemeler için
+  `HEADSHELL_DATA_DIR` ya da CLI'de `--data-dir` ile ayrı bir dizin verin.
+- `HEADSHELL_MUSIC_DIRS` listesi `PATH` gibi yazılır: Windows'ta `;`,
+  ötekilerde `:` ile.
+- Depo her platformda LF satır sonlarıyla çıkar (`.gitattributes`). Windows'ta
+  `core.autocrlf` açık olsa da snapshot'lar bayt bayt tutar.
+- Araç çalıştırma testleri Unix'te bir `sh` betiği, Windows'ta sistemin
+  `cmd.exe`'sinin bir kopyasını "eser" olarak kuruyor.
 
 ### Kendini atlayan testler
 
 Ağa bağlı testler (D-043) ulaşamadıklarında **düşmez, kendilerini atlar ve
 sebebini `stderr`'e yazar.** Atlanan test geçmiş sayılmaz — rapor ederken
-"atlandı" de. Bugün 450 test geçiyor, 7'si kendini atlıyor.
+"atlandı" de. Bugün Linux'ta 411 test koşuyor ve 3'ü kendini atlıyor
+(AcoustID anahtarı yok); torrent'in 56 testi eklentiyle birlikte park edildi
+(D-069). `playback_local`'in ses testi ses aygıtı olan ama yük altındaki bir
+makinede aralıklı düşebiliyor (D-059, D-070).
 
 Atlananları gerçekten koşturmak için gereken ortam değişkenleri:
 
 | Değişken | Neyi açar |
 |---|---|
 | `HEADSHELL_ACOUSTID_KEY` | AcoustID canlı sınamaları (3 test). Anahtarsız derlemede `EMBEDDED_API_KEY` boş olduğu için atlanırlar. |
-| `HEADSHELL_TORZNAB_URL` + `HEADSHELL_TORZNAB_KEY` | Torznab canlı sınamaları (3 test). Kendi Prowlarr/Jackett'ınızı ister; `HEADSHELL_TORZNAB_QUERY` sorguyu değiştirir. |
-| `HEADSHELL_PYTHON` | Motorun kullanacağı Python yorumlayıcısı. Verilirse **geri düşülmez**: o yorumlayıcı çalışmıyorsa motor `python3`'e kaymaz, durur ve söyler. |
+| `HEADSHELL_TEST_YTMUSIC_COOKIES` | YouTube'un bot duvarını aşmak için çerez (D-061). Yalnızca veri merkezi adreslerinde gerekiyor; ev bağlantısında testler çerezsiz de koşuyor. |
 
-`HEADSHELL_YTDLP` **kaldırıldı** (D-055): yt-dlp'yi artık eklenti aramıyor, motor
-kuruyor. `ytmusic` testleri onu manifestteki sabitlenmiş sürümden indiriyor
-ve `--features http-client` olmayan bir derlemede kendilerini atlıyor.
+`HEADSHELL_PYTHON` ve `HEADSHELL_YTDLP` **kaldırıldı** (D-055, D-069): motor
+Python aramıyor, yt-dlp'yi eklenti değil motor kuruyor. `ytmusic` testleri
+onu manifestteki sabitlenmiş sürümden, bu platformun ikilisi olarak
+indiriyor. Torznab değişkenleri torrent eklentisiyle birlikte park edildi
+(`parked/`, D-069).
 
 Depo kökündeki `.env` **hiçbir kod tarafından okunmaz** — `dotenv` benzeri bir
 bağımlılık yok. Oraya yazdığınız değer kendiliğinden ortama girmez; kabuğunuza
@@ -93,7 +134,7 @@ kaymasıydı.
 | **K2** | İçe aktarma export dosyalarından yapılır, API'den değil |
 | **K3** | Ses asla röle edilmez, yalnızca pozisyon senkronlanır |
 | **K4** | Spotify çekirdeğe girmez |
-| **K5** | Eklentiler alt süreç + JSON-RPC ile konuşur |
+| **K5** | Eklentiler gömülü JS motorunda koşar; dışarıya yalnızca motorun kapılarından çıkar |
 | **K6** | Kanonik kimlik zinciri sırası: ISRC → MBID → bulanık → AcoustID |
 | **K7** | Çekirdek API'si `uniffi` ile ifade edilebilir olmalı |
 | **K8** | `headshell-core` içinde `unwrap()` / `expect()` / `panic!()` yok |

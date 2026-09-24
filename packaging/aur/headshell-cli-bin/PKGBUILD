@@ -23,9 +23,7 @@ arch=('x86_64')
 url='https://github.com/headshell/headshell'
 license=('MIT' 'Apache-2.0')
 depends=('alsa-lib')
-optdepends=('headshell-bin: desktop application'
-            'yt-dlp: YouTube Music plugin streaming'
-            'python: plugin runtime')
+optdepends=('headshell-bin: desktop application')
 provides=("headshell-cli=$pkgver")
 conflicts=('headshell-cli')
 # İkili yukarı akıştan geliyor; yeniden `strip`'lenmesin, boş bir `-debug`

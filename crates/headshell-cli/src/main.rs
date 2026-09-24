@@ -30,7 +30,10 @@ const EXIT_FAILURE: u8 = 1;
     about = "Sağlayıcıdan bağımsız dinleme kimliği"
 )]
 struct Cli {
-    /// Veri dizinini elle belirt (varsayılan: $XDG_DATA_HOME/headshell).
+    /// Veri dizinini elle belirt. Varsayılan sistemden sisteme değişir:
+    /// Linux/BSD `~/.local/share/headshell`, macOS
+    /// `~/Library/Application Support/headshell`, Windows
+    /// `%LOCALAPPDATA%\headshell`. `headshell diag` kullanılanı yazar.
     #[arg(long, global = true, value_name = "DİZİN")]
     data_dir: Option<PathBuf>,
 
@@ -206,21 +209,24 @@ enum ProviderCommand {
 
 #[derive(Debug, Subcommand)]
 enum PluginCommand {
-    /// Kurulu eklentileri ve durumlarını listele (süreç başlatmaz).
+    /// Kurulu eklentileri ve durumlarını listele (eklentileri çalıştırmaz).
     List,
     /// Bir eklentinin beyan ettiği izinleri onayla.
     ///
-    /// Onay, eklentiyi hapsetmez: izin beyanı bir sözleşmedir, güvenlik
-    /// duvarı değil (D-040). Eklenti sizin bütün yetkinizle çalışır.
+    /// Onaylanan izinler zorlanır (D-069): eklenti yalnızca beyan ettiği
+    /// ana bilgisayarlara bağlanabilir ve dosya sistemine erişemez. Motorun
+    /// kurduğu araçlar (yt-dlp gibi) ayrı programlardır ve bu sınırın
+    /// dışındadır.
     Approve {
         /// Eklenti adı (dizin adı).
         name: String,
     },
-    /// Eklentinin beyan ettiği çalışma zamanı eserlerini kur (D-055).
+    /// Eklentinin beyan ettiği araçları (yt-dlp gibi) bu platform için kur.
     ///
     /// İndirmeyi motor yapar, eklenti değil; her eser sabitlenmiş bir
-    /// sürümle gelir ve sha256'sı doğrulanmadan yerine konmaz. Sisteme
-    /// hiçbir şey yazılmaz, root istenmez.
+    /// sürümle ve platform başına ayrı bir ikiliyle gelir, sha256'sı
+    /// doğrulanmadan yerine konmaz. Sisteme hiçbir şey yazılmaz, root
+    /// istenmez, Python gerekmez (D-055, D-069).
     ///
     /// Bu komut `--online` beklemez: indirme komutun kendisidir, yan
     /// etkisi değil. Zaten kurulu eserler için ağa çıkılmaz.

@@ -706,14 +706,8 @@ impl LocalProvider {
 mod tests {
     use super::*;
 
-    fn temp_dir(label: &str) -> PathBuf {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let dir = std::env::temp_dir().join(format!("headshell-local-{label}-{unique}"));
-        std::fs::create_dir_all(&dir).expect("geçici dizin");
-        dir
+    fn temp_dir(label: &str) -> crate::test_support::TempDir {
+        crate::test_support::TempDir::new(&format!("local-{label}"))
     }
 
     /// Gerçek ses fixture'larının dizini (`ffmpeg` üretimi sinüs tonları, adları İngilizce — D-036).
@@ -747,7 +741,7 @@ mod tests {
         write(&dir, "cover.jpg", b"cover");
         write(&dir, "notes.txt", b"note");
 
-        let provider = LocalProvider::new(vec![dir.clone()]);
+        let provider = LocalProvider::new(vec![dir.to_path_buf()]);
         let summary = provider.rescan_now().expect("tarama");
 
         assert_eq!(summary.files_seen, 4);
@@ -756,8 +750,6 @@ mod tests {
         assert_eq!(summary.failed, 0, "geçerli dosyalar başarısız olmamalı");
         // K9: sayılar birbirini tutmalı — kayıp dosya sessizce yutulmasın.
         assert_eq!(summary.indexed + summary.failed, summary.audio_files);
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[cfg(feature = "audio")]
@@ -769,14 +761,12 @@ mod tests {
         copy_fixture(&dir, "tagged.flac", "sound.flac");
         write(&dir, "corrupt.flac", b"this is not an audio file");
 
-        let provider = LocalProvider::new(vec![dir.clone()]);
+        let provider = LocalProvider::new(vec![dir.to_path_buf()]);
         let summary = provider.rescan_now().expect("tarama sürmeli");
 
         assert_eq!(summary.audio_files, 2);
         assert_eq!(summary.indexed, 1, "yalnızca sağlam dosya indekslenmeli");
         assert_eq!(summary.failed, 1, "bozuk dosya sayılmalı");
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// `audio` kapalıyken üstveri dosya adından gelir; bu kipte tarama yine
@@ -789,7 +779,7 @@ mod tests {
         copy_fixture(&dir, "tagged.flac", "First Last - Track.flac");
         write(&dir, "corrupt.flac", b"this is not an audio file");
 
-        let provider = LocalProvider::new(vec![dir.clone()]);
+        let provider = LocalProvider::new(vec![dir.to_path_buf()]);
         let summary = provider.rescan_now().expect("tarama");
 
         assert_eq!(summary.audio_files, 2);
@@ -798,8 +788,6 @@ mod tests {
             summary.tag_fallback, 2,
             "hepsi dosya adına düşmeli ve sayılmalı"
         );
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[cfg(feature = "audio")]
@@ -809,7 +797,7 @@ mod tests {
         // Dosya adı kasten yanıltıcı: etiketler kazanmalı.
         copy_fixture(&dir, "tagged.flac", "wrong-name.flac");
 
-        let provider = LocalProvider::new(vec![dir.clone()]);
+        let provider = LocalProvider::new(vec![dir.to_path_buf()]);
         let summary = provider.rescan_now().expect("tarama");
         assert_eq!(summary.tag_fallback, 0, "etiket okunabilmeli");
 
@@ -829,7 +817,6 @@ mod tests {
         );
 
         drop(index);
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[cfg(feature = "audio")]
@@ -842,7 +829,7 @@ mod tests {
             "Other Artist - Ogg Track.ogg",
         );
 
-        let provider = LocalProvider::new(vec![dir.clone()]);
+        let provider = LocalProvider::new(vec![dir.to_path_buf()]);
         let summary = provider.rescan_now().expect("tarama");
         assert_eq!(summary.indexed, 1);
         assert_eq!(
@@ -855,7 +842,6 @@ mod tests {
         assert_eq!(index[0].track.title, "Ogg Track");
 
         drop(index);
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -904,7 +890,7 @@ mod tests {
             "Other Artist - Ogg Track.ogg",
         );
 
-        let provider = LocalProvider::new(vec![dir.clone()]);
+        let provider = LocalProvider::new(vec![dir.to_path_buf()]);
         provider.rescan_now().expect("tarama");
 
         // Etiketten gelen sanatçı.
@@ -917,8 +903,6 @@ mod tests {
 
         let none = provider.search("nonexistent", 10).await.expect("arama");
         assert!(none.is_empty());
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// Arama, üstveri hangi yoldan gelirse gelsin dosya adı alanlarını bulmalı.
@@ -932,14 +916,12 @@ mod tests {
             "Common Artist - Common Track.ogg",
         );
 
-        let provider = LocalProvider::new(vec![dir.clone()]);
+        let provider = LocalProvider::new(vec![dir.to_path_buf()]);
         provider.rescan_now().expect("tarama");
 
         let hits = provider.search("common artist", 10).await.expect("arama");
         assert_eq!(hits.len(), 1, "{hits:?}");
         assert!(provider.search("nothing", 10).await.unwrap().is_empty());
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[tokio::test]
@@ -952,13 +934,11 @@ mod tests {
                 &format!("Common Artist - Track {index}.ogg"),
             );
         }
-        let provider = LocalProvider::new(vec![dir.clone()]);
+        let provider = LocalProvider::new(vec![dir.to_path_buf()]);
         provider.rescan_now().expect("tarama");
 
         let hits = provider.search("common", 2).await.expect("arama");
         assert_eq!(hits.len(), 2, "limit aşılmamalı");
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[tokio::test]
@@ -970,7 +950,7 @@ mod tests {
             "Common Artist - Common Track.ogg",
         );
 
-        let provider = LocalProvider::new(vec![dir.clone()]);
+        let provider = LocalProvider::new(vec![dir.to_path_buf()]);
         provider.rescan_now().expect("tarama");
 
         // İndeksteki dosya çalınabilir.
@@ -984,8 +964,6 @@ mod tests {
         // Rastgele bir yol reddedilmeli — bu bir dosya okuma yüzeyi değil.
         let outside = ProviderTrackId::new(ProviderId::new("local"), "/etc/passwd");
         assert_eq!(provider.resolve_source(&outside).await.unwrap(), None);
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[tokio::test]
@@ -997,7 +975,7 @@ mod tests {
             "Common Artist - Common Track.ogg",
         );
 
-        let provider = LocalProvider::new(vec![dir.clone()]);
+        let provider = LocalProvider::new(vec![dir.to_path_buf()]);
         provider.rescan_now().expect("tarama");
         let indexed = provider.search("common", 1).await.unwrap();
 
@@ -1012,8 +990,6 @@ mod tests {
             None,
             "silinmiş dosya çalınabilir görünmemeli"
         );
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[tokio::test]
@@ -1022,7 +998,7 @@ mod tests {
         // çıkar; `canonicalize` bunu çözer.
         let dir = temp_dir("escape");
         copy_fixture(&dir, "tagged.flac", "song.flac");
-        let provider = LocalProvider::new(vec![dir.clone()]);
+        let provider = LocalProvider::new(vec![dir.to_path_buf()]);
 
         let escaping = dir.join("..").join("..").join("etc").join("passwd");
         let id = ProviderTrackId::new(
@@ -1044,8 +1020,6 @@ mod tests {
             provider.resolve_source(&ok_id).await.unwrap().is_some(),
             "kökün altındaki dosya çalınabilmeli"
         );
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[tokio::test]

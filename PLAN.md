@@ -115,8 +115,18 @@ Sunucudan ses akıtan tasarım önerme. (Maliyet + hukuk + çoklu sağlayıcı, 
 ### K4 — Spotify çekirdeğe girmez
 Ayrı, opsiyonel eklenti. `headshell-core`'un bağımlılık ağacında Spotify'a ait hiçbir şey olmaz.
 
-### K5 — Eklentiler alt süreç + JSON-RPC ile konuşur
-Dinamik kütüphane değil. Eklenti çökerse çekirdek düşmez; eklentiler herhangi bir dilde yazılır.
+### K5 — Eklentiler gömülü motorda koşar; dışarıya yalnızca motorun kapılarından çıkar
+Eklentiler JavaScript ile yazılır ve çekirdeğe gömülü QuickJS'te koşar (D-069).
+Kullanıcıdan **hiçbir çalışma zamanı kurması istenmez.** Eklenti ağa, sırlara,
+kalıcı depoya ve araçlara yalnızca `host` üzerinden erişir ve beyan ettiği
+izinler **zorlanır**. Eklentinin fırlattığı hata, takıldığı döngü ya da bellek
+taşması çekirdeği düşürmez. Dinamik kütüphane (`dlopen`) yok.
+
+> İlk yazımı "alt süreç + JSON-RPC; eklentiler herhangi bir dilde yazılır"dı
+> (api 1). D-069'da değişti, çünkü "herhangi bir dil" pratikte "kullanıcının
+> kurması gereken bir çalışma zamanı" demekti. Takas bilerek yapıldı: api 1'de
+> eklenti ayrı süreçti ve C düzeyinde bir çökme bile çekirdeğe ulaşmazdı; api
+> 2'de yalnızca QuickJS'in kendi kusuru çekirdeği düşürebilir.
 
 ### K6 — Kanonik kimlik zinciri sırası
 `ISRC → MusicBrainz ID → bulanık eşleşme (sanatçı+başlık+süre) → AcoustID parmak izi`
@@ -738,9 +748,14 @@ modeliyle birlikte yeniden bakılacak.
 **Bitti sayılır:** Rust olmayan bir referans eklenti çalışıyor ve çekirdek onu
 sürüm uyumsuzluğunda çökmeden reddedebiliyor.
 
-### 2.1 JSON-RPC eklenti protokolü — TAMAM
+### 2.1 JSON-RPC eklenti protokolü — TAMAM, api 2 ile yerini QuickJS'e bıraktı (§2.9)
 Yaşam döngüsü, el sıkışma, **sürümleme**, zaman aşımı, çökme izolasyonu.
 Protokol sürümlenir; uyumsuz eklenti yüklenmez, hata mesajı verir.
+
+> **D-069:** Aşağısı api 1'in kaydı. Tel protokolü (JSON-RPC, alt süreç, el
+> sıkışma) kalktı; `transport.rs` ve `client.rs` silindi. Korunan: manifest +
+> onay defteri + sır ad alanı + sürüm reddi + zaman aşımı + sayılı yeniden
+> başlatma. Güncel hâli §2.9'da.
 
 **Yapıldı** (`crates/headshell-core/src/plugin/`). Beş dosya, beş iş: `protocol`
 (tel biçimi), `manifest` (`plugin.json` + izin beyanı), `consent` (onay
@@ -801,8 +816,9 @@ ortam değişkeni değil, çünkü `set_var` Rust 2024'te `unsafe` ve workspace
 > ad alanlı; eklenti yalnızca kendi ad alanını görür. `keyring` yine yok.
 
 ### 2.2 Referans eklenti — SoundCloud (D-027)
-Rust olmayan bir dilde (Python) yazılmış bir sağlayıcı — protokolün gerçekten
-dil bağımsız olduğunun kanıtı.
+Rust olmayan bir dilde yazılmış bir sağlayıcı — sözleşmenin çekirdeğin dışında
+yazılabildiğinin kanıtı. İlk yazımı Python'du; D-069'da JS'e taşındı
+(`plugins/soundcloud/main.js`) ve canlı testleri yeniden geçti.
 
 Platform seçimi katalog kalitesine göre değil **sınanabilirliğe** göre yapıldı:
 SoundCloud abonelik gerektirmeyen tek aday, yani CI'da ve başkasının makinesinde
@@ -920,8 +936,13 @@ beraberlik "%100 güven" diye raporlanıyordu. Doğruluk kümesi %97.2 → %100
 > Parmak izi yolu: **`rusty-chromaprint`** (saf Rust; PCM symphonia'dan),
 > `fpcalc` alt süreci değil.
 
-### 2.4 Torrent sağlayıcı
-`librqbit`. Sıralı akış. Bash prototipinin varisi —
+### 2.4 Torrent sağlayıcı — PARK EDİLDİ (D-069)
+`librqbit`. Sıralı akış.
+
+> **D-069:** Eklenti sistemi QuickJS'e geçerken torrent "bizimle gelmedi"
+> (kullanıcının kararı). Kod `parked/`'da, workspace'in dışında, silinmedi;
+> geri dönüşün açık soruları `parked/README.md`'de. Aşağısı çalıştığı günün
+> kaydı. Bash prototipinin varisi —
 oradaki dersler geçerli: her torrent kendi dizinine, hazırlık için sabit `sleep` yerine
 gerçek hazır olma kontrolü, peer sayısı ve indirme hızı raporlanır.
 
@@ -998,7 +1019,7 @@ eklenti düşmeli.
 | 2.1 JSON-RPC protokolü | TAMAM — izin modeli (D-040), sırlar (D-042), gerçek süreçle sınandı |
 | 2.2 Referans eklenti (SoundCloud) | TAMAM — canlı SoundCloud'da arıyor ve çalıyor (D-043) |
 | 2.3 AcoustID | TAMAM — parmak izi + AcoustID + `resolve --file` (D-046), gerçek anahtarla canlı sınandı; tek borç: `EMBEDDED_API_KEY` hâlâ boş |
-| 2.4 Torrent sağlayıcı | TAMAM — `crates/headshell-plugin-torrent` alt süreç eklentisi (D-047): Torznab araması, sıralı yerel akış, iki adımlı yayım→dosya kimliği |
+| 2.4 Torrent sağlayıcı | PARK EDİLDİ (D-069) — çalışan alt süreç eklentisiydi (D-047); api 2'ye taşınmadı, `parked/`'da |
 | 2.5 Yayın platformu eklentileri | TAMAM — `plugins/ytmusic` (D-048): InnerTube araması, yt-dlp ile m4a akışı, kısıtlamayı kaldıran `Range` başlığı; canlı serviste baştan sona çaldı |
 
 **Faz 1'den taşınan borçlar:**
@@ -1024,13 +1045,14 @@ D-055), dördü duruyor ve bir tanesi küçüldü:
 
 - **~~Eklenti motoru~~ — KAPANDI (D-055).** Motor yazıldı, `ytmusic` ve
   `soundcloud` ondan geçiyor.
-- **`torrent` kullanıcıya `cargo build --release` yaptırıyor** — D-049'u
-  ihlal eden tek şey bu. Çekirdeğe taşıma çözümü **iptal edildi** (D-056);
-  eklenti olarak kalıyor ve dağıtım sorusu **`TODO: AFTER FIRST RELEASE`**.
+- ~~**`torrent` kullanıcıya `cargo build --release` yaptırıyor**~~ — torrent
+  park edildi (D-069); dağıtım sorusu geri dönüşün sorularından biri
+  (`parked/README.md`).
 - **Gömülü AcoustID anahtarı yok** (`EMBEDDED_API_KEY` boş, D-046).
-- **İzin sözlüğü joker kabul etmiyor** (D-040) — googlevideo.com, rastgele
-  peer. D-055 buna yeni bir yük **eklemedi**: motorun indirmesi ayrı bir
-  satırda duruyor, eklentinin izin listesine karışmıyor.
+- ~~**İzin sözlüğü joker kabul etmiyor** (D-040)~~ — **KAPANDI (D-069)**:
+  `*.googlevideo.com` beyan edilebiliyor ve izinler artık zorlanıyor.
+  "Rastgele peer" hâlâ ifade edilemiyor ve edilmemeli — torrent'in geri
+  dönüş sorusu.
 - **Gerçek zamanlı dizin izleme** (D-025) — `--if-stale` yoklaması yerinde.
 - **`play --dry-run` sağlayıcı parça kimliğini insan çıktısına yazmıyor**
   (D-054'te ölçüldü).
@@ -1048,9 +1070,9 @@ kaldı:
 
 | eklenti | istediği | durum |
 |---|---|---|
-| `soundcloud` | Python | motorun yorumlayıcısı — **uyuyor** |
-| `ytmusic` | Python + yt-dlp | eser motorca kuruluyor — **uyuyor** |
-| `torrent` | `cargo build --release` | **hâlâ ihlal** — Rust ikilisi motordan geçemez; çözümü `TODO: AFTER FIRST RELEASE` (D-056) |
+| `soundcloud` | hiçbir şey | gömülü motor — **uyuyor** (D-069) |
+| `ytmusic` | yt-dlp | platform ikilisi motorca kuruluyor, Python yok — **uyuyor** (D-069) |
+| `torrent` | `cargo build --release` | **park edildi** (D-069) — geri dönüşte çözülecek |
 
 Kuralın kaçmaması gereken yer: D-048 bilerek "yt-dlp'yi kullanıcı kendi paket
 yöneticisiyle günceller"e yaslanmıştı, çünkü YouTube onu düzenli bozuyor ve
@@ -1082,9 +1104,14 @@ açılmadan, `headshell plugin list` çıktısında görünüyor.
 >
 > **K5 değişmiyor:** alt süreç + JSON-RPC sınırı herkese açık kalır, motor tek
 > yol değil *kurulum gerektirmeyen desteklenen yol* olur. Depoda dağıtılan her
-> eklenti ondan geçer.
+> eklenti ondan geçer. — **D-069 bunu değiştirdi:** alt süreç yolu kalktı, K5
+> yeniden yazıldı, motor tek yol.
 
-### 2.8 Eklenti motoru — TAMAM (D-050 karar, D-055 uygulama)
+### 2.8 Eklenti motoru — TAMAM (D-050 karar, D-055 uygulama) — Python kısmı §2.9 ile geçersiz
+
+> **D-069:** Bu bölümün Python'a dair her şeyi (yorumlayıcı bulma, 3.9+,
+> `HEADSHELL_PYTHON`, README'deki ilan) geçersiz. Eser mekanizması (madde 2,
+> sabitlenmiş sürüm + karma) duruyor ve platform başına genişledi.
 
 D-050'nin kararı yazıldı. Altı maddenin beşi bitti, biri açık:
 
@@ -1131,6 +1158,59 @@ D-050'nin kararı yazıldı. Altı maddenin beşi bitti, biri açık:
 > **Çevrimdışı:** dört ayrı tanı var ve hiçbiri ötekine benzemiyor —
 > `kurulu değil`, `karma tutmuyor`, `kurulamadı` (ağ), `YETİM` (kaynak 404).
 > Sonuncusu kullanıcının düzeltemeyeceği tek durum ve mesaj bunu söylüyor.
+
+### 2.9 Eklenti motoru v2 — QuickJS — TAMAM (D-069), temiz makine sınaması YAPILACAK
+
+**Sorun:** api 1'in eklentileri Python'du ve D-050 Python'u "projenin
+gereksinimi" ilan etmişti. Pratikte eklentiyi denemek isteyen herkes önce bir
+çalışma zamanı kurmak zorundaydı (Windows'ta yok, Debian'da `venv` ayrı
+paket) — kullanıcının ifadesiyle "kime göndersem bir sorun yaşadı".
+
+**Yapıldı** (`crates/headshell-core/src/plugin/`):
+
+1. **Motor** — `script.rs`: her eklenti kendi iş parçacığında, kendi QuickJS
+   çalışma zamanında. Çağrı süresi 20 sn, yükleme 5 sn, bellek 128 MB; döngü
+   `try/catch` içinde bile kesiliyor. `plugin-engine` feature'ı arkasında
+   (+4 crate, ~1,3 MB); CLI ve masaüstü açıyor.
+2. **`host`** — `host.rs`: `http`, `secrets`, `storage`, `tools`, `log` ve
+   `console`. Eşzamanlı. Yükleme sırasında ağ ve araç yasak.
+3. **İzinler zorlanıyor** — istekte, her yönlendirmede (istemci yönlendirme
+   izlemiyor, motor izliyor), akış adresinde. Joker (`*.alan.adi`) geldi.
+   Tek istisna motorun kurduğu araçlar ve bu her çıktıda yazıyor.
+4. **Platform başına eser** — `artifact.rs`: `requires[].assets`, anahtar
+   çekirdeğin derlendiği hedeften. İndirme diske akıyor (40 MB'lık ikili).
+   "Bu platform için yayın yok" beşinci tanı.
+5. **Sözleşme api 2** — `health`, `search`, `resolve_source` dışa aktarılır;
+   manifestte `main`. api 1 manifestleri "sürüm uyuşmuyor" diye görünüyor ve
+   ne yapılacağı yazıyor.
+6. **Eklentiler taşındı** — `soundcloud` ve `ytmusic` JS'e; canlı testleri
+   (10/10) geçiyor, ikisi de sesi gerçekten çalıyor. `echo` fikstürü JS'e.
+7. **Torrent park edildi** — `parked/`.
+
+Aşamalar: `PLUGIN_LOAD` (manifest/onay), `PLUGIN_RUNTIME` (araç kurulumu),
+`PLUGIN_START` (betiği yükleme, dışa aktarım denetimi — eski
+`PLUGIN_HANDSHAKE`), `PROVIDER_CALL` (çağrı). Hata tipleri: `PluginThrew`
+("hayır dedi", mesaj + `main.js:satır`), `PluginContract` ("kodu motorla
+anlaşamıyor"), `PluginTimeout`, `PluginCrashed`, `PluginIncompatible`.
+
+**Sınama:** motorun 73 birim testi gerçek QuickJS + sahte ağla; CLI'de
+**ortamı tamamen boşaltılmış** bir süreçte (`PATH` yok) eklenti cevap veriyor.
+
+**Temiz Linux — ilk ölçüm TAMAM:** Python, yt-dlp ve Node olmayan bir
+`archlinux` konteynerinde kurulum, onay, yt-dlp indirmesi, sağlık, arama ve
+akış çözümü geçti; çalma yalnızca konteynerin ses kartı olmadığı için
+`PLAYBACK_OUTPUT`'ta durdu (D-069).
+
+**YAPILACAK — Windows ve macOS'ta temiz makine sınaması.** Python ve yt-dlp
+kurulu olmayan bir ortamda `plugin install ytmusic` + `play`. D-070 bunun
+önünü açtı (Windows'ta uygulama `HOME` yüzünden hiç açılmıyordu) ve CI'a
+Windows/macOS test işini ekledi; elle deneme hâlâ yapılmadı (§3.7).
+
+> KARAR NOKTASI: yt-dlp JS çalışma zamanı istiyor. 2026.08.19 "JS runtimes:
+> none" deyip YouTube çözümünü sürdürüyor ama bunun kullanımdan kaldırıldığını
+> yazıyor (ölçüldü). O yol kapandığında motor bir JS çalışma zamanını da
+> (deno ya da `qjs`) aynı `requires` mekanizmasıyla indirmek zorunda kalacak.
+> Bugün bir iş değil — **sor**, kapandığında.
 
 ---
 
@@ -1266,16 +1346,19 @@ kimse şikâyet etmez, sonra **Faz 4'te aynı formül oda senkronunu sürer.**
 
 `fixtures/anchor/position_cases.json` iki tarafın da okuduğu tek doğruluk
 kaynağı (12 vaka). Rust tarafını `headshell-core/tests/anchor_parity.rs`, JS
-tarafını `headshell/ui/anchor.js` + `headshell/tests/anchor_parity.mjs` bağlıyor.
+tarafını `headshell/ui/anchor.js` + `headshell/tests/anchor_parity_js.rs` bağlıyor.
 
 Kümenin en değerli vakası yazılırken bulundu: `rate = 1.001` ile 100 sn'de
 çekirdek **100099 ms** diyor, 100100 değil — `100000 × 1.001` ikilik tabanda
 tam değil ve `as u64` kırpıyor. JS `Math.round` kullanırsa iki kopya tam
 buradan ayrılır. Doğru karşılık `Math.floor(gecen_ms * rate)`.
 
-JS koşumu `node` istiyor ve `node` yoksa test **atlanmıyor, düşüyor**.
-Atlanabilir olsaydı kurulu olmayan bir makinede yeşil yanıp hiçbir şey
-kanıtlamazdı — D-032'de tam bu yüzden bir test silinmişti.
+JS koşumu bir zamanlar `node` istiyordu ve `node` yoksa test **atlanmıyor,
+düşüyordu**: atlanabilir olsaydı kurulu olmayan bir makinede yeşil yanıp
+hiçbir şey kanıtlamazdı — D-032'de tam bu yüzden bir test silinmişti. D-070
+kuralı korudu, bedelini kaldırdı: `anchor.js` artık çekirdeğin eklenti
+motoruyla aynı gömülü QuickJS'te değerlendiriliyor; test yine hiç atlanmıyor
+ama makineden hiçbir şey istemiyor.
 
 #### Paket — TAMAM
 
@@ -1337,6 +1420,11 @@ bir tema yazarı. Yorum ve arayüz metni Türkçe kalır. Bu karar uygulanırken
 > zaman "webview içinde" vaadi düşer), yoksa sınırlı/izinli bir webview JS
 > sandbox'ı mı? IPC'nin hangi alt kümesi (varsa) açılır? Tema ile aynı paket
 > biçimini mi paylaşır yoksa ayrı mı? **Sor.**
+>
+> **D-069 notu:** "K5 modeli" artık alt süreç değil, çekirdeğe gömülü
+> QuickJS + `host` kapıları. Mod sorusu açılınca üçüncü bir seçenek var:
+> mod'u webview'de değil eklentilerin motorunda koşturmak, izinli bir `host`
+> alt kümesiyle. Soru hâlâ kapanmadı.
 
 #### Token seti v1 — TAMAM (D-037)
 
@@ -1534,9 +1622,10 @@ Linux paketleyicilerine geçmiyor ve bu ancak paketin içi açılınca görüld�
    Taslak sürümde dokuz varlık var: `.deb`, `.rpm`, `.AppImage`, `.dmg`,
    `.msi`, NSIS `.exe` ve üç CLI arşivi.
 
-> **macOS yalnızca arm64.** Matriste `macos-14` var, o da Apple Silicon.
-> Intel Mac kullanıcısı için `.dmg` üretilmiyor. Bilinen eksik, kapsam
-> kararı: ikinci bir runner ikinci bir derleme demek ve talep henüz ölçülmedi.
+> **macOS yalnızca arm64'tü** — D-070 kapattı: `.dmg` ve CLI arşivi artık
+> evrensel ikili (`universal-apple-darwin`, `lipo`), aynı arm64 koşucusunda
+> çapraz derleniyor; ikinci bir koşucu gerekmedi. İlk `workflow_dispatch`
+> koşumuna kadar doğrulanmadı.
 
 ### AUR paketleri
 
@@ -1581,6 +1670,61 @@ tasarlandıkları gibi çalışıyor ve mod'lar onların üstüne değil yanına
 Faz 3 kapandığında geriye kalan iş kod değil **dağıtım**: ilk sürümün
 yayımlanması. Bkz. yukarıda §3.5 — paketler üretiliyor, AUR paketleri yazıldı,
 sürüm hâlâ taslak.
+
+### 3.7 Platform taşınabilirliği — TAMAM (D-070), elle Windows/macOS denemesi YAPILACAK
+
+**Sorun:** kod yalnızca Linux'ta yazılıp sınanmıştı ve üç yerde Unix'e,
+birkaç yerde de tek bir makineye bağlı kalmıştı:
+
+1. **Veri dizini** yalnızca `HOME`'a bakıyordu; standart bir Windows `HOME`
+   tanımlamaz. CLI hata verip duruyordu, masaüstü **hiçbir şey demeden**
+   kapanıyordu (Windows sürüm derlemesi konsolsuz).
+2. **Müzik dizin listesi** `:` ile bölünüyordu — `C:\Müzik` ikiye ayrılırdı.
+3. **Subsonic tuzu** `/dev/urandom`'dan okunuyordu; Windows'ta her seferinde
+   zayıf yedeğe düşüyordu (söyleyerek, ama düşüyordu).
+4. **Testler** `/tmp`'ye dizin açıp hiç silmiyordu: bir geliştirme
+   makinesinde 1.100 dizin, 1,2 GB — o makinede `/tmp` bir tmpfs, yani bellek.
+   YouTube Music testlerinin önbelleği ölmüş bir indirme adresini o makinede
+   gizleyebilirdi.
+5. **Bir test `node` istiyordu** (§3.2).
+6. **Satır sonları** korunmuyordu: Windows'ta `core.autocrlf` açık bir
+   checkout snapshot'ları kırardı.
+7. **Linux paketleri** Ubuntu 24.04'te derleniyordu ve glibc 2.39 istiyordu —
+   Debian 12'de açılmıyordu (ölçüldü). **macOS paketi** yalnızca arm64'tü.
+
+**Yapıldı:**
+
+- Veri dizini sistem başına: Linux/BSD `~/.local/share/headshell`, macOS
+  `~/Library/Application Support/headshell`, Windows
+  `%LOCALAPPDATA%\headshell` (kullanıcının kararı). `HEADSHELL_DATA_DIR` ve
+  açıkça tanımlanmış `XDG_DATA_HOME` her sistemde önce. Çözüm saf bir
+  fonksiyonda; üç sistemin dalı her makinede sınanıyor.
+- Müzik listesi `std::env::split_paths` ile; olağan müzik dizini sistem başına.
+- Tuz: `/dev/urandom` yoksa işletim sisteminin rastgeleliğiyle anahtarlanmış
+  `RandomState`.
+- Masaüstü açılamazsa hata bir **pencerede** gösteriliyor (her sistemde).
+- Testler kendini silen dizinler kullanıyor; entegrasyon testleri
+  `target/tmp`'de. yt-dlp önbelleği her koşumda karmayı ve adresin yaşadığını
+  denetliyor.
+- `anchor_parity_js` gömülü QuickJS'te; `node` gerekmiyor.
+- `.gitattributes`: her yerde LF, ikili fikstürler dönüşümsüz.
+- CI'a Windows ve macOS işi: clippy + testler. Araç testlerinin Windows
+  karşılığı `cmd.exe` kopyasıyla.
+- Sürüm hattı: Linux 22.04'te (glibc 2.35), macOS evrensel ikili.
+- **BSD'ler derlenebilir, denenmedi (canary):** eklenti motorunun bağlaması
+  orada `libclang` ile derleme anında üretiliyor (kullanıcının kararı:
+  "derlenebilir olsunlar ama not tested olarak yazılsın").
+
+**Sınama:** Linux'ta üç kapı. Windows hedefine çapraz derleme (Zig ile) —
+çekirdek ve CLI, testler dahil, clippy temiz: `cfg(windows)` kodunun ilk
+derlenmesi. Ubuntu 22.04 konteynerinde derlenen CLI'nin Debian 12'de açıldığı
+ölçüldü. Açılış hatası penceresinin metni taşıması, Tauri'nin kullandığı `url`
+sürümüyle ve QuickJS'teki `decodeURIComponent` ile ayrı ayrı doğrulandı;
+pencerenin içeriği bu makinede görüntü olarak yakalanamadı.
+
+**YAPILACAK:** Windows ve macOS'ta **elle** deneme — CI işi testleri koşturur
+ama bir masaüstünde pencere açmaz, ses çalmaz. §2.9'un "temiz makinede
+`plugin install ytmusic` + `play`" maddesi de burada.
 
 ---
 
@@ -1651,6 +1795,11 @@ her commit'te sorar. Aksi halde ihlaller aylarca birikir ve toplu halde ortaya �
 > Bugün konan şey **gerçek scaffolding üretimi değil**, ondan önce gelen ucuz
 > süzgeç: `crates/headshell-core/tests/k7_surface.rs` public tiplerde lifetime ve
 > public imzalarda closure arıyor, CI'ın üçüncü kapısında koşuyor (D-053).
+>
+> **D-069 notu:** eklenti motoru (`rquickjs-sys`) masaüstü hedefleri için
+> hazır bağlamalarla geliyor ama Android/iOS için gelmiyor; o derlemelerde
+> `bindgen` feature'ı (derleme anında libclang) açılacak. Motorun kendisi
+> mobile uygun — api 1'in alt süreçleri iOS'ta hiç çalışamazdı.
 >
 > Gerçek `uniffi` kontrolü hâlâ bu fazın işi ve iki şey istiyor: çekirdekteki
 > ~60-80 tipin `#[derive(uniffi::Record)]` ile işaretlenmesi, ve aşağıdaki dört
@@ -1737,7 +1886,9 @@ Yani: **çalabildiğimiz platform üç, dinleme kimliğini alabildiğimiz platfo
 |---|---|
 | **canonical id** | Sağlayıcıdan bağımsız parça kimliği (tercihen MBID) |
 | **provider** | Ses kaynağı: yerel, Subsonic, SoundCloud, torrent… |
-| **plugin** | Alt süreç olarak çalışan, JSON-RPC konuşan sağlayıcı |
+| **plugin** | JS ile yazılmış, çekirdeğe gömülü QuickJS'te koşan sağlayıcı (api 2, D-069) |
+| **host** | Motorun eklentiye verdiği tek kapı: `http`, `secrets`, `storage`, `tools`, `log` |
+| **eser (artifact)** | Eklentinin beyan ettiği, motorun platform başına indirip karmasını doğruladığı araç (yt-dlp) |
 | **listen** | Tek dinleme olayı: parça + zaman damgası + süre + kaynak |
 | **anchor** | `{track, wall_time, position, rate, state}` — oda senkronunun tek primitifi |
 | **resolve** | Parçayı kanonik kimliğe, oradan sağlayıcı kimliğine eşleme |

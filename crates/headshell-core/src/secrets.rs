@@ -143,19 +143,16 @@ fn restrict_permissions(_path: &Path) -> Result<()> {
 mod tests {
     use super::*;
 
-    fn temp_path(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "headshell-secrets-{}-{}",
-            std::process::id(),
-            jiff::Timestamp::now().as_nanosecond()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir.join(name)
+    /// Dizin, dosya yolu kadar yaşamalı: ikisi birlikte döner.
+    fn temp_path(name: &str) -> (crate::test_support::TempDir, std::path::PathBuf) {
+        let dir = crate::test_support::TempDir::new("secrets");
+        let path = dir.join(name);
+        (dir, path)
     }
 
     #[test]
     fn secrets_survive_a_round_trip_and_stay_private() {
-        let path = temp_path("secrets.json");
+        let (_dir, path) = temp_path("secrets.json");
         let mut secrets = Secrets::default();
         secrets.set(&plugin_namespace("soundcloud"), "client_id", "abc123");
         secrets.set("provider:navidrome", "token", "xyz");
@@ -215,7 +212,7 @@ mod tests {
 
     #[test]
     fn a_missing_file_is_empty_but_a_broken_one_is_an_error() {
-        let path = temp_path("secrets.json");
+        let (_dir, path) = temp_path("secrets.json");
         assert_eq!(Secrets::load(&path).unwrap(), Secrets::default());
 
         std::fs::write(&path, "{ bozuk").unwrap();

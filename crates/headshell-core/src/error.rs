@@ -132,10 +132,10 @@ pub enum ErrorKind {
     #[error("eklenti manifesti geçersiz: {path} — {detail}")]
     PluginManifest { path: PathBuf, detail: String },
 
-    /// Eklenti motorunun bir adımı tökezledi (D-055).
+    /// Eklenti motorunun bir adımı tökezledi (D-055, D-069).
     ///
-    /// `step` **hangi adımda** olduğunu söyler — Python arama, eser indirme,
-    /// karma doğrulama. Motorun bütün başarısızlıkları aynı cümleye
+    /// `step` **hangi adımda** olduğunu söyler — platform eşleme, eser
+    /// indirme, karma doğrulama, betiği okuma. Motorun bütün başarısızlıkları aynı cümleye
     /// çıkmamalı: "yt-dlp yok" ile "yt-dlp indirilemedi" ile "indirilen
     /// yt-dlp'nin karması tutmadı" üç ayrı tanıdır ve üçünün çözümü
     /// farklıdır (K9).
@@ -159,8 +159,13 @@ pub enum ErrorKind {
     #[error("{plugin} eklentisi onaylanmadı: {detail}")]
     PluginNotApproved { plugin: String, detail: String },
 
-    /// Eklenti süreci başlatılamadı, öldü ya da kanalı kapattı.
-    #[error("{plugin} eklenti süreci çalışmıyor: {detail}")]
+    /// Eklentinin iş parçacığı başlatılamadı ya da düştü (D-069).
+    ///
+    /// JS'in fırlattığı bir hata bu değil — o [`ErrorKind::PluginThrew`].
+    /// Bu, motorun kendisinin eklentiyi taşıyamadığı durum: iş parçacığı
+    /// açılamadı, QuickJS kurulamadı, ya da eklenti vazgeçilecek kadar çok
+    /// kez düştü.
+    #[error("{plugin} eklentisi çalışmıyor: {detail}")]
     PluginCrashed { plugin: String, detail: String },
 
     /// Eklenti verilen sürede cevap vermedi.
@@ -174,13 +179,32 @@ pub enum ErrorKind {
         seconds: u64,
     },
 
-    /// Eklenti JSON-RPC hata nesnesi döndürdü — yani süreç sağ, işi reddetti.
-    #[error("{plugin} eklentisi {method} çağrısını reddetti: {message} (kod {code})")]
-    PluginRpc {
+    /// Eklentinin kodu bir hata fırlattı — motor sağ, eklenti işi reddetti.
+    ///
+    /// `location` JS yığınının ilk satırı (`main.js:42:7`): "neden" kadar
+    /// "nerede" de tanının parçası (K9), ve eklenti yazarı onsuz hatayı
+    /// kendi kodunda aramak zorunda kalır.
+    #[error("{plugin} eklentisi {method} çağrısında hata verdi: {message}{location}")]
+    PluginThrew {
         plugin: String,
         method: String,
-        code: i64,
         message: String,
+        /// Boş ya da ` (main.js:42:7)` biçiminde.
+        location: String,
+    },
+
+    /// Eklenti sözleşmeye uymadı: beyan ettiği bir fonksiyonu dışa
+    /// aktarmıyor ya da beklenmeyen biçimde bir değer döndürdü.
+    ///
+    /// [`ErrorKind::PluginThrew`]'dan ayrı: "eklenti hayır dedi" ile
+    /// "eklentinin kodu motorla anlaşamıyor" farklı tanılardır. İlkini
+    /// kullanıcı bekleyerek ya da yapılandırarak çözer, ikincisini yalnızca
+    /// eklenti yazarı (K9).
+    #[error("{plugin} eklentisi sözleşmeye uymuyor ({method}): {detail}")]
+    PluginContract {
+        plugin: String,
+        method: String,
+        detail: String,
     },
 
     /// Sunucu HTTP 200 döndü ama gövdede hata var (Subsonic'in yaptığı gibi).

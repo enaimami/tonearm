@@ -1,45 +1,48 @@
-//! Eklenti sınırı: alt süreç + JSON-RPC sağlayıcılar (K5, Faz 2 §2.1).
+//! Eklenti sınırı: gömülü QuickJS'te koşan sağlayıcılar (K5, D-069).
 //!
 //! Bir eklenti `<data_dir>/plugins/<ad>/` dizinidir; içinde `plugin.json`
-//! (bkz. [`manifest`]) ve çalıştırılabilir bir şey vardır. Dil serbest —
-//! protokolün tamamı satır bazlı JSON ([`protocol`]).
+//! (bkz. [`manifest`]) ve bir JS betiği vardır. Betik çekirdeğin içindeki
+//! motorda koşar — kullanıcının makinesinde **hiçbir şey kurulu olması
+//! gerekmez**. api 1'de eklenti Python'la yazılmış bir alt süreçti ve "kime
+//! göndersem bir sorun çıktı"nın sebebi buydu: Windows'ta Python yok,
+//! Debian'da `venv` ayrı paket, sürümler tutmuyor.
 //!
 //! ## Yaşam döngüsü
 //!
-//! 1. **Keşif** ([`discover`]) — süreç açmadan: manifest okunur, izin onayı
-//!    ([`consent`]) sorulur, protokol sürümü karşılaştırılır. `headshell plugin
-//!    list` bu kadarını kullanır ve hiçbir eklentiyi başlatmaz.
-//! 2. **Başlatma** — **ilk çağrıda**, tembel. `headshell stats` çalışırken
-//!    yanında altı süreç açılmasın diye; ve el sıkışmadaki yetenekler
-//!    manifestte de yazdığı için başlatmadan yönlendirme yapılabiliyor.
-//! 3. **El sıkışma** — sürüm denetlenir. Uymuyorsa eklenti yüklenmez,
-//!    çekirdek çökmez, iki sayı da kullanıcıya söylenir.
-//! 4. **Çağrı** — her metodun zaman aşımı var; asılı kalan eklenti
-//!    çekirdeği asmaz.
-//! 5. **Çökme** — süreç ölürse çağrı hata döner ve bir sonraki çağrıda
-//!    yeniden başlatılır. [`MAX_STARTS`] denemeden sonra vazgeçilir; sonsuz
-//!    yeniden başlatma bir çökme döngüsünü gizler.
+//! 1. **Keşif** ([`discover`]) — motoru açmadan: manifest okunur, izin onayı
+//!    ([`consent`]) sorulur, protokol sürümü ve eserlerin durumu ölçülür.
+//!    `headshell plugin list` bu kadarını kullanır.
+//! 2. **Başlatma** — **ilk çağrıda**, tembel: eklentinin iş parçacığı açılır,
+//!    betik değerlendirilir ve beyan edilen yeteneklerin fonksiyonları
+//!    dışa aktarılmış mı diye bakılır ([`script`]).
+//! 3. **Çağrı** — her çağrının süresi var; takılan eklenti çekirdeği
+//!    takmaz.
+//! 4. **Düşme** — zaman aşımı ya da düşen iş parçacığı motoru bırakır ve bir
+//!    sonraki çağrı yeniden başlatır. [`MAX_STARTS`] denemeden sonra
+//!    vazgeçilir; sonsuz yeniden başlatma bir çökme döngüsünü gizler.
 //!
-//! ## Sınır neyi tutar, neyi tutmaz
+//! ## Sınır neyi tutar
 //!
-//! Tutar: kimlik alanı (eklenti başka bir sağlayıcının kimliğini uyduramaz,
-//! bkz. [`protocol::WireTrack`]), sır alanı (yalnızca kendi ad alanı, D-042),
-//! zaman (zaman aşımı), yaşam (çökme izolasyonu).
-//!
-//! Tutmaz: dosya sistemi ve ağ. Eklenti kullanıcının bütün yetkisiyle
-//! çalışır; izin beyanı bir sözleşmedir, güvenlik duvarı değil (D-040) — ve
-//! bu, `headshell plugin list` çıktısında da böyle yazar.
+//! Kimlik alanı (eklenti başka sağlayıcının kimliğini uyduramaz), sır alanı
+//! (yalnızca kendi ad alanı, D-042), zaman, bellek, **ağ** (her istek ve her
+//! yönlendirme `permissions.net`'e göre denetlenir) ve **dosya sistemi**
+//! (eklentinin dosyaya erişimi yok). Tutmadığı tek kapı motorun kurduğu
+//! araçlar: `host.tools.run` ile çalışan yt-dlp gibi bir eser kullanıcının
+//! yetkisiyle çalışır ve bu `headshell plugin list`'te yazar ([`host`]).
 
-pub mod client;
+pub mod artifact;
 pub mod consent;
+#[cfg(feature = "plugin-engine")]
+mod host;
 pub mod manifest;
 pub mod protocol;
-pub mod runtime;
-pub mod transport;
+#[cfg(feature = "plugin-engine")]
+mod script;
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -47,32 +50,43 @@ use crate::config::Config;
 use crate::diag::Stage;
 use crate::error::{Error, ErrorKind, Result, io_err};
 use crate::ids::{ProviderId, ProviderTrackId};
+use crate::net::HttpClient;
 use crate::provider::{
     AudioSource, Capabilities, Provider, ProviderFuture, ProviderHealth, ProviderInfo,
     ProviderTrack,
 };
 use crate::secrets::{Secrets, plugin_namespace};
 
-use client::{CALL_TIMEOUT, HANDSHAKE_TIMEOUT, PluginClient};
+use artifact::ArtifactStore;
 use consent::{ConsentStatus, ConsentStore};
-use manifest::{MANIFEST_FILE, Permissions, PluginManifest};
-use protocol::{
-    HandshakeParams, HandshakeResult, HealthResult, HostInfo, PLUGIN_API, ResolveSourceParams,
-    ResolveSourceResult, SearchParams, SearchResult, method,
-};
-use transport::{ProcessFactory, TransportFactory};
+use manifest::{MANIFEST_FILE, Permissions, PluginManifest, Requirement};
+use protocol::{HealthResult, PLUGIN_API, SourceResult, WireTrack, export};
 
-/// İzin beyanı zorlanıyor mu (D-040).
+#[cfg(feature = "plugin-engine")]
+use script::ScriptWorker;
+#[cfg(not(feature = "plugin-engine"))]
+use unavailable::ScriptWorker;
+
+/// İzin beyanı zorlanıyor mu (D-040 → D-069).
 ///
-/// `false`, ve bu sabit **dışa açık** çünkü her çıktıda görünmesi gerekiyor:
-/// eklenti kullanıcının bütün yetkisiyle çalışır, beyan bir sözleşmedir.
-/// Landlock/bwrap geldiğinde bu değer platforma göre hesaplanacak — o gün
-/// `api` artmaz, yalnızca burası değişir.
-pub const PERMISSIONS_ENFORCED: bool = false;
+/// api 1'de `false`'tu: eklenti ayrı bir süreçti ve kullanıcının bütün
+/// yetkisiyle çalışıyordu. api 2'de eklenti dışarıya yalnızca motorun
+/// kapılarından çıkabiliyor ve motor her kapıda beyana bakıyor. **Tek
+/// istisna** motorun kurduğu araçlar (yt-dlp): onlar ayrı süreçtir ve
+/// hapsedilmez — çıktılar bunu ayrıca söyler.
+pub const PERMISSIONS_ENFORCED: bool = true;
 
 /// Bir eklentinin kaç kez başlatılacağı. Aşılırsa vazgeçilir ve sebebi
 /// söylenir — sonsuz yeniden başlatma çökme döngüsünü sessiz kılar.
 pub const MAX_STARTS: u32 = 3;
+
+/// Betiği değerlendirmeye tanınan süre. Kısa: yükleme ağa çıkamaz
+/// (motor bunu reddeder), yalnızca kendini kurar.
+pub const START_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Bir çağrıya tanınan süre. Ağ gerektiren bir arama ya da yt-dlp'nin imza
+/// çözümü bu kadar sürebilir.
+pub const CALL_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Keşifte görülen bir eklenti. Çalıştırılamayanlar da burada — sessizce
 /// atlanan eklenti, kullanıcının kurduğunu sandığı eklentidir (K9).
@@ -88,10 +102,10 @@ pub struct PluginEntry {
     pub permissions: Permissions,
     /// Onay durumu (manifest okunabildiyse).
     pub consent: Option<ConsentStatus>,
-    /// Motordan istenen eserlerin durumu (D-055). **Ağa çıkılmadan** ölçülür:
-    /// yalnızca diskte var mı ve karması tutuyor mu.
+    /// Motordan istenen eserlerin durumu (D-055, D-069). **Ağa çıkılmadan**
+    /// ölçülür: bu platform için yayın var mı, diskte mi, karması tutuyor mu.
     #[serde(default)]
-    pub requires: Vec<runtime::RequirementStatus>,
+    pub requires: Vec<artifact::RequirementStatus>,
     /// Yüklenemiyorsa sebebi — tek satır, kopyalanabilir.
     pub problem: Option<String>,
 }
@@ -101,7 +115,6 @@ impl PluginEntry {
     ///
     /// Eksik bir eser yüklemeyi **engeller**: eseri olmayan bir eklentiyi
     /// başlatmak, onu ilk aramada anlaşılmaz bir hatayla düşürmek olurdu.
-    /// Eksiklik burada, süreç açılmadan söylenir (K9).
     #[must_use]
     pub fn is_loadable(&self) -> bool {
         self.problem.is_none()
@@ -114,7 +127,7 @@ impl PluginEntry {
 
     /// Hazır olmayan eserler. Boşsa motor tarafında eksik yok.
     #[must_use]
-    pub fn missing_requirements(&self) -> Vec<&runtime::RequirementStatus> {
+    pub fn missing_requirements(&self) -> Vec<&artifact::RequirementStatus> {
         self.requires
             .iter()
             .filter(|status| !status.state.is_ready())
@@ -141,10 +154,18 @@ impl PluginEntry {
                 })
                 .collect::<Vec<_>>()
                 .join("; ");
-            return format!(
-                "motorun kurması gereken eser eksik ({detail}) — `headshell plugin install {}`",
-                self.name
-            );
+            // Platform desteği yoksa kurulum komutu önermek yanlış tavsiye.
+            let unsupported = missing.iter().all(|status| {
+                matches!(status.state, artifact::RequirementState::Unsupported { .. })
+            });
+            return if unsupported {
+                format!("motorun kurması gereken eser bu platformda yok ({detail})")
+            } else {
+                format!(
+                    "motorun kurması gereken eser eksik ({detail}) — `headshell plugin install {}`",
+                    self.name
+                )
+            };
         }
         match &self.consent {
             Some(status) => status.describe(),
@@ -158,7 +179,7 @@ impl PluginEntry {
 pub struct PluginSummary {
     /// Dizinde görülen eklenti sayısı.
     pub discovered: usize,
-    /// Yüklenmeye hazır (onaylı, sürümü uygun).
+    /// Yüklenmeye hazır (onaylı, sürümü uygun, eserleri kurulu).
     pub ready: usize,
     /// Onay bekliyor ya da yeni izin istiyor.
     pub awaiting_approval: usize,
@@ -168,9 +189,8 @@ pub struct PluginSummary {
     pub incompatible: usize,
     /// Manifesti okunamadı/geçersiz.
     pub broken: usize,
-    /// Onaylı ve sürümü uygun ama motorun kurması gereken bir eseri eksik
-    /// (D-055). `ready`'den ayrı: kullanıcının yapacağı şey farklı — onay
-    /// değil kurulum.
+    /// Motorun kurması gereken bir eseri eksik (D-055). `ready`'den ayrı:
+    /// kullanıcının yapacağı şey farklı — onay değil kurulum.
     #[serde(default)]
     pub needs_install: usize,
 }
@@ -189,11 +209,10 @@ impl PluginSummary {
     }
 }
 
-/// Eklenti dizinini tarar. **Hiçbir süreç başlatmaz.**
+/// Eklenti dizinini tarar. **Hiçbir eklentiyi başlatmaz.**
 ///
 /// Bozuk bir eklenti taramayı durdurmaz: sebebi [`PluginEntry::problem`]'e
-/// yazılır ve gerisi taranmaya devam eder. Bir eklentinin bozuk olması
-/// ötekileri görünmez yapmamalı.
+/// yazılır ve gerisi taranmaya devam eder.
 ///
 /// # Errors
 /// Eklenti dizini okunamazsa (var ama izin yok gibi) ya da onay defteri
@@ -201,7 +220,7 @@ impl PluginSummary {
 pub fn discover(config: &Config) -> Result<(Vec<PluginEntry>, PluginSummary)> {
     let dir = config.plugins_dir();
     let consents = ConsentStore::load(&config.plugin_consent_path())?;
-    let engine = runtime::Engine::new(config);
+    let store = ArtifactStore::new(config);
 
     let entries = match std::fs::read_dir(&dir) {
         Ok(entries) => entries,
@@ -218,7 +237,7 @@ pub fn discover(config: &Config) -> Result<(Vec<PluginEntry>, PluginSummary)> {
         if !path.is_dir() || !path.join(MANIFEST_FILE).exists() {
             continue;
         }
-        found.push(describe_plugin(&path, &consents, &engine));
+        found.push(describe_plugin(&path, &consents, &store));
     }
     // Dizin sırası dosya sistemine göre değişir; çıktı kararlı olmalı.
     found.sort_by(|a, b| a.name.cmp(&b.name));
@@ -234,7 +253,7 @@ fn summarize(entries: &[PluginEntry]) -> PluginSummary {
     };
     for entry in entries {
         if entry.problem.is_some() {
-            if entry.api.is_some() {
+            if entry.api.is_some_and(|api| api != PLUGIN_API) {
                 summary.incompatible += 1;
             } else {
                 summary.broken += 1;
@@ -257,7 +276,7 @@ fn summarize(entries: &[PluginEntry]) -> PluginSummary {
     summary
 }
 
-fn describe_plugin(dir: &Path, consents: &ConsentStore, engine: &runtime::Engine) -> PluginEntry {
+fn describe_plugin(dir: &Path, consents: &ConsentStore, store: &ArtifactStore) -> PluginEntry {
     let name = dir
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -266,37 +285,42 @@ fn describe_plugin(dir: &Path, consents: &ConsentStore, engine: &runtime::Engine
     let manifest = match PluginManifest::load(dir) {
         Ok(manifest) => manifest,
         Err(err) => {
+            let api = match err.kind() {
+                ErrorKind::PluginIncompatible { plugin_api, .. } => Some(*plugin_api),
+                _ => None,
+            };
+            let problem = match err.kind() {
+                ErrorKind::PluginIncompatible { plugin_api, .. } => format!(
+                    "protokol sürümü uyuşmuyor: eklenti api {plugin_api}, çekirdek api \
+                     {PLUGIN_API}{}",
+                    if *plugin_api == 1 {
+                        " — api 1 eski Python/alt süreç eklentisiydi; eklentinin api 2 \
+                         (QuickJS) sürümünü kurun"
+                    } else {
+                        ""
+                    }
+                ),
+                _ => err.chain_text().replace('\n', " "),
+            };
             return PluginEntry {
                 name,
                 dir: dir.to_path_buf(),
                 display_name: None,
                 version: None,
-                api: None,
+                api,
                 permissions: Permissions::default(),
                 consent: None,
                 requires: Vec::new(),
-                problem: Some(err.chain_text().replace('\n', " ")),
+                problem: Some(problem),
             };
         }
     };
 
-    // Sürüm uyuşmazlığı **keşifte** yakalanıyor: süreç açmaya gerek yok ve
-    // kullanıcı sebebini `plugin list`'te görüyor.
-    let problem = (manifest.api != PLUGIN_API).then(|| {
-        format!(
-            "protokol sürümü uyuşmuyor: eklenti api {}, çekirdek api {PLUGIN_API}",
-            manifest.api
-        )
-    });
-
     // Eser durumu diskten okunuyor; okunamazsa bu da bir `problem` — sessizce
     // "eksik yok" demek, eksik bir eseri hazır göstermek olurdu.
-    let (requires, problem) = match engine.statuses(&manifest.requires) {
-        Ok(requires) => (requires, problem),
-        Err(err) => (
-            Vec::new(),
-            problem.or_else(|| Some(err.chain_text().replace('\n', " "))),
-        ),
+    let (requires, problem) = match store.statuses(&manifest.requires) {
+        Ok(requires) => (requires, None),
+        Err(err) => (Vec::new(), Some(err.chain_text().replace('\n', " "))),
     };
 
     PluginEntry {
@@ -312,8 +336,8 @@ fn describe_plugin(dir: &Path, consents: &ConsentStore, engine: &runtime::Engine
     }
 }
 
-/// Onaylı eklentileri sağlayıcı olarak kurar. **Süreç başlatmaz** — her
-/// sağlayıcı ilk çağrısında kendi sürecini açar.
+/// Onaylı eklentileri sağlayıcı olarak kurar. **Motor açılmaz** — her
+/// sağlayıcı ilk çağrısında kendi motorunu açar.
 ///
 /// # Errors
 /// Keşif başarısız olursa ya da sır dosyası bozuksa.
@@ -348,67 +372,49 @@ pub fn load(config: &Config) -> Result<(Vec<Arc<dyn Provider>>, PluginSummary)> 
     Ok((providers, summary))
 }
 
-/// `exec`'i çözer ve çıplak bir `python3`/`python` adını motorun bulduğu
-/// yorumlayıcıyla değiştirir (D-050 S1).
+/// Bir eklentinin motoru başlatmak için gereken her şey.
 ///
-/// Eklentinin manifesti `"exec": ["python3", "./main.py"]` yazar ve **hangi**
-/// `python3` sorusuyla işi olmaz; cevabı motor verir. Kullanıcının
-/// `HEADSHELL_PYTHON` ile yaptığı seçim de böylece bütün eklentiler için bir kez
-/// geçerli olur.
+/// Değer olarak taşınıyor, çünkü motor kendi iş parçacığında kuruluyor ve
+/// her yeniden başlatma aynı tariften yapılıyor.
 ///
-/// Yorumlayıcı bulunamazsa manifestteki ad **olduğu gibi bırakılır.** Burada
-/// hata döndürmek bir eklentinin derdini ötekilerin yüklenmesine bulaştırırdı;
-/// ad bırakılınca işletim sisteminin kendi hatası el sıkışmada görünür ve
-/// motorun ayrıntılı tanısı `headshell plugin install` ile alınır.
-fn resolve_exec_via_engine(manifest: &PluginManifest, dir: &Path) -> (PathBuf, Vec<String>) {
-    let (program, args) = manifest.resolve_exec(dir);
-    let is_bare_python = matches!(
-        program.to_str(),
-        Some("python3" | "python" | "python3.exe" | "python.exe")
-    );
-    if !is_bare_python {
-        return (program, args);
-    }
-
-    match runtime::find_python() {
-        Ok(python) => {
-            tracing::debug!(
-                plugin = %manifest.name,
-                python = %python.path.display(),
-                surum = %python.version,
-                kaynak = %python.source,
-                "yorumlayıcı motordan verildi"
-            );
-            (python.path, args)
-        }
-        Err(err) => {
-            tracing::warn!(
-                plugin = %manifest.name,
-                error = %err.chain_text().replace('\n', " "),
-                "motor bir Python bulamadı; manifestteki ad olduğu gibi denenecek"
-            );
-            (program, args)
-        }
-    }
+/// Motor kapalı bir derlemede alanların çoğunu okuyan kimse yok — yedek
+/// yalnızca adı kullanıp "motor yok" diyor. Tarif yine de kuruluyor, çünkü
+/// sağlayıcının keşif, onay ve yetenek yüzü motordan bağımsız ve aynı kalmalı.
+#[derive(Clone)]
+#[cfg_attr(not(feature = "plugin-engine"), allow(dead_code))]
+pub(crate) struct ScriptSpec {
+    pub(crate) plugin: String,
+    /// Betiğin mutlak yolu.
+    pub(crate) main: PathBuf,
+    /// Yığın izlerinde görünecek ad: manifestteki `main`.
+    pub(crate) module_name: String,
+    pub(crate) capabilities: Capabilities,
+    pub(crate) permissions: Permissions,
+    pub(crate) secrets: BTreeMap<String, String>,
+    pub(crate) state_dir: PathBuf,
+    /// Eklentinin HTTP istemcisi; yoksa **neden** olmadığı (K9).
+    pub(crate) http: std::result::Result<Arc<dyn HttpClient>, String>,
+    pub(crate) store: ArtifactStore,
+    pub(crate) requires: Vec<Requirement>,
 }
 
-/// Alt süreçte yaşayan bir sağlayıcı.
+/// Gömülü motorda yaşayan bir sağlayıcı.
 pub struct PluginProvider {
     id: ProviderId,
     display_name: String,
-    /// El sıkışmadan sonra güncellenir; başlangıçta manifestteki beyan.
-    capabilities: AtomicU32,
-    manifest_path: PathBuf,
-    factory: Arc<dyn TransportFactory>,
-    handshake: HandshakeParams,
+    capabilities: Capabilities,
+    permissions: Permissions,
+    spec: ScriptSpec,
+    start_timeout: Duration,
+    call_timeout: Duration,
     state: std::sync::Mutex<SessionState>,
 }
 
 #[derive(Default)]
 struct SessionState {
-    client: Option<PluginClient>,
+    worker: Option<ScriptWorker>,
     starts: u32,
-    /// Bir daha denemeye değmeyen bir sebep (sürüm uyuşmazlığı gibi).
+    /// Bir daha denemeye değmeyen bir sebep (sözleşme ihlali gibi).
     give_up: Option<String>,
 }
 
@@ -416,13 +422,14 @@ impl std::fmt::Debug for PluginProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PluginProvider")
             .field("id", &self.id)
-            .field("factory", &self.factory)
-            .finish()
+            .field("capabilities", &self.capabilities)
+            .finish_non_exhaustive()
     }
 }
 
 impl PluginProvider {
-    /// Manifestten kurar. Süreç açılmaz.
+    /// Manifestten kurar, bu derlemenin eklenti HTTP istemcisiyle. Motor
+    /// açılmaz.
     ///
     /// # Errors
     /// Eklentinin durum dizini oluşturulamazsa.
@@ -432,45 +439,35 @@ impl PluginProvider {
         dir: &Path,
         secrets: &Secrets,
     ) -> Result<Self> {
-        let engine = runtime::Engine::new(config);
-        let (program, args) = resolve_exec_via_engine(manifest, dir);
-        let factory = Arc::new(ProcessFactory::new(
-            &manifest.name,
-            program,
-            args,
-            dir.to_path_buf(),
-        ));
+        let http = crate::net::plugin_http_client().map_err(|err| {
+            format!(
+                "bu derlemede eklentiler ağa çıkamaz: {}",
+                err.chain_text().replace('\n', " ")
+            )
+        });
+        Self::with_http(config, manifest, dir, secrets, http)
+    }
 
+    /// Manifestten kurar; HTTP istemcisini çağıran verir. Motor açılmaz.
+    ///
+    /// Testler ve kendi HTTP yığınını taşıyan kabuklar için. Verilen istemci
+    /// **yönlendirme izlememeli**: izleyen bir istemci izin denetiminin
+    /// etrafından dolanmanın yolunu açar ([`host`]).
+    ///
+    /// # Errors
+    /// Eklentinin durum dizini oluşturulamazsa.
+    pub fn with_http(
+        config: &Config,
+        manifest: &PluginManifest,
+        dir: &Path,
+        secrets: &Secrets,
+        http: std::result::Result<Arc<dyn HttpClient>, String>,
+    ) -> Result<Self> {
         let state_dir = config.plugin_state_dir(&manifest.name);
         std::fs::create_dir_all(&state_dir)
             .map_err(|err| io_err(Stage::PluginLoad, &state_dir, err))?;
 
-        let handshake = HandshakeParams {
-            api: PLUGIN_API,
-            host: HostInfo::current(),
-            data_dir: protocol::path_to_wire(&state_dir),
-            secrets: secrets.namespace(&plugin_namespace(&manifest.name)),
-            permissions: manifest.permissions.normalized(),
-            requirements: engine.ready_paths(&manifest.requires)?,
-        };
-
-        Ok(Self::new(
-            manifest,
-            dir.join(MANIFEST_FILE),
-            factory,
-            handshake,
-        ))
-    }
-
-    /// Taşımayı çağıran verir — testler süreç açmadan sınayabilsin diye.
-    #[must_use]
-    pub fn new(
-        manifest: &PluginManifest,
-        manifest_path: PathBuf,
-        factory: Arc<dyn TransportFactory>,
-        handshake: HandshakeParams,
-    ) -> Self {
-        let (declared, unknown) = protocol::parse_capabilities(&manifest.capabilities);
+        let (capabilities, unknown) = protocol::parse_capabilities(&manifest.capabilities);
         if !unknown.is_empty() {
             tracing::warn!(
                 plugin = %manifest.name,
@@ -478,34 +475,63 @@ impl PluginProvider {
                 "manifest tanınmayan yetenek adı içeriyor, yok sayıldı"
             );
         }
-        Self {
+        let unmapped = capabilities.contains(Capabilities::BROWSE)
+            || capabilities.contains(Capabilities::CONTROL);
+        if unmapped {
+            tracing::warn!(
+                plugin = %manifest.name,
+                "`browse`/`control` api 2'de bir fonksiyona karşılık gelmiyor; beyan yalnızca listede görünür"
+            );
+        }
+
+        let spec = ScriptSpec {
+            plugin: manifest.name.clone(),
+            main: manifest.main_path(dir),
+            module_name: manifest.main.trim_start_matches("./").to_owned(),
+            capabilities,
+            permissions: manifest.permissions.normalized(),
+            secrets: secrets.namespace(&plugin_namespace(&manifest.name)),
+            state_dir,
+            http,
+            store: ArtifactStore::new(config),
+            requires: manifest.requires.clone(),
+        };
+
+        Ok(Self {
             id: ProviderId::new(manifest.name.clone()),
             display_name: manifest.display_name.clone(),
-            capabilities: AtomicU32::new(declared.bits()),
-            manifest_path,
-            factory,
-            handshake,
+            capabilities,
+            permissions: manifest.permissions.normalized(),
+            spec,
+            start_timeout: START_TIMEOUT,
+            call_timeout: CALL_TIMEOUT,
             state: std::sync::Mutex::new(SessionState::default()),
-        }
+        })
     }
 
-    fn capabilities(&self) -> Capabilities {
-        Capabilities::from_bits(self.capabilities.load(Ordering::Relaxed))
+    /// Süreleri değiştirir. Yalnızca sınama için: zaman aşımını sınayan bir
+    /// test 20 saniye beklememeli.
+    #[must_use]
+    pub fn with_timeouts(mut self, start: Duration, call: Duration) -> Self {
+        self.start_timeout = start;
+        self.call_timeout = call;
+        self
     }
 
-    /// İstemciyi hazırlar (gerekirse başlatır) ve `run`'ı çalıştırır.
+    /// Motoru hazırlar (gerekirse başlatır) ve bir fonksiyonu çağırır.
     ///
-    /// Çökme ve zaman aşımı istemciyi düşürür: bir sonraki çağrı yeniden
-    /// başlatır. Öteki hatalar (eklenti "hayır" dedi) süreci düşürmez —
-    /// reddedilen bir istek ölmüş bir süreç değildir (D-023'ün eklenti hâli).
-    fn with_client<T>(
+    /// Zaman aşımı ve düşen iş parçacığı motoru bırakır: bir sonraki çağrı
+    /// yeniden başlatır. Eklentinin fırlattığı hata motoru bırakmaz —
+    /// reddedilen bir istek bozulmuş bir motor değildir (D-023'ün eklenti
+    /// hâli).
+    fn call(
         &self,
-        stage: Stage,
-        run: impl FnOnce(&mut PluginClient) -> Result<T>,
-    ) -> Result<T> {
+        function: &'static str,
+        args: Vec<serde_json::Value>,
+    ) -> Result<serde_json::Value> {
         let mut state = self.state.lock().map_err(|_| {
             Error::new(
-                stage,
+                Stage::ProviderCall,
                 ErrorKind::PluginCrashed {
                     plugin: self.id.as_str().to_owned(),
                     detail: "eklenti durumu kilidi bozuldu (önceki çağrı panikledi)".to_owned(),
@@ -515,7 +541,7 @@ impl PluginProvider {
 
         if let Some(reason) = &state.give_up {
             return Err(Error::new(
-                stage,
+                Stage::PluginStart,
                 ErrorKind::PluginCrashed {
                     plugin: self.id.as_str().to_owned(),
                     detail: reason.clone(),
@@ -523,12 +549,12 @@ impl PluginProvider {
             ));
         }
 
-        if state.client.is_none() {
+        if state.worker.is_none() {
             self.start(&mut state)?;
         }
-        let Some(client) = state.client.as_mut() else {
+        let Some(worker) = state.worker.as_mut() else {
             return Err(Error::new(
-                stage,
+                Stage::PluginStart,
                 ErrorKind::PluginCrashed {
                     plugin: self.id.as_str().to_owned(),
                     detail: "eklenti başlatılamadı".to_owned(),
@@ -536,19 +562,16 @@ impl PluginProvider {
             ));
         };
 
-        let outcome = run(client);
+        let outcome = worker.call(function, args, self.call_timeout);
         if let Err(err) = &outcome
             && matches!(
                 err.kind(),
                 ErrorKind::PluginCrashed { .. } | ErrorKind::PluginTimeout { .. }
             )
         {
-            // Asılı kalan süreci de düşürüyoruz: cevap vermeyen bir eklentiyle
-            // sıradaki çağrıda id'ler karışırdı.
-            if let Some(client) = state.client.as_mut() {
-                client.shutdown();
-            }
-            state.client = None;
+            // Süresi dolan bir çağrının yarım bıraktığı durumla devam
+            // edilmiyor: motor bırakılır, sıradaki çağrı temiz başlar.
+            state.worker = None;
         }
         outcome
     }
@@ -558,7 +581,7 @@ impl PluginProvider {
             let reason = format!("{MAX_STARTS} kez başlatıldı ve her seferinde düştü, vazgeçildi");
             state.give_up = Some(reason.clone());
             return Err(Error::new(
-                Stage::PluginHandshake,
+                Stage::PluginStart,
                 ErrorKind::PluginCrashed {
                     plugin: self.id.as_str().to_owned(),
                     detail: reason,
@@ -567,17 +590,17 @@ impl PluginProvider {
         }
         state.starts += 1;
 
-        let transport = self.factory.open()?;
-        let mut client = PluginClient::new(self.id.as_str(), transport);
-        match self.handshake(&mut client) {
-            Ok(()) => {
-                state.client = Some(client);
+        match ScriptWorker::start(self.spec.clone(), self.start_timeout) {
+            Ok(worker) => {
+                state.worker = Some(worker);
                 Ok(())
             }
             Err(err) => {
-                client.shutdown();
-                // Sürüm uyuşmazlığı yeniden denemekle düzelmez.
-                if matches!(err.kind(), ErrorKind::PluginIncompatible { .. }) {
+                // Sözleşme ihlali ve eksik motor tekrarla düzelmez.
+                if matches!(
+                    err.kind(),
+                    ErrorKind::PluginContract { .. } | ErrorKind::Unsupported { .. }
+                ) {
                     state.give_up = Some(err.chain_text().replace('\n', " "));
                 }
                 Err(err)
@@ -585,77 +608,13 @@ impl PluginProvider {
         }
     }
 
-    fn handshake(&self, client: &mut PluginClient) -> Result<()> {
-        let params = serde_json::to_value(&self.handshake).map_err(|source| {
-            Error::new(
-                Stage::PluginHandshake,
-                ErrorKind::Json {
-                    entry: format!("{} el sıkışma isteği", self.id),
-                    source,
-                },
-            )
-        })?;
-        let result: HandshakeResult = client.call(
-            Stage::PluginHandshake,
-            method::HANDSHAKE,
-            params,
-            HANDSHAKE_TIMEOUT,
-        )?;
-
-        if result.api != PLUGIN_API {
-            return Err(Error::new(
-                Stage::PluginHandshake,
-                ErrorKind::PluginIncompatible {
-                    plugin: self.id.as_str().to_owned(),
-                    plugin_api: result.api,
-                    host_api: PLUGIN_API,
-                },
-            ));
-        }
-        if result.name != self.id.as_str() {
-            return Err(Error::new(
-                Stage::PluginHandshake,
-                ErrorKind::PluginManifest {
-                    path: self.manifest_path.clone(),
-                    detail: format!(
-                        "el sıkışmada kendini `{}` diye tanıttı, manifest `{}` diyor",
-                        result.name, self.id
-                    ),
-                },
-            ));
-        }
-
-        let (live, unknown) = protocol::parse_capabilities(&result.capabilities);
-        if !unknown.is_empty() {
-            tracing::warn!(
-                plugin = %self.id,
-                unknown = %unknown.join(", "),
-                "eklenti tanımadığımız bir yetenek bildirdi, yok sayıldı"
-            );
-        }
-        let declared = self.capabilities();
-        if live != declared {
-            // Çelişki hata değil ama sessiz de değil: yönlendirme manifeste
-            // bakıyor, çağrı el sıkışmaya (K9).
-            tracing::warn!(
-                plugin = %self.id,
-                manifest = %declared.describe(),
-                handshake = %live.describe(),
-                "manifest ve el sıkışma yetenekleri farklı, el sıkışma geçerli"
-            );
-        }
-        self.capabilities.store(live.bits(), Ordering::Relaxed);
-        Ok(())
-    }
-
-    /// Süreci kapatır. Bir sonraki çağrı yeniden başlatır.
+    /// Motoru kapatır. Bir sonraki çağrı yeniden başlatır.
     pub fn shutdown(&self) {
         match self.state.lock() {
             Ok(mut state) => {
-                if let Some(client) = state.client.as_mut() {
-                    client.shutdown();
+                if let Some(mut worker) = state.worker.take() {
+                    worker.shutdown();
                 }
-                state.client = None;
             }
             Err(_) => tracing::warn!(plugin = %self.id, "kapatma sırasında kilit bozuktu"),
         }
@@ -667,9 +626,94 @@ impl PluginProvider {
             ErrorKind::Unsupported {
                 provider: self.id.as_str().to_owned(),
                 what: what.to_owned(),
-                capabilities: self.capabilities().describe(),
+                capabilities: self.capabilities.describe(),
             },
         )
+    }
+
+    fn contract(&self, method: &str, detail: String) -> Error {
+        Error::new(
+            Stage::ProviderCall,
+            ErrorKind::PluginContract {
+                plugin: self.id.as_str().to_owned(),
+                method: method.to_owned(),
+                detail,
+            },
+        )
+    }
+
+    fn health_now(&self) -> Result<HealthResult> {
+        let value = self.call(export::HEALTH, Vec::new())?;
+        serde_json::from_value(value).map_err(|err| {
+            self.contract(
+                export::HEALTH,
+                format!("`{{ reachable, detail?, track_count? }}` bekleniyordu: {err}"),
+            )
+        })
+    }
+
+    fn search_now(&self, query: &str, limit: usize) -> Result<Vec<ProviderTrack>> {
+        if !self.capabilities.contains(Capabilities::SEARCH) {
+            return Err(self.unsupported("arama"));
+        }
+        let value = self.call(
+            export::SEARCH,
+            vec![serde_json::json!(query), serde_json::json!(limit)],
+        )?;
+        let wires: Vec<WireTrack> = serde_json::from_value(value).map_err(|err| {
+            self.contract(
+                export::SEARCH,
+                format!("`{{ id, artist, title, … }}` dizisi bekleniyordu: {err}"),
+            )
+        })?;
+
+        let mut tracks = Vec::with_capacity(wires.len());
+        let mut dropped_isrc = 0usize;
+        for wire in wires {
+            let (track, dropped) = wire.into_provider_track(&self.id);
+            if dropped {
+                dropped_isrc += 1;
+            }
+            tracks.push(track);
+        }
+        if dropped_isrc > 0 {
+            // Sayıp raporluyoruz, yutmuyoruz (K9).
+            tracing::warn!(
+                plugin = %self.id,
+                dropped = dropped_isrc,
+                "eklenti biçimsiz ISRC gönderdi, o alanlar düşürüldü"
+            );
+        }
+        Ok(tracks)
+    }
+
+    fn resolve_now(&self, id: &ProviderTrackId) -> Result<Option<AudioSource>> {
+        if !self.capabilities.contains(Capabilities::STREAM) {
+            return Err(self.unsupported("kaynak çözme"));
+        }
+        if id.provider != self.id {
+            return Err(Error::new(
+                Stage::PlaybackResolve,
+                ErrorKind::InvalidInput {
+                    detail: format!("{} kimliği {} eklentisine sorulamaz", id.provider, self.id),
+                },
+            ));
+        }
+        let value = self.call(export::RESOLVE_SOURCE, vec![serde_json::json!(id.id)])?;
+        let source: SourceResult = serde_json::from_value(value).map_err(|err| {
+            self.contract(
+                export::RESOLVE_SOURCE,
+                format!(
+                    "`{{ kind: \"http_stream\", url, headers }}` ya da `null` bekleniyordu: {err}"
+                ),
+            )
+        })?;
+        if let Some(source) = &source
+            && let Err(reason) = protocol::check_source(source, &self.permissions)
+        {
+            return Err(self.contract(export::RESOLVE_SOURCE, reason));
+        }
+        Ok(source)
     }
 }
 
@@ -678,37 +722,27 @@ impl Provider for PluginProvider {
         ProviderInfo {
             id: self.id.clone(),
             display_name: self.display_name.clone(),
-            capabilities: self.capabilities(),
+            capabilities: self.capabilities,
         }
     }
 
     fn health<'a>(&'a self) -> ProviderFuture<'a, ProviderHealth> {
-        Box::pin(std::future::ready({
-            let result = self.with_client(Stage::ProviderCall, |client| {
-                client.call::<HealthResult>(
-                    Stage::ProviderCall,
-                    method::HEALTH,
-                    serde_json::json!({}),
-                    CALL_TIMEOUT,
-                )
-            });
-            match result {
-                Ok(health) => Ok(ProviderHealth {
-                    id: self.id.clone(),
-                    reachable: health.reachable,
-                    track_count: health.track_count,
-                    detail: health.detail,
-                }),
-                // Ulaşılamamak bir sağlık **cevabıdır** (uzak sağlayıcıyla
-                // aynı kural): `provider test` sebebi göstermeli.
-                Err(err) => Ok(ProviderHealth {
-                    id: self.id.clone(),
-                    reachable: false,
-                    track_count: None,
-                    detail: Some(err.chain_text().replace('\n', " ")),
-                }),
-            }
-        }))
+        Box::pin(std::future::ready(Ok(match self.health_now() {
+            Ok(health) => ProviderHealth {
+                id: self.id.clone(),
+                reachable: health.reachable,
+                track_count: health.track_count,
+                detail: health.detail,
+            },
+            // Ulaşılamamak bir sağlık **cevabıdır** (uzak sağlayıcıyla aynı
+            // kural): `provider test` sebebi göstermeli.
+            Err(err) => ProviderHealth {
+                id: self.id.clone(),
+                reachable: false,
+                track_count: None,
+                detail: Some(err.chain_text().replace('\n', " ")),
+            },
+        })))
     }
 
     fn search<'a>(
@@ -716,514 +750,105 @@ impl Provider for PluginProvider {
         query: &'a str,
         limit: usize,
     ) -> ProviderFuture<'a, Vec<ProviderTrack>> {
-        Box::pin(std::future::ready((|| {
-            if !self.capabilities().contains(Capabilities::SEARCH) {
-                return Err(self.unsupported("arama"));
-            }
-            let params = serde_json::to_value(SearchParams {
-                query: query.to_owned(),
-                limit,
-            })
-            .map_err(|source| {
-                Error::new(
-                    Stage::ProviderCall,
-                    ErrorKind::Json {
-                        entry: format!("{} arama isteği", self.id),
-                        source,
-                    },
-                )
-            })?;
-
-            let result: SearchResult = self.with_client(Stage::ProviderCall, |client| {
-                client.call(Stage::ProviderCall, method::SEARCH, params, CALL_TIMEOUT)
-            })?;
-
-            let mut tracks = Vec::with_capacity(result.tracks.len());
-            let mut dropped_isrc = 0usize;
-            for wire in result.tracks {
-                let (track, dropped) = wire.into_provider_track(&self.id);
-                if dropped {
-                    dropped_isrc += 1;
-                }
-                tracks.push(track);
-            }
-            if dropped_isrc > 0 {
-                // Sayıp raporluyoruz, yutmuyoruz (K9).
-                tracing::warn!(
-                    plugin = %self.id,
-                    dropped = dropped_isrc,
-                    "eklenti biçimsiz ISRC gönderdi, o alanlar düşürüldü"
-                );
-            }
-            Ok(tracks)
-        })()))
+        Box::pin(std::future::ready(self.search_now(query, limit)))
     }
 
     fn resolve_source<'a>(
         &'a self,
         id: &'a ProviderTrackId,
     ) -> ProviderFuture<'a, Option<AudioSource>> {
-        Box::pin(std::future::ready((|| {
-            if !self.capabilities().contains(Capabilities::STREAM) {
-                return Err(self.unsupported("kaynak çözme"));
-            }
-            if id.provider != self.id {
-                return Err(Error::new(
-                    Stage::PlaybackResolve,
-                    ErrorKind::InvalidInput {
-                        detail: format!(
-                            "{} kimliği {} eklentisine sorulamaz",
-                            id.provider, self.id
-                        ),
-                    },
-                ));
-            }
-            let params = serde_json::to_value(ResolveSourceParams { id: id.id.clone() }).map_err(
-                |source| {
-                    Error::new(
-                        Stage::ProviderCall,
-                        ErrorKind::Json {
-                            entry: format!("{} kaynak isteği", self.id),
-                            source,
-                        },
-                    )
-                },
-            )?;
-
-            let result: ResolveSourceResult = self.with_client(Stage::ProviderCall, |client| {
-                client.call(
-                    Stage::ProviderCall,
-                    method::RESOLVE_SOURCE,
-                    params,
-                    CALL_TIMEOUT,
-                )
-            })?;
-            Ok(result.source)
-        })()))
+        Box::pin(std::future::ready(self.resolve_now(id)))
     }
 }
 
 impl Drop for PluginProvider {
     fn drop(&mut self) {
-        // Sağlayıcı düşerse arkasında süreç kalmaz.
+        // Sağlayıcı düşerse arkasında iş parçacığı ve sır dosyası kalmaz.
         self.shutdown();
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::Mutex;
-    use transport::{PluginTransport, Received, ScriptedTransport};
+/// Bir future'ı çağıran iş parçacığında bitirir.
+///
+/// Çekirdek bir çalışma zamanı kurmuyor (konvansiyon: çalışma zamanını
+/// çağıran seçer), ama motorun iki yeri eşzamanlı: eklentinin iş
+/// parçacığındaki `host.http` ve kurulum komutu. `HttpClient::send` ise
+/// `async`. Aradaki boşluk burada kapanıyor.
+///
+/// Bekleme **meşgul değil**: future hazır değilse iş parçacığı uyutulur ve
+/// uyandırıcı onu kaldırır. `ureq` istemcisi zaten ilk yoklamada hazır
+/// dönüyor; kendi eşzamansız istemcisini veren bir kabuk (mobil) da işlemci
+/// yakmadan beklenir.
+pub(crate) fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
+    use std::pin::pin;
+    use std::task::{Context, Poll, Wake, Waker};
 
-    /// Her açılışta sırayla verilen betikleri oynatan fabrika: çökme ve
-    /// yeniden başlatma böyle sınanıyor, süreç açmadan.
-    #[derive(Debug)]
-    struct FakeFactory {
-        scripts: Mutex<Vec<Vec<String>>>,
-        opens: Mutex<usize>,
-    }
-
-    impl FakeFactory {
-        fn new(scripts: Vec<Vec<&str>>) -> Arc<Self> {
-            Arc::new(Self {
-                scripts: Mutex::new(
-                    scripts
-                        .into_iter()
-                        .map(|lines| lines.into_iter().map(str::to_owned).collect())
-                        .collect(),
-                ),
-                opens: Mutex::new(0),
-            })
+    struct ThreadWaker(std::thread::Thread);
+    impl Wake for ThreadWaker {
+        fn wake(self: Arc<Self>) {
+            self.0.unpark();
         }
-
-        fn opens(&self) -> usize {
-            *self.opens.lock().unwrap()
+        fn wake_by_ref(self: &Arc<Self>) {
+            self.0.unpark();
         }
     }
 
-    impl TransportFactory for FakeFactory {
-        fn open(&self) -> Result<Box<dyn PluginTransport>> {
-            *self.opens.lock().unwrap() += 1;
-            let mut scripts = self.scripts.lock().unwrap();
-            let lines = if scripts.is_empty() {
-                Vec::new()
-            } else {
-                scripts.remove(0)
-            };
-            Ok(Box::new(ScriptedTransport::new(
-                lines.into_iter().map(Received::Line).collect(),
-            )))
+    let waker = Waker::from(Arc::new(ThreadWaker(std::thread::current())));
+    let mut context = Context::from_waker(&waker);
+    let mut future = pin!(future);
+    loop {
+        match future.as_mut().poll(&mut context) {
+            Poll::Ready(value) => return value,
+            Poll::Pending => std::thread::park(),
         }
-    }
-
-    fn manifest() -> PluginManifest {
-        PluginManifest {
-            name: "demo".to_owned(),
-            display_name: "Demo".to_owned(),
-            version: Some("0.1.0".to_owned()),
-            api: PLUGIN_API,
-            exec: vec!["demo".to_owned()],
-            capabilities: vec!["search".to_owned(), "stream".to_owned()],
-            permissions: Permissions::default(),
-            requires: Vec::new(),
-            description: None,
-        }
-    }
-
-    fn provider(factory: Arc<dyn TransportFactory>) -> PluginProvider {
-        PluginProvider::new(
-            &manifest(),
-            PathBuf::from("/tmp/demo/plugin.json"),
-            factory,
-            HandshakeParams {
-                api: PLUGIN_API,
-                host: HostInfo::current(),
-                data_dir: "/tmp/demo/state".to_owned(),
-                secrets: std::collections::BTreeMap::new(),
-                permissions: Permissions::default(),
-                requirements: std::collections::BTreeMap::new(),
-            },
-        )
-    }
-
-    const HANDSHAKE_OK: &str = r#"{"jsonrpc":"2.0","id":1,"result":{"api":1,"name":"demo","display_name":"Demo","capabilities":["search","stream"]}}"#;
-
-    #[tokio::test]
-    async fn a_search_goes_through_the_handshake_and_comes_back_typed() {
-        let factory = FakeFactory::new(vec![vec![
-            HANDSHAKE_OK,
-            r#"{"jsonrpc":"2.0","id":2,"result":{"tracks":[{"id":"42","artist":"A","title":"B","duration_ms":1000}]}}"#,
-        ]]);
-        let provider = provider(factory.clone());
-
-        let tracks = provider.search("b", 10).await.unwrap();
-        assert_eq!(tracks.len(), 1);
-        assert_eq!(tracks[0].id.provider, ProviderId::new("demo"));
-        assert_eq!(tracks[0].id.id, "42");
-        assert_eq!(tracks[0].track.title, "B");
-        assert_eq!(factory.opens(), 1, "süreç bir kez açılmalı");
-    }
-
-    #[tokio::test]
-    async fn the_process_starts_lazily_on_the_first_call_not_at_construction() {
-        let factory = FakeFactory::new(vec![vec![HANDSHAKE_OK]]);
-        let provider = provider(factory.clone());
-        assert_eq!(factory.opens(), 0, "kurulum süreç açmamalı");
-        // `info` de açmamalı: yetenekler manifestten biliniyor.
-        assert!(provider.info().capabilities.contains(Capabilities::SEARCH));
-        assert_eq!(factory.opens(), 0);
-    }
-
-    #[tokio::test]
-    async fn a_version_mismatch_refuses_the_plugin_without_crashing_the_core() {
-        let factory = FakeFactory::new(vec![vec![
-            r#"{"jsonrpc":"2.0","id":1,"result":{"api":99,"name":"demo","display_name":"Demo","capabilities":[]}}"#,
-        ]]);
-        let provider = provider(factory.clone());
-
-        let err = provider.search("x", 1).await.unwrap_err();
-        match err.kind() {
-            ErrorKind::PluginIncompatible {
-                plugin_api,
-                host_api,
-                ..
-            } => {
-                assert_eq!(*plugin_api, 99);
-                assert_eq!(*host_api, PLUGIN_API);
-            }
-            other => panic!("beklenmeyen hata: {other:?}"),
-        }
-        assert_eq!(err.stage(), Stage::PluginHandshake);
-
-        // İkinci çağrı yeniden denemez: sürüm uyuşmazlığı tekrarla düzelmez.
-        let second = provider.search("x", 1).await.unwrap_err();
-        assert!(matches!(second.kind(), ErrorKind::PluginCrashed { .. }));
-        assert_eq!(factory.opens(), 1, "vazgeçilen eklenti yeniden açılmamalı");
-    }
-
-    #[tokio::test]
-    async fn a_plugin_that_lies_about_its_name_is_rejected() {
-        let factory = FakeFactory::new(vec![vec![
-            r#"{"jsonrpc":"2.0","id":1,"result":{"api":1,"name":"baska","display_name":"X","capabilities":[]}}"#,
-        ]]);
-        let provider = provider(factory);
-        let err = provider.search("x", 1).await.unwrap_err();
-        assert!(
-            err.chain_text().contains("el sıkışmada kendini"),
-            "{}",
-            err.chain_text()
-        );
-    }
-
-    #[tokio::test]
-    async fn a_crash_is_isolated_and_the_next_call_restarts_the_process() {
-        let factory = FakeFactory::new(vec![
-            // İlk süreç: el sıkışır, sonra ölür.
-            vec![HANDSHAKE_OK],
-            // İkinci süreç: el sıkışır ve cevabı verir.
-            vec![
-                HANDSHAKE_OK,
-                r#"{"jsonrpc":"2.0","id":2,"result":{"tracks":[]}}"#,
-            ],
-        ]);
-        let provider = provider(factory.clone());
-
-        let err = provider.search("x", 1).await.unwrap_err();
-        assert!(matches!(err.kind(), ErrorKind::PluginCrashed { .. }));
-
-        let tracks = provider.search("x", 1).await.unwrap();
-        assert!(tracks.is_empty());
-        assert_eq!(factory.opens(), 2, "çöken eklenti yeniden başlatılmalı");
-    }
-
-    #[tokio::test]
-    async fn restarting_gives_up_after_max_starts() {
-        // Her açılış hemen ölüyor: sonsuza kadar denenmemeli.
-        let factory = FakeFactory::new(vec![Vec::new(), Vec::new(), Vec::new(), Vec::new()]);
-        let provider = provider(factory.clone());
-
-        for _ in 0..MAX_STARTS {
-            assert!(provider.search("x", 1).await.is_err());
-        }
-        let err = provider.search("x", 1).await.unwrap_err();
-        assert!(
-            err.chain_text().contains("vazgeçildi"),
-            "{}",
-            err.chain_text()
-        );
-        assert_eq!(factory.opens(), MAX_STARTS as usize);
-    }
-
-    #[tokio::test]
-    async fn a_rejected_call_does_not_kill_the_process() {
-        let factory = FakeFactory::new(vec![vec![
-            HANDSHAKE_OK,
-            r#"{"jsonrpc":"2.0","id":2,"error":{"code":-32000,"message":"kota doldu"}}"#,
-            r#"{"jsonrpc":"2.0","id":3,"result":{"tracks":[]}}"#,
-        ]]);
-        let provider = provider(factory.clone());
-
-        let err = provider.search("x", 1).await.unwrap_err();
-        assert!(matches!(err.kind(), ErrorKind::PluginRpc { .. }));
-
-        // Reddedilen istek ağ hatası değildir (D-023) — eklenti hâli:
-        // reddedilen istek çökme değildir, süreç ayakta kalmalı.
-        provider.search("x", 1).await.unwrap();
-        assert_eq!(factory.opens(), 1, "reddetme süreci düşürmemeli");
-    }
-
-    #[tokio::test]
-    async fn health_reports_a_dead_plugin_as_unreachable_not_as_an_error() {
-        let factory = FakeFactory::new(vec![Vec::new()]);
-        let provider = provider(factory);
-        let health = provider.health().await.unwrap();
-        assert!(!health.reachable);
-        assert!(health.detail.is_some_and(|detail| detail.contains("ADIM:")));
-    }
-
-    #[tokio::test]
-    async fn a_capability_the_plugin_lacks_is_refused_before_the_process_starts() {
-        let mut manifest = manifest();
-        manifest.capabilities = vec!["search".to_owned()];
-        let factory = FakeFactory::new(vec![vec![HANDSHAKE_OK]]);
-        let provider = PluginProvider::new(
-            &manifest,
-            PathBuf::from("/tmp/demo/plugin.json"),
-            factory.clone(),
-            HandshakeParams {
-                api: PLUGIN_API,
-                host: HostInfo::current(),
-                data_dir: "/tmp".to_owned(),
-                secrets: std::collections::BTreeMap::new(),
-                permissions: Permissions::default(),
-                requirements: std::collections::BTreeMap::new(),
-            },
-        );
-
-        let id = ProviderTrackId::new(ProviderId::new("demo"), "1");
-        let err = provider.resolve_source(&id).await.unwrap_err();
-        assert!(matches!(err.kind(), ErrorKind::Unsupported { .. }));
-        assert_eq!(factory.opens(), 0, "yeteneği olmayan çağrı süreç açmamalı");
-    }
-
-    #[tokio::test]
-    async fn a_track_id_from_another_provider_is_refused() {
-        let factory = FakeFactory::new(vec![vec![HANDSHAKE_OK]]);
-        let provider = provider(factory.clone());
-        let id = ProviderTrackId::new(ProviderId::new("baska"), "1");
-        let err = provider.resolve_source(&id).await.unwrap_err();
-        assert!(matches!(err.kind(), ErrorKind::InvalidInput { .. }));
-        assert_eq!(factory.opens(), 0);
-    }
-
-    // --- keşif ---
-
-    fn temp_config(name: &str) -> Config {
-        let dir = std::env::temp_dir().join(format!(
-            "headshell-plugin-discover-{}-{}-{name}",
-            std::process::id(),
-            jiff::Timestamp::now().as_nanosecond()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        Config::with_data_dir(dir)
-    }
-
-    fn write_plugin(config: &Config, name: &str, manifest_json: &str) {
-        let dir = config.plugins_dir().join(name);
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(MANIFEST_FILE), manifest_json).unwrap();
-    }
-
-    #[test]
-    fn a_missing_plugins_dir_is_an_empty_list_not_an_error() {
-        let config = temp_config("bos");
-        let (entries, summary) = discover(&config).unwrap();
-        assert!(entries.is_empty());
-        assert_eq!(summary, PluginSummary::default());
-    }
-
-    #[test]
-    fn discovery_reports_each_plugins_reason_without_stopping() {
-        let config = temp_config("karisik");
-        write_plugin(
-            &config,
-            "iyi",
-            r#"{"name":"iyi","display_name":"İyi","api":1,"exec":["x"],
-                "permissions":{"net":["a.example"]}}"#,
-        );
-        write_plugin(
-            &config,
-            "eski",
-            r#"{"name":"eski","display_name":"Eski","api":99,"exec":["x"]}"#,
-        );
-        write_plugin(&config, "bozuk", "{ bu json değil");
-
-        let (entries, summary) = discover(&config).unwrap();
-        assert_eq!(entries.len(), 3, "bozuk eklenti ötekileri gizlememeli");
-        assert_eq!(summary.discovered, 3);
-        assert_eq!(summary.incompatible, 1);
-        assert_eq!(summary.broken, 1);
-        assert_eq!(summary.awaiting_approval, 1, "onay bekleyen: iyi");
-        assert_eq!(summary.ready, 0);
-
-        let by_name = |name: &str| {
-            entries
-                .iter()
-                .find(|entry| entry.name == name)
-                .unwrap()
-                .clone()
-        };
-        assert!(by_name("eski").problem.unwrap().contains("api 99"));
-        assert!(by_name("bozuk").problem.is_some());
-        assert!(
-            !by_name("iyi").is_loadable(),
-            "onaysız eklenti yüklenmemeli"
-        );
-    }
-
-    #[test]
-    fn an_approved_plugin_becomes_loadable_and_load_starts_no_process() {
-        let config = temp_config("onayli");
-        write_plugin(
-            &config,
-            "iyi",
-            r#"{"name":"iyi","display_name":"İyi","api":1,"exec":["/bin/false"],
-                "capabilities":["search"],"permissions":{"net":["a.example"]}}"#,
-        );
-
-        let mut store = ConsentStore::default();
-        store.approve(
-            "iyi",
-            &Permissions {
-                net: vec!["a.example".to_owned()],
-                fs: Vec::new(),
-            },
-            jiff::Timestamp::now(),
-        );
-        store.save(&config.plugin_consent_path()).unwrap();
-
-        let (entries, summary) = discover(&config).unwrap();
-        assert_eq!(summary.ready, 1);
-        assert!(entries[0].is_loadable());
-
-        let (providers, summary) = load(&config).unwrap();
-        assert_eq!(providers.len(), 1);
-        assert_eq!(summary.ready, 1);
-        assert_eq!(providers[0].info().id, ProviderId::new("iyi"));
-        assert!(
-            providers[0]
-                .info()
-                .capabilities
-                .contains(Capabilities::SEARCH)
-        );
-        // Eklentinin durum dizini kurulmuş olmalı.
-        assert!(config.plugin_state_dir("iyi").is_dir());
-    }
-
-    #[test]
-    fn a_plugin_that_grew_its_permissions_is_not_loaded_until_reapproved() {
-        let config = temp_config("buyuyen");
-        write_plugin(
-            &config,
-            "iyi",
-            r#"{"name":"iyi","display_name":"İyi","api":1,"exec":["x"],
-                "permissions":{"net":["a.example","yeni.example"]}}"#,
-        );
-        let mut store = ConsentStore::default();
-        store.approve(
-            "iyi",
-            &Permissions {
-                net: vec!["a.example".to_owned()],
-                fs: Vec::new(),
-            },
-            jiff::Timestamp::now(),
-        );
-        store.save(&config.plugin_consent_path()).unwrap();
-
-        let (entries, summary) = discover(&config).unwrap();
-        assert_eq!(summary.awaiting_approval, 1);
-        assert!(!entries[0].is_loadable());
-        assert!(
-            entries[0].status_text().contains("yeni.example"),
-            "{}",
-            entries[0].status_text()
-        );
-
-        let (providers, _) = load(&config).unwrap();
-        assert!(providers.is_empty());
-    }
-
-    #[test]
-    fn a_plugin_only_sees_its_own_secrets() {
-        let config = temp_config("sirlar");
-        write_plugin(
-            &config,
-            "iyi",
-            r#"{"name":"iyi","display_name":"İyi","api":1,"exec":["x"],"capabilities":["search"]}"#,
-        );
-        let mut store = ConsentStore::default();
-        store.approve("iyi", &Permissions::default(), jiff::Timestamp::now());
-        store.save(&config.plugin_consent_path()).unwrap();
-
-        let mut secrets = Secrets::default();
-        secrets.set("plugin:iyi", "client_id", "benim");
-        secrets.set("plugin:baska", "client_id", "onun");
-        secrets.save(&config.secrets_path()).unwrap();
-
-        let manifest = PluginManifest::load(&config.plugins_dir().join("iyi")).unwrap();
-        let provider = PluginProvider::from_manifest(
-            &config,
-            &manifest,
-            &config.plugins_dir().join("iyi"),
-            &Secrets::load(&config.secrets_path()).unwrap(),
-        )
-        .unwrap();
-
-        assert_eq!(provider.handshake.secrets.len(), 1);
-        assert_eq!(
-            provider.handshake.secrets.get("client_id"),
-            Some(&"benim".to_owned())
-        );
     }
 }
+
+/// Motorun olmadığı derlemenin yedeği: aynı yüzey, her başlatma bir hata.
+///
+/// Eklentiler bu derlemede de keşfedilir, listelenir ve onaylanır —
+/// kullanıcı neyin kurulu olduğunu görmeli. Yalnızca **çalıştırılamazlar**
+/// ve ilk çağrı bunu söyler (K9).
+#[cfg(not(feature = "plugin-engine"))]
+mod unavailable {
+    use std::time::Duration;
+
+    use super::ScriptSpec;
+    use crate::diag::Stage;
+    use crate::error::{Error, ErrorKind, Result};
+
+    #[derive(Debug)]
+    pub(crate) struct ScriptWorker;
+
+    fn missing(plugin: &str) -> Error {
+        Error::new(
+            Stage::PluginStart,
+            ErrorKind::Unsupported {
+                provider: plugin.to_owned(),
+                what: "eklenti çalıştırma (`plugin-engine` feature'ı kapalı bir derleme)"
+                    .to_owned(),
+                capabilities: "NONE".to_owned(),
+            },
+        )
+    }
+
+    impl ScriptWorker {
+        pub(crate) fn start(spec: ScriptSpec, _timeout: Duration) -> Result<Self> {
+            Err(missing(&spec.plugin))
+        }
+
+        pub(crate) fn call(
+            &mut self,
+            _function: &'static str,
+            _args: Vec<serde_json::Value>,
+            _timeout: Duration,
+        ) -> Result<serde_json::Value> {
+            Err(missing("?"))
+        }
+
+        pub(crate) fn shutdown(&mut self) {}
+    }
+}
+
+#[cfg(test)]
+mod tests;

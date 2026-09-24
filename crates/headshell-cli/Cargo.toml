@@ -24,6 +24,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 # D-011: `--out *.png` için PNG rasterizasyonu.
 # D-016: `headshell play` için ses hattı (symphonia + cpal).
 # D-020: uzak sağlayıcılar için HTTP istemcisi (ureq + rustls).
+# D-069: eklentiler için gömülü JS motoru (QuickJS).
 # D-046: `headshell resolve --file` için ses parmak izi (Chromaprint).
 #   CLI her çekirdek yeteneğinin sınandığı yüzey (CLAUDE.md); parmak izi
 #   feature'ının açık kalması gereken tek derleme burası. Ağacı büyütüyor ve
@@ -33,6 +34,7 @@ headshell-core = { workspace = true, features = [
     "audio",
     "http-client",
     "fingerprint",
+    "plugin-engine",
 ] }
 
 [lints]

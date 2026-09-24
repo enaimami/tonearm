@@ -22,5 +22,7 @@ pub mod secrets;
 pub mod session;
 pub mod sleeve;
 pub mod stats;
+#[cfg(test)]
+mod test_support;
 
 pub use error::{Error, ErrorKind, Result};

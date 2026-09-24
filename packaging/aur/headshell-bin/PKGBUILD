@@ -32,9 +32,7 @@ arch=('x86_64')
 url='https://github.com/headshell/headshell'
 license=('MIT' 'Apache-2.0')
 depends=('webkit2gtk-4.1' 'gtk3' 'alsa-lib' 'hicolor-icon-theme')
-optdepends=('headshell-cli-bin: command line interface'
-            'yt-dlp: YouTube Music plugin streaming'
-            'python: plugin runtime')
+optdepends=('headshell-cli-bin: command line interface')
 provides=("headshell=$pkgver")
 conflicts=('headshell')
 # İkili yukarı akıştan geliyor; `makepkg` onu yeniden `strip`'lemesin.

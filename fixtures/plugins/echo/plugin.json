@@ -1,12 +1,12 @@
 {
   "name": "echo",
   "display_name": "Echo (sınama)",
-  "version": "0.1.0",
-  "api": 1,
-  "exec": ["python3", "./main.py"],
+  "version": "0.2.0",
+  "api": 2,
+  "main": "main.js",
   "capabilities": ["search", "stream"],
   "permissions": {
     "net": ["ornek.gecersiz"]
   },
-  "description": "Protokolü sınayan sabit kataloglu eklenti. Ağa çıkmaz."
+  "description": "Eklenti sözleşmesini sınayan sabit kataloglu eklenti. Ağa çıkmaz."
 }

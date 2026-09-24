@@ -1,19 +1,31 @@
-# Eklenti yazma rehberi (protokol api 1)
+# Eklenti yazma rehberi (sözleşme api 2)
 
-`headshell` sağlayıcıları **alt süreç** olarak çalıştırır ve onlarla satır bazlı
-JSON-RPC 2.0 konuşur. Yani bir eklenti herhangi bir dilde yazılabilir:
-stdin'den satır okuyup stdout'a satır yazabilen her şey yeterli.
+`headshell` eklentileri **JavaScript** ile yazılır ve `headshell`'un içine
+gömülü **QuickJS** motorunda koşar (D-069). Kullanıcının makinesinde Python,
+Node ya da başka bir çalışma zamanı gerekmez: eklentiyi bir dizine koymak
+yeter.
+
+Bir eklenti dış dünyaya yalnızca motorun verdiği `host` nesnesinden çıkabilir
+— HTTP, sırlar, küçük bir kalıcı depo, motorun kurduğu araçlar ve günlük.
+Dosya sistemine, sürece, sokete doğrudan erişimi yoktur. Beyan ettiği izinler
+bu yüzden **zorlanır**.
 
 Üç çalışan örnek:
 
-- [`plugins/soundcloud/main.py`](../plugins/soundcloud/main.py) — **gerçek
-  eklenti.** Python, yalnızca standart kütüphane, canlı bir servise bağlanır.
-  Yazacağınız şeye en yakın örnek budur.
-- [`plugins/ytmusic/main.py`](../plugins/ytmusic/main.py) — üstverisini bir
-  servisten, sesini **harici bir araçtan** (yt-dlp alt süreci) alan eklenti.
-  İkisini birleştiren bir eklenti yazacaksanız buraya bakın.
-- [`fixtures/plugins/echo/main.py`](../fixtures/plugins/echo/main.py) — sabit
-  kataloglu sınama eklentisi (~150 satır). Protokolü çıplak görmek için.
+- [`plugins/soundcloud/main.js`](../plugins/soundcloud/main.js) — **gerçek
+  eklenti.** Canlı bir servise bağlanır, anahtarını keşfedip `host.storage`'ta
+  önbellekler. Yazacağınız şeye en yakın örnek budur.
+- [`plugins/ytmusic/main.js`](../plugins/ytmusic/main.js) — üstverisini bir
+  servisten, sesini **motorun kurduğu bir araçtan** (yt-dlp) alan eklenti.
+- [`fixtures/plugins/echo/main.js`](../fixtures/plugins/echo/main.js) — sabit
+  kataloglu sınama eklentisi (~60 satır). Sözleşmeyi çıplak görmek için.
+
+> **api 1'den geliyorsanız:** api 1 bir alt süreç + JSON-RPC protokolüydü ve
+> eklentiler Python'la yazılıyordu. api 1 eklentileri artık **yüklenmez**;
+> `headshell plugin list` onları "protokol sürümü uyuşmuyor: eklenti api 1"
+> diye gösterir. Taşıma kısa: `exec` yerine `main`, metotlar yerine dışa
+> aktarılan fonksiyonlar, `urllib` yerine `host.http`, dosya yerine
+> `host.storage`. SoundCloud ve YouTube Music eklentileri bu yolu izledi.
 
 ---
 
@@ -24,15 +36,24 @@ Bir dizin:
 ```
 <veri-dizini>/plugins/soundcloud/
 ├── plugin.json      # manifest
-└── main.py          # (ya da bir ikili, bir kabuk betiği, ne olursa)
+└── main.js          # betik
 ```
 
-Veri dizini: `$XDG_DATA_HOME/headshell` (varsayılan `~/.local/share/headshell`).
-`HEADSHELL_DATA_DIR` ile değiştirilebilir.
+Veri dizini sistemden sisteme değişir (D-070); `headshell diag` kullanılanı
+yazar:
+
+| Sistem | Veri dizini |
+|---|---|
+| Linux, BSD | `~/.local/share/headshell` (`$XDG_DATA_HOME` tanımlıysa onun altı) |
+| macOS | `~/Library/Application Support/headshell` |
+| Windows | `%LOCALAPPDATA%\headshell` |
+
+`HEADSHELL_DATA_DIR` ortam değişkeni ya da CLI'nin `--data-dir` bayrağı her
+sistemde önce gelir. Aşağıdaki komutlar Linux yolunu kullanıyor; öteki
+sistemlerde yalnızca dizin değişir.
 
 **Dizin adı kimliktir.** `plugin.json` içindeki `name` dizin adıyla aynı
-olmak zorunda; uyuşmazsa eklenti reddedilir. Sessizce dizin adına düşmüyoruz,
-çünkü o zaman hangi adın kazandığı tahmin edilirdi.
+olmak zorunda; uyuşmazsa eklenti reddedilir.
 
 ### `plugin.json`
 
@@ -40,290 +61,304 @@ olmak zorunda; uyuşmazsa eklenti reddedilir. Sessizce dizin adına düşmüyoru
 {
   "name": "soundcloud",
   "display_name": "SoundCloud",
-  "version": "0.1.0",
-  "api": 1,
-  "exec": ["python3", "./main.py"],
+  "version": "0.2.0",
+  "api": 2,
+  "main": "main.js",
   "capabilities": ["search", "stream"],
   "permissions": {
-    "net": ["api.soundcloud.com"],
-    "fs": []
+    "net": ["soundcloud.com", "api-v2.soundcloud.com", "*.sndcdn.com"]
   },
-  "description": "Tek cümlelik açıklama."
+  "requires": [],
+  "description": "Bir cümle."
 }
 ```
 
 | Alan | Zorunlu | Anlamı |
 |---|---|---|
-| `name` | evet | Dizin adıyla aynı. Sağlayıcı kimliği bu. |
+| `name` | evet | Dizin adıyla aynı. Sağlayıcı kimliği. |
 | `display_name` | evet | Kullanıcıya gösterilen ad. |
-| `version` | hayır | Eklentinin kendi sürümü (protokol sürümü değil). |
-| `api` | evet | Konuştuğu protokol sürümü — bugün `1`. |
-| `exec` | evet | İlk öğe program, gerisi argüman. |
-| `capabilities` | hayır | `search`, `browse`, `stream`, `control`. |
-| `permissions` | hayır | Aşağıya bakın. |
-| `requires` | hayır | Motorun sizin için kuracağı eserler — §2.5. |
+| `version` | hayır | Eklentinin kendi sürümü. |
+| `api` | evet | Konuştuğu sözleşme sürümü: bugün `2`. |
+| `main` | evet | Eklenti dizinine göre betiğin yolu. `.js` olmalı, dizinin dışına çıkamaz (`..` ve mutlak yol reddedilir). |
+| `capabilities` | hayır | `search`, `stream`. Motor, beyan edilen her yeteneğin fonksiyonunun dışa aktarıldığını denetler. |
+| `permissions.net` | hayır | Bağlanılacak ana bilgisayarlar. Bkz. §2. |
+| `requires` | hayır | Motorun kuracağı araçlar. Bkz. §5. |
+| `description` | hayır | Bir cümle. |
 
-`exec`'in ilk öğesinde `/` varsa eklenti dizinine göre çözülür (`./main.py`),
-yoksa `PATH`'ten aranır. Süreç **eklenti dizininde** çalıştırılır, yani göreli
-yollar kendi dosyalarınıza işaret eder.
-
-**Özel durum:** `exec`'in ilk öğesi çıplak `python3` ya da `python` ise onu
-`PATH`'ten değil **motor** çözer (D-055) — sürümü denetlenmiş tek bir
-yorumlayıcı, bütün eklentiler için aynısı. "Hangi Python" sorusuyla işiniz
-olmaz.
+api 1'in iki alanı **reddedilir**, yok sayılmaz: `exec` (eklenti bir komut
+değil, betiktir) ve `permissions.fs` (eklenti dosya sistemine erişemez).
 
 ---
 
-## 2. İzinler: sözleşme, güvenlik duvarı değil
+## 2. İzinler — zorlanıyor
 
-`permissions.net` erişeceğiniz ana bilgisayarları, `permissions.fs`
-dokunacağınız yol öneklerini bildirir. Kullanıcı bunları
-`headshell plugin approve <ad>` ile onaylar; onay `plugins.json`'a yazılır.
-İzinleri **büyütürseniz** kullanıcıya yeniden sorulur, küçültürseniz
-sorulmaz.
+Her `host.http` isteğinde, izlenen **her yönlendirmede** ve `resolve_source`'un
+döndürdüğü akış adresinde motor ana bilgisayarı `permissions.net`'e göre
+denetler. Beyan edilmemiş bir adrese istek ağa hiç çıkmaz; eklentiye
+`izin yok: <ana bilgisayar> …` hatası fırlatılır.
 
-**Bu bir hapis değildir.** Eklenti kullanıcının bütün yetkisiyle çalışır;
-`headshell` beyanınızı zorlamaz ve kullanıcıya da böyle söyler. Beyan dürüst
-olmak içindir — yalan söyleyen bir manifest, kullanıcıyı kaybetmenin en
-hızlı yoludur. (Karar ve gerekçesi: `DECISIONS.md`, D-040.)
+- **Tam ad:** `api.soundcloud.com` yalnızca o adı kapsar, alt alan adlarını
+  kapsamaz.
+- **Joker:** `*.sndcdn.com` her alt alan adını (`cf-media.sndcdn.com`)
+  kapsar, `sndcdn.com`'un kendisini **kapsamaz**. Yalnızca en solda olabilir.
+  Çıplak `*` ve `*.com` gibi tek etiketli joker reddedilir — "her yere
+  çıkarım" diyen bir eklenti bunu tek tek yazmalı ya da kullanıcı onu
+  reddetmeli.
+- **Şema, port ve yol yazılmaz.** Yalnızca `http` ve `https`'e gidilebilir;
+  herhangi bir port serbest.
+- IP adresi yazılabilir (`127.0.0.1`) ama IPv6 köşeli ayraçlı adres
+  desteklenmiyor.
 
-Çekirdeğin kendi eliyle verdiği şey daraltılmıştır:
+**Onay:** İlk kurulumda `headshell plugin approve <ad>` ile kullanıcı izinleri
+onaylar. Onaylanan küme `<veri-dizini>/plugins.json`'da saklanır. Eklentiniz
+güncellenip **daha fazla** izin isterse yeniden onaya kadar yüklenmez; daha
+**az** isterse sorun yok. Joker hesaba katılır: onaylanmış `*.x.com`, sonradan
+istenen `a.x.com`'u kapsar.
 
-- Yazabileceğiniz dizin: `<veri-dizini>/plugins/<ad>/state` (el sıkışmada
-  `data_dir` olarak gelir).
-- Görebileceğiniz sırlar: yalnızca **kendi ad alanınız**
-  (`plugin:<ad>`). Kullanıcı `headshell secret set plugin:soundcloud client_id`
-  ile yazar; siz el sıkışmada `secrets` olarak alırsınız. Başka bir
-  eklentinin sırrını göremezsiniz.
+**Sınırın dışında kalan tek şey motorun kurduğu araçlardır.** `host.tools.run`
+ile çalışan bir program (yt-dlp) ayrı bir süreçtir ve hapsedilmez; kendi ağ
+trafiği bu listeyle sınırlanmaz. `headshell plugin list` bunu her seferinde
+yazar.
 
 ---
 
-## 2.5 Bağımlılıklar: root isteyemezsiniz (D-049)
+## 3. Sözleşme: dışa aktarılan fonksiyonlar
 
-Eklentiniz sistemde kurulu bir araca yaslanıyorsa, o aracı **kullanıcıya
-kurdurmak sizin çözümünüz değildir.** Kural:
+Betik bir **ES modülüdür**. Çekirdek onu ilk çağrıda değerlendirir ve dışa
+aktardığı fonksiyonları çağırır:
 
-> Bir eklenti ya bağımlılıklarını kendisi getirir, ya da onları **root yetkisi
-> istemeden** kuran bir yordam sunar.
+```js
+export function health() {
+  return { reachable: true, detail: "her şey yolunda" };
+}
 
-Sebep destek yüzeyi: "paket yöneticinle kur" cümlesi her dağıtım ve her
-işletim sistemi için ayrı bir yol demek, ve o yolları eklenti yazarı değil
-proje taşır. Hata mesajınızda `apt`/`pacman`/`brew` gibi tek bir sisteme ait
-komut **yazmayın** — kullanıcıların çoğuna yanlış tavsiye olur.
+export function search(query, limit) {
+  return [{ id: "42", artist: "Ezhel", title: "Geceler", duration_ms: 213000 }];
+}
 
-Uygulanış şekli **D-050'de kapandı, D-055'te yazıldı: `headshell`'un kendi eklenti
-motoru var.** Çalışma zamanı (Python 3.9+) eklentinin değil host'un işi ve
-`headshell`'un gereksinimi olarak bir kez ilan ediliyor. İhtiyacınız olan paketleri
-**siz kurmazsınız**: `plugin.json`'da `requires` ile beyan edersiniz, motor
-onları indirir. Eklenti hiçbir şey indirmez, `pip` çağırmaz, sisteme dokunmaz.
+export function resolve_source(id) {
+  return { kind: "http_stream", url: `https://cdn.ornek.com/${id}.mp3`, headers: [] };
+}
+```
+
+| Fonksiyon | Zorunlu | Dönüş |
+|---|---|---|
+| `health()` | evet | `{ reachable, detail?, track_count? }` |
+| `search(query, limit)` | `search` yeteneği varsa | parça dizisi |
+| `resolve_source(id)` | `stream` yeteneği varsa | kaynak ya da `null` |
+
+Adlar bilerek api 1'in metot adlarıyla ve çekirdeğin `Provider` trait'iyle
+aynı (`resolve_source`, `resolveSource` değil). `async function` de
+yazabilirsiniz; motor sözü çözer.
+
+### `health()`
+
+Ulaşamamak bir **cevaptır**, hata değil: `{ reachable: false, detail: "…" }`
+dönün ve sebebi yazın. `track_count` bilinmiyorsa `null` bırakın — yanlış bir
+sayı vermek "bilmiyorum"dan kötüdür. Fırlatırsanız da çekirdek bunu
+"ulaşılamıyor" diye gösterir, fırlattığınız mesajla.
+
+### `search(query, limit)`
+
+```js
+[
+  {
+    id: "42",               // zorunlu — çıplak kimlik
+    artist: "Ezhel",         // zorunlu
+    title: "Geceler",        // zorunlu
+    album: "Müptezhel",      // isteğe bağlı
+    duration_ms: 213000,     // isteğe bağlı ama bulanık eşleşme için önemli
+    isrc: "TRA111700001"     // isteğe bağlı; biçimi tutmazsa düşürülür ve sayılır
+  }
+]
+```
+
+`id` **çıplak** bir dizedir. Sağlayıcı adını çekirdek ekler — başka bir
+sağlayıcının ad alanında kimlik uyduramazsınız. Sonuç yoksa `[]` dönün.
+
+### `resolve_source(id)`
+
+```js
+{ kind: "http_stream", url: "https://…", headers: [{ name: "Range", value: "bytes=0-" }] }
+```
+
+`null` "bu parça çalınamaz" demektir ve hata değildir. Adres izinlerinizin
+içinde olmalı (§2); dışındaysa çekirdek kaynağı reddeder. `local_file`
+döndürülemez — eklentinin dosya sistemine erişimi yok.
+
+**Ses asla röle edilmez (K3):** döndürdüğünüz adresi çekirdek kendisi çeker.
+
+### Hata vermek
+
+Sıradan bir JS hatası fırlatın:
+
+```js
+throw new Error("SoundCloud kotayı doldurdu (429); bir süre bekleyin");
+```
+
+Çekirdek bunu **reddetme** olarak okur ve eklentiyi yeniden başlatmaz.
+Kullanıcı mesajınızı ve hatanın çıktığı satırı görür:
+`soundcloud eklentisi search çağrısında hata verdi: … (main.js:42:7)`.
+"Bulamadım" ile "bakamadım" farklı şeylerdir (K9): sonuç yoksa `[]`/`null`
+dönün, bir şey bozulduysa fırlatın.
+
+Sözleşmeye uymayan bir dönüş (dizi yerine nesne, `kind`'ı tanınmayan kaynak)
+**sözleşme ihlali** olarak ayrıca raporlanır: kullanıcı onu bekleyerek
+düzeltemez, yalnızca siz düzeltebilirsiniz.
+
+---
+
+## 4. `host` — dış dünyaya açılan kapı
+
+Hepsi **eşzamanlı**: fonksiyon döndüğünde iş bitmiştir. Motorda olay döngüsü
+ve zamanlayıcı yok (`setTimeout` yok).
+
+| API | Ne yapar |
+|---|---|
+| `host.http.get(url, headers?)` | GET. Başlıklar düz bir nesne: `{ "User-Agent": "…" }`. |
+| `host.http.post(url, body, headers?)` | POST, gövde bir dize. |
+| `host.http.request({ url, method?, headers?, body? })` | Genel biçim; `method` `GET` ya da `POST`. |
+| `host.secrets.get(key)` | Kendi ad alanınızdaki sır; yoksa `null`. |
+| `host.secrets.file(key)` | Sırrı `0600` bir geçici dosyaya yazar ve yolunu döndürür (yoksa `null`). Motor kapanınca silinir. Bir araca dosya yolu olarak vermek için. |
+| `host.storage.get(key)` / `.set(key, value)` / `.remove(key)` | Eklentiye özel kalıcı anahtar-değer; değerler dize. Toplam 1 MB. |
+| `host.tools.run(name, args, { timeoutMs? })` | `requires`'ta beyan edilmiş, kurulu ve karması doğrulanmış aracı çalıştırır. |
+| `host.log.debug/info/warn/error(message)` | `tracing`'e yazar; `headshell -v` ile görünür. |
+| `console.log/info/warn/error/debug` | `host.log`'a bağlı. |
+| `host.api`, `host.version`, `host.platform`, `host.plugin` | Sözleşme sürümü, çekirdek sürümü, platform anahtarı (`linux-x86_64`), eklentinin adı. |
+
+**HTTP cevabı:**
+
+```js
+{ status: 200, ok: true, url: "son adres", headers: { "content-type": "…" }, body: "…" }
+```
+
+2xx dışı durum kodları **fırlatılmaz**, `status` ile döner — 404 ile 500'ü
+ayırmak sizin işiniz. Ağa ulaşılamazsa, izin yoksa ya da çağrının süresi
+dolduysa fırlatılır. Yönlendirmeleri motor izler (en çok 5) ve her adımda
+izni yeniden sorar. Gövde metin olarak gelir (UTF-8, bozuk baytlar
+değiştirilir); ikili içerik için tasarlanmadı.
+
+**Araç çıktısı:**
+
+```js
+{ code: 0, stdout: "…", stderr: "…", truncated: false }
+```
+
+Aracın süresi çağrının kalan süresini geçemez; `timeoutMs` daha kısa bir
+sınır koyar. Süre dolarsa araç durdurulur ve fırlatılır.
+
+### Modül yüklenirken
+
+Betiğin üst düzeyi (fonksiyonların dışı) yüklemede bir kez çalışır ve **ağa
+çıkamaz, araç çalıştıramaz** — bu işler ilk çağrıya aittir. Yükleme 5 saniyeyle
+sınırlı.
+
+### Sınırlar
+
+| | |
+|---|---|
+| Çağrı süresi | 20 sn. Döngüde takılan kod kesilir (`try/catch` kesmeyi yakalayamaz). |
+| Yükleme süresi | 5 sn |
+| Bellek | 128 MB; aşılırsa "out of memory" istisnası — çekirdek değil, o çağrı düşer |
+| Tek HTTP isteği | 15 sn |
+| Modül | Tek dosya; `import` ile başka dosya yüklenemez |
+| Web API'leri | Yok: `fetch`, `URL`, `TextEncoder`, `Intl`, `setTimeout`. Dil ve standart kütüphanesi (JSON, RegExp, Map, Date…) var. |
+
+---
+
+## 5. Araçlar: `requires` (D-049, D-055, D-069)
+
+**Hiçbir eklenti kullanıcıdan root yetkisi ya da sistem çapında bir kurulum
+isteyemez** (D-049). Aracınızı kullanıcıya kurdurmazsınız; manifestte beyan
+edersiniz, **motor** kurar:
 
 ```json
 "requires": [
   {
     "name": "yt-dlp",
     "version": "2026.08.19",
-    "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp",
-    "sha256": "1fa6733c37ea6fb51c99ad8fe785e7b7e5f3246c9b980230329d4fb72ed8d4d6"
+    "assets": {
+      "linux-x86_64":   { "url": "https://…/yt-dlp_linux",   "sha256": "58162f9b…" },
+      "macos-aarch64":  { "url": "https://…/yt-dlp_macos",   "sha256": "0f192b7e…" },
+      "windows-x86_64": { "url": "https://…/yt-dlp.exe",     "sha256": "66674953…" }
+    }
   }
 ]
 ```
 
-Dört alanın dördü de **zorunlu.** Sürümsüz bir eser güncellendiğinde sessizce
-başka bir şey olur; karmasız bir eser ağdan ne geldiyse odur. `url` `https://`
-ile başlamak zorunda. Doğrulama tutmazsa dosya **yerine konmaz.**
+- Eser **platform başına** beyan edilir. Anahtar `<işletim sistemi>-<mimari>`,
+  musl Linux için sonuna `-musl`. Tanınan anahtarlar: `linux-x86_64`,
+  `linux-aarch64`, `linux-x86`, `linux-arm`, `linux-x86_64-musl`,
+  `linux-aarch64-musl`, `macos-x86_64`, `macos-aarch64`, `windows-x86_64`,
+  `windows-aarch64`, `windows-x86`. Bilinmeyen anahtar manifesti geçersiz
+  kılar (yazım hatası "bu platformda yok"a dönüşmesin diye).
+- Her yayın **kendi kendine yeten** bir ikili olmalı — başka bir yorumlayıcı
+  istemeyen (yt-dlp'nin zipapp'i Python istiyor, PyInstaller ikilileri
+  istemiyor).
+- `url` `https://` olmalı, `sha256` 64 haneli. Karma tutmazsa dosya yerine
+  konmaz.
+- Kullanıcının platformu haritada yoksa eklenti yüklenmez ve durum satırı
+  bunu söyler; kurulum komutu önerilmez, çünkü kurulum bunu düzeltmez.
+- Eser `<veri-dizini>/runtime/<ad>-<sürüm>-<platform>` altına iner
+  (Windows'ta `.exe` ile). Sisteme hiçbir şey yazılmaz.
 
-Eser tek dosya olmalı — motor `venv`/`pip` kullanmıyor (bkz. D-055: `ensurepip`
-her dağıtımda yok ve orada motor root'suz bir çıkış yolu sunamazdı). yt-dlp
-gibi zipapp olarak dağıtılan araçlar bu yola uyar; sıradan bir PyPI paketi
-bugün kurulamaz.
+Eklenti aracı adıyla çağırır; yolunu bilmesine gerek yok:
 
-**Kurulum yolunu el sıkışmada alırsınız.** `handshake` parametrelerindeki
-`requirements` haritası `ad → mutlak yol` verir ve **yalnızca hazır eserleri**
-içerir: haritada bir ad varsa o eser kurulu ve karması doğrulanmıştır, yoksa
-hiç yoktur. Boş dize dönmez.
-
-```python
-def handshake(params):
-    state["requirements"] = params.get("requirements") or {}
-    ...
-
-def ytdlp():
-    path = state["requirements"].get("yt-dlp")
-    if not path:
-        raise PluginError("yt-dlp kurulu değil: `headshell plugin install <ad>`")
-    return [path]
+```js
+const run = host.tools.run("yt-dlp", ["--version"], { timeoutMs: 5000 });
 ```
 
-Kullanıcı `headshell plugin install <ad>` yazınca motor indirir, doğrular, yerine
-koyar. `headshell plugin list` süreç açmadan eksiği söyler.
-
-`api` kırılmadı — `requires` da `requirements` da birer **ekleme** ve eklemek
-sürümü artırmaz (§5). Bu alanları okumayan eski bir eklenti bugüne kadar
-olduğu gibi çalışır.
-
-**Bağlantılar eskirse ne olur.** Beyan ettiğiniz adres bir gün 404 döndürür;
-motor bunu "ağ yok" değil **YETİM** diye raporlar ve düzeltmenin *sizin* işiniz
-olduğunu söyler. Zaten kurulmuş bir eser bundan etkilenmez: dosya diskte,
-karması tutuyor, çalışmaya devam eder. Yetimlik yalnızca henüz kurmamış bir
-kullanıcı için bir sorundur — yani yeni sürüm yayımlamak sizin sorumluluğunuz.
+Motor aracı ilk kullanımda karmasıyla yeniden doğrular: kurulumdan sonra
+değiştirilmiş bir dosya çalıştırılmaz.
 
 ---
 
-## 3. Protokol
+## 6. Yaşam döngüsü ve dayanıklılık
 
-Her mesaj **tek satır JSON + `\n`**. Uzunluk başlığı yok.
-
-- stdout **yalnızca protokol içindir**. Hata ayıklama çıktınızı **stderr**'e
-  yazın; `headshell` onu log'a aktarır. (stdout'a düşen JSON olmayan satır sizi
-  öldürmez, uyarı olarak atlanır — ama ona güvenmeyin.)
-- İsteklerin `id`'si vardır, cevabınız **aynı `id`'yi** taşımalı.
-- İstemediğiniz bir metoda `-32601` (metot yok) dönün; çekirdek bunu
-  "bu yeteneği desteklemiyor" diye okur, çökme saymaz.
-
-### `handshake` — zorunlu
-
-İlk çağrı budur. **Ağa çıkmayın**: bu çağrının zaman aşımı 5 saniye,
-ötekilerin 20.
-
-İstek:
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"handshake","params":{
-  "api": 1,
-  "host": {"name": "headshell", "version": "0.0.1-beta"},
-  "data_dir": "/home/kisi/.local/share/headshell/plugins/soundcloud/state",
-  "secrets": {"client_id": "..."},
-  "permissions": {"net": ["api.soundcloud.com"], "fs": []}
-}}
-```
-
-Cevap:
-
-```json
-{"jsonrpc":"2.0","id":1,"result":{
-  "api": 1,
-  "name": "soundcloud",
-  "display_name": "SoundCloud",
-  "plugin_version": "0.1.0",
-  "capabilities": ["search", "stream"]
-}}
-```
-
-`api` çekirdeğinkiyle **eşit değilse eklenti yüklenmez** ve kullanıcı iki
-sayıyı da görür. `name` manifestteki adla aynı olmak zorunda.
-
-### `health` — zorunlu
-
-```json
-{"jsonrpc":"2.0","id":2,"result":{
-  "reachable": true, "track_count": 1234, "detail": "SoundCloud API v2"
-}}
-```
-
-`track_count` bilinmiyorsa `null` — sıfır değil. "Bilmiyorum" ile "hiç yok"
-farklı cevaplardır. Ulaşamıyorsanız `reachable: false` + `detail` ile
-**sebebini** yazın; hata dönmeyin, ulaşamamak bir sağlık cevabıdır.
-
-### `search` — `search` yeteneği varsa
-
-İstek `params`: `{"query": "...", "limit": 20}`.
-
-```json
-{"jsonrpc":"2.0","id":3,"result":{"tracks":[
-  {"id":"12345","artist":"Sanatçı","title":"Parça",
-   "album":"Albüm","duration_ms":213000,"isrc":"TR1234567890"}
-]}}
-```
-
-`id` **sizin** kimliğiniz — çıplak bir dize. Sağlayıcı adını çekirdek ekler;
-başka bir sağlayıcının kimlik alanına yazamazsınız. `isrc` biçimi tutmuyorsa
-alan düşürülür ve sayılır (parça düşmez).
-
-### `resolve_source` — `stream` yeteneği varsa
-
-İstek `params`: `{"id": "12345"}`.
-
-```json
-{"jsonrpc":"2.0","id":4,"result":{"source":{
-  "kind": "http_stream",
-  "url": "https://.../stream.mp3",
-  "headers": [{"name":"authorization","value":"OAuth ..."}]
-}}}
-```
-
-`kind` iki değer alır: `http_stream` (yukarıdaki) ve `local_file`
-(`{"kind":"local_file","path":"/yol/dosya.flac"}`).
-
-Çalınamıyorsa `{"source": null}` — bu bir hata değil, "yok" cevabıdır.
-
-**Sesi siz röle etmezsiniz.** Verdiğiniz adresi istemci kendisi çeker
-(Değişmez Kural K3).
-
-### `shutdown` — bildirim, cevap beklenmez
-
-```json
-{"jsonrpc":"2.0","method":"shutdown"}
-```
-
-Aldığınızda temizlenip çıkın. Çıkmazsanız stdin kapatılır, sonra
-öldürülürsünüz.
-
-### `log` — isteğe bağlı bildirim
-
-Çekirdeğe log yollamak isterseniz:
-
-```json
-{"jsonrpc":"2.0","method":"log","params":{"level":"info","message":"..."}}
-```
-
-### Hata dönmek
-
-```json
-{"jsonrpc":"2.0","id":3,"error":{"code":-32000,"message":"kota doldu"}}
-```
-
-Hata dönmek **çökmek değildir**: süreciniz ayakta kalır, çekirdek yalnızca o
-çağrıyı başarısız sayar.
+- Motor eklentiniz için **ilk çağrıda** açılır, kurulumda değil. Her eklenti
+  kendi iş parçacığında, kendi QuickJS çalışma zamanında koşar; eklentiler
+  birbirinin durumunu göremez.
+- Fırlattığınız bir hata motoru düşürmez: modül durumu (önbelleğe aldığınız
+  değişkenler) bir sonraki çağrıda yerinde durur.
+- Süre dolarsa motor bırakılır ve bir sonraki çağrı betiği **baştan**
+  yükler — yarım kalmış bir çağrının bıraktığı durumla devam edilmez.
+- Üç başlatmadan sonra vazgeçilir; sonsuz yeniden başlatma bir çökme
+  döngüsünü gizler. Sözleşme ihlalinde (eksik dışa aktarım) hiç yeniden
+  denenmez.
+- **Bilinen sınır:** QuickJS'in kendi C kodunda bir çökme çekirdeği de
+  düşürür — api 1'de eklenti ayrı süreçti, api 2'de değil (D-069'un takası).
+  JS'in yapabileceği hiçbir şey (sonsuz döngü, bellek taşması, derin
+  özyineleme) bu sınıfta değil.
 
 ---
 
-## 4. Yaşam döngüsü ve dayanıklılık
-
-- Süreciniz **ilk çağrıda** başlatılır, kurulumda değil.
-- Çökerseniz çağrı hata döner ve bir sonraki çağrıda **yeniden
-  başlatılırsınız**. Üç denemeden sonra vazgeçilir (sonsuz yeniden başlatma
-  bir çökme döngüsünü gizler).
-- Zaman aşımına uğrarsanız süreciniz düşürülür — cevap vermeyen bir
-  eklentiyle sonraki çağrıların `id`'leri karışırdı.
-- Sürüm uyuşmazlığında yeniden denenmezsiniz; tekrarla düzelmez.
-
----
-
-## 5. Sürümleme kuralı
+## 7. Sürümleme kuralı
 
 `api` tek bir tam sayı ve kuralı tema sözleşmesiyle aynı:
 
 > **Eklemek sürümü artırmaz, kaldırmak ya da anlamını değiştirmek artırır.**
 
-Yeni bir metot eklendiğinde eski eklentiler onu bilmez, `-32601` döner ve
-çekirdek "desteklemiyor" diye okur. Bu yüzden `api 1` bilerek dar tutuldu:
-`scan_catalog` ve `catalog_changed_since` gibi opsiyonel metotlar, gerçek bir
-kullanıcıları çıktığında ve tel biçimleri ölçüldüğünde eklenecek.
+`host`'a yeni bir fonksiyon, manifeste yeni bir alan, `PLATFORMS`'a yeni bir
+platform eklemek `api`'yi artırmaz. api 1 → 2 geçişi ikinci türdendi:
+eklentinin nerede koştuğu değişti.
 
 ---
 
-## 6. Kurulum ve sınama
+## 8. Kurulum ve sınama
 
 ```bash
-# Eklentiyi yerine koyun
+# Eklentiyi yerine koyun (Linux; macOS ve Windows yolu için §1'deki tablo)
 mkdir -p ~/.local/share/headshell/plugins/soundcloud
-cp plugin.json main.py ~/.local/share/headshell/plugins/soundcloud/
+cp plugin.json main.js ~/.local/share/headshell/plugins/soundcloud/
 
 # Görünüyor mu, ne istiyor?
 headshell plugin list
 
 # İzinleri onaylayın
 headshell plugin approve soundcloud
+
+# Araç istiyorsa
+headshell plugin install soundcloud
 
 # Sır gerekiyorsa (değer komut satırına yazılmaz)
 headshell secret set plugin:soundcloud client_id
@@ -335,21 +370,28 @@ headshell provider test soundcloud
 headshell diag
 ```
 
+Windows'ta (PowerShell) yerleştirme adımı:
+
+```powershell
+$hedef = "$env:LOCALAPPDATA\headshell\plugins\soundcloud"
+New-Item -ItemType Directory -Force -Path $hedef | Out-Null
+Copy-Item plugin.json, main.js $hedef
+```
+
 `headshell plugin disable <ad>` kapatır (onay korunur), `enable` geri açar,
 `forget` onayı tamamen unutur.
 
 Hata mesajları aşamayı taşır: `PLUGIN_LOAD` (manifest/onay),
-`PLUGIN_HANDSHAKE` (başlatma/sürüm), `PROVIDER_CALL` (çağrı).
+`PLUGIN_RUNTIME` (araç kurulumu), `PLUGIN_START` (betiği yükleme, dışa
+aktarım denetimi), `PROVIDER_CALL` (çağrı).
 
 ---
 
-## 7. SoundCloud eklentisini kurmak
-
-Depodaki `plugins/soundcloud/` doğrudan kullanılabilir:
+## 9. SoundCloud eklentisini kurmak
 
 ```bash
 mkdir -p ~/.local/share/headshell/plugins/soundcloud
-cp plugins/soundcloud/{main.py,plugin.json} ~/.local/share/headshell/plugins/soundcloud/
+cp plugins/soundcloud/{main.js,plugin.json} ~/.local/share/headshell/plugins/soundcloud/
 
 headshell plugin approve soundcloud
 headshell provider test soundcloud     # "kullanılabilir" demeli
@@ -357,8 +399,8 @@ headshell play "nujabes aruarian dance"
 ```
 
 `client_id` **istenmez**: eklenti SoundCloud'un web istemcisinden kendisi
-keşfeder ve `state/client_id.txt` içine önbellekler. Kendi anahtarınız varsa
-o kullanılır ve keşfe hiç gidilmez:
+keşfeder ve `host.storage`'ta önbellekler. Kendi anahtarınız varsa o
+kullanılır ve keşfe hiç gidilmez:
 
 ```bash
 headshell secret set plugin:soundcloud client_id
@@ -371,26 +413,24 @@ doğru görünmesin diye (D-043).
 **Bilinen sınırlar**, ikisi de kasıtlı:
 
 - **Yalnızca `progressive` (düz HTTP MP3).** Ölçüldü: parçaların %99'unda var.
-  Kalan %1 yalnızca HLS sunuyor ve açık bir hata alır — sessizce boş sonuç
-  değil.
+  Kalan %1 yalnızca HLS sunuyor ve açık bir hata alır.
 - **`[önizleme]` etiketli parçalar 30 saniyedir.** SoundCloud'un `SNIP`
-  politikası; tam parça abonelik istiyor. api 1'de bunu taşıyacak bir alan
-  olmadığı için başlığa yazılıyor.
+  politikası; tam parça abonelik istiyor.
 
-Keşif dokümante edilmemiş bir yola dayanıyor ve **haber vermeden bozulabilir**.
-Bozulursa eklenti size kendi `client_id`'nizi vermenizi söyler; sessizce boş
-sonuç döndürmez.
+Keşif belgelenmemiş bir yola dayanıyor ve **haber vermeden bozulabilir**.
+Bozulursa eklenti size kendi `client_id`'nizi vermenizi söyler.
 
 ---
 
-## 8. YouTube Music eklentisini kurmak
+## 10. YouTube Music eklentisini kurmak
 
-Depodaki `plugins/ytmusic/` doğrudan kullanılabilir. **yt-dlp'yi siz
-kurmazsınız** — eklenti onu manifestinde beyan eder, motor indirir (D-055).
+**yt-dlp'yi siz kurmazsınız, Python da gerekmez** — eklenti yt-dlp'yi
+manifestinde platform başına beyan eder, motor sizin platformunuzun kendi
+kendine yeten ikilisini indirir (~40 MB, D-069).
 
 ```bash
 mkdir -p ~/.local/share/headshell/plugins/ytmusic
-cp plugins/ytmusic/{main.py,plugin.json} ~/.local/share/headshell/plugins/ytmusic/
+cp plugins/ytmusic/{main.js,plugin.json} ~/.local/share/headshell/plugins/ytmusic/
 
 headshell plugin approve ytmusic    # izinleri ve motorun indireceğini gösterir
 headshell plugin install ytmusic    # yt-dlp'yi indirir, sha256'sını doğrular
@@ -398,34 +438,35 @@ headshell provider test ytmusic     # "kullanılabilir" + yt-dlp sürümünü ya
 headshell play "nujabes aruarian dance"
 ```
 
-Sır **istemiyor**. `install` çalıştırılmadan önce `headshell plugin list` eksiği
-süreç açmadan söyler; eklenti sessizce boş sonuç dönmez.
+Beyan edilen platformlar: Linux x86_64/aarch64 (glibc ve musl), macOS
+(evrensel ikili, Intel + Apple Silicon), Windows x86_64/x86/ARM64. **32 bit
+ARM Linux (`linux-arm`) ve 32 bit x86 Linux için yt-dlp tek dosyalık yayın
+yapmıyor**; BSD'ler için hiç yayın yok. Oralarda eklenti **yüklenmez** ve
+`headshell plugin list` "bu platform için yayın yok" der; kurulum komutu
+önerilmez, çünkü kurulum bunu düzeltmez.
 
-Eser `~/.local/share/headshell/runtime/yt-dlp-<sürüm>` altına iner ve sisteme
-hiçbir şey yazılmaz. `install`'ı ikinci kez koşturmak ağa çıkmaz. Dosya
-bozulursa (`karma tutmuyor`) yeniden koşturmak düzeltir.
+Veri merkezi adreslerinde YouTube bot duvarı çıkarabiliyor (D-061). Çerez
+verirseniz yt-dlp'ye dosya olarak geçirilir, motor kapanınca silinir:
 
-**Neden alt süreç, neden kütüphane değil** (D-048): depoda hiçbir Python
-bağımlılığı yok, ve YouTube bir şeyi bozduğunda kullanıcının gördüğü mesaj
-yt-dlp'nin kendi mesajı oluyor ("Sign in to confirm you're not a bot" gibi).
-Tamiri de yt-dlp yapıyor, biz değil.
+```bash
+headshell secret set plugin:ytmusic cookies    # Netscape biçimli çerez dosyasının içeriği
+```
 
-**Ama D-055'ten sonra sürümü biz sabitliyoruz** ve bunun bir bedeli var:
-YouTube yt-dlp'yi bozduğunda kullanıcı artık kendi paket yöneticisiyle
-güncelleyip kurtulamaz, manifestte yeni bir sürüm yayımlamamızı bekler.
-Bakım yükü bir miktar bize geçti — D-049'un "güncel kalabilir" şartının
-karşılığı bu depoda `requires`'ı güncel tutmaktır.
+**Sürümü biz sabitliyoruz** (D-055) ve bunun bir bedeli var: YouTube yt-dlp'yi
+bozduğunda kullanıcı kendi paket yöneticisiyle güncelleyip kurtulamaz,
+manifestte yeni bir sürüm yayımlanmasını bekler. Güncellerken **her
+platformun** karmasını yt-dlp'nin yayımladığı `SHA2-256SUMS` dosyasından
+alın.
 
 **Bilinen sınırlar**, üçü de ölçülmüş:
 
-- **Ses m4a (AAC-LC, ~130 kbps).** Daha iyisi var (opus, 136 kbps) ama
-  çekirdeğin symphonia'sında ne opus çözücüsü ne webm kabı var; çalınamayan
-  yüksek kalite yerine çalınabilen düşük kalite seçildi.
-- **Akış `Range: bytes=0-` başlığıyla çekiliyor.** Bu başlık olmadan aynı adres
-  32 KB/s veriyor, onunla 8 MB/s — 250 kat. Başlık `source.headers` içinde
-  geliyor; kendi eklentinizi yazarken benzer bir kısıtlamayla karşılaşırsanız
-  taşıyacağınız yer orası.
-- **İzin beyanı eksik.** Ses adresi her çözümde değişen bir
-  `googlevideo.com` ana bilgisayarında duruyor ve izin sözlüğü joker kabul
-  etmiyor (`*` yok). `music.youtube.com` + `www.youtube.com` beyan edildi,
-  gerisi `description`'da yazıyor. Aynı sıkıntı torrent eklentisinde de var.
+- **Ses m4a (AAC-LC, ~130 kbps).** Çekirdeğin symphonia'sında ne opus
+  çözücüsü ne webm kabı var; çalınamayan yüksek kalite yerine çalınabilen
+  düşük kalite seçildi.
+- **Akış `Range: bytes=0-` başlığıyla çekiliyor.** Bu başlık olmadan aynı
+  adres 32 KB/s veriyor, onunla 8 MB/s.
+- **yt-dlp JS çalışma zamanı istemeye başladı.** 2026.08.19 sürümü "JS
+  runtimes: none" deyip YouTube çözümünü JS çalışma zamanı olmadan
+  sürdürüyor ama bunun **kullanımdan kaldırıldığını** uyarıyor (ölçüldü,
+  D-069). O yol kapandığında motorun bir JS çalışma zamanını da (deno ya da
+  `qjs`) aynı `requires` mekanizmasıyla indirmesi gerekecek.

@@ -4,6 +4,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod support;
+
 use std::path::PathBuf;
 
 use headshell_core::config::Config;
@@ -17,20 +19,14 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 /// Test başına tekil geçici dizin. `std` dışına çıkmadan.
-fn temp_dir(label: &str) -> PathBuf {
-    let unique = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let dir = std::env::temp_dir().join(format!("headshell-test-{label}-{unique}"));
-    std::fs::create_dir_all(&dir).expect("geçici dizin oluşturulmalı");
-    dir
+fn temp_dir(label: &str) -> support::TempDir {
+    support::TempDir::new(&format!("import-{label}"))
 }
 
 #[tokio::test]
 async fn extended_export_imports_resolves_and_counts() {
     let dir = temp_dir("extended");
-    let mut sess = Session::open(Config::with_data_dir(&dir)).unwrap();
+    let mut sess = Session::open(Config::with_data_dir(dir.path())).unwrap();
 
     let report = sess
         .import_archive(
@@ -76,7 +72,7 @@ async fn extended_export_imports_resolves_and_counts() {
 #[tokio::test]
 async fn reimporting_the_same_export_is_idempotent() {
     let dir = temp_dir("idempotent");
-    let mut sess = Session::open(Config::with_data_dir(&dir)).unwrap();
+    let mut sess = Session::open(Config::with_data_dir(dir.path())).unwrap();
     let path = fixture("spotify_extended_mini.zip");
 
     let first = sess
@@ -104,7 +100,7 @@ async fn reimporting_the_same_export_is_idempotent() {
 #[tokio::test]
 async fn account_export_is_detected_and_stats_reflect_it() {
     let dir = temp_dir("account");
-    let mut sess = Session::open(Config::with_data_dir(&dir)).unwrap();
+    let mut sess = Session::open(Config::with_data_dir(dir.path())).unwrap();
 
     let report = sess
         .import_archive(
@@ -135,7 +131,7 @@ async fn account_export_is_detected_and_stats_reflect_it() {
 #[tokio::test]
 async fn stats_group_creep_variants_together() {
     let dir = temp_dir("stats");
-    let mut sess = Session::open(Config::with_data_dir(&dir)).unwrap();
+    let mut sess = Session::open(Config::with_data_dir(dir.path())).unwrap();
     sess.import_archive(
         &fixture("spotify_extended_mini.zip"),
         session::default_lookup(),
@@ -186,7 +182,7 @@ async fn stats_group_creep_variants_together() {
 #[tokio::test]
 async fn unsupported_archive_fails_at_the_detect_stage() {
     let dir = temp_dir("unsupported");
-    let mut sess = Session::open(Config::with_data_dir(&dir)).unwrap();
+    let mut sess = Session::open(Config::with_data_dir(dir.path())).unwrap();
     let bogus = dir.join("bogus");
     std::fs::create_dir_all(&bogus).unwrap();
     std::fs::write(bogus.join("notes.txt"), b"bu bir export degil").unwrap();
@@ -219,7 +215,7 @@ async fn unsupported_archive_fails_at_the_detect_stage() {
 #[tokio::test]
 async fn resolve_reports_the_chain_step_it_used() {
     let dir = temp_dir("resolve");
-    let sess = Session::open(Config::with_data_dir(&dir)).unwrap();
+    let sess = Session::open(Config::with_data_dir(dir.path())).unwrap();
 
     let report = sess
         .resolve_track("Radiohead - Creep", session::default_lookup())

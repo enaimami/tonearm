@@ -270,9 +270,16 @@ pub fn suggest_id(url: &str, kind: ServerKind) -> ProviderId {
 
 /// Rastgele salt üretir.
 ///
-/// Dönüşün ikinci ögesi entropinin güçlü olup olmadığı: `/dev/urandom`
-/// okunamazsa saat + süreç kimliği tabanlı bir yedeğe düşüyoruz ve bunu
-/// **söylüyoruz** (K9 — sessiz düşüş yok).
+/// Dönüşün ikinci ögesi entropinin işletim sisteminden gelip gelmediği.
+///
+/// Unix'te `/dev/urandom` okunuyor. O dosya Windows'ta yok ve ilk yazım orada
+/// sessizce olmasa da hep zayıf yedeğe düşüyordu (D-070). Artık ikinci yol
+/// standart kütüphanenin `RandomState`'i: anahtarlarını işletim sisteminin
+/// rastgele sayı üretecinden alıyor (Windows'ta `ProcessPrng`), ve o
+/// anahtarlarla karılmış bir sayaç dışarıdan tahmin edilemiyor. Salt'ın işi
+/// gizlilik değil — aynı parolanın iki kurulumda aynı token'a düşmemesi —
+/// ve bunun için yeterli. Saat + süreç kimliği yedeği yalnızca ikisi de
+/// olmazsa kalıyor, ve **söyleniyor** (K9).
 #[must_use]
 pub fn random_salt() -> (String, bool) {
     // `read` değil `read_exact`: `/dev/urandom` sonsuz bir akış, tamamını
@@ -284,6 +291,9 @@ pub fn random_salt() -> (String, bool) {
         let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
         return (hex, true);
     }
+    if let Some(hex) = os_seeded_hex() {
+        return (hex, true);
+    }
     // Yedek: saat + süreç kimliği. Zayıf ama salt'ın işi gizlilik değil,
     // aynı parolanın iki kurulumda aynı token'a düşmemesi.
     let seed = format!(
@@ -292,6 +302,22 @@ pub fn random_salt() -> (String, bool) {
         std::process::id()
     );
     (md5::md5_hex(seed.as_bytes())[..24].to_owned(), false)
+}
+
+/// İşletim sisteminin rastgeleliğiyle anahtarlanmış 24 onaltılık hane.
+///
+/// `RandomState::new()` anahtarlarını süreç başına bir kez işletim
+/// sisteminden alır; iki bağımsız 64 bitlik çıktı için iki farklı sayaç
+/// karılıyor. `Option` çünkü dönüşü imzada dürüst tutmak istiyoruz: bugün
+/// her zaman `Some`.
+fn os_seeded_hex() -> Option<String> {
+    use std::hash::{BuildHasher, RandomState};
+    let state = RandomState::new();
+    let high = state.hash_one(0x6865_6164_u64);
+    let low = state.hash_one(0x7368_656c_u64);
+    let mut hex = format!("{high:016x}{low:016x}");
+    hex.truncate(24);
+    Some(hex)
 }
 
 /// Kayıt isteğini diske yazılabilir bir sunucu kaydına çevirir.
@@ -470,6 +496,17 @@ mod tests {
         );
     }
 
+    /// `/dev/urandom` olmayan sistemlerin (Windows) yolu. Linux'ta
+    /// `random_salt` onu hiç çağırmıyor; bu test olmasa hiç koşmazdı.
+    #[test]
+    fn os_seeded_salts_are_24_hex_digits_and_differ() {
+        let a = os_seeded_hex().unwrap();
+        let b = os_seeded_hex().unwrap();
+        assert_eq!(a.len(), 24, "{a}");
+        assert!(a.bytes().all(|byte| byte.is_ascii_hexdigit()), "{a}");
+        assert_ne!(a, b, "iki çağrı aynı tuzu verdi");
+    }
+
     #[test]
     fn salts_differ_between_calls() {
         let (a, _) = random_salt();
@@ -480,8 +517,7 @@ mod tests {
 
     #[test]
     fn servers_survive_a_file_round_trip_and_stay_private() {
-        let dir = std::env::temp_dir().join(format!("headshell-servers-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_support::TempDir::new("servers");
         let path = dir.join("servers.json");
 
         let servers = vec![RemoteServer {
@@ -508,15 +544,11 @@ mod tests {
         // Parola dosyaya hiç girmemeli.
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(!text.contains("sesame"), "{text}");
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn a_missing_file_is_an_empty_list_but_a_broken_one_is_an_error() {
-        let dir =
-            std::env::temp_dir().join(format!("headshell-servers-bad-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_support::TempDir::new("servers-bad");
         let missing = dir.join("yok.json");
         assert!(load_servers(&missing).unwrap().is_empty());
 
@@ -533,7 +565,5 @@ mod tests {
             load_servers(&future).is_err(),
             "bilinmeyen sürüm okunmamalı"
         );
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 }

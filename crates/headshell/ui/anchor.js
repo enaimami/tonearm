@@ -8,7 +8,8 @@
 // İki kopya zamanla kayar ve kayma kimsenin fark etmediği yerde başlar.
 // Kilit: `fixtures/anchor/position_cases.json` — iki tarafın da okuduğu tek
 // doğruluk kaynağı. Rust tarafını `headshell-core/tests/anchor_parity.rs`,
-// bu tarafı `headshell/tests/anchor_parity.mjs` bağlıyor.
+// bu tarafı `headshell/tests/anchor_parity_js.rs` bağlıyor — dosyayı gömülü
+// QuickJS'te değerlendirerek, `node` istemeden (D-070).
 //
 // **`Math.floor`, `Math.round` değil.** Çekirdek `as u64` ile kırpıyor:
 // `rate 1.001` ile 100 sn'de 100100 değil 100099 ms çıkıyor

@@ -1,21 +1,56 @@
 {
   "name": "ytmusic",
   "display_name": "YouTube Music",
-  "version": "0.3.0",
-  "api": 1,
-  "exec": ["python3", "./main.py"],
+  "version": "0.4.0",
+  "api": 2,
+  "main": "main.js",
   "capabilities": ["search", "stream"],
   "permissions": {
-    "net": ["music.youtube.com", "www.youtube.com"],
-    "fs": []
+    "net": ["music.youtube.com", "*.googlevideo.com"]
   },
   "requires": [
     {
       "name": "yt-dlp",
       "version": "2026.08.19",
-      "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp",
-      "sha256": "1fa6733c37ea6fb51c99ad8fe785e7b7e5f3246c9b980230329d4fb72ed8d4d6"
+      "assets": {
+        "linux-x86_64": {
+          "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp_linux",
+          "sha256": "58162f9bfdc27458ea47bfcb311cf47028f17d8154a8bf7d689861d46399230a"
+        },
+        "linux-aarch64": {
+          "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp_linux_aarch64",
+          "sha256": "b16e4dab368a816cd05d477d698a605a6ae87ccee1c8ffd38fa21d7254141fcc"
+        },
+        "linux-x86_64-musl": {
+          "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp_musllinux",
+          "sha256": "f3dec9cfeaf304cec98290fe41c6ad465d4b747d302473559643e7af24929722"
+        },
+        "linux-aarch64-musl": {
+          "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp_musllinux_aarch64",
+          "sha256": "17b164c4d258be92bb1ad146cb7c336b783aedb380814aabbcb7d52937f77e57"
+        },
+        "macos-x86_64": {
+          "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp_macos",
+          "sha256": "0f192b7ec147ab6288885d6351d9ab67367640029b4377576ef46dd79cf7b202"
+        },
+        "macos-aarch64": {
+          "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp_macos",
+          "sha256": "0f192b7ec147ab6288885d6351d9ab67367640029b4377576ef46dd79cf7b202"
+        },
+        "windows-x86_64": {
+          "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp.exe",
+          "sha256": "66674953fe251b89f4d08c5f0e35e0728679bd67ab3d7d05c0562af101dd3e7a"
+        },
+        "windows-aarch64": {
+          "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp_arm64.exe",
+          "sha256": "05b438997bafc3affdfda9d041353c9d73e04dc842207254b655b0887c4445b0"
+        },
+        "windows-x86": {
+          "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp_x86.exe",
+          "sha256": "a8f91bd41452506bc81ebd2f369b186fea0ee7075413ba00cef9fd346a0a5d0c"
+        }
+      }
     }
   ],
-  "description": "YouTube Music'te arar (InnerTube) ve yt-dlp ile çözdüğü m4a akışını çalar. yt-dlp'yi motor kurar (D-055); eklenti onu aramaz, kurmaz, güncellemez. `cookies` sırrı verilirse yt-dlp'ye çerez dosyası olarak geçirilir — YouTube veri merkezi adreslerine bot duvarı çıkarıyor (D-061). DİKKAT — izin beyanı eksiktir: ses adresi her çözümde değişen bir googlevideo.com ana bilgisayarında duruyor ve izin sözlüğü (D-040) joker kabul etmiyor. Ayrıca yt-dlp bir alt süreç olarak çalışır; onun ağ trafiği bu listede görünmez."
+  "description": "YouTube Music'te arar (InnerTube) ve yt-dlp ile çözdüğü m4a akışını çalar. yt-dlp'yi motor kurar: bu platformun kendi kendine yeten ikilisini indirir ve karmasını doğrular (D-069); sistemde Python gerekmez. `cookies` sırrı verilirse yt-dlp'ye çerez dosyası olarak geçirilir — YouTube veri merkezi adreslerine bot duvarı çıkarıyor (D-061). DİKKAT — yt-dlp motorun hapsettiği bir betik değil, ayrı bir programdır: ağ trafiği bu eklentinin izin listesiyle sınırlanmaz. Linux armv7 (`linux-arm`) için tek dosyalık yayın yok, 32 bit Linux için hiç yok."
 }

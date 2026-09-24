@@ -12,7 +12,7 @@
 </p>
 
 [![Lisans](https://img.shields.io/badge/lisans-MIT%20%7C%20Apache--2.0-2f6feb?style=for-the-badge)](LICENSE-MIT)
-[![Rust](https://img.shields.io/badge/rust-1.85%2B-e07b39?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.87%2B-e07b39?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org)
 [![Platform](https://img.shields.io/badge/linux%20·%20macOS%20·%20windows-3c3833?style=for-the-badge)](#kurulum)
 [![Durum](https://img.shields.io/badge/durum-v0.0.1--beta-ffb454?style=for-the-badge)](#kurulum)
 
@@ -154,6 +154,31 @@ etiketinde üretilir ve [sürüm sayfasına](https://github.com/headshell/headsh
 eklenir. macOS ve Windows paketleri imzasızdır: macOS'ta sağ tık → Aç,
 Windows'ta SmartScreen → Yine de çalıştır.
 
+**Hangi sistemde ne kadar sınandı** — "çalışıyor" ile "derleniyor" ayrı
+şeyler, tablo ikisini ayırıyor:
+
+| Sistem | Hazır paket | Durum |
+|---|---|---|
+| Linux x86_64 | `.deb`, `.rpm`, AppImage, CLI arşivi, AUR | **Sınanıyor** — her değişiklikte CI; gerçek kullanımda ses çalma dahil |
+| Windows 10/11 x64 | `.msi`, kurulum `.exe`'si, CLI arşivi | **CI'da derleme ve testler** (D-070); gerçek bir masaüstünde elle denenmedi |
+| macOS, Apple Silicon ve Intel (evrensel ikili) | `.dmg`, CLI arşivi | **CI'da derleme ve testler** Apple Silicon'da (D-070); Intel yalnızca derleniyor; elle denenmedi |
+| Linux aarch64, musl (Alpine) | yok — kaynaktan | **Denenmedi** — derlenmesi beklenir |
+| FreeBSD, NetBSD, OpenBSD, DragonFly | yok — kaynaktan | **Denenmedi (canary)** — derleme için `libclang` gerekir; ses ve masaüstü kabuğunun orada çalışıp çalışmadığı bilinmiyor |
+
+Hazır Linux paketlerinin istediği en düşük glibc: **2.35** (Ubuntu 22.04,
+Debian 12, Fedora 36 ve sonrası). `v0.0.1-beta` Ubuntu 24.04'te derlenmişti
+ve **2.39** istiyor — Debian 12'de açılmıyor; sonraki sürümden itibaren
+paketler 22.04'te derleniyor.
+
+Veri dizini (kütüphane, eklentiler, ayarlar) her sistemin kendi yerinde durur;
+`HEADSHELL_DATA_DIR` hepsinde önce gelir, `headshell diag` kullanılanı yazar:
+
+| Sistem | Veri dizini |
+|---|---|
+| Linux, BSD | `~/.local/share/headshell` (`$XDG_DATA_HOME` tanımlıysa onun altı) |
+| macOS | `~/Library/Application Support/headshell` |
+| Windows | `%LOCALAPPDATA%\headshell` |
+
 **Arch Linux** — AUR'da iki yol var; `-bin` olan derleme beklemez:
 
 ```bash
@@ -179,16 +204,22 @@ cargo run -p headshell                      # masaüstü penceresi
 
 <br>
 
-Rust 1.85+ (2024 edition). Linux'ta masaüstü kabuğu için:
+Rust 1.87+ (2024 edition) ve bir C derleyicisi (SQLite ile eklenti motoru
+kaynaktan derleniyor). Linux'ta masaüstü kabuğu için:
 `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libasound2-dev`, `librsvg2-dev`,
-`patchelf`.
+`patchelf`. Windows'ta MSVC araç zinciri, macOS'ta Xcode komut satırı
+araçları yeter. BSD'lerde ek olarak `libclang` gerekir (eklenti motorunun
+bağlaması orada derleme anında üretiliyor).
 
-Eklentiler için Python 3.9+ gerekir — gömülü değil, sistemden kullanılır.
-Python yoksa `headshell`'un geri kalanı çalışır, yalnızca eklenti sağlayıcıları
-düşer ve sebebini söyler. Eklentilerin **paketleri** için bir şey kurman
-gerekmez: onları motor indirir (`headshell plugin install <ad>`), sabitlenmiş
-sürümden ve sha256 doğrulayarak, senin veri dizinine. Sisteme dokunulmaz,
-root istenmez, `pip` gerekmez.
+Hazır Linux paketleri **Ubuntu 22.04'te** derlenir: bir ikili, derlendiği
+sistemin glibc'sinden eskisinde açılmaz. Kendin derlersen ikili, derlediğin
+makineden eski sistemlerde açılmayabilir.
+
+Eklentiler için **hiçbir şey kurman gerekmez.** Eklenti motoru (QuickJS)
+`headshell`'un içinde geliyor; eklentilerin ihtiyaç duyduğu araçları
+(YouTube Music için yt-dlp) motor indirir — `headshell plugin install <ad>`,
+senin platformunun kendi kendine yeten ikilisini, sabitlenmiş sürümden ve
+sha256 doğrulayarak, senin veri dizinine. Python, `pip`, root gerekmez.
 
 </details>
 
@@ -275,14 +306,17 @@ headshell stats --year 2024 --json | jq '.report.top_artists[0]'
 | **Yerel dosyalar** | ✅ Çekirdekte | FLAC, MP3, OGG/Vorbis, M4A/AAC |
 | **Subsonic / Navidrome** | ✅ Çekirdekte | Gerçek sunucuda doğrulandı |
 | **Jellyfin** | ✅ Çekirdekte | Gerçek sunucuda doğrulandı |
-| **SoundCloud** | ✅ Eklenti | Python 3.9+, başka bir şey gerekmez |
-| **YouTube Music** | ✅ Eklenti | yt-dlp'yi motor indirir, sha256 doğrular |
-| **Torrent (Torznab)** | ⚠️ Eklenti | Çalışıyor, ama **kaynaktan derlenmesi** gerekiyor |
+| **SoundCloud** | ✅ Eklenti | Hiçbir şey gerekmez |
+| **YouTube Music** | ✅ Eklenti | yt-dlp'nin platform ikilisini motor indirir, sha256 doğrular |
+| **Torrent (Torznab)** | ⏸️ Park edildi | Eski eklenti protokolüne yazılmıştı; yeni motora sonra taşınacak |
 | **Spotify çalma** | ❌ Yok | Ve olmayacak — içe aktarma zaten export dosyasından |
 
-Eklentiler **ayrı süreçte**, JSON-RPC ile konuşur: biri çökerse uygulama
-düşmez, ve eklenti herhangi bir dilde yazılabilir. Her eklenti kurulmadan
-önce neye erişeceğini beyan eder ve onayını ister.
+Eklentiler JavaScript'le yazılır ve `headshell`'un içine gömülü **QuickJS**
+motorunda koşar: kullanıcının makinesinde Python, Node ya da başka bir
+çalışma zamanı gerekmez. Her eklenti neye erişeceğini beyan eder ve onayını
+ister — ve beyan **zorlanır**: eklenti yalnızca beyan ettiği adreslere
+bağlanabilir, dosya sistemine erişemez. Takılan ya da hata veren bir eklenti
+uygulamayı düşürmez.
 → [eklenti yazma rehberi](docs/eklenti-yazma.md)
 
 ---
@@ -307,7 +341,7 @@ düşmez, ve eklenti herhangi bir dilde yazılabilir. Her eklenti kurulmadan
 - [x] **Kimlik & istatistik** — içe aktarma, kanonik kimlik zinciri, SQLite, istatistik motoru
 - [x] **Sleeve** — SVG/PNG kart, kare ve hikâye
 - [x] **Çalma** — yerel dosyalar, Subsonic, Jellyfin, scrobbler, TUI
-- [x] **Eklentiler** — alt süreç + JSON-RPC protokolü, üç sağlayıcı, AcoustID parmak izi
+- [x] **Eklentiler** — gömülü QuickJS motoru, zorlanan izinler, iki sağlayıcı, AcoustID parmak izi
 - [x] **Masaüstü** — Tauri arayüzü ve sürümlenmiş CSS tema sözleşmesi
 - [ ] **Odalar** — birlikte senkron dinleme; ses röle edilmez, yalnızca zaman çapası geçer
 - [ ] **Sosyal graf** — arkadaşlık kurulmaz, birlikte dinlemelerden türetilir

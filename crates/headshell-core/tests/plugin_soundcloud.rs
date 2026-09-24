@@ -1,9 +1,11 @@
 //! SoundCloud referans eklentisi, **gerçek SoundCloud'a karşı** (Faz 2 §2.2).
 //!
-//! `plugin_process.rs` protokolü sabit kataloglu bir fixture'la sınıyor; burada
+//! `plugin_script.rs` sözleşmeyi sabit kataloglu bir fixture'la sınıyor; burada
 //! sınanan şey başka: `plugins/soundcloud` gerçek bir servise bağlanıyor ve
 //! zincirin tamamı — client_id keşfi, arama, akış adresi çözümü — canlı olarak
-//! yürüyor.
+//! yürüyor. D-069'dan beri eklenti gömülü QuickJS'te koşuyor: ağa yalnızca
+//! manifestin izin verdiği ana bilgisayarlardan çıkabiliyor, ve bu testler o
+//! iznin gerçek servis için **yeterli** olduğunun da kanıtı.
 //!
 //! **Bu testler varsayılan koşuma dahildir** (D-043). Bilinçli bir seçim ve
 //! bir bedeli var: SoundCloud düştüğünde ya da web yüzeyini değiştirdiğinde
@@ -22,6 +24,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod support;
+
 use std::path::{Path, PathBuf};
 
 use headshell_core::config::Config;
@@ -34,15 +38,6 @@ use headshell_core::secrets::Secrets;
 /// Eklentinin repodaki kaynağı (fixture değil — kullanıcıya dağıtılan dosya).
 fn plugin_source_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/soundcloud")
-}
-
-fn python_available() -> bool {
-    std::process::Command::new("python3")
-        .arg("--version")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
 }
 
 /// SoundCloud'a TCP ile ulaşılabiliyor mu.
@@ -62,10 +57,6 @@ fn soundcloud_reachable() -> bool {
 
 /// Testin koşulup koşulamayacağını söyler; koşulamıyorsa sebebini yazar.
 fn prerequisites_met(test: &str) -> bool {
-    if !python_available() {
-        eprintln!("{test}: python3 yok — atlanıyor (bu bir başarısızlık değil)");
-        return false;
-    }
     if !soundcloud_reachable() {
         eprintln!("{test}: soundcloud.com:443'e ulaşılamadı — atlanıyor (ağ yok sayılıyor)");
         return false;
@@ -73,21 +64,15 @@ fn prerequisites_met(test: &str) -> bool {
     true
 }
 
-fn temp_config(name: &str) -> Config {
-    let dir = std::env::temp_dir().join(format!(
-        "headshell-soundcloud-{}-{}-{name}",
-        std::process::id(),
-        jiff::Timestamp::now().as_nanosecond()
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    Config::with_data_dir(dir)
+fn temp_config(name: &str) -> support::TestConfig {
+    support::TestConfig::new(&format!("soundcloud-{name}"))
 }
 
 /// Eklentiyi repodan veri dizinine kurar — kullanıcının yaptığı şeyin aynısı.
 fn install(config: &Config) -> PluginProvider {
     let dir = config.plugins_dir().join("soundcloud");
     std::fs::create_dir_all(&dir).unwrap();
-    for file in ["main.py", "plugin.json"] {
+    for file in ["main.js", "plugin.json"] {
         std::fs::copy(plugin_source_dir().join(file), dir.join(file)).unwrap();
     }
 
@@ -190,7 +175,8 @@ async fn a_search_hit_resolves_to_a_playable_http_stream() {
                 break;
             }
             Ok(None) => refusals.push(format!("{}: çalınamaz", hit.id)),
-            Err(err) => refusals.push(format!("{}: {err}", hit.id)),
+            // `chain_text`: `Display` yalnızca `ADIM: X` basıyor (D-061'in dersi).
+            Err(err) => refusals.push(format!("{}: {}", hit.id, err.chain_text())),
         }
     }
 

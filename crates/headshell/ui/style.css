@@ -784,3 +784,10 @@ kbd {
 .toast.info .stage {
   color: var(--headshell-success);
 }
+
+/* Açılış hatası penceresi (D-070): uzun hata satırları yatay kaydırma
+   yerine sarılır. */
+.startup-error pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+}

@@ -36,17 +36,20 @@ pub enum Stage {
     ProviderCall,
     /// Eklenti keşfi: manifest okuma, doğrulama, izin onayı (Faz 2).
     PluginLoad,
-    /// Eklenti motoru: Python'u bulma, beyan edilen eserleri çözme ve kurma.
+    /// Eklenti motorunun eser tarafı: beyan edilen araçları (yt-dlp) bu
+    /// platform için çözme, indirme, doğrulama ve kurma (D-055, D-069).
     ///
     /// `PluginLoad`'dan ayrı: "manifest bozuk" ile "manifest doğru ama
     /// istediği eser kurulu değil" farklı tanılardır ve farklı şeyler
     /// gerektirir — biri eklentiyi düzeltmeyi, öteki bir kurulum adımını (K9).
     PluginRuntime,
-    /// Eklenti sürecini başlatma ve el sıkışma — sürüm uyumu burada denetlenir.
+    /// Eklentiyi başlatma: betiği okuma, QuickJS'te değerlendirme ve dışa
+    /// aktardığı fonksiyonları beyanıyla karşılaştırma (D-069).
     ///
-    /// `ProviderCall`'dan ayrı: "eklenti hiç açılmadı" ile "eklenti açıldı ama
-    /// bu çağrıya hayır dedi" farklı tanılardır (K9).
-    PluginHandshake,
+    /// `ProviderCall`'dan ayrı: "eklenti hiç ayağa kalkmadı" ile "eklenti
+    /// ayakta ama bu çağrıya hayır dedi" farklı tanılardır (K9). Eski adı
+    /// `PLUGIN_HANDSHAKE`'ti; el sıkışan bir alt süreç artık yok.
+    PluginStart,
     /// HTTP taşıma katmanı: bağlanma, zaman aşımı, TLS, durum kodu.
     ///
     /// `ProviderCall`'dan ayrı: "sunucuya ulaşamadım" ile "sunucu isteğimi
@@ -79,7 +82,7 @@ impl Stage {
             Self::ProviderCall => "PROVIDER_CALL",
             Self::PluginLoad => "PLUGIN_LOAD",
             Self::PluginRuntime => "PLUGIN_RUNTIME",
-            Self::PluginHandshake => "PLUGIN_HANDSHAKE",
+            Self::PluginStart => "PLUGIN_START",
             Self::NetworkRequest => "NETWORK_REQUEST",
             Self::SleeveRender => "SLEEVE_RENDER",
             Self::PlaybackResolve => "PLAYBACK_RESOLVE",

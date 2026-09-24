@@ -1114,14 +1114,7 @@ mod tests {
     #[test]
     fn catalog_survives_reopening_the_database() {
         // Asıl amaç buydu: indeks bellekte değil diskte.
-        let dir = std::env::temp_dir().join(format!(
-            "headshell-catalog-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_support::TempDir::new("catalog");
         let db = dir.join("library.db");
         let provider = ProviderId::new("local");
 
@@ -1141,8 +1134,6 @@ mod tests {
         let hits = library.search_catalog("radiohead", 10).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].track.title, "Creep");
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -1320,14 +1311,7 @@ mod tests {
     fn migrating_a_v1_database_keeps_its_listens() {
         // v2 göçü var olan kurulumları bozmamalı: kullanıcının import ettiği
         // geçmiş, şema yükseldiğinde yerinde kalmalı.
-        let dir = std::env::temp_dir().join(format!(
-            "headshell-migrate-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_support::TempDir::new("migrate");
         let db = dir.join("library.db");
 
         // v1 şemasını elle kur ve bir dinleme yaz.
@@ -1367,7 +1351,5 @@ mod tests {
             )
             .unwrap();
         assert_eq!(library.catalog_len(&provider).unwrap(), 1);
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 }

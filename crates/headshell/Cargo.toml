@@ -29,13 +29,20 @@ tokio = { version = "1.53.1", features = ["rt", "time", "sync", "macros"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 # D-030: bağımlılık tek yönlü — bu paket `headshell-cli`'yi görmez.
-headshell-core = { workspace = true, features = ["render-png", "audio", "http-client"] }
+headshell-core = { workspace = true, features = ["render-png", "audio", "http-client", "plugin-engine"] }
 # Yerel dosya diyaloğu: export arşivini ve kartın kaydedileceği yeri seçmek
 # için. Kabuğa ait bir bağımlılık — `headshell-core`'un ağacına girmez, mobil
 # binary boyutunu etkilemez. İzni `capabilities/default.json`'da yalnızca
 # `open`/`save` ile sınırlı: diyalog bir yol **döndürür**, dosyayı okuyup
 # yazan taraf yine çekirdektir.
 tauri-plugin-dialog = "2"
+
+[dev-dependencies]
+# D-070: `tests/anchor_parity_js.rs` webview'in çapa formülünü (`ui/anchor.js`)
+# eskiden `node` ile koşturuyordu. Artık çekirdeğin eklenti motoruyla aynı
+# QuickJS ile: ağaca yeni crate girmiyor (çekirdek zaten getiriyor), testi
+# koşturan makineye de bir çalışma zamanı kurdurulmuyor.
+rquickjs = { version = "0.14", default-features = false, features = ["std"] }
 
 [lints]
 workspace = true

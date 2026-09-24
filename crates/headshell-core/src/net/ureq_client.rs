@@ -26,6 +26,12 @@ const MAX_BODY_BYTES: u64 = 32 * 1024 * 1024;
 /// kalmasın.
 const TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Eklenti isteklerinin süresi — çağrı bütçesinin (20 sn) altında kalmalı.
+const PLUGIN_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Bir eserin gövdesini okumanın üst sınırı. 40 MB ~45 KB/s'de iner.
+const DOWNLOAD_BODY_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+
 /// `ureq` tabanlı HTTP istemcisi.
 pub struct UreqClient {
     agent: ureq::Agent,
@@ -50,6 +56,48 @@ impl UreqClient {
             .timeout_global(Some(TIMEOUT))
             // Durum kodunu hata değil veri olarak istiyoruz: 401 ile
             // "bağlanamadım" farklı tanılardır (K9).
+            .http_status_as_error(false)
+            .user_agent(concat!("headshell/", env!("CARGO_PKG_VERSION")))
+            .build();
+        Self {
+            agent: ureq::Agent::new_with_config(config),
+        }
+    }
+
+    /// Eklentilere verilen istemci: **yönlendirme izlemez** (D-069).
+    ///
+    /// İzin denetimi istek adresine bakıyor; istemci yönlendirmeyi kendisi
+    /// izleseydi izinli bir adres eklentiyi izinsiz bir yere taşıyabilirdi.
+    /// 3xx olduğu gibi döner, her adımı motor izler ve yeniden sorar.
+    ///
+    /// Süre de daha kısa: bir eklenti çağrısının bütçesi 20 sn ve tek bir
+    /// istek bunun hepsini yememeli — yavaş bir istek eklentiye bir hata
+    /// olarak dönsün, çağrının kendisi zaman aşımına uğramasın.
+    #[must_use]
+    pub fn without_redirects() -> Self {
+        let config = ureq::Agent::config_builder()
+            .timeout_global(Some(PLUGIN_TIMEOUT))
+            .http_status_as_error(false)
+            .max_redirects(0)
+            .user_agent(concat!("headshell/", env!("CARGO_PKG_VERSION")))
+            .build();
+        Self {
+            agent: ureq::Agent::new_with_config(config),
+        }
+    }
+
+    /// Motorun eser indirmesi için istemci (D-069).
+    ///
+    /// Genel zaman aşımı **yok**: 40 MB'lık bir ikili yavaş bir bağlantıda
+    /// 30 saniyeyi rahatça geçer ve genel süre gövdeyi okumayı da kapsıyor.
+    /// Yerine her aşamanın kendi süresi var — bağlanamayan ya da hiç cevap
+    /// vermeyen bir sunucu yine takılı bırakmaz.
+    #[must_use]
+    pub fn for_downloads() -> Self {
+        let config = ureq::Agent::config_builder()
+            .timeout_connect(Some(TIMEOUT))
+            .timeout_recv_response(Some(TIMEOUT))
+            .timeout_recv_body(Some(DOWNLOAD_BODY_TIMEOUT))
             .http_status_as_error(false)
             .user_agent(concat!("headshell/", env!("CARGO_PKG_VERSION")))
             .build();
@@ -146,6 +194,27 @@ impl UreqClient {
             .and_then(|value| value.parse::<u64>().ok());
 
         Ok((length, Box::new(response.into_body().into_reader())))
+    }
+}
+
+impl crate::plugin::artifact::ArtifactSource for UreqClient {
+    fn open(&self, url: &str) -> Result<crate::plugin::artifact::ArtifactResponse> {
+        let response = self
+            .agent
+            .get(url)
+            .call()
+            .map_err(|err| super::network_err(url, err))?;
+        let status = response.status().as_u16();
+        let length = response
+            .headers()
+            .get("content-length")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u64>().ok());
+        Ok(crate::plugin::artifact::ArtifactResponse {
+            status,
+            length,
+            body: Box::new(response.into_body().into_reader()),
+        })
     }
 }
 

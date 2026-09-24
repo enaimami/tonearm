@@ -121,10 +121,12 @@ paketini zaten `makepkg` kuruyor, yani bundler'ın işi tekrar olurdu — ve
 `tauri-cli` bir yapım bağımlılığı olarak gelirdi. Düz `cargo build` yeter;
 karşılığında `.desktop` girdisini ve ikonları PKGBUILD elle kuruyor.
 
-## Torrent eklentisi pakete girmiyor
+## Eklentilerin çalışma zamanı bağımlılığı yok
 
-Eklenti motoru eklentileri `~/.local/share/headshell/plugins/<ad>/` altında
-arıyor ve `plugin.json`'daki `exec` o dizine göreli. `/usr/bin` altındaki bir
-ikiliyi görmez, yani paketin içine konsa da kullanılamazdı. Sistem çapında
-eklenti dizini bir çekirdek kararı — PLAN.md §2.8 madde 5 ve D-049, ilk
-sürümden sonra.
+`python` ve `yt-dlp` `optdepends`'ten çıktı (D-069): eklenti motoru (QuickJS)
+ikilinin içinde, ve YouTube Music eklentisinin istediği yt-dlp'yi motor,
+platformun kendi kendine yeten ikilisi olarak kullanıcının veri dizinine
+indiriyor. Sistemin `yt-dlp` paketi kullanılmıyor — sürümü manifest
+sabitliyor ve karması doğrulanıyor.
+
+Torrent eklentisi park edildi (`parked/`, D-069) ve hiçbir pakete girmiyor.

@@ -52,7 +52,7 @@ indeksidir; bir kuralı uygulamadan önce oradaki metni oku.
 | **K2** | İçe aktarma export dosyalarından yapılır, API'den değil |
 | **K3** | Ses asla röle edilmez, yalnızca pozisyon senkronlanır |
 | **K4** | Spotify çekirdeğe girmez |
-| **K5** | Eklentiler alt süreç + JSON-RPC ile konuşur |
+| **K5** | Eklentiler gömülü JS motorunda (QuickJS) koşar; dışarıya yalnızca `host`'tan çıkar |
 | **K6** | Kanonik kimlik zinciri sırası: ISRC → MBID → bulanık → AcoustID |
 | **K7** | Çekirdek API'si `uniffi` ile ifade edilebilir olmalı |
 | **K8** | `headshell-core` içinde `unwrap()` / `expect()` / `panic!()` yok |
@@ -85,7 +85,7 @@ headshell/
 │   │   │   ├── sleeve/         # paylaşılabilir kart (svg + png)
 │   │   │   ├── library/        # SQLite + FTS
 │   │   │   ├── provider/       # sağlayıcı trait'leri + local + remote/{subsonic,jellyfin}
-│   │   │   ├── plugin/         # alt süreç + JSON-RPC eklentiler + motor (runtime)
+│   │   │   ├── plugin/         # QuickJS motoru (script) + host kapıları + eserler (artifact)
 │   │   │   ├── playback/       # symphonia + cpal
 │   │   │   ├── net/            # HTTP trait'i + ureq istemcisi + fake
 │   │   │   ├── diag/           # tanılama, aşağıya bak
@@ -94,13 +94,13 @@ headshell/
 │   │   └── tests/              # fixtures/ üzerinden entegrasyon testleri
 │   ├── headshell-cli/               # ince kabuk (ikili adı: `headshell`)
 │   │   └── tests/snapshots/    # --json çıktısının snapshot'ları
-│   ├── headshell/                   # Tauri masaüstü kabuğu (ikili adı: `headshell-desktop`)
-│   │   ├── src/                # main + env + state + core_thread + commands
-│   │   ├── ui/                 # düz statik webview — bundler yok, npm yok
-│   │   ├── icons/              # icon.svg kaynak, ötekiler üretilir (icons/README.md)
-│   │   └── themes/             # iki referans tema (contrast, daylight)
-│   └── headshell-plugin-torrent/    # torrent sağlayıcısı — ayrı ikili, JSON-RPC (D-047)
-├── plugins/                    # kurulabilir eklentiler: soundcloud, ytmusic, torrent
+│   └── headshell/                   # Tauri masaüstü kabuğu (ikili adı: `headshell-desktop`)
+│       ├── src/                # main + env + state + core_thread + commands
+│       ├── ui/                 # düz statik webview — bundler yok, npm yok
+│       ├── icons/              # icon.svg kaynak, ötekiler üretilir (icons/README.md)
+│       └── themes/             # iki referans tema (contrast, daylight)
+├── plugins/                    # kurulabilir eklentiler (JS, api 2): soundcloud, ytmusic
+├── parked/                     # DERLENMEYEN, silinmemiş kod — torrent (D-069)
 ├── packaging/                  # dağıtım: copyright, .desktop girdisi, aur/ (D-066)
 ├── docs/                       # eklenti yazma rehberi, tanıtım sayfası
 ├── spike/                      # ATILABILIR prototipler — workspace DIŞI, CI DIŞI
@@ -110,15 +110,12 @@ headshell/
 `spike/` derlenmez, test edilmez, CI'ya girmez. Eşleştirme sezgilerini önce burada
 dene; doğruluk tatmin edici olunca `identity/`'ye porta.
 
-`headshell-plugin-torrent` neden `crates/` altında ama çekirdeğin dışında: eklentidir
-(K5), ama Rust yazılmıştır ve aynı workspace'te derlenir. `headshell-core`'un
-bağımlılık ağacına girmez — D-047.
-
-> Bu düzen **kalıcı.** D-050 S3 bir zamanlar torrent'ı çekirdeğe feature'lı bir
-> sağlayıcı olarak taşımayı kararlaştırmıştı; **D-056 o kararı geri aldı.**
-> Torrent eklenti olarak kalıyor, yukarıdaki ağaç doğru. Geriye kalan borç
-> taşıma değil **dağıtım**: eklenti kullanıcıya `cargo build --release`
-> yaptırıyor ve bu D-049'u ihlal ediyor — ilk sürümden sonraya ertelendi.
+`parked/` workspace'in `exclude`'unda: derlenmez, test edilmez, CI'a girmez.
+`spike/`'tan farkı, oradaki kodun atılabilir değil **geri dönmesi beklenen**
+kod olması. Bugün tek sakini torrent sağlayıcısı: api 1'in alt süreç
+protokolüne yazılmıştı ve eklenti sistemi QuickJS'e geçerken (D-069)
+kullanıcının kararıyla taşınmadı. Geri dönüşün açık soruları
+`parked/README.md`'de; karar verilmeden workspace'e geri alınmaz.
 
 ---
 
@@ -132,7 +129,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 ```
 
-Aynılarının kısayolu `Makefile`'da; `make` ya da `make help` hedefleri listeler.
+Aynılarının kısayolu `Makefile`'da (yalnızca Unix; Windows'ta komutlar doğrudan
+koşulur); `make` ya da `make help` hedefleri listeler.
 `make gates` üç kapıyı CI sırasıyla koşar (biçim en ucuzu, en önce düşsün),
 `make core-features` çekirdeği feature'lar birleşmeden denetler (D-054),
 `make cli ARGS="stats --year 2024"` CLI'yi çağırır, `make aur-test PKG=…`
@@ -209,7 +207,7 @@ kaç kayıt geldi, kaçı ISRC ile, kaçı bulanık, kaçı eşleşmedi.
 - Genel API'de `async` — çalışma zamanını çağıran seçsin, çekirdek `#[tokio::main]` kurmasın.
 - Yeni bağımlılık eklemeden önce sor. Ağaç küçük kalmalı (mobil binary boyutu).
   Zorunlu değilse opsiyonel bir cargo feature arkasına koy (`render-png`, `audio`,
-  `fingerprint`, `http-client`).
+  `fingerprint`, `http-client`, `plugin-engine`).
 - Ağ ve dosya sistemine dokunan her şey trait arkasında olsun ki testler sahte (fake) kullanabilsin.
 - Kimlikler tip güvenli: `CanonicalId`, `ProviderTrackId`, `ListenId` ayrı newtype'lar, `String` değil.
 
@@ -227,6 +225,18 @@ kaç kayıt geldi, kaçı ISRC ile, kaçı bulanık, kaçı eşleşmedi.
   Her değişiklikte doğruluk oranını ölç — bu sayı projenin en önemli metriğidir:
   `cargo test -p headshell-core --test identity_accuracy`
 - CLI için: alt komutların `--json` çıktısını snapshot testiyle doğrula.
+- **Testler makinede iz bırakmaz (D-070).** Geçici dizin kendini silen bir
+  yardımcıyla açılır: çekirdekte `crate::test_support::TempDir`/`TestConfig`,
+  entegrasyon testlerinde `tests/support/mod.rs` (kök `target/tmp`). Doğrudan
+  `std::env::temp_dir()` altına dizin açma — testler bir zamanlar orada 1,2 GB
+  bırakmıştı.
+- **Testler dışarıda bir program istemez.** `node`, `python3`, `sh` gibi bir
+  çalışma zamanına yaslanan test başka bir makinede ya başarısız olur ya
+  sessizce atlanır. JS gerekiyorsa gömülü QuickJS kullanılır (D-070); bir
+  işletim sistemine özgü program gerekiyorsa test o sisteme kapılanır
+  (`cfg(unix)` / `cfg(windows)`) ve öteki sistemin karşılığı yazılır.
+- Yol karşılaştırmasında dize değil `PathBuf` kullan: `/` ve `\` ayırıcısı
+  Windows'ta ikisi de geçerli, dize karşılaştırması orada yanlış düşer.
 
 ---
 
@@ -241,7 +251,8 @@ kaç kayıt geldi, kaçı ISRC ile, kaçı bulanık, kaçı eşleşmedi.
 | "Asla yapma" listesi | PLAN.md — ASLA YAPMA |
 | Terimler (canonical id, anchor, listen…) | PLAN.md — SÖZLÜK |
 | Hangi platform hukuken hangi tarafta | PLAN.md — EK: Yayın platformları |
-| Eklenti nasıl yazılır | docs/eklenti-yazma.md |
+| Eklenti nasıl yazılır (JS, `host` API'si) | docs/eklenti-yazma.md |
+| Park edilmiş kod neden orada | parked/README.md |
 | Tema nasıl yazılır | crates/headshell/themes/README.md |
 | Masaüstü paketleri nasıl üretilir | .github/workflows/release.yml, crates/headshell/icons/README.md |
 | AUR paketi nasıl yayımlanır | packaging/aur/README.md |

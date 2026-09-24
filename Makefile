@@ -65,12 +65,12 @@ test: ## Bütün testler
 # bakılır — ci.yml'nin ikinci işi budur.
 core-features: ## Çekirdeği feature'lar birleşmeden denetle
 	cargo clippy -p headshell-core --all-targets -- -D warnings
-	@for f in audio http-client fingerprint render-png; do \
+	@for f in audio http-client fingerprint render-png plugin-engine; do \
 	  echo "--- feature: $$f"; \
 	  cargo clippy -p headshell-core --all-targets --features "$$f" -- -D warnings || exit 1; \
 	done
 	cargo clippy -p headshell-core --all-targets \
-	  --features audio,http-client,fingerprint,render-png -- -D warnings
+	  --features audio,http-client,fingerprint,render-png,plugin-engine -- -D warnings
 
 # --- tek tek sınamalar -------------------------------------------------------
 

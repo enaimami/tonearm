@@ -1,6 +1,25 @@
 //! Veri dizini ve yapılandırma.
 //!
 //! Yol çözümlemesi çekirdekte: CLI, GUI ve mobil aynı dizini bulmalı.
+//!
+//! ## Platformlar (D-070)
+//!
+//! Veri dizini her işletim sisteminin **kendi** yerinde durur; ilk yazım
+//! yalnızca `HOME`'a bakıyordu ve standart bir Windows `HOME` tanımlamadığı
+//! için orada hiç açılmıyordu:
+//!
+//! | sistem | varsayılan |
+//! |---|---|
+//! | Linux, BSD ve öteki Unix'ler | `$XDG_DATA_HOME/headshell` → `~/.local/share/headshell` |
+//! | macOS | `~/Library/Application Support/headshell` |
+//! | Windows | `%LOCALAPPDATA%\headshell` |
+//!
+//! `HEADSHELL_DATA_DIR` her sistemde önce gelir; `XDG_DATA_HOME` açıkça
+//! tanımlanmışsa macOS ve Windows'ta da uyulur — kullanıcı bilerek koymuştur.
+//!
+//! Ortam okuması saf fonksiyonlarda ([`resolve_data_dir`], [`resolve_music_dirs`]):
+//! Rust 2024'te `set_var` `unsafe` ve workspace `unsafe_code = "forbid"`
+//! diyor, yani Windows'un ve macOS'un dalları bu yolla her makinede sınanıyor.
 
 use std::path::{Path, PathBuf};
 
@@ -10,7 +29,10 @@ use crate::error::{Error, ErrorKind, Result};
 /// Veri dizinini elle vermek için ortam değişkeni (testler ve taşınabilir kurulum).
 pub const DATA_DIR_ENV: &str = "HEADSHELL_DATA_DIR";
 
-/// Müzik dizinlerini elle vermek için ortam değişkeni (`:` ile ayrılmış).
+/// Müzik dizinlerini elle vermek için ortam değişkeni.
+///
+/// Liste `PATH` gibi yazılır: Unix'te `:`, Windows'ta `;` ile ayrılır —
+/// `C:\Müzik` gibi bir yolun içindeki iki nokta ayırıcı sayılmasın diye.
 pub const MUSIC_DIRS_ENV: &str = "HEADSHELL_MUSIC_DIRS";
 
 /// Çekirdeğin çalışması için gereken yollar.
@@ -28,33 +50,25 @@ impl Config {
         }
     }
 
-    /// Veri dizinini ortamdan bulur.
-    ///
-    /// Sıra: `HEADSHELL_DATA_DIR` → `XDG_DATA_HOME/headshell` → `HOME/.local/share/headshell`.
+    /// Veri dizinini ortamdan bulur — bu işletim sisteminin kuralıyla.
     ///
     /// # Errors
-    /// Hiçbiri bulunamazsa — sessizce geçici dizine düşmek, kullanıcının
-    /// geçmişini fark ettirmeden kaybetmek demektir.
+    /// Hiçbir aday bulunamazsa. Sessizce geçici dizine düşmek, kullanıcının
+    /// geçmişini fark ettirmeden kaybetmek demektir; hata bu sistemde hangi
+    /// değişkenlere bakıldığını söyler.
     pub fn discover() -> Result<Self> {
-        if let Some(dir) = non_empty_env(DATA_DIR_ENV) {
-            return Ok(Self::with_data_dir(dir));
+        match resolve_data_dir(std::env::consts::OS, &non_empty_env) {
+            Some(dir) => Ok(Self::with_data_dir(dir)),
+            None => Err(Error::new(
+                Stage::ConfigLoad,
+                ErrorKind::NotFound {
+                    what: format!(
+                        "veri dizini — bu sistemde bakılan değişkenlerin hiçbiri tanımlı değil: {}",
+                        data_dir_sources(std::env::consts::OS).join(", ")
+                    ),
+                },
+            )),
         }
-        if let Some(dir) = non_empty_env("XDG_DATA_HOME") {
-            return Ok(Self::with_data_dir(PathBuf::from(dir).join("headshell")));
-        }
-        if let Some(home) = non_empty_env("HOME") {
-            return Ok(Self::with_data_dir(
-                PathBuf::from(home).join(".local/share/headshell"),
-            ));
-        }
-        Err(Error::new(
-            Stage::ConfigLoad,
-            ErrorKind::NotFound {
-                what: format!(
-                    "veri dizini — {DATA_DIR_ENV}, XDG_DATA_HOME ya da HOME değişkenlerinden hiçbiri tanımlı değil"
-                ),
-            },
-        ))
     }
 
     /// Veri dizini.
@@ -101,10 +115,9 @@ impl Config {
         self.data_dir.join("plugins.json")
     }
 
-    /// Bir eklentinin yazabileceği kendi dizini.
-    ///
-    /// Eklentinin gördüğü tek yazılabilir yol bu — izin beyanı zorlanmasa da
-    /// (D-040) çekirdeğin kendi eliyle verdiği şey daraltılmış olur.
+    /// Bir eklentinin durum dizini: `host.storage`'ın dosyası ve motorun
+    /// kurduğu araçların çalışma dizini (D-069). Eklentinin kendisi dosya
+    /// sistemine dokunamaz; bu dizini onun adına motor kullanır.
     #[must_use]
     pub fn plugin_state_dir(&self, plugin: &str) -> PathBuf {
         self.plugins_dir().join(plugin).join("state")
@@ -129,32 +142,14 @@ impl Config {
 
     /// Yerel sağlayıcının tarayacağı müzik dizinleri.
     ///
-    /// Sıra: `HEADSHELL_MUSIC_DIRS` (`:` ile ayrılmış) → `XDG_MUSIC_DIR` →
-    /// `HOME/Müzik` → `HOME/Music`. Hiçbiri yoksa boş liste döner —
+    /// Sıra: `HEADSHELL_MUSIC_DIRS` → `XDG_MUSIC_DIR` → bu sistemin olağan
+    /// müzik dizini (Windows'ta `%USERPROFILE%\Music`, macOS'ta `~/Music`,
+    /// ötekilerde `~/Müzik` ve `~/Music`). Hiçbiri yoksa boş liste döner —
     /// uydurma bir yol seçmek, kullanıcının müziğini "bulamadım" yerine
     /// "yanlış yerde aradım" hatasına çevirir.
     #[must_use]
     pub fn music_dirs(&self) -> Vec<PathBuf> {
-        if let Some(raw) = non_empty_env(MUSIC_DIRS_ENV) {
-            return raw
-                .split(':')
-                .map(str::trim)
-                .filter(|part| !part.is_empty())
-                .map(PathBuf::from)
-                .collect();
-        }
-        if let Some(dir) = non_empty_env("XDG_MUSIC_DIR") {
-            return vec![PathBuf::from(dir)];
-        }
-        if let Some(home) = non_empty_env("HOME") {
-            let home = PathBuf::from(home);
-            // Türkçe ve İngilizce yerelin varsayılan adları.
-            return [home.join("Müzik"), home.join("Music")]
-                .into_iter()
-                .filter(|dir| dir.is_dir())
-                .collect();
-        }
-        Vec::new()
+        resolve_music_dirs(std::env::consts::OS, &non_empty_env)
     }
 
     /// Veri dizinini oluşturur.
@@ -171,9 +166,237 @@ fn non_empty_env(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|v| !v.trim().is_empty())
 }
 
+/// Bir işletim sisteminde veri dizininin nereden bulunacağı, sırasıyla —
+/// hata mesajı ve belge bu listeyi kullanır.
+fn data_dir_sources(os: &str) -> Vec<&'static str> {
+    let default: &[&'static str] = match os {
+        "windows" => &["LOCALAPPDATA", "USERPROFILE"],
+        _ => &["HOME"],
+    };
+    [DATA_DIR_ENV, "XDG_DATA_HOME"]
+        .into_iter()
+        .chain(default.iter().copied())
+        .collect()
+}
+
+/// Veri dizinini verilen ortamdan çözer. `os`, `std::env::consts::OS`'un
+/// değeri (`"linux"`, `"macos"`, `"windows"`, `"freebsd"`…).
+fn resolve_data_dir(os: &str, env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    if let Some(dir) = env(DATA_DIR_ENV) {
+        return Some(PathBuf::from(dir));
+    }
+    if let Some(dir) = env("XDG_DATA_HOME") {
+        return Some(PathBuf::from(dir).join("headshell"));
+    }
+    match os {
+        // `LOCALAPPDATA` her kullanıcı oturumunda tanımlı. Olmadığı ender
+        // durumda (bazı hizmet hesapları) aynı yer profilden kurulur.
+        "windows" => env("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .or_else(|| {
+                env("USERPROFILE").map(|home| PathBuf::from(home).join("AppData").join("Local"))
+            })
+            .map(|base| base.join("headshell")),
+        "macos" => env("HOME").map(|home| {
+            PathBuf::from(home)
+                .join("Library")
+                .join("Application Support")
+                .join("headshell")
+        }),
+        _ => env("HOME").map(|home| {
+            PathBuf::from(home)
+                .join(".local")
+                .join("share")
+                .join("headshell")
+        }),
+    }
+}
+
+/// Müzik dizinlerini verilen ortamdan çözer. Olağan dizinler yalnızca
+/// **varsa** listeye girer; açıkça verilenler olduğu gibi girer — yoklarsa
+/// bunu tarama söyler.
+fn resolve_music_dirs(os: &str, env: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {
+    if let Some(raw) = env(MUSIC_DIRS_ENV) {
+        // `split_paths` bu sistemin ayırıcısını kullanıyor: Windows'ta `;`,
+        // ötekilerde `:`. Elle `:` ile bölmek `C:\Müzik`'i ikiye ayırırdı.
+        return std::env::split_paths(&raw)
+            .filter(|path| !path.as_os_str().is_empty())
+            .collect();
+    }
+    if let Some(dir) = env("XDG_MUSIC_DIR") {
+        return vec![PathBuf::from(dir)];
+    }
+    let candidates: Vec<PathBuf> = match os {
+        "windows" => env("USERPROFILE")
+            .map(|home| vec![PathBuf::from(home).join("Music")])
+            .unwrap_or_default(),
+        "macos" => env("HOME")
+            .map(|home| vec![PathBuf::from(home).join("Music")])
+            .unwrap_or_default(),
+        // Türkçe ve İngilizce yerelin varsayılan adları.
+        _ => env("HOME")
+            .map(|home| {
+                let home = PathBuf::from(home);
+                vec![home.join("Müzik"), home.join("Music")]
+            })
+            .unwrap_or_default(),
+    };
+    candidates.into_iter().filter(|dir| dir.is_dir()).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Sahte ortam: yalnızca verilen değişkenler tanımlı.
+    fn env_of(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
+        let pairs: Vec<(String, String)> = pairs
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+            .collect();
+        move |key: &str| {
+            pairs
+                .iter()
+                .find(|(name, _)| name == key)
+                .map(|(_, value)| value.clone())
+        }
+    }
+
+    /// Standart bir Windows `HOME` tanımlamaz; ilk yazım tam da bu yüzden
+    /// orada hiç açılmıyordu (D-070).
+    #[test]
+    fn windows_uses_localappdata_and_does_not_need_home() {
+        let env = env_of(&[
+            ("LOCALAPPDATA", r"C:\Users\enai\AppData\Local"),
+            ("USERPROFILE", r"C:\Users\enai"),
+        ]);
+        assert_eq!(
+            resolve_data_dir("windows", &env),
+            Some(PathBuf::from(r"C:\Users\enai\AppData\Local").join("headshell"))
+        );
+
+        let only_profile = env_of(&[("USERPROFILE", r"C:\Users\enai")]);
+        assert_eq!(
+            resolve_data_dir("windows", &only_profile),
+            Some(
+                PathBuf::from(r"C:\Users\enai")
+                    .join("AppData")
+                    .join("Local")
+                    .join("headshell")
+            )
+        );
+
+        // `HOME` Windows'ta aday bile değil: Git Bash onu tanımlar ve
+        // aynı kullanıcının iki kabukta iki ayrı kütüphanesi olurdu.
+        let git_bash = env_of(&[("HOME", "/c/Users/enai")]);
+        assert_eq!(resolve_data_dir("windows", &git_bash), None);
+    }
+
+    #[test]
+    fn macos_uses_application_support() {
+        let env = env_of(&[("HOME", "/Users/enai")]);
+        assert_eq!(
+            resolve_data_dir("macos", &env),
+            Some(PathBuf::from(
+                "/Users/enai/Library/Application Support/headshell"
+            ))
+        );
+    }
+
+    #[test]
+    fn linux_and_other_unixes_use_the_xdg_default() {
+        let env = env_of(&[("HOME", "/home/enai")]);
+        for os in ["linux", "freebsd", "netbsd", "openbsd"] {
+            assert_eq!(
+                resolve_data_dir(os, &env),
+                Some(PathBuf::from("/home/enai/.local/share/headshell")),
+                "{os}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_explicit_choice_wins_on_every_system() {
+        for os in ["linux", "macos", "windows", "freebsd"] {
+            let explicit = env_of(&[
+                ("HEADSHELL_DATA_DIR", "/secilen"),
+                ("XDG_DATA_HOME", "/xdg"),
+                ("LOCALAPPDATA", "/yerel"),
+                ("HOME", "/ev"),
+            ]);
+            assert_eq!(
+                resolve_data_dir(os, &explicit),
+                Some(PathBuf::from("/secilen")),
+                "{os}"
+            );
+            let xdg = env_of(&[
+                ("XDG_DATA_HOME", "/xdg"),
+                ("LOCALAPPDATA", "/yerel"),
+                ("HOME", "/ev"),
+            ]);
+            assert_eq!(
+                resolve_data_dir(os, &xdg),
+                Some(PathBuf::from("/xdg/headshell")),
+                "{os}: açıkça tanımlanmış XDG_DATA_HOME uyulmalı"
+            );
+        }
+    }
+
+    #[test]
+    fn the_error_names_what_this_system_looked_at() {
+        assert_eq!(
+            data_dir_sources("windows"),
+            vec![
+                "HEADSHELL_DATA_DIR",
+                "XDG_DATA_HOME",
+                "LOCALAPPDATA",
+                "USERPROFILE"
+            ]
+        );
+        assert_eq!(
+            data_dir_sources("linux"),
+            vec!["HEADSHELL_DATA_DIR", "XDG_DATA_HOME", "HOME"]
+        );
+        assert_eq!(resolve_data_dir("linux", &env_of(&[])), None);
+    }
+
+    /// Liste bu sistemin kendi ayırıcısıyla bölünür; Windows'ta sürücü
+    /// harfinin iki noktası ayırıcı değildir.
+    #[test]
+    fn a_music_dir_list_is_split_with_this_systems_separator() {
+        let separator = if cfg!(windows) { ';' } else { ':' };
+        let first = if cfg!(windows) { r"C:\Muzik" } else { "/muzik" };
+        let raw = format!("{first}{separator}{separator}/arsiv");
+        let env = env_of(&[("HEADSHELL_MUSIC_DIRS", &raw)]);
+        assert_eq!(
+            resolve_music_dirs(std::env::consts::OS, &env),
+            vec![PathBuf::from(first), PathBuf::from("/arsiv")]
+        );
+    }
+
+    #[test]
+    fn default_music_dirs_follow_the_system_and_must_exist() {
+        let home = crate::test_support::TempDir::new("config-muzik");
+        std::fs::create_dir_all(home.join("Music")).unwrap();
+        let root = home.to_str().unwrap();
+
+        for (os, key) in [
+            ("windows", "USERPROFILE"),
+            ("macos", "HOME"),
+            ("linux", "HOME"),
+        ] {
+            let env = env_of(&[(key, root)]);
+            assert_eq!(
+                resolve_music_dirs(os, &env),
+                vec![home.join("Music")],
+                "{os}"
+            );
+        }
+        // Var olmayan olağan dizin uydurulmaz.
+        let empty = crate::test_support::TempDir::new("config-muzik-bos");
+        let env = env_of(&[("HOME", empty.to_str().unwrap())]);
+        assert!(resolve_music_dirs("linux", &env).is_empty());
+    }
 
     #[test]
     fn paths_hang_off_the_data_dir() {

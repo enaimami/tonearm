@@ -307,14 +307,40 @@ pub fn default_http_client() -> Result<Arc<dyn HttpClient>> {
 /// Bu derlemede `http-client` kapalı olduğu için **her zaman** hata döner.
 #[cfg(not(feature = "http-client"))]
 pub fn default_http_client() -> Result<Arc<dyn HttpClient>> {
-    Err(Error::new(
+    Err(no_http_client())
+}
+
+/// Eklentilere verilen HTTP istemcisi: **yönlendirme izlemeyen** (D-069).
+///
+/// Motor her yönlendirmeyi kendisi izleyip izin listesinde yeniden sorar;
+/// yönlendirmeyi kendisi izleyen bir istemci bu denetimi delerdi.
+///
+/// # Errors
+/// `http-client` feature'ı kapalıysa.
+#[cfg(feature = "http-client")]
+pub fn plugin_http_client() -> Result<Arc<dyn HttpClient>> {
+    Ok(Arc::new(UreqClient::without_redirects()))
+}
+
+/// Eklentilere verilen HTTP istemcisi.
+///
+/// # Errors
+/// Bu derlemede `http-client` kapalı olduğu için **her zaman** hata döner.
+#[cfg(not(feature = "http-client"))]
+pub fn plugin_http_client() -> Result<Arc<dyn HttpClient>> {
+    Err(no_http_client())
+}
+
+#[cfg(not(feature = "http-client"))]
+fn no_http_client() -> Error {
+    Error::new(
         Stage::NetworkRequest,
         ErrorKind::Unsupported {
             provider: "net".to_owned(),
             what: "HTTP istemcisi (`http-client` feature'ı kapalı derleme)".to_owned(),
             capabilities: "NONE".to_owned(),
         },
-    ))
+    )
 }
 
 /// Yanıt gövdesini JSON olarak çözer.

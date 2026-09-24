@@ -9,14 +9,15 @@
 //! **Bu testler varsayılan koşuma dahildir** (D-043) ve iki başarısızlığı ayrı
 //! tutuyor (K9):
 //!
-//! - **Ulaşamamak** başarısızlık değil: ağ yoksa ya da `python3` yoksa test
-//!   kendini atlar ve sebebini `stderr`'e yazar.
+//! - **Ulaşamamak** başarısızlık değil: ağ yoksa test kendini atlar ve
+//!   sebebini `stderr`'e yazar.
 //! - **Ulaşıp beklenmeyeni almak** düşer.
 //!
-//! `yt-dlp` artık bir ön koşul değil: motor onu manifestteki sabitlenmiş
-//! sürümden indiriyor (D-055). Ağ varken indirememek **atlama sebebi değil,
-//! düşme sebebidir** — beyan edilen adres ölmüşse (yetim) bunu sessizce
-//! geçmek, bozuk bir manifesti yeşil göstermek olurdu.
+//! Ne `python3` ne `yt-dlp` bir ön koşul: eklenti gömülü QuickJS'te koşuyor
+//! ve motor yt-dlp'nin **bu platformun** kendi kendine yeten ikilisini
+//! manifestteki sabitlenmiş sürümden indiriyor (D-069). Ağ varken indirememek
+//! **atlama sebebi değil, düşme sebebidir** — beyan edilen adres ölmüşse
+//! (yetim) bunu sessizce geçmek, bozuk bir manifesti yeşil göstermek olurdu.
 //!
 //! Kırmızı yandığında ilk soru: **son commit'e mi baksam, yoksa
 //! `yt-dlp -J "https://music.youtube.com/watch?v=..."` mi çeksem?** İkincisi
@@ -25,13 +26,15 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod support;
+
 use std::path::{Path, PathBuf};
 
 use headshell_core::config::Config;
 use headshell_core::ids::{ProviderId, ProviderTrackId};
 use headshell_core::plugin::PluginProvider;
+use headshell_core::plugin::artifact::{ArtifactStore, default_artifact_source};
 use headshell_core::plugin::manifest::{PluginManifest, Requirement};
-use headshell_core::plugin::runtime::Engine;
 use headshell_core::provider::{AudioSource, Capabilities, Provider};
 use headshell_core::secrets::{Secrets, plugin_namespace};
 
@@ -40,61 +43,55 @@ fn plugin_source_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/ytmusic")
 }
 
-fn command_runs(program: &str, args: &[&str]) -> bool {
-    std::process::Command::new(program)
-        .args(args)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
+/// yt-dlp'nin bu platform ikilisi: koşum başına en çok bir kez iner.
+///
+/// Eklenti yt-dlp'yi kendi aramıyor (D-055); onu motor kuruyor. Test de
+/// **aynı yoldan** geçiyor. İndirme ~40 MB, o yüzden sonuç projenin
+/// `target/tmp`'sinde tutuluyor (D-070) — ama körü körüne değil:
+///
+/// - Önbellekteki dosyanın karması her koşumda yeniden doğrulanıyor.
+/// - İndirme adresinin **hâlâ yaşadığı** her koşumda soruluyor (gövdesi
+///   okunmadan). Önbellek bunu atlasaydı adres öldüğünde (yetim, D-055) bu
+///   makine yeşil kalır, temiz bir makine kırmızı yanardı — sonuç makineye
+///   bağlı olurdu.
+fn shared_ytdlp(requirement: &Requirement) -> Result<PathBuf, String> {
+    static SHARED: std::sync::OnceLock<Result<PathBuf, String>> = std::sync::OnceLock::new();
+    SHARED.get_or_init(|| fetch_ytdlp(requirement)).clone()
 }
 
-/// Motorun kuracağı yt-dlp'yi bir kez indirip testler arasında paylaşır.
-///
-/// Eklenti artık yt-dlp'yi kendi aramıyor (D-055); onu motor kuruyor. Test de
-/// **aynı yoldan** geçiyor — sınanan şey tam olarak kullanıcının yaşadığı
-/// akış. İndirme her test için tekrarlanmasın diye sonuç sabit bir dizinde
-/// tutuluyor; motor eseri karmasıyla adlandırdığı için bu önbellek bayatlayamaz.
-fn cached_ytdlp(requirement: &Requirement) -> Result<PathBuf, String> {
-    let cache = std::env::temp_dir().join("headshell-test-runtime");
-    let cached = cache.join(requirement.file_name());
-    if cached.exists() {
-        return Ok(cached);
+fn fetch_ytdlp(requirement: &Requirement) -> Result<PathBuf, String> {
+    let cache = support::root().join("ytdlp-cache");
+    let store = ArtifactStore::new(&Config::with_data_dir(&cache));
+    let platform = store.platform().to_owned();
+    let Some(asset) = requirement.asset_for(&platform) else {
+        return Err(format!("{platform} için yayın beyan edilmemiş"));
+    };
+    let source = default_artifact_source().map_err(|err| err.chain_text())?;
+
+    // Adres yaşıyor mu: yalnızca durum kodu, gövde okunmadan.
+    match source.open(&asset.url) {
+        Ok(response) if response.status == 404 || response.status == 410 => {
+            return Err(format!(
+                "YETİM — {} {} dedi; önbellekteki kopya bunu gizlemeyecek",
+                asset.url, response.status
+            ));
+        }
+        Ok(_) => {}
+        // Ulaşılamadıysa hüküm yok: önbellek varsa onunla devam, yoksa
+        // aşağıdaki kurulum zaten ne olduğunu söyleyecek.
+        Err(err) => eprintln!(
+            "uyarı: {} yoklanamadı ({}), önbellekle devam",
+            asset.url,
+            err.chain_text().replace('\n', " ")
+        ),
     }
 
-    let engine = Engine::new(&Config::with_data_dir(
-        std::env::temp_dir().join("headshell-test-runtime-home"),
-    ));
-    let http = headshell_core::net::default_http_client().map_err(|err| err.chain_text())?;
-    match engine.install(&http, requirement) {
-        Ok(outcome) if outcome.is_ready() => {}
-        Ok(outcome) => return Err(outcome.describe()),
-        Err(err) => return Err(err.chain_text()),
+    // `install` karma tutuyorsa ağa hiç çıkmıyor, tutmuyorsa yeniden iniyor.
+    match store.install(source.as_ref(), requirement) {
+        Ok(outcome) if outcome.is_ready() => Ok(store.artifact_path(requirement)),
+        Ok(outcome) => Err(outcome.describe()),
+        Err(err) => Err(err.chain_text()),
     }
-
-    std::fs::create_dir_all(&cache).map_err(|err| err.to_string())?;
-
-    // Paylaşılan önbelleğe **atomik** yerleştirme. `copy` atomik değil:
-    // paralel koşan öteki test yarım yazılmış dosyayı yukarıdaki `exists()`
-    // ile görüp hazır sayıyor, kendi dizinine kopyalıyor, motorun karma
-    // denetimi tutmuyor ve eser `ready_paths`'e hiç girmiyor — eklenti de
-    // "yt-dlp kurulu değil" diyor. CI'da böyle çıktı (D-062).
-    //
-    // D-060'ın motorda düzelttiği desenin aynısı: önce koşuma özgü bir ada
-    // yaz, sonra `rename` ile yerine koy. `rename` aynı dosya sisteminde
-    // atomiktir, yani dosya ya yok ya da tam.
-    let staging = cache.join(format!(
-        "{}.{}-{}.kuruluyor",
-        requirement.file_name(),
-        std::process::id(),
-        jiff::Timestamp::now().as_nanosecond()
-    ));
-    std::fs::copy(engine.artifact_path(requirement), &staging).map_err(|err| err.to_string())?;
-    if let Err(err) = std::fs::rename(&staging, &cached) {
-        let _ = std::fs::remove_file(&staging);
-        return Err(err.to_string());
-    }
-    Ok(cached)
 }
 
 /// YouTube Music'e TCP ile ulaşılabiliyor mu.
@@ -113,14 +110,10 @@ fn ytmusic_reachable() -> bool {
 
 /// Testin koşulup koşulamayacağını söyler; koşulamıyorsa sebebini yazar.
 fn prerequisites_met(test: &str) -> bool {
-    if !command_runs("python3", &["--version"]) {
-        eprintln!("{test}: python3 yok — atlanıyor (bu bir başarısızlık değil)");
-        return false;
-    }
     // Motor eseri HTTP ile indiriyor; bu derlemede istemci yoksa test
     // koşulamaz. "Koşamadım" ile "koştu ve düştü" ayrı tanılar (K9) —
     // ve atlanan test geçmiş sayılmaz (D-043).
-    if let Err(err) = headshell_core::net::default_http_client() {
+    if let Err(err) = default_artifact_source() {
         eprintln!(
             "{test}: {} — atlanıyor (bu derleme yt-dlp'yi indiremez)",
             err.chain_text().replace('\n', " ")
@@ -134,14 +127,8 @@ fn prerequisites_met(test: &str) -> bool {
     true
 }
 
-fn temp_config(name: &str) -> Config {
-    let dir = std::env::temp_dir().join(format!(
-        "headshell-ytmusic-{}-{}-{name}",
-        std::process::id(),
-        jiff::Timestamp::now().as_nanosecond()
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    Config::with_data_dir(dir)
+fn temp_config(name: &str) -> support::TestConfig {
+    support::TestConfig::new(&format!("ytmusic-{name}"))
 }
 
 /// CI ortam değişkenindeki YouTube çerezlerini sır deposuna yazar.
@@ -171,7 +158,7 @@ fn store_cookies(config: &Config) -> bool {
 fn install(config: &Config) -> PluginProvider {
     let dir = config.plugins_dir().join("ytmusic");
     std::fs::create_dir_all(&dir).unwrap();
-    for file in ["main.py", "plugin.json"] {
+    for file in ["main.js", "plugin.json"] {
         std::fs::copy(plugin_source_dir().join(file), dir.join(file)).unwrap();
     }
 
@@ -179,16 +166,21 @@ fn install(config: &Config) -> PluginProvider {
 
     // Motorun işi: eklentinin beyan ettiği eserleri kur. Test bunu
     // kullanıcının `headshell plugin install` ile yaptığının aynısı olarak
-    // yapıyor, sonra sağlayıcıyı kuruyor — el sıkışmaya giden yol haritası
-    // ancak eser yerindeyse doluyor.
+    // yapıyor (paylaşılan önbellekten), sonra sağlayıcıyı kuruyor.
     for requirement in &manifest.requires {
-        let cached = match cached_ytdlp(requirement) {
+        let shared = match shared_ytdlp(requirement) {
             Ok(path) => path,
             Err(reason) => panic!("yt-dlp kurulamadı: {reason}"),
         };
-        let engine = Engine::new(config);
-        std::fs::create_dir_all(engine.runtime_dir()).unwrap();
-        std::fs::copy(&cached, engine.artifact_path(requirement)).unwrap();
+        let store = ArtifactStore::new(config);
+        std::fs::create_dir_all(store.runtime_dir()).unwrap();
+        // Sabit bağ, kopya değil: her test 40 MB'ı yeniden yazmasın. Bağ
+        // kurulamazsa (başka dosya sistemi) kopyaya düşülür; `copy`
+        // çalıştırma bitini de taşıyor.
+        let target = store.artifact_path(requirement);
+        if std::fs::hard_link(&shared, &target).is_err() {
+            std::fs::copy(&shared, &target).unwrap();
+        }
     }
 
     let secrets = Secrets::load(&config.secrets_path()).unwrap();
