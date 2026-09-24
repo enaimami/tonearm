@@ -89,6 +89,55 @@ fn temp_dir(label: &str) -> TempDir {
     }
 }
 
+/// Test edilen `headshell` ikilisi için komut — Windows'ta **konsolsuz** (D-070).
+///
+/// Birkaç test "terminal yoksa ne olur" sorusunu soruyor: parola istemi
+/// `HEADSHELL_PASSWORD`'u önermeli, `--tui` açılmayı reddetmeli. crossterm
+/// terminali standart girişten değil doğrudan açıyor — Windows'ta konsol
+/// arabelleğini (`CONIN$`), Unix'te `/dev/tty`'yi — ve standart giriş boru
+/// olsa da çocuk süreç ebeveyninin terminaline ulaşıyor. GitHub'ın Windows
+/// koşucusunda süreçlerin bir konsolu var: istem hiç gelmeyecek bir tuşu
+/// **sonsuza kadar** bekledi, CI'ın ilk Windows koşumu bir saati aşkın bu
+/// yüzden takıldı. `DETACHED_PROCESS` çocuğu konsolsuz başlatıyor; çıktı
+/// boruları etkilenmiyor. Unix'teki karşılığı: [`child_is_terminalless`].
+fn cli_command() -> Command {
+    #[cfg_attr(not(windows), allow(unused_mut))]
+    let mut command = Command::new(env!("CARGO_BIN_EXE_headshell"));
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        command.creation_flags(DETACHED_PROCESS);
+    }
+    command
+}
+
+/// Çocuk süreç bir terminale ulaşamıyor mu — terminalsiz testlerin ön koşulu.
+///
+/// Windows'ta her zaman evet: [`cli_command`] konsoldan ayrık başlatıyor.
+/// Unix'te çocuk, test sürecinin denetleyici terminalini miras alıyor;
+/// terminalden `cargo test` koşan bir geliştiricide istem gerçekten açılır
+/// ve bir tuş bekler (sahte terminalle ölçüldü, D-070 eki). Çocuğu
+/// terminalden koparmanın güvenli bir std yolu yok: `CommandExt::setsid`
+/// kararsız (`process_setsid`), `pre_exec` `unsafe` ister ve workspace onu
+/// yasaklıyor. Ön koşul sağlanamazsa test **atlanıyor** ve sebebini söylüyor;
+/// CI'da denetleyici terminal yok, test orada gerçekten koşuyor.
+fn child_is_terminalless(test: &str) -> bool {
+    let reachable = cfg!(unix)
+        && std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/tty")
+            .is_ok();
+    if reachable {
+        eprintln!(
+            "{test}: denetleyici terminal var, çocuk süreç ona ulaşır — atlanıyor \
+             (terminalsiz bir koşum, örneğin CI, bunu sınıyor)"
+        );
+    }
+    !reachable
+}
+
 /// `headshell` ikilisini çalıştırır; `(stdout, stderr, başarılı_mı)`.
 fn run(data_dir: &Path, args: &[&str]) -> (String, String, bool) {
     run_with_music(data_dir, None, args)
@@ -96,7 +145,7 @@ fn run(data_dir: &Path, args: &[&str]) -> (String, String, bool) {
 
 /// Parolayı ortamdan vererek çalıştırır (§1.3: parola argüman olmaz).
 fn run_with_password(data_dir: &Path, password: &str, args: &[&str]) -> (String, String, bool) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_headshell"));
+    let mut command = cli_command();
     command
         .arg("--data-dir")
         .arg(data_dir)
@@ -113,7 +162,7 @@ fn run_with_password(data_dir: &Path, password: &str, args: &[&str]) -> (String,
 
 /// `HEADSHELL_MUSIC_DIRS` ayarlayarak çalıştırır (yerel sağlayıcı testleri için).
 fn run_with_music(data_dir: &Path, music: Option<&Path>, args: &[&str]) -> (String, String, bool) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_headshell"));
+    let mut command = cli_command();
     command.arg("--data-dir").arg(data_dir).args(args);
     match music {
         Some(dir) => {
@@ -675,8 +724,11 @@ fn an_unknown_server_kind_is_rejected_not_guessed() {
 /// Tty yoksa parola sessizce ekrana basılmamalı; ne yapılacağı söylenmeli.
 #[test]
 fn without_a_terminal_the_password_prompt_points_at_the_env_var() {
+    if !child_is_terminalless("without_a_terminal_the_password_prompt_points_at_the_env_var") {
+        return;
+    }
     let dir = temp_dir("parolaistem");
-    // `run` HEADSHELL_PASSWORD ayarlamıyor ve test süreci bir tty'ye bağlı değil.
+    // `run` HEADSHELL_PASSWORD ayarlamıyor.
     let (_, stderr, ok) = run(
         &dir,
         &[
@@ -732,12 +784,14 @@ fn playing_with_no_match_says_what_to_do() {
 /// bilir, arayüzün neden açılmadığını da bilmeli.
 #[test]
 fn the_tui_refuses_to_start_without_a_terminal() {
+    if !child_is_terminalless("the_tui_refuses_to_start_without_a_terminal") {
+        return;
+    }
     let dir = temp_dir("tui");
     let music = audio_fixtures();
     let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["provider", "scan"]);
     assert!(ok, "{stderr}");
 
-    // Test süreci bir tty'ye bağlı değil.
     let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["play", "sine", "--tui"]);
     assert!(!ok, "terminalsiz TUI başarısız olmalı");
     assert!(stderr.contains("PLAYBACK_OUTPUT"), "{stderr}");
@@ -838,7 +892,7 @@ fn plugin_lifecycle_is_visible_from_the_cli() {
 fn secrets_are_listed_by_name_and_never_by_value() {
     let dir = temp_dir("sir");
 
-    let mut command = Command::new(env!("CARGO_BIN_EXE_headshell"));
+    let mut command = cli_command();
     let output = command
         .arg("--data-dir")
         .arg(&dir)
@@ -884,7 +938,7 @@ fn a_plugin_runs_with_nothing_on_the_path() {
     let (_, stderr, ok) = run(&dir, &["plugin", "approve", "echo"]);
     assert!(ok, "approve başarısız: {stderr}");
 
-    let mut command = Command::new(env!("CARGO_BIN_EXE_headshell"));
+    let mut command = cli_command();
     command
         .arg("--data-dir")
         .arg(&*dir)

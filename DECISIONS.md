@@ -3860,3 +3860,45 @@ bittikten sonra makineden kaldırıldı.
 - Ubuntu 22.04 koşucusu emekliye ayrılınca glibc tabanı bir konteynerde
   tutulmalı, koşucu sürümüne bırakılmamalı.
 - BSD'lerde gerçek bir derleme.
+
+### Ek — Windows CI'ın ilk koşumu takıldı; aynı tuzak Unix terminalinde de vardı (2026-09-24)
+
+Windows işi clippy'yi üç dakikada geçti, test adımında bir saati aşkın
+kilitli kaldı; macOS aynı işi yedi dakikada bitirdi. Günlük iş bitmeden
+açılmıyor, yerel belirteç de koşumu iptal edemiyordu (403).
+
+`headshell provider add` parolayı `HEADSHELL_PASSWORD`'da bulamayınca yankısız
+istemi açıyor; istem crossterm'in ham kipini kullanıyor. crossterm terminali
+standart girişten değil doğrudan açıyor — Windows'ta konsol arabelleğini
+(`CONIN$`), Unix'te `/dev/tty`'yi. Test çocuğun standart girişini boş
+bağlıyor ve bunu "terminal yok" sayıyordu; oysa çocuk ebeveyninin
+terminaline yine ulaşıyor. Linux ve macOS koşucularında denetleyici terminal
+yok: ham kip hemen düşüyor ve CLI ne yapılacağını söylüyor — testin
+beklediği buydu. Windows koşucusunda süreçlerin bir konsolu var: ham kip
+açıldı, `event::read()` hiç gelmeyecek bir tuşu bekledi. `--tui` testi aynı
+varsayımı taşıyordu.
+
+Windows tarafının günlüğü yok; sebep koddan çıkarıldı. Aynı mekanizma Unix'te
+yeniden üretildi: test `script` altında (sahte terminal — terminalden
+`cargo test` koşan bir geliştiricinin durumu) 60 saniyede bitmedi ve
+öldürüldü. Yani bu iki test bir geliştiricinin terminalinde de takılıyordu;
+yerelde geçmelerinin sebebi, koşumun denetleyici terminali olmayan bir
+kabuktan yapılmasıydı.
+
+**Ürün doğru davranıyor** — terminaldeki kullanıcıya parola sormak doğru olan
+(ssh ve sudo da standart giriş boru olsa bile terminalden soruyor); betikler
+için `HEADSHELL_PASSWORD` var. Yanlış olan testin varsayımıydı. Düzeltme:
+
+- **Windows:** CLI testleri ikiliyi konsoldan ayrık (`DETACHED_PROCESS`)
+  başlatıyor; ön koşul her zaman sağlanıyor.
+- **Unix:** çocuğu terminalden koparmanın güvenli bir std yolu yok
+  (`CommandExt::setsid` 1.98'de hâlâ kararsız, `pre_exec` `unsafe` ister ve
+  workspace onu yasaklıyor). İki test `/dev/tty` açılabiliyorsa sebebini
+  yazıp **atlanıyor**; CI'da denetleyici terminal yok, orada gerçekten
+  koşuyorlar. Sahte terminalde ikisi de atlandı, terminalsiz kabukta ikisi
+  de koştu ve geçti.
+
+CI ve paketleme işlerine süre sınırı kondu (`timeout-minutes`): bir sonraki
+takılma 6 saat beklemeden düşer ve günlüğü açılır. Takılan koşum
+(36041064570) yerel belirteçle iptal edilemiyor; GitHub'ın 6 saatlik
+sınırıyla ya da arayüzden iptal edilerek kapanacak.

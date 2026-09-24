@@ -46,6 +46,8 @@ jobs:
           - os: windows-2022
             name: windows
     runs-on: ${{ matrix.os }}
+    # Takılan bir adım 6 saat beklemesin (D-070); paketleme ~15-25 dk.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 

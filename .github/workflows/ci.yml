@@ -21,8 +21,13 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  # Her işin bir süre sınırı var (D-070): Windows'un ilk koşumunda bir test
+  # hiç gelmeyecek bir tuşu bekledi ve iş, GitHub'ın varsayılanı olan 6 saate
+  # kadar kilitli kaldı — günlüğü de iş bitmeden açılmıyordu. Sınırlar
+  # ölçülen sürelerin birkaç katı.
   gates:
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -79,6 +84,7 @@ jobs:
       matrix:
         os: [windows-2022, macos-14]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -109,6 +115,7 @@ jobs:
   # feature'dı (`http-client` açık, `audio` kapalı gibi).
   core-features:
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
