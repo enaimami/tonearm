@@ -1818,7 +1818,7 @@ dependencies = [
 
 [[package]]
 name = "headshell"
-version = "0.0.1-beta"
+version = "0.0.2-beta"
 dependencies = [
  "headshell-core",
  "rquickjs",
@@ -1834,7 +1834,7 @@ dependencies = [
 
 [[package]]
 name = "headshell-cli"
-version = "0.0.1-beta"
+version = "0.0.2-beta"
 dependencies = [
  "anyhow",
  "clap",
@@ -1850,7 +1850,7 @@ dependencies = [
 
 [[package]]
 name = "headshell-core"
-version = "0.0.1-beta"
+version = "0.0.2-beta"
 dependencies = [
  "cpal",
  "jiff",

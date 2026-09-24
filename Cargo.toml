@@ -12,7 +12,7 @@ exclude = ["spike", "parked"]
 
 [workspace.package]
 # D-005: lisans MIT OR Apache-2.0 olarak karara bağlandı.
-version = "0.0.1-beta"
+version = "0.0.2-beta"
 edition = "2024"
 # D-069: 1.85 → 1.87. `rquickjs` 0.14 (eklenti motoru) 1.87 istiyor. 1.85'e
 # uyan son sürüm 0.11'di; üç sürüm geriden QuickJS-NG düzeltmelerini kaçırmak
