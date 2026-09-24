@@ -29,8 +29,31 @@ const TIMEOUT: Duration = Duration::from_secs(30);
 /// Eklenti isteklerinin süresi — çağrı bütçesinin (20 sn) altında kalmalı.
 const PLUGIN_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// Bir eserin gövdesini okumanın üst sınırı. 40 MB ~45 KB/s'de iner.
-const DOWNLOAD_BODY_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+/// Gövdesi uzun süren istekler için süreler: eser indirme ve ses akışı.
+///
+/// Genel süre burada işe yaramaz, çünkü gövdeyi de kapsar: 40 MB'lık bir
+/// ikili ya da FLAC yavaş bir bağlantıda 30 saniyeyi rahatça geçer.
+///
+/// **Toplam süre yok**, bilerek: ureq 3.4'te süresi geçmiş bir son tarih
+/// hata değil 1 sn'lik bir okuma süresi oluyor, yani sürekli akan bir gövdeyi
+/// hiçbir toplam süre kesmiyor (ölçüldü, D-069 eki). Takılmaya karşı koruma
+/// sessizlik sınırı; boyuta karşı koruma çağıranın tavanı (eser 128 MB,
+/// akış 256 MB). Yavaş ama akan bir indirme kesilmez — kullanıcı için doğru
+/// olan da bu.
+#[derive(Debug, Clone, Copy)]
+struct LongBody {
+    /// Ad çözme, bağlanma, isteği gönderme ve yanıt başlıklarını bekleme
+    /// sınırı: hiç cevap vermeyen bir sunucu bundan uzun takılı bırakmaz.
+    handshake: Duration,
+    /// Gövdede iki okuma arasındaki en uzun sessizlik.
+    idle: Duration,
+}
+
+/// Eser indirme ve ses akışının ortak süreleri.
+const LONG_BODY: LongBody = LongBody {
+    handshake: TIMEOUT,
+    idle: TIMEOUT,
+};
 
 /// `ureq` tabanlı HTTP istemcisi.
 pub struct UreqClient {
@@ -87,17 +110,39 @@ impl UreqClient {
     }
 
     /// Motorun eser indirmesi için istemci (D-069).
-    ///
-    /// Genel zaman aşımı **yok**: 40 MB'lık bir ikili yavaş bir bağlantıda
-    /// 30 saniyeyi rahatça geçer ve genel süre gövdeyi okumayı da kapsıyor.
-    /// Yerine her aşamanın kendi süresi var — bağlanamayan ya da hiç cevap
-    /// vermeyen bir sunucu yine takılı bırakmaz.
     #[must_use]
     pub fn for_downloads() -> Self {
+        Self::long_body(LONG_BODY)
+    }
+
+    /// Ses akışı için istemci ([`Self::open_stream`] ile).
+    ///
+    /// Eskiden [`Self::new`] kullanılıyordu ve 30 sn'lik genel süre gövdeyi
+    /// de kapsıyordu: 30 sn'de tamamı inmeyen bir parça (uzak bir sunucudan
+    /// FLAC, yavaş bir bağlantıdan herhangi bir şey) ortasında kesiliyordu.
+    #[must_use]
+    pub fn for_streams() -> Self {
+        Self::long_body(LONG_BODY)
+    }
+
+    /// Genel süresi olmayan, aşama aşama sınırlanmış istemci.
+    ///
+    /// Başlık bekleme `timeout_send_request` ile sınırlanıyor,
+    /// `timeout_recv_response` ile **değil**. ureq 3.4 bir aşamanın süresini
+    /// sonraki aşamada da denetliyor ve o aşamanın *bittiği* andan sayıyor:
+    /// `recv_response` gövdeyi de başlıkların geldiği andan itibaren
+    /// sınırlıyordu. İndirme istemcisinde 30 sn'ydi ve 30 sn'de inmeyen her
+    /// eser "timeout: receive response" ile kesildi (D-069 eki). Aynı kural
+    /// `send_request`'i başlık beklemeye taşıyor ve orada bırakıyor: gövdenin
+    /// öncülü yalnızca `recv_response`. `recv_body` ise her okumada yeniden
+    /// sayıldığı için bir toplam değil, sessizlik sınırı. Kural ureq'le
+    /// değişirse aşağıdaki testler düşer.
+    fn long_body(limits: LongBody) -> Self {
         let config = ureq::Agent::config_builder()
-            .timeout_connect(Some(TIMEOUT))
-            .timeout_recv_response(Some(TIMEOUT))
-            .timeout_recv_body(Some(DOWNLOAD_BODY_TIMEOUT))
+            .timeout_resolve(Some(limits.handshake))
+            .timeout_connect(Some(limits.handshake))
+            .timeout_send_request(Some(limits.handshake))
+            .timeout_recv_body(Some(limits.idle))
             .http_status_as_error(false)
             .user_agent(concat!("headshell/", env!("CARGO_PKG_VERSION")))
             .build();
@@ -236,4 +281,106 @@ fn collect_headers(map: &ureq::http::HeaderMap) -> Vec<HttpHeader> {
             )
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    //! Süreler gerçek bir yerel sunucuya karşı sınanıyor: ureq'in hangi
+    //! süreyi hangi aşamada saydığı belgesinden okunamadı, ölçülerek bulundu.
+
+    use std::io::{BufRead as _, BufReader, Read as _, Write as _};
+    use std::net::{TcpListener, TcpStream};
+    use std::time::{Duration, Instant};
+
+    use super::{LongBody, UreqClient};
+    use crate::plugin::artifact::ArtifactSource as _;
+
+    const LIMITS: LongBody = LongBody {
+        handshake: Duration::from_millis(500),
+        idle: Duration::from_secs(2),
+    };
+
+    /// Tek bağlantılık yerel sunucu: isteğin başlıklarını okuyup bağlantıyı
+    /// `serve`'e verir.
+    fn serve_once(serve: impl FnOnce(TcpStream) + Send + 'static) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let Ok((stream, _)) = listener.accept() else {
+                return;
+            };
+            let mut request = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            // Başlıklar boş bir satırla biter.
+            while request.read_line(&mut line).unwrap_or(0) > 2 {
+                line.clear();
+            }
+            serve(stream);
+        });
+        format!("http://{addr}/eser")
+    }
+
+    fn send_headers(stream: &mut TcpStream, length: usize) {
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+        stream.flush().unwrap();
+    }
+
+    /// D-069 eki: eskiden gövde başlıklardan 30 sn sonra kesiliyordu.
+    #[test]
+    fn a_body_slower_than_the_handshake_budget_still_arrives_whole() {
+        // 10 × 150 ms: gövde, başlık bekleme süresinin üç katında iniyor.
+        let url = serve_once(|mut stream| {
+            send_headers(&mut stream, 10 * 1024);
+            for _ in 0..10 {
+                std::thread::sleep(Duration::from_millis(150));
+                if stream.write_all(&[7; 1024]).is_err() {
+                    return;
+                }
+            }
+        });
+        let mut body = UreqClient::long_body(LIMITS).open(&url).unwrap().body;
+        let mut bytes = Vec::new();
+        body.read_to_end(&mut bytes).unwrap();
+        assert_eq!(bytes.len(), 10 * 1024);
+    }
+
+    #[test]
+    fn a_server_that_never_answers_does_not_hold_the_request() {
+        let url = serve_once(|stream| {
+            std::thread::sleep(Duration::from_secs(4));
+            drop(stream);
+        });
+        let started = Instant::now();
+        let Err(err) = UreqClient::long_body(LIMITS).open(&url) else {
+            panic!("cevap vermeyen sunucu hata olmalı");
+        };
+        let elapsed = started.elapsed();
+        assert!(err.chain_text().contains("timeout"), "{}", err.chain_text());
+        assert!(elapsed < Duration::from_millis(2500), "{elapsed:?}");
+    }
+
+    #[test]
+    fn a_body_that_goes_silent_fails_after_the_idle_budget() {
+        let limits = LongBody {
+            idle: Duration::from_millis(300),
+            ..LIMITS
+        };
+        let url = serve_once(|mut stream| {
+            send_headers(&mut stream, 4096);
+            let _ = stream.write_all(&[1; 1024]);
+            std::thread::sleep(Duration::from_secs(4));
+        });
+        let started = Instant::now();
+        let mut body = UreqClient::long_body(limits).open(&url).unwrap().body;
+        let mut bytes = Vec::new();
+        let err = body.read_to_end(&mut bytes).unwrap_err();
+        let elapsed = started.elapsed();
+        assert_eq!(bytes.len(), 1024, "gelen kısım okunmuş olmalı");
+        assert!(err.to_string().contains("timeout"), "{err}");
+        assert!(elapsed < Duration::from_millis(2500), "{elapsed:?}");
+    }
 }

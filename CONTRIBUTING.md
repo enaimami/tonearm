@@ -77,9 +77,11 @@ Derleme ve testler aynı `cargo` komutlarıyla koşar. Farklar:
 
 Ağa bağlı testler (D-043) ulaşamadıklarında **düşmez, kendilerini atlar ve
 sebebini `stderr`'e yazar.** Atlanan test geçmiş sayılmaz — rapor ederken
-"atlandı" de. Bugün Linux'ta 411 test koşuyor ve 3'ü kendini atlıyor
+"atlandı" de. Bugün Linux'ta 414 test koşuyor ve 3'ü kendini atlıyor
 (AcoustID anahtarı yok); torrent'in 56 testi eklentiyle birlikte park edildi
-(D-069). `playback_local`'in ses testi ses aygıtı olan ama yük altındaki bir
+(D-069). Testleri bir terminalden koşarsan iki CLI testi daha atlanır: "terminal
+yokken ne olur" sorusu, çocuk süreç terminale ulaşabildiği sürece sınanamaz
+(D-070 eki). `playback_local`'in ses testi ses aygıtı olan ama yük altındaki bir
 makinede aralıklı düşebiliyor (D-059, D-070).
 
 Atlananları gerçekten koşturmak için gereken ortam değişkenleri:

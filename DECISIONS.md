@@ -3739,6 +3739,48 @@ kilidinden de çıktı.
 - linux armv7 (zip) ve linux i686 (yayın yok).
 - Torrent'in yeni motora dönüşü (`parked/README.md`).
 
+### D-069 eki — eser indirmesi 30 saniyede kesiliyordu; ses akışı da (2026-09-25)
+
+`v0.0.2-beta` taslağındaki CLI Python'suz bir Debian 12 konteynerinde
+denendi. `plugin install ytmusic` şu hatayla düştü: `kaynağa ulaşılamadı:
+indirme 1307282 baytta kesildi: timeout: receive response`. O sırada
+GitHub'dan indirme yavaştı (~43 KB/s). İndirme istemcisinin tasarımı
+doğruydu — genel süre yok, gövdeye 15 dakika — uygulaması değildi.
+
+**Sebep ureq 3.4'te; belgesinde değil, kaynağında** (`timings.rs`): bir
+aşamanın süresi sonraki aşamada da denetleniyor ve o aşamanın *bittiği*
+andan sayılıyor. `recv_response` (30 sn) böylece gövdeyi de başlıkların
+geldiği andan itibaren sınırlıyordu: 30 saniyede inmeyen her eser kesildi.
+yt-dlp ~35 MB; 30 saniyeye sığması ~1,2 MB/s (~10 Mbit/s) ister. CI'da ve
+ilk konteyner ölçümünde bağlantı hızlıydı, o yüzden görünmedi.
+
+Aynı incelemede ikinci bir şey çıktı: ureq'te süresi geçmiş bir son tarih
+hata değil, 1 saniyelik bir okuma süresi oluyor (`NextTimeout::not_zero`).
+Sürekli akan bir gövdeyi hiçbir toplam süre kesmiyor; "15 dakika" bütçesi
+hiçbir zaman zorlanabilir değildi. Bunu sınayan test üç koşumda bir, son
+tarih bir baytın geldiği ana denk geldiğinde düştü.
+
+Düzeltme (`net::ureq_client::long_body`):
+
+- Başlık bekleme `timeout_send_request` ile sınırlanıyor: aynı kural onu
+  başlık beklemeye taşıyor, gövdeye taşımıyor.
+- Gövdede toplam süre yok. `recv_body` her okumada yeniden sayıldığı için
+  bir **sessizlik sınırı** (30 sn). Boyut tavanları okuma sırasında
+  zorlanıyor (eser 128 MB, akış 256 MB). Yavaş ama akan bir indirme artık
+  kesilmiyor; ölü bir bağlantı en geç 30 saniyede düşüyor.
+- **Ses akışı da aynı istemciye geçti** (`for_streams`). v0.0.1-beta'dan beri
+  `UreqClient::new()` kullanıyordu ve 30 sn'lik genel süre gövdeyi de
+  kapsıyordu: tamamı 30 saniyede inmeyen bir parça (uzak bir Subsonic'ten
+  FLAC, yavaş bir bağlantıdan herhangi bir şey) ortasında kesilirdi. Bu
+  sürümün getirdiği bir hata değil, ama kökü ve düzeltmesi aynı.
+
+Sınama: yerel sunucuya karşı üç test — yavaş gövde, hiç cevap vermeyen
+sunucu, ortasında susan gövde. Eski ayarla ilki düşüyor, üretimdeki hatanın
+birebir aynısıyla (`Timeout(RecvResponse)`); öteki ikisi düzeltmenin
+korumaları bozmadığını sınıyor. Gerçek ağda düzeltilmiş derleme yt-dlp'yi
+51 saniyede kurdu ve karmasını doğruladı. Kural ureq'le değişirse bu
+testler düşer.
+
 ## D-070 — Platform taşınabilirliği: Windows, macOS ve Unix-benzerleri; testler makinede iz bırakmaz
 
 **Tarih:** 2026-09-24 · **Durum:** UYGULANDI (2026-09-24)

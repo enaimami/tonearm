@@ -68,7 +68,7 @@ impl HttpMediaSource {
     /// ([`Stage::NetworkRequest`]) — yani "çalmaya başladım ama ses yok"
     /// durumu oluşmadan önce.
     pub fn open(url: &str, headers: &[HttpHeader]) -> Result<Self> {
-        let client = UreqClient::new();
+        let client = UreqClient::for_streams();
         let (total, mut reader) = client.open_stream(url, headers)?;
 
         if let Some(len) = total
