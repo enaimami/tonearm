@@ -1,16 +1,17 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="tr">
 <head>
   <meta charset="UTF-8">
-  <link rel="alternate" hreflang="tr" href="index.tr.html">
+  <!-- Türkçe kopya (D-073): kanonik sayfa İngilizce olan index.html; bu kopya 2026-09-25 tarihli hâlidir. -->
+  <link rel="alternate" hreflang="en" href="index.html">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>headshell — Your decade of music memory. Yours again.</title>
-  <meta name="description" content="A provider-independent listening identity. Take back ten years of music history, and play from your own archive or your own server.">
+  <title>headshell — On yıllık müzik hafızanız. Yeniden sizin.</title>
+  <meta name="description" content="Sağlayıcıdan bağımsız dinleme kimliği. 10 yıllık müzik geçmişinizi geri alın, kendi arşivinizden veya sunucunuzdan çalın.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
-    /* APPLE STYLE: Elegant Defiance / Minimalist Space Black & Apple Pro Blue */
+    /* APPLE STİLİ: Zarif Başkaldırı / Minimalist Space Black & Apple Pro Mavi */
     :root {
       --bg: #000000;
       --bg-surface: #0f0f11;
@@ -21,7 +22,7 @@
       --text: #f5f5f7;
       --text-muted: #86868b;
       --text-dim: #515158;
-      --accent: #2997ff;       /* Apple Pro Electric Blue */
+      --accent: #2997ff;       /* Apple Pro Elektrik Mavisi */
       --accent-glow: #60a5fa;
       --accent-warm: #f5f5f7;
     }
@@ -194,7 +195,7 @@
       text-decoration: none;
     }
 
-    /* Showcase / Grid */
+    /* Vitrin / Grid */
     .showcase-grid {
       display: grid;
       grid-template-columns: 1.1fr 0.9fr;
@@ -261,7 +262,7 @@
       text-align: center;
     }
 
-    /* Comparison Table */
+    /* Kıyaslama Tablosu */
     .section-header {
       text-align: center;
       max-width: 720px;
@@ -353,7 +354,7 @@
       font-weight: 700;
     }
 
-    /* Engineering Principles (4-column Grid) */
+    /* Mühendislik İlkeleri (4'lü Grid) */
     .principles-grid {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
@@ -397,7 +398,7 @@
       line-height: 1.6;
     }
 
-    /* Steps */
+    /* Adımlar */
     .steps-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -470,7 +471,7 @@
       color: var(--text-muted);
     }
 
-    /* FAQ (Extended 2-Column Cards) */
+    /* SSS (Genişletilmiş 2 Kolonlu Kartlar) */
     .faq-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -565,12 +566,12 @@
         <span class="brand-pill">v0.0.2-beta</span>
       </div>
       <nav>
-        <a href="#philosophy">Philosophy</a>
-        <a href="#comparison">Comparison</a>
-        <a href="#quickstart">Quick Start</a>
-        <a href="#faq">FAQ</a>
-        <a href="index.tr.html" lang="tr" hreflang="tr">Türkçe</a>
-        <a href="https://github.com/headshell/headshell" target="_blank" class="btn-source">Source Code ↗</a>
+        <a href="#felsefe">Felsefe</a>
+        <a href="#karsilastirma">Karşılaştırma</a>
+        <a href="#baslangic">Hızlı Başlangıç</a>
+        <a href="#faq">Sıkça Sorulanlar</a>
+        <a href="index.html" lang="en" hreflang="en">English</a>
+        <a href="https://github.com/headshell/headshell" target="_blank" class="btn-source">Kaynak Kod ↗</a>
       </nav>
     </header>
 
@@ -578,115 +579,115 @@
 
       <!-- Hero -->
       <section class="hero">
-        <div class="hero-tag">PERSONAL LISTENING SOVEREIGNTY</div>
-        <h1>Your decade of music memory.<br><span class="gradient">Yours again.</span></h1>
+        <div class="hero-tag">KİŞİSEL DİNLEME EGEMENLİĞİ</div>
+        <h1>On yıllık müzik hafızanız.<br><span class="gradient">Yeniden size ait.</span></h1>
         
         <p class="lead">
-          Subscriptions end. Companies change. But the listening identity you built up over ten years should belong to you alone. headshell was designed to give that ownership back.
+          Abonelikler biter. Şirketler değişir. Fakat 10 yıl boyunca biriktirdiğiniz dinleme kimliği yalnızca size ait olmalıdır. headshell, bu mülkiyeti geri vermek için tasarlandı.
         </p>
 
         <div class="hero-cta">
-          <a href="#quickstart" class="btn-primary">Get Started</a>
+          <a href="#baslangic" class="btn-primary">Hemen Başlayın</a>
           <span class="btn-secondary">$ cargo build --release</span>
         </div>
       </section>
 
-      <!-- Philosophy & Showcase Grid -->
-      <section id="philosophy" class="showcase-grid">
+      <!-- Felsefe & Vitrin Grid -->
+      <section id="felsefe" class="showcase-grid">
         <div class="manifesto-panel">
-          <h2>Your listening identity is independent of the audio.</h2>
+          <h2>Müzik dinleme kimliği, sesten bağımsızdır.</h2>
           <p>
-            Where the music comes from changes — whether it is your own local FLAC archive or the Navidrome or Jellyfin server in your home. The listening history, playlists and statistics on top should never be locked into a company's terms.
+            Müziğin nereden geldiği değişir — ister kendi yerel FLAC arşiviniz, ister evinizdeki Navidrome veya Jellyfin sunucunuz olsun. Üstteki dinleme geçmişiniz, çalma listeleriniz ve istatistikleriniz asla bir şirketin şartlarına kilitlenmemelidir.
           </p>
           <p>
-            It rescues your Spotify history with your legal GDPR right, ties the songs to the universal MusicBrainz and ISRC standards, and keeps them for a lifetime in your own local SQLite database.
+            Spotify'daki geçmişinizi yasal GDPR hakkınızla kurtarır, şarkıları evrensel MusicBrainz ve ISRC standartlarına bağlar ve kendi yerel SQLite veritabanınızda ömür boyu korur.
           </p>
           <div class="highlight-quote">
-            "The product isn't the audio stream; it's your listening identity."
+            "Ürün ses akışı değil, dinleme kimliğinizdir."
           </div>
         </div>
 
         <div class="artifact-card">
-          <img src="sample-card.svg" alt="An archive Sleeve card made by headshell">
+          <img src="sample-card.tr.svg" alt="headshell tarafından üretilen arşiv Sleeve kartı">
           <div class="caption">
-            A real archive card made directly by headshell. It documents not just 12 months but your whole life in music.
+            headshell tarafından doğrudan üretilen gerçek arşiv kartı. Yalnızca 12 ayı değil, tüm müzik ömrünüzü belgeler.
           </div>
         </div>
       </section>
 
-      <!-- Comparison -->
-      <section id="comparison">
+      <!-- Karşılaştırma -->
+      <section id="karsilastirma">
         <div class="section-header">
-          <h2>Traditional Services vs. headshell</h2>
-          <p>Two different worlds offered to the music listener.</p>
+          <h2>Geleneksel Servisler vs. headshell</h2>
+          <p>Müzik dinleyicisine sunulan iki farklı dünya.</p>
         </div>
 
         <div class="compare-grid">
           <div class="compare-card current">
-            <span class="tag">Company-Centred Model</span>
+            <span class="tag">Şirket Odaklı Model</span>
             <h3>Spotify / Apple Music</h3>
             <ul class="compare-list">
-              <li>Your listening history is held hostage on the platform's server; it is gone when the subscription ends.</li>
-              <li>Year-end summaries (Spotify Wrapped®) come only once a year, and only for the last 12 months.</li>
-              <li>Only the DRM-protected catalog the platform allows can be listened to.</li>
-              <li>Your listening data is processed for advertising and user profiling.</li>
-              <li>When the company changes its terms, every outside tool stops working.</li>
+              <li>Dinleme geçmişiniz platformun sunucusunda rehindir; abonelik bittiğinde kaybolur.</li>
+              <li>Yıl sonu özetleri (Spotify Wrapped®) yılda sadece bir kez ve yalnızca son 12 ay için sunulur.</li>
+              <li>Yalnızca platformun izin verdiği DRM korumalı katalog dinlenebilir.</li>
+              <li>Dinleme verileriniz reklam ve kullanıcı profilleme için işlenir.</li>
+              <li>Şirket sözleşmeyi değiştirdiğinde tüm harici araçlar çalışmayı durdurur.</li>
             </ul>
           </div>
 
           <div class="compare-card headshell">
-            <span class="tag">User-Centred Model</span>
+            <span class="tag">Kullanıcı Odaklı Model</span>
             <h3>headshell</h3>
             <ul class="compare-list">
-              <li>The data lives entirely in an SQLite database on your computer; it is never deleted.</li>
-              <li>Unlimited Sleeve cards covering 5 or 10 years, made whenever you like.</li>
-              <li>Your own local FLAC/MP3 archive and your Subsonic/Jellyfin server come together in one place.</li>
-              <li>Zero telemetry, zero surveillance. Works 100% offline.</li>
-              <li>Canonical IDs (ISRC / MBID) keep it from depending on any platform.</li>
+              <li>Veri tamamen sizin bilgisayarınızdaki SQLite veritabanındadır; ömür boyu silinmez.</li>
+              <li>İstediğiniz an, 5 yıllık veya 10 yıllık sınırsız Sleeve kartları üretilir.</li>
+              <li>Kendi yerel FLAC/MP3 arşiviniz ve Subsonic/Jellyfin sunucunuz tek elde birleşir.</li>
+              <li>Sıfır telemetri, sıfır gözetim. %100 çevrimdışı çalışabilirlik.</li>
+              <li>Kanonik kimlikler (ISRC / MBID) sayesinde hiçbir platforma bağımlı kalmaz.</li>
             </ul>
           </div>
         </div>
       </section>
 
-      <!-- Engineering Principles (4-column Grid) -->
+      <!-- Mühendislik İlkeleri (4'lü Grid) -->
       <section>
         <div class="section-header">
-          <h2>Uncompromising Architecture</h2>
-          <p>Engineering that puts user rights and hardware performance at the centre.</p>
+          <h2>Tavizsiz Mimari</h2>
+          <p>Kullanıcı haklarını ve donanım performansını merkeze alan mühendislik.</p>
         </div>
 
         <div class="principles-grid">
           <div class="principle-box">
             <span class="num">01 / GDPR</span>
-            <h4>Legal Data Portability</h4>
-            <p>Without depending on API terms, it imports locally the ten-year streaming zip you got with your EU GDPR right.</p>
+            <h4>Yasal Veri Taşınabilirliği</h4>
+            <p>API şartlarına bağımlı kalmadan, Avrupa Birliği GDPR hakkınızla aldığınız 10 yıllık akış zip dosyasını yerel olarak içe aktarır.</p>
           </div>
 
           <div class="principle-box">
-            <span class="num">02 / IDENTITY</span>
-            <h4>Universal Identity Standards</h4>
-            <p>It ties tracks not to platform URIs but to ISRC, MusicBrainz IDs and acoustic fingerprints. Your data is kept even if the platforms shut down.</p>
+            <span class="num">02 / İDENTİTY</span>
+            <h4>Evrensel Kimlik Standartları</h4>
+            <p>Parçaları platform URI'larına değil; ISRC, MusicBrainz ID ve akustik parmak izlerine bağlar. Platformlar kapansa da veriniz korunur.</p>
           </div>
 
           <div class="principle-box">
             <span class="num">03 / SCROBBLE</span>
-            <h4>A Personal Scrobbler</h4>
-            <p>Ten years of imported data and the song you play today meet in the same database. Past and present merge into a single timeline.</p>
+            <h4>Kişisel Scrobbler</h4>
+            <p>10 yıllık içe aktarılan verinizle, bugün çaldığınız şarkı aynı veritabanında buluşur. Geçmiş ve bugün tek zaman çizgisinde birleşir.</p>
           </div>
 
           <div class="principle-box">
             <span class="num">04 / RUST</span>
-            <h4>Pure Rust Performance</h4>
-            <p>Audio playback with zero stutter and no garbage-collector pauses, low memory use and high safety.</p>
+            <h4>Saf Rust Performansı</h4>
+            <p>Garbage collector duraklamaları olmadan sıfır takılmayla ses oynatma, düşük bellek tüketimi ve yüksek güvenlik.</p>
           </div>
         </div>
       </section>
 
-      <!-- Quick Start -->
-      <section id="quickstart">
+      <!-- Hızlı Başlangıç -->
+      <section id="baslangic">
         <div class="section-header">
-          <h2>Quick Start</h2>
-          <p>Rescue your data in 4 simple steps and listen on your own terms.</p>
+          <h2>Hızlı Başlangıç</h2>
+          <p>4 basit adımda verinizi kurtarın ve kendi şartlarınızla dinleyin.</p>
         </div>
 
         <div class="steps-grid">
@@ -694,12 +695,12 @@
             <div>
               <div class="step-header">
                 <span class="step-num">01</span>
-                <strong>Request Your History</strong>
+                <strong>Geçmişinizi Talep Edin</strong>
               </div>
-              <p>Ask for your data package from your Spotify account (*Account → Privacy → Extended streaming history*).</p>
+              <p>Spotify hesabınızdan (*Hesap → Gizlilik → Genişletilmiş akış geçmişi*) veri paketinizi isteyin.</p>
             </div>
             <div class="terminal-block">
-              <span class="comment"># Download the archive that arrives in your email:</span><br>
+              <span class="comment"># E-postanıza ulaşan arşivi indirin:</span><br>
               <span class="output">my_spotify_data.zip</span>
             </div>
           </div>
@@ -708,9 +709,9 @@
             <div>
               <div class="step-header">
                 <span class="step-num">02</span>
-                <strong>Import and Analyse</strong>
+                <strong>İçe Aktarın ve Analiz Edin</strong>
               </div>
-              <p>Move the archive into a local SQLite database and see your listening statistics instantly:</p>
+              <p>Arşivi yerel SQLite veritabanına taşıyın ve dinleme istatistiklerinizi anında görün:</p>
             </div>
             <div class="terminal-block">
               <span class="cmd">headshell import</span> my_spotify_data.zip<br>
@@ -722,9 +723,9 @@
             <div>
               <div class="step-header">
                 <span class="step-num">03</span>
-                <strong>Make Your Sleeve Card</strong>
+                <strong>Sleeve Kartınızı Üretin</strong>
               </div>
-              <p>Create your card in a vertical or square format to share on social media:</p>
+              <p>Sosyal medyada paylaşmak üzere dikey veya kare formatta kartınızı oluşturun:</p>
             </div>
             <div class="terminal-block">
               <span class="cmd">headshell sleeve</span> --year 2024 --format story --out story.png
@@ -735,9 +736,9 @@
             <div>
               <div class="step-header">
                 <span class="step-num">04</span>
-                <strong>Play Freely</strong>
+                <strong>Özgürce Çalın</strong>
               </div>
-              <p>Scan your local music folders or connect your Navidrome/Jellyfin server:</p>
+              <p>Yerel müzik klasörlerinizi tarayın veya Navidrome/Jellyfin sunucunuzu bağlayın:</p>
             </div>
             <div class="terminal-block">
               <span class="cmd">headshell provider scan</span><br>
@@ -747,63 +748,63 @@
         </div>
       </section>
 
-      <!-- FAQ (Extended, 10 Questions) -->
+      <!-- SSS (Genişletilmiş 10 Soru) -->
       <section id="faq">
         <div class="section-header">
-          <h2>Frequently Asked Questions</h2>
-          <p>All the technical and practical questions you might have about headshell.</p>
+          <h2>Sıkça Sorulan Sorular</h2>
+          <p>headshell hakkında aklınıza gelebilecek tüm teknik ve pratik sorular.</p>
         </div>
 
         <div class="faq-grid">
           
           <div class="faq-card">
-            <h4>Is this a music piracy or MP3 download tool?</h4>
-            <p><strong>Absolutely not.</strong> headshell isn't an audio provider but an independent listening identity layer. While you listen to your own legal music archive (FLAC, MP3) or your personal media server (Navidrome, Subsonic, Jellyfin), it frees your history and statistics from the companies' monopoly.</p>
+            <h4>Bu bir müzik korsanlığı veya MP3 indirme aracı mı?</h4>
+            <p><strong>Kesinlikle hayır.</strong> headshell bir ses sağlayıcısı değil, bağımsız bir dinleme kimliği katmanıdır. Kendi yasal müzik arşivinizi (FLAC, MP3) veya kişisel medya sunucunuzu (Navidrome, Subsonic, Jellyfin) dinlerken geçmişinizi ve istatistiklerinizi şirketlerin tekelinden kurtarır.</p>
           </div>
 
           <div class="faq-card">
-            <h4>If I close my Spotify account, will I lose my listening history?</h4>
-            <p><strong>Never.</strong> From the moment you import your data into headshell once, your whole history is sealed locally in the SQLite database on your computer. Even if Spotify shut down tomorrow or you cancelled your subscription, your ten years of music memory would stay with you.</p>
+            <h4>Spotify hesabımı kapatırsam dinleme geçmişim kaybolur mu?</h4>
+            <p><strong>Asla.</strong> headshell ile verinizi bir kez içe aktardığınız andan itibaren tüm geçmişiniz bilgisayarınızdaki SQLite veritabanında yerel olarak mühürlenir. Spotify yarın kapansa veya aboneliğinizi iptal etseniz dahi 10 yıllık müzik hafızanız sizde kalır.</p>
           </div>
 
           <div class="faq-card">
-            <h4>Do I need to give my Spotify password or an API key?</h4>
-            <p><strong>No.</strong> headshell connects to no company's API and doesn't ask for your password. It reads, offline on your own computer, the data export zip you officially downloaded under the EU GDPR's data portability right.</p>
+            <h4>Spotify şifremi veya API anahtarımı vermem gerekiyor mu?</h4>
+            <p><strong>Hayır.</strong> headshell hiçbir şirketin API'sine bağlanmaz ve şifrenizi istemez. Avrupa Birliği GDPR veri taşınabilirliği kapsamında resmi olarak indirdiğiniz veri export zip dosyasını kendi bilgisayarınızda çevrimdışı olarak okur.</p>
           </div>
 
           <div class="faq-card">
-            <h4>If I delete a music file from my computer, is my listening history deleted?</h4>
-            <p><strong>No.</strong> In headshell's architecture, "what you listened to" (the history table) and "what you can play from the disk right now" (the catalog) are kept completely separate. Even if you delete a file, that track's past listening records, scrobbles and statistics stay.</p>
+            <h4>Bilgisayarımdan bir müzik dosyasını silersem dinleme geçmişim silinir mi?</h4>
+            <p><strong>Hayır.</strong> headshell mimarisinde "ne dinledin" (geçmiş tablosu) ile "şu an diskte ne çalabilirsin" (katalog) tamamen ayrı tutulur. Bir dosyayı silseniz dahi o parçanın geçmişteki dinleme kayıtları, scrobble'ları ve istatistikleri kalıcıdır.</p>
           </div>
 
           <div class="faq-card">
-            <h4>Does it work without an internet connection?</h4>
-            <p><strong>Yes, it can work 100% offline.</strong> Importing data, local library search (SQLite FTS5), music playback, the terminal interface and Sleeve card generation need no outside internet connection.</p>
+            <h4>İnternet bağlantım olmadan çalışır mı?</h4>
+            <p><strong>Evet, %100 çevrimdışı çalışabilir.</strong> Veri içe aktarma, yerel kütüphane araması (SQLite FTS5), müzik çalma, terminal arayüzü ve Sleeve kartı üretimi harici hiçbir internet bağlantısına ihtiyaç duymaz.</p>
           </div>
 
           <div class="faq-card">
-            <h4>How do I connect my personal Navidrome or Jellyfin server?</h4>
-            <p>You can register it easily with <code>headshell provider add subsonic --url https://... --user yourname</code>. Your password isn't typed on the command line (so it doesn't land in the shell history); it is read from the prompt without echo, and what is kept on disk is a token derived from it.</p>
+            <h4>Kişisel Navidrome veya Jellyfin sunucumu nasıl bağlarım?</h4>
+            <p><code>headshell provider add subsonic --url https://... --user adiniz</code> komutuyla kolayca kaydedebilirsiniz. Parolanız komut satırına yazılmaz (böylece kabuk geçmişine düşmez); istemden yankısız okunur veya token olarak diskte güvenle saklanır.</p>
           </div>
 
           <div class="faq-card">
-            <h4>How is the audio quality? Does it support Hi-Res and lossless?</h4>
-            <p>headshell uses the <code>symphonia</code> decoder and the <code>cpal</code> audio output path, both written in pure Rust. It sends FLAC, WAV, OGG, MP3 and M4A files straight to your hardware as a pure bit stream; it applies no quality loss or compression.</p>
+            <h4>Ses kalitesi nasıl? Hi-Res ve Kayıpsız (Lossless) destekliyor mu?</h4>
+            <p>headshell, saf Rust ile yazılmış <code>symphonia</code> çözücüsü ve <code>cpal</code> ses çıkış hattını kullanır. FLAC, WAV, OGG, MP3 ve M4A dosyalarını doğrudan donanımınıza saf bit akışıyla iletir; herhangi bir kalite kaybı veya sıkıştırma uygulamaz.</p>
           </div>
 
           <div class="faq-card">
-            <h4>How are songs with broken or missing tags (ID3) matched?</h4>
-            <p>headshell uses a strict <strong>canonical identity chain</strong>: it resolves songs with, in order, the ISRC code, the MusicBrainz ID, fuzzy matching with duration/artist tolerance, and the audio fingerprint. It is tested on 72 hard, hand-labelled cases with 98%+ accuracy.</p>
+            <h4>Etiketleri (ID3) bozuk veya eksik olan şarkılar nasıl eşleşiyor?</h4>
+            <p>headshell katı bir <strong>Kanonik Kimlik Zinciri</strong> kullanır: Sırasıyla ISRC kodu, MusicBrainz ID, süre/sanatçı toleranslı bulanık eşleme ve ses parmak iziyle şarkıları çözümler. 69 farklı zorlu vaka üzerinde %98+ doğrulukla test edilmiştir.</p>
           </div>
 
           <div class="faq-card">
-            <h4>How will listening together (rooms) work?</h4>
-            <p>Audio is never relayed from a server (so there is no copyright risk and no server cost). Everyone in a room plays the music from their own local source; only a millisecond-precise time anchor is synced over the network.</p>
+            <h4>Birlikte Dinleme (Odalar / Rooms) özelliği nasıl çalışacak?</h4>
+            <p>Ses asla sunucudan röle edilmez (böylece telif riski ve sunucu masrafı oluşmaz). Odalardaki herkes müziği kendi yerel kaynağından çalar; ağ üzerinden yalnızca milisaniyelik bir zaman çapası (anchor) senkronlanır.</p>
           </div>
 
           <div class="faq-card">
-            <h4>Is there a desktop interface (GUI), and will there be a mobile version?</h4>
-            <p><strong>Yes.</strong> The Tauri-based desktop interface is already here, with CSS themes users can write. The headshell-core was designed from day one to fit iOS/Android bindings through <code>uniffi</code>; the mobile version comes in a later phase.</p>
+            <h4>Modern Masaüstü Arayüzü (GUI) ve Mobil Sürüm gelecek mi?</h4>
+            <p><strong>Evet.</strong> headshell-core çekirdeği bugünden <code>uniffi</code> ile iOS/Android mobil bağlamalarına ve Tauri tabanlı masaüstü arayüzüne uyumlu olarak tasarlandı. Geliştiriciler ve kullanıcılar için CSS tabanlı topluluk temaları da yoldadır.</p>
           </div>
 
         </div>
@@ -812,7 +813,7 @@
     </main>
 
     <footer>
-      <div>headshell · free software built in pure Rust (2024 edition).</div>
+      <div>headshell · Saf Rust (2024 edition) ile inşa edilmiş özgür yazılım.</div>
       <div>
         <a href="https://github.com/headshell/headshell/blob/master/LICENSE-MIT">MIT</a> / <a href="https://github.com/headshell/headshell/blob/master/LICENSE-APACHE">Apache-2.0</a>
       </div>

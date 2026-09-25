@@ -1,27 +1,29 @@
-# torrent eklentisi
+# The torrent plugin
 
-Faz 2 §2.4'ün sağlayıcısı. Karar kaydı: **D-047**.
+The provider of Phase 2 §2.4. The decision record: **D-047**.
 
-Bu dizin eklentinin *kurulu* hâlidir; kaynağı `crates/headshell-plugin-torrent/`.
+This directory is the plugin's *installed* form; its source is
+`crates/headshell-plugin-torrent/`.
 
-> **`TODO: AFTER FIRST RELEASE` — kurulum D-049'u ihlal ediyor.**
-> Aşağıdaki kurulum size bir **Rust araç zinciri** kurduruyor. D-049 hiçbir
-> eklentinin sistem çapında kurulum istememesini şart koşuyor ve D-055'ten
-> sonra bunu ihlal eden tek eklenti bu: ötekiler betik, motorun Python'undan
-> geçiyorlar; bu bir ikili, geçemiyor.
+> **`TODO: AFTER FIRST RELEASE` — installation breaks D-049.**
+> The installation below makes you install a **Rust toolchain**. D-049 requires
+> that no plugin ask for a system-wide install, and after D-055 this is the
+> only plugin that breaks it: the others are scripts that go through the
+> engine's Python; this one is a binary, and it can't.
 >
-> Bir ara çözüm "çekirdeğe feature kapılı sağlayıcı olarak taşı" idi
-> (D-050 S3); **D-056 onu iptal etti** — sökülecek şey 2.335 satır kaynak +
-> 647 satır test, çalışan bir eklenti. Açık kalan soru **dağıtım**: platform
-> başına önceden derlenmiş yayın çıktısı mı, yoksa "kaynaktan derle" mi
-> kalacak. İlk sürümden sonra karara bağlanacak (PLAN §2.8 madde 5).
+> An interim solution was "move it into the core as a provider behind a
+> feature gate" (D-050 Q3); **D-056 cancelled it** — what would be torn out is
+> 2,335 lines of source + 647 lines of tests, a working plugin. The question
+> left open is **distribution**: a prebuilt release output per platform, or
+> staying with "build from source". It will be decided after the first release
+> (PLAN §2.8 item 5).
 
-Eklenti çekirdeğin içinde değil, **alt süreç** olarak çalışır (K5) — sebebi
-ölçüldü: `librqbit` `headshell-core`'un bağımlılık ağacına 179 crate ekliyordu
-(77 → 256) ve o ağaç `uniffi` ile mobile de gidecekti. Bu düzen D-056 ile
-**kalıcı** oldu.
+The plugin runs not inside the core but **as a subprocess** (K5) — the reason
+was measured: `librqbit` added 179 crates to `headshell-core`'s dependency tree
+(77 → 256), and that tree would have gone to mobile too, through `uniffi`. This
+arrangement became **permanent** with D-056.
 
-## Kurulum
+## Installation
 
 ```bash
 cargo build --release -p headshell-plugin-torrent
@@ -31,91 +33,92 @@ cp target/release/headshell-plugin-torrent ~/.local/share/headshell/plugins/torr
 headshell plugin approve torrent
 ```
 
-Dizin adı kimliktir (D-037): dizin `torrent` olmalı, `plugin.json`'daki
-`name` ile birebir aynı.
+The directory name is the ID (D-037): the directory must be `torrent`, exactly
+the same as the `name` in `plugin.json`.
 
-## Arama için Torznab gerekiyor
+## Search needs Torznab
 
-Arama doğrudan indekslere gitmiyor. Prowlarr ya da Jackett'ın konuştuğu
-**Torznab** API'sini kullanıyoruz: tek standart, tek ayrıştırıcı, ve depoda
-hiçbir siteye özel kazıyıcı yok. Hangi indekslerin sorgulanacağını siz kendi
-Prowlarr/Jackett'ınızda seçersiniz; bir site bozulduğunda güncellenmesi
-gereken bizim kodumuz değil, onların indeks tanımıdır.
+Search doesn't go to the indexers directly. We use the **Torznab** API that
+Prowlarr or Jackett speak: one standard, one parser, and no site-specific
+scraper in the repository. You choose which indexers are queried in your own
+Prowlarr/Jackett; when a site breaks, what needs updating is not our code but
+their indexer definition.
 
 ```bash
-headshell secret set plugin:torrent torznab_url      # ör. http://127.0.0.1:9696/1/api
+headshell secret set plugin:torrent torznab_url      # e.g. http://127.0.0.1:9696/1/api
 headshell secret set plugin:torrent torznab_api_key
 ```
 
-Yapılandırılmamışsa `search` **boş sonuç değil, açık bir hata** döndürür:
-"bakmadım" ile "bulamadım" ayrı tanılardır (K9). Çalma bu durumda da çalışır —
-elinizde bir infohash ya da magnet varsa.
+If it isn't configured, `search` returns **not an empty result but an explicit
+error**: "I didn't look" and "I couldn't find it" are different diagnoses
+(K9). Playing works in this case too — if you have an infohash or a magnet at
+hand.
 
-## İki adımlı arama
+## Two-step search
 
-Torznab bir **yayım** (release) döndürür, bir parça değil — genelde bir albüm.
-Protokolün `WireTrack`'i ise bir parça. api 1'i büyütmeden çözüm iki adım:
+Torznab returns a **release**, not a track — usually an album. The protocol's
+`WireTrack`, however, is a track. Without growing api 1, the solution is two
+steps:
 
-**Sağlayıcıya doğrudan arama yaptıran bir CLI komutu yok** — `headshell provider`
-altında `search` diye bir alt komut yoktur. Eklentinin araması `headshell play`'in
-üzerinden çalışıyor: katalogda sonuç yoksa çekirdek akıtabilen bütün
-sağlayıcılara soruyor (`Session::queue_from_search`), torrent de onlardan
-biri.
+**There is no CLI command that makes a provider search directly** — there is
+no `search` subcommand under `headshell provider`. The plugin's search works
+through `headshell play`: if the catalog has no results, the core asks every
+provider that can stream (`Session::queue_from_search`), and torrent is one of
+them.
 
-Kimlikleri görmek için `--dry-run --json` gerekiyor; insan okunur çıktı
-yalnızca `sanatçı - başlık` basıyor ve bir yayımın infohash'i orada
-**görünmüyor**:
+Seeing the IDs needs `--dry-run --json`; the human-readable output only prints
+`artist - title`, and a release's infohash **doesn't show** there:
 
 ```bash
-# 1. adım — yayımlar. Kimlik = <infohash>, ve yalnızca JSON'da görünür.
+# step 1 — releases. ID = <infohash>, and it shows only in the JSON.
 headshell play "radiohead ok computer" --dry-run --json | jq -r '.queued[].id.id'
 
-# 2. adım — o yayımın içindeki ses dosyaları. Kimlik = <infohash>/<sıra>
+# step 2 — the audio files inside that release. ID = <infohash>/<index>
 headshell play <infohash> --dry-run --json | jq -r '.queued[].id.id'
 
-# 3. adım — çal.
+# step 3 — play.
 headshell play <infohash>/3
 ```
 
-> Bu iki adımın `--json`'a mahkûm olması eklentinin değil **CLI'nin** eksiği:
-> `play --dry-run` sağlayıcı parça kimliğini insan çıktısına yazmıyor. Açık
-> borç olarak PLAN.md §2.6'da duruyor.
+> That these two steps are stuck with `--json` is not the plugin's gap but
+> **the CLI's**: `play --dry-run` doesn't write the provider track ID in the
+> human output. It stands as an open debt in PLAN.md §2.6.
 
-Bir magnet bağlantısını doğrudan aratabilirsiniz; eklenti onu kataloğuna yazıp
-içindeki dosyaları listeler.
+You can search for a magnet link directly; the plugin writes it into its
+catalog and lists the files inside.
 
-Tek ses dosyası olan bir yayımda çıplak `<infohash>` doğrudan çalar. Birden
-çok dosya varsa eklenti **tahmin etmez**: dosyaları listeleyen ve ne
-yazacağınızı söyleyen bir hata döner — 2. adımı `--json` olmadan da bu hata
-üzerinden görebilirsiniz.
+In a release with a single audio file, a bare `<infohash>` plays directly. If
+there are several files, the plugin **doesn't guess**: it returns an error
+that lists the files and tells you what to type — you can see step 2 through
+this error without `--json` too.
 
-## Ses nasıl geliyor
+## How the audio arrives
 
-İndirmenin bitmesi beklenmiyor. `librqbit` parça önceliğini okuma konumuna
-göre ayarlıyor; eklenti o akışı yalnızca `127.0.0.1`'e bağlı küçük bir HTTP
-sunucusundan sunuyor ve `resolve_source` o adresi döndürüyor.
+The download isn't expected to finish. `librqbit` sets the piece priority
+according to the read position; the plugin serves that stream from a small HTTP
+server bound only to `127.0.0.1`, and `resolve_source` returns that address.
 
-Bu K3'ün yasakladığı şey değil: röle edilen bir veri yok, akış kullanıcının
-kendi makinesinde kendi çektiği veriden okunuyor. Adresin yolunda süreç ömrü
-kadar yaşayan rastgele bir jeton var — aynı makinedeki başka bir süreç
-adresleri deneyerek indirilenleri okuyamasın diye.
+This isn't what K3 forbids: no data is relayed; the stream is read on the
+user's own machine from data they fetched themselves. The address's path
+carries a random token that lives as long as the process — so that another
+process on the same machine can't read the downloads by trying addresses.
 
-## İzin beyanı eksik, ve bilerek eksik
+## The permission declaration is incomplete, on purpose
 
-`plugin.json` yalnızca iki DHT giriş noktası beyan ediyor. Bir torrent
-istemcisi tanımı gereği **önceden bilinemeyen** tracker'lara ve rastgele peer
-adreslerine bağlanır; ayrıca arama için sizin verdiğiniz Torznab adresine
-gider. D-040'ın izin sözlüğü ("ana bilgisayar adı listesi, `*` yok") bunu
-ifade edemiyor. Beyanı eksik bırakıp `description`'da söylemek, olmayan bir
-kısıtlama varmış gibi göstermekten dürüst. Sözlüğün genişletilmesi açık bir
-konu (D-047).
+`plugin.json` declares only two DHT entry points. A torrent client by
+definition connects to trackers and random peer addresses that **can't be known
+in advance**; it also goes to the Torznab address you gave for search. D-040's
+permission vocabulary ("a list of host names, no `*`") can't express this.
+Leaving the declaration incomplete and saying so in the `description` is more
+honest than pretending a restriction exists that doesn't. Widening the
+vocabulary is an open topic (D-047).
 
-## Ayarlar
+## Settings
 
-| Değişken | Ne işe yarar |
+| Variable | What it does |
 |---|---|
-| `HEADSHELL_TORRENT_LOG` | `tracing` filtresi (varsayılan `info`). Günlük stderr'e gider, çekirdek onu `headshell diag`'a taşır. |
+| `HEADSHELL_TORRENT_LOG` | The `tracing` filter (default `info`). The log goes to stderr, and the core carries it into `headshell diag`. |
 
-İndirilenler `<eklenti veri dizini>/downloads/<infohash>/` altına, her torrent
-kendi dizinine iner (PLAN §2.4: iki yayımın aynı dosya adını taşıması sık, ve
-üst üste yazmak sessiz veri kaybıdır).
+Downloads land under `<plugin data directory>/downloads/<infohash>/`, every
+torrent in its own directory (PLAN §2.4: two releases carrying the same file
+name is common, and overwriting is silent data loss).

@@ -1,1992 +1,2188 @@
-# PLAN.md — Faz Faz Yürütme Planı
+# PLAN.md — Phase-by-Phase Execution Plan
 
-Bu dosya projenin yol haritası ve **normatif kural setidir**: çalışma protokolü,
-değişmez kurallar (§2), faz planı, ASLA YAPMA, SÖZLÜK. `CLAUDE.md` her oturumda
-okunan operasyonel özettir ve şunların sahibidir: workspace ağacı, komutlar, CLI
-test yüzeyi, kod konvansiyonları, tanılama pratiği, test düzeni.
+This file is the project's roadmap and **normative rule set**: the working
+protocol, the invariant rules (§2), the phase plan, NEVER DO, the GLOSSARY.
+`CLAUDE.md` is the operational summary read in every session and owns: the
+workspace tree, the commands, the CLI test surface, the code conventions, the
+diagnostics practice, the test layout.
 
-**Her olgu tek dosyada yaşar.** Bir başlık iki yerde yazılıysa biri kayar — bu
-zaten bir kez oldu. Çelişki olursa **kurallarda bu dosya, operasyonel bilgide
-CLAUDE.md geçerlidir**.
+**Every fact lives in one file.** If a topic is written in two places, one of
+them drifts — this has already happened once. If they contradict each other,
+**this file wins on rules, CLAUDE.md wins on operational knowledge**.
 
-> Proje adı **`headshell`** — D-058 ile karara bağlandı, yer tutucu değil.
+> The project is named **`headshell`** — settled by D-058, not a placeholder.
 
 ---
 
-# 0. ÖNCE OKU: Çalışma Protokolü
+# 0. READ FIRST: The Working Protocol
 
-## 0.1 Ne zaman durup soracaksın
+## 0.1 When to stop and ask
 
-Aşağıdakilerden biri olduğunda **kod yazma, dur ve sor.** Tahmin etme, varsayma, "muhtemelen
-şunu istiyordur" deme.
+When one of the following happens, **don't write code; stop and ask.** Don't
+guess, don't assume, don't say "they probably want this".
 
-| Durum | Ne yap |
+| Situation | What to do |
 |---|---|
-| Bir **değişmez kuralı** ihlal etmen gerekiyor | DUR. Neden gerektiğini açıkla, sor. |
-| Mevcut **fazın kapsamı dışına** çıkıyorsun | DUR. Hangi faza ait olduğunu söyle, sor. |
-| **Yeni bağımlılık** eklemen gerekiyor | Sor. Crate adı, boyut, neden gerekli, alternatifi ne. |
-| **Veritabanı şeması** değişecek | Sor. Migration gerekiyorsa özellikle sor. |
-| İki makul tasarım var ve seçim **geri alınamaz** | Sor. Seçenekleri ve takasları sun. |
-| Kimlik eşleştirme **doğruluk oranını düşürecek** bir değişiklik | Sor. Önce/sonra sayılarıyla. |
-| Bir servisin davranışını **bilmiyorsun** (API şekli, dosya formatı) | Sor ya da doğrula. **Uydurma.** |
-| Dışa açılan bir **API imzası** değişecek | Sor. Mobil/GUI hattını kırabilir. |
-| Bir test **kırıldı** ve düzeltmek davranışı değiştiriyor | Sor. Testi susturma. |
+| You need to break an **invariant rule** | STOP. Explain why it's needed, ask. |
+| You're going **outside the current phase's scope** | STOP. Say which phase it belongs to, ask. |
+| You need to add a **new dependency** | Ask. The crate name, its size, why it's needed, what the alternative is. |
+| The **database schema** will change | Ask. Ask especially if a migration is needed. |
+| There are two reasonable designs and the choice is **irreversible** | Ask. Present the options and the trade-offs. |
+| A change that will **lower the identity matching accuracy rate** | Ask. With before/after numbers. |
+| You **don't know** how a service behaves (API shape, file format) | Ask or verify. **Don't make it up.** |
+| A public **API signature** will change | Ask. It may break the mobile/GUI line. |
+| A test **broke** and fixing it changes behaviour | Ask. Don't silence the test. |
 
-## 0.2 Nasıl soracaksın
+## 0.2 How to ask
 
-Soruyu şu biçimde sor:
-
-```
-KARAR GEREKLİ: <tek cümlelik konu>
-Bağlam:    <neden bu noktaya gelindi>
-Seçenek A: <ne> — artı: <...> eksi: <...>
-Seçenek B: <ne> — artı: <...> eksi: <...>
-Önerim:    <hangisi ve neden>
-```
-
-Sonra **bekle.** Cevap gelmeden ilerleme, geçici çözümle devam etme.
-
-## 0.3 Karar defteri
-
-Her cevaplanan soru `DECISIONS.md` dosyasına eklenir:
+Ask the question in this form:
 
 ```
-## D-NNN — <kararın tek satırlık başlığı>
-**Tarih:** YYYY-AA-GG · **Durum:** UYGULANDI (YYYY-AA-GG)
-**Soru:** <cevaplanan soru>
-**Karar:** <verilen karar>
-**Gerekçe:** <neden bu, neden öteki değil>
+DECISION NEEDED: <the topic in one sentence>
+Context:   <why we got to this point>
+Option A:  <what> — pro: <...> con: <...>
+Option B:  <what> — pro: <...> con: <...>
+My advice: <which one and why>
 ```
 
-Numara **uydurulmaz**: `DECISIONS.md`'nin sonundaki son numaranın bir
-fazlasıdır. Bu blok bir biçim örneğidir; içindeki `D-NNN` bilerek sahte bir
-numaradır. Bir zamanlar burada örnek olarak `D-007` yazıyordu ve depoda
-bambaşka bir konuda gerçek bir D-007 vardı — örneği arayan okur yanlış kararı
-buluyordu.
+Then **wait.** Don't move on before the answer comes, and don't carry on with a
+workaround.
 
-Aynı soru iki kez sorulmaz. Bir şeye karar vermeden önce `DECISIONS.md`'yi oku.
+## 0.3 The decision log
 
-## 0.4 Bir işi "bitti" saymadan önce
+Every answered question is added to `DECISIONS.md`:
 
-1. `cargo test --workspace` temiz
-2. `cargo clippy --workspace --all-targets -- -D warnings` temiz
-3. `cargo fmt --all` uygulanmış
-4. Yeni yetenek varsa **CLI'de bir alt komutu var** ve `--json` destekliyor
-5. Kimlik/import'a dokunduysan doğruluk kümesi çalıştırıldı, sayı raporlandı
-6. Değişiklik `DECISIONS.md`'deki bir kararı geçersiz kılıyorsa güncellendi
+```
+## D-NNN — <the decision's one-line title>
+**Date:** YYYY-MM-DD · **Status:** APPLIED (YYYY-MM-DD)
+**Question:** <the question that was answered>
+**Decision:** <the decision that was made>
+**Reasoning:** <why this, why not the other>
+```
+
+The number is **not made up**: it is one more than the last number at the end
+of `DECISIONS.md`. This block is a format example; the `D-NNN` in it is a
+deliberately fake number. Once the example here said `D-007`, and the
+repository had a real D-007 on a completely different topic — a reader looking
+up the example found the wrong decision.
+
+The same question is not asked twice. Read `DECISIONS.md` before deciding
+anything.
+
+## 0.4 Before counting a job as "done"
+
+1. `cargo test --workspace` is clean
+2. `cargo clippy --workspace --all-targets -- -D warnings` is clean
+3. `cargo fmt --all` has been applied
+4. If there is a new capability, **it has a CLI subcommand** and it supports `--json`
+5. If you touched identity/import, the accuracy set was run and the number reported
+6. If the change invalidates a decision in `DECISIONS.md`, that decision was updated
 
 ---
 
-# 1. TEMEL KARARLAR (cevaplandı — ayrıntı `DECISIONS.md`)
+# 1. FOUNDATIONAL DECISIONS (answered — details in `DECISIONS.md`)
 
-| Konu | Karar | Sonuç |
+| Topic | Decision | Consequence |
 |---|---|---|
-| **Mobil** | Evet, sonraki fazlarda — ama API **bugünden** uyumlu (D-001) | K7 bağlayıcıdır, taviz yok |
-| **Dağıtım** | Yayınlanacak, topluluk hedefleniyor (D-002) | Faz 4 kapsamda; public repo hijyeni gerekli |
-| **Yerel arşiv** | Yok, test fixture'ı üretilebilir (D-003) | Faz 1 dogfood edilemez, sıra buna göre |
-| **Sleeve** | Açık hedef, aralık sezonu takvimi belirliyor (D-004) | **Faz 0.5 eklendi** |
+| **Mobile** | Yes, in later phases — but the API is compatible **from today** (D-001) | K7 is binding, no compromise |
+| **Distribution** | It will be published; a community is the aim (D-002) | Phase 4 is in scope; public repo hygiene is needed |
+| **Local archive** | None; test fixtures can be produced (D-003) | Phase 1 cannot be dogfooded; the order follows from that |
+| **Sleeve** | An explicit goal; the December season sets the calendar (D-004) | **Phase 0.5 was added** |
 
-**Açık kalan yok.** Proje adı **D-058: `headshell`** ile kapandı; lisans
-**D-005: MIT OR Apache-2.0**.
-
----
-
-# 2. DEĞİŞMEZ KURALLAR
-
-Tartışmaya kapalı. İhlal gerekiyorsa §0.1'e göre sor.
-
-### K1 — Altın Kural: CLI ince kabuktur
-Bütün mantık `headshell-core` içindedir. CLI yalnızca: argüman ayrıştırma, çekirdek çağrısı,
-çıktı biçimleme, çıkış kodu.
-
-**Test:** bir özellik CLI'den silindiğinde çekirdek onu hâlâ sunabiliyor olmalı.
-
-CLI içinde asla: iş mantığı, veri dönüşümü, ağ çağrısı, SQL, eşleştirme algoritması.
-
-### K2 — İçe aktarma export dosyalarından yapılır, API'den değil
-Spotify/Apple/Google export zip'leri. GDPR taşınabilirlik hakkı bunu garanti eder;
-sağlayıcı geliştirici şartları kısıtlayamaz. **Projenin kırılamayan tek parçası budur.**
-Geçmiş veya kütüphane çekmek için sağlayıcı API'sine gitme.
-
-### K3 — Ses asla röle edilmez, yalnızca pozisyon senkronlanır
-Odalarda her istemci kendi kaynağından çalar; ağdan sadece zaman çapası geçer.
-Sunucudan ses akıtan tasarım önerme. (Maliyet + hukuk + çoklu sağlayıcı, üçü birden.)
-
-### K4 — Spotify çekirdeğe girmez
-Ayrı, opsiyonel eklenti. `headshell-core`'un bağımlılık ağacında Spotify'a ait hiçbir şey olmaz.
-
-### K5 — Eklentiler gömülü motorda koşar; dışarıya yalnızca motorun kapılarından çıkar
-Eklentiler JavaScript ile yazılır ve çekirdeğe gömülü QuickJS'te koşar (D-069).
-Kullanıcıdan **hiçbir çalışma zamanı kurması istenmez.** Eklenti ağa, sırlara,
-kalıcı depoya ve araçlara yalnızca `host` üzerinden erişir ve beyan ettiği
-izinler **zorlanır**. Eklentinin fırlattığı hata, takıldığı döngü ya da bellek
-taşması çekirdeği düşürmez. Dinamik kütüphane (`dlopen`) yok.
-
-> İlk yazımı "alt süreç + JSON-RPC; eklentiler herhangi bir dilde yazılır"dı
-> (api 1). D-069'da değişti, çünkü "herhangi bir dil" pratikte "kullanıcının
-> kurması gereken bir çalışma zamanı" demekti. Takas bilerek yapıldı: api 1'de
-> eklenti ayrı süreçti ve C düzeyinde bir çökme bile çekirdeğe ulaşmazdı; api
-> 2'de yalnızca QuickJS'in kendi kusuru çekirdeği düşürebilir.
-
-### K6 — Kanonik kimlik zinciri sırası
-`ISRC → MusicBrainz ID → bulanık eşleşme (sanatçı+başlık+süre) → AcoustID parmak izi`
-Sıra bozulmaz. Her adım bir **güven skoru** döndürür.
-
-### K7 — Çekirdek API'si `uniffi` ile ifade edilebilir olmalı
-D-001 gereği **bağlayıcıdır**, gevşetilemez.
-
-Dışa açılan imzalarda **yasak**: generic parametre (`<L: Trait>`), lifetime, closure parametresi.
-**Serbest**: `Arc<dyn Trait>` — `uniffi` bunu callback interface olarak modeller
-(`#[uniffi::export(with_foreign)]`), yani Kotlin/Swift tarafında uygulanabilir.
-`async fn` de serbest, `uniffi` destekliyor.
-
-**"Dışa açılan" ne demek (D-052):** `uniffi`'nin ihraç edeceği yüzey — `Session`
-metodları, o imzalarda geçen tipler ve callback interface olarak modellenen
-trait'ler. Bir tip bu yüzeyden geçiyorsa alanlarında lifetime **olamaz**;
-`PlayOptions` bu yüzden `&'a str` yerine `String` taşıyor.
-
-Ergonomi için yazılmış `pub fn new(x: impl Into<String>)` tarzı yapıcılar kuralın
-**dışındadır**: `uniffi` yalnızca işaretlenmiş öğeye bakar, Faz 6'da bunların
-yanına `#[uniffi::constructor]` ile `String` alan ikinci bir yapıcı eklenir ve
-mevcut Rust çağıranları kırılmaz. Gerekçe D-052'de.
-
-> Bu kuralın ilk yazımı "trait object yok" diyordu; fazla katıydı ve D-006'da düzeltildi.
-
-> **Bilinen açık (D-052):** `ProviderFuture<'a, T>`, `HttpFuture<'a>` ve
-> `LookupFuture<'a, T>` dışa açılan yüzeyde lifetime taşıyor. Kaza değil —
-> dyn-uyumlu async trait'in makrosuz tek yolu bu. Ama `uniffi` bir trait
-> metodunun dönüşünde `Pin<Box<dyn Future + Send + 'a>>` ifade **edemez**:
-> `Provider`, `HttpClient`, `MetadataLookup` ve `FingerprintLookup` Faz 6'da
-> `uniffi`'nin kendi async makinesine göre yeniden yazılacak. Bugün
-> düzeltilebilir bir şey değil, izlenmesi gereken bir borç.
-
-### K8 — `headshell-core` içinde `unwrap()` / `expect()` / `panic!()` yok
-Testler hariç. Sessiz `unwrap_or_default()` de yasak — veri kaybını yutar.
-
-### K9 — Her başarısızlık hangi aşamada olduğunu söyler
-Kısmi başarı üreten her işlem özet döndürür: kaç geldi, kaçı başarılı, kaçı hangi yolla,
-kaçı başarısız.
-
-### K10 — Faz sınırı aşılmaz
-Sonraki fazın kodunu "hazır olsun diye" yazma. Faz 4 gelmeden sunucu kodu yok.
+**Nothing is left open.** The project name was closed with **D-058:
+`headshell`**; the license is **D-005: MIT OR Apache-2.0**.
 
 ---
 
-# 3. KONVANSİYONLAR, WORKSPACE, KOMUTLAR — `CLAUDE.md`'de
+# 2. INVARIANT RULES
 
-Bu üç başlığın tek sahibi [`CLAUDE.md`](CLAUDE.md)'dir; burada tekrarlanmaz.
-Sebebi kayma: aynı ağaç iki dosyada durunca biri bayatladı ve olmayan bir
-`sync/` dizinini aylarca listeledi, var olan `net/` ile `sleeve/`'ı hiç
-göstermedi.
+Not open for debate. If one must be broken, ask as in §0.1.
 
-- **Kod konvansiyonları** (hata tipleri, `async`, newtype kimlikler, isimlendirme
-  dili D-036) → CLAUDE.md, "Kod konvansiyonları"
-- **Workspace ağacı** → CLAUDE.md, "Workspace"
-- **Komutlar** → CLAUDE.md, "Komutlar"
-- **Tanılama pratiği ve test düzeni** → CLAUDE.md, "Tanılama kültürü" / "Test"
+### K1 — The Golden Rule: the CLI is a thin shell
+All logic lives in `headshell-core`. The CLI only does argument parsing,
+calling the core, formatting the output, the exit code.
 
-Normatif olan bu dosyada kalır: çalışma protokolü (§0), değişmez kurallar (§2),
-faz planı, ASLA YAPMA, SÖZLÜK.
+**Test:** when a feature is deleted from the CLI, the core must still be able
+to offer it.
+
+Never in the CLI: business logic, data transformation, network calls, SQL,
+matching algorithms.
+
+### K2 — Importing is done from export files, not from APIs
+Spotify/Apple/Google export zips. The GDPR's right to data portability
+guarantees this; a provider's developer terms cannot restrict it. **This is the
+one part of the project that cannot be broken.** Don't go to a provider's API
+to pull history or a library.
+
+### K3 — Audio is never relayed; only the position is synced
+In rooms every client plays from its own source; only a time anchor crosses
+the network. Don't propose a design that streams audio from a server. (Cost +
+law + multiple providers, all three at once.)
+
+### K4 — Spotify does not enter the core
+A separate, optional plugin. Nothing that belongs to Spotify is in
+`headshell-core`'s dependency tree.
+
+### K5 — Plugins run in an embedded engine; they reach the outside only through the engine's gates
+Plugins are written in JavaScript and run in the QuickJS embedded in the core
+(D-069). The user is **never asked to install a runtime.** A plugin reaches the
+network, secrets, persistent storage and tools only through `host`, and the
+permissions it declares are **enforced**. An error a plugin throws, a loop it
+gets stuck in or a memory overflow does not bring the core down. No dynamic
+libraries (`dlopen`).
+
+> Its first wording was "subprocess + JSON-RPC; plugins are written in any
+> language" (api 1). It changed in D-069, because "any language" in practice
+> meant "a runtime the user has to install". The trade-off was made on
+> purpose: in api 1 the plugin was a separate process, and even a C-level
+> crash could not reach the core; in api 2 only a flaw in QuickJS itself can
+> bring the core down.
+
+### K6 — The order of the canonical identity chain
+`ISRC → MusicBrainz ID → fuzzy match (artist+title+duration) → AcoustID fingerprint`
+The order is not broken. Every step returns a **confidence score**.
+
+### K7 — The core API must be expressible with `uniffi`
+It is **binding** because of D-001 and cannot be loosened.
+
+**Forbidden** in public signatures: generic parameters (`<L: Trait>`),
+lifetimes, closure parameters. **Allowed**: `Arc<dyn Trait>` — `uniffi`
+models it as a callback interface (`#[uniffi::export(with_foreign)]`), so it
+can be implemented on the Kotlin/Swift side. `async fn` is allowed too;
+`uniffi` supports it.
+
+**What "public" means (D-052):** the surface `uniffi` will export — `Session`
+methods, the types that appear in those signatures, and the traits modelled as
+callback interfaces. If a type crosses this surface, its fields **cannot**
+carry lifetimes; that is why `PlayOptions` carries a `String` instead of
+`&'a str`.
+
+Constructors written for ergonomics, in the style of
+`pub fn new(x: impl Into<String>)`, are **outside** the rule: `uniffi` only
+looks at the marked item; in Phase 6 a second constructor taking a `String` is
+added next to them with `#[uniffi::constructor]`, and existing Rust callers
+don't break. The reasoning is in D-052.
+
+> This rule's first wording said "no trait objects"; it was too strict and was
+> corrected in D-006.
+
+> **A known gap (D-052):** `ProviderFuture<'a, T>`, `HttpFuture<'a>` and
+> `LookupFuture<'a, T>` carry lifetimes on the public surface. Not an accident
+> — it is the only macro-free way to a dyn-compatible async trait. But `uniffi`
+> **cannot** express `Pin<Box<dyn Future + Send + 'a>>` in the return of a
+> trait method: `Provider`, `HttpClient`, `MetadataLookup` and
+> `FingerprintLookup` will be rewritten for `uniffi`'s own async machinery in
+> Phase 6. It is not something that can be fixed today; it is a debt to keep
+> an eye on.
+
+### K8 — No `unwrap()` / `expect()` / `panic!()` in `headshell-core`
+Tests excepted. A silent `unwrap_or_default()` is forbidden too — it swallows
+data loss.
+
+### K9 — Every failure says which stage it happened in
+Every operation that produces partial success returns a summary: how many came
+in, how many succeeded, how many by which route, how many failed.
+
+### K10 — Phase boundaries are not crossed
+Don't write the next phase's code "so that it's ready". No server code before
+Phase 4 arrives.
 
 ---
 
-# FAZ 0 — Kimlik Katmanı
+# 3. CONVENTIONS, WORKSPACE, COMMANDS — in `CLAUDE.md`
 
-**Amaç:** Kullanıcı export zip'ini verir, ömür boyu istatistiklerini görür.
-Oynatma yok, sunucu yok, hesap yok. Bu faz tek başına değerli bir üründür.
+The sole owner of these three topics is [`CLAUDE.md`](CLAUDE.md); they are not
+repeated here. The reason is drift: while the same tree stood in two files, one
+went stale and listed a nonexistent `sync/` directory for months, while never
+showing the `net/` and `sleeve/` that did exist.
 
-**Bitti sayılır:** `headshell import x.zip && headshell stats --year 2024` çalışıyor ve
-kimlik doğruluk oranı ölçülüp raporlanıyor.
+- **Code conventions** (error types, `async`, newtype IDs, the naming language,
+  D-073) → CLAUDE.md, "Code conventions"
+- **The workspace tree** → CLAUDE.md, "Workspace"
+- **Commands** → CLAUDE.md, "Commands"
+- **Diagnostics practice and test layout** → CLAUDE.md, "Diagnostics culture" /
+  "Tests"
 
-### 0.1 Workspace iskeleti
-Cargo workspace, iki crate, CI (test + clippy + fmt), `DECISIONS.md` boş dosya.
+What is normative stays in this file: the working protocol (§0), the invariant
+rules (§2), the phase plan, NEVER DO, the GLOSSARY.
 
-### 0.2 Export ayrıştırıcı
+---
+
+# PHASE 0 — The Identity Layer
+
+**Goal:** the user hands over the export zip and sees their lifetime
+statistics. No playback, no server, no account. This phase is a valuable
+product on its own.
+
+**Counts as done:** `headshell import x.zip && headshell stats --year 2024`
+works, and the identity accuracy rate is measured and reported.
+
+### 0.1 Workspace skeleton
+A Cargo workspace, two crates, CI (test + clippy + fmt), `DECISIONS.md` as an
+empty file.
+
+### 0.2 Export parser
 - Spotify **extended streaming history**: `Streaming_History_Audio_*.json`
-  Alanlar: `ts`, `master_metadata_track_name`, `master_metadata_album_artist_name`,
+  Fields: `ts`, `master_metadata_track_name`, `master_metadata_album_artist_name`,
   `master_metadata_album_album_name`, `ms_played`, `spotify_track_uri`, `skipped`, `platform`.
-- Spotify **account data**: `Playlist1.json`, kütüphane, takipler.
-- Zip'i akış halinde oku — 8 yıllık arşiv büyük olabilir, tamamını belleğe alma.
-- **Format değişebilir.** Beklenmeyen alan görürsen düşürme; sayıp raporla (K9).
+- Spotify **account data**: `Playlist1.json`, the library, follows.
+- Read the zip as a stream — an 8-year archive can be large; don't load all of
+  it into memory.
+- **The format can change.** If you see an unexpected field, don't drop it;
+  count it and report it (K9).
 
-> KARAR NOKTASI: Last.fm / ListenBrainz içe aktarma bu fazda mı, Faz 2'de mi?
-> **İKİSİ DE DEĞİL — soru bayatladı.** Faz 0 ve Faz 2 kapandı, ikisinde de
-> yazılmadı: `import/` bugün yalnızca `spotify.rs` + `archive.rs` taşıyor.
-> Soru "hangi fazda" değil artık; **yapılacak mı** diye sorulmalı ve yeni bir
-> faza bağlanmalı. K2 gereği kaynak yine export dosyası olurdu (ListenBrainz
-> export'u JSON, Last.fm'in kendi export'u yok — üçüncü taraf araç gerekir ve
-> bu tek başına bir karar). Açık, sahipsiz, ve bir faza bağlı değil.
+> DECISION POINT: Is Last.fm / ListenBrainz importing in this phase or in
+> Phase 2? **NEITHER — the question went stale.** Phase 0 and Phase 2 closed,
+> and it was written in neither: today `import/` carries only `spotify.rs` +
+> `archive.rs`. The question is no longer "which phase"; it should be asked
+> **whether it will be done**, and tied to a new phase. Because of K2 the
+> source would again be an export file (the ListenBrainz export is JSON;
+> Last.fm has no export of its own — a third-party tool is needed, and that is
+> a decision on its own). Open, ownerless, and not tied to a phase.
 
-### 0.3 Depolama
-SQLite. Ham `listen` olayları **asla silinmez** — istatistikler bunlardan türetilir.
-Şema versiyonlanır, migration'lar baştan planlanır.
+### 0.3 Storage
+SQLite. Raw `listen` events are **never deleted** — the statistics are derived
+from them. The schema is versioned; migrations are planned from the start.
 
-> KARAR NOKTASI: Şema taslağını yazmadan önce sun ve onay al. Sonradan
-> değiştirmek pahalı. **KAPANDI — şema yazıldı ve uygulandı.**
-> `library/schema.rs`: sıralı, geri dönüşsüz göçler dizisi, sürüm SQLite'ın
-> `user_version` pragma'sında, "yeni göç ekle, var olanı değiştirme" kuralı
-> modül başlığında yazılı. Ham `listen` satırı silen bir göç yok (ASLA YAPMA).
+> DECISION POINT: Present the schema draft before writing it and get approval.
+> Changing it later is expensive. **CLOSED — the schema was written and
+> applied.** `library/schema.rs`: an ordered, irreversible series of
+> migrations, the version in SQLite's `user_version` pragma, and the rule "add
+> a new migration, don't change an existing one" written in the module header.
+> There is no migration that deletes a raw `listen` row (NEVER DO).
 
-### 0.4 Kanonik kimlik çözümlemesi
-**Önce `spike/` içinde Python ile prototiple.** Algoritma belli değil; eşik değerleri,
-süre toleransı, remaster/live/deluxe ayrımı, "feat." temizliği on kez değişecek.
+### 0.4 Canonical identity resolution
+**Prototype it in Python inside `spike/` first.** The algorithm is not settled;
+the thresholds, the duration tolerance, the remaster/live/deluxe distinction and
+the "feat." cleanup will change ten times.
 
-`fixtures/identity/cases.json` içinde **etiketli doğruluk kümesi** tut.
-Doğruluk oranı bu projenin en önemli metriğidir; her değişiklikte ölç.
+Keep a **labelled accuracy set** in `fixtures/identity/cases.json`. The accuracy
+rate is this project's most important metric; measure it with every change.
 
-Tatmin edici orana ulaşınca `identity/`'ye porta. Zincir K6'daki sırayı izler.
+Once it reaches a satisfying rate, port it to `identity/`. The chain follows the
+order in K6.
 
-> KARAR NOKTASI: Kabul edilebilir minimum doğruluk oranı ve güven eşiği.
-> **KAPANDI — kod ve D-009.** Taban `tests/identity_accuracy.rs` içinde
-> `ACCURACY_FLOOR = 0.97` ve asla "test geçsin" diye düşürülmez; küme de bir
-> sözleşmedir (en az 60 vaka, en az 15 negatif). Bulanık tarafta sanatçı
-> benzerliği `ARTIST_MIN_SIMILARITY = 0.7`'nin altındaysa aday hiç
-> değerlendirilmez (`identity/fuzzy.rs`). Bugünkü ölçüm: **72/72 = %100**,
-> 22 negatif vaka.
+> DECISION POINT: The minimum acceptable accuracy rate and the confidence
+> threshold. **CLOSED — the code and D-009.** The floor is
+> `ACCURACY_FLOOR = 0.97` in `tests/identity_accuracy.rs`, and it is never
+> lowered "so that the test passes"; the set is a contract too (at least 60
+> cases, at least 15 negatives). On the fuzzy side, if the artist similarity is
+> below `ARTIST_MIN_SIMILARITY = 0.7` the candidate is not considered at all
+> (`identity/fuzzy.rs`). Today's measurement: **72/72 = 100%**, 22 negative
+> cases.
 
-### 0.5 İstatistik motoru
-Toplam süre, en çok dinlenenler, dönemsel kırılım, atlanma oranı, ilk/son dinleme,
-keşif zaman çizelgesi. Hepsi ham olaylardan hesaplanır, önceden hesaplanmış tablo tutma
-(şimdilik — performans sorun olursa sor).
+### 0.5 Statistics engine
+Total time, the most listened, the per-period breakdown, the skip rate,
+first/last listen, the discovery timeline. All computed from the raw events;
+don't keep precomputed tables (for now — ask if performance becomes a problem).
 
-### 0.6 CLI komutları
+### 0.6 CLI commands
 ```
 headshell import <zip> [--dry-run]
 headshell stats [--year N] [--top N] [--artist X]
-headshell resolve "<sanatçı> - <başlık>"
+headshell resolve "<artist> - <title>"
 headshell diag
 ```
-Hepsi `--json` destekler.
+All of them support `--json`.
 
-### 0.7 Tanılama
-`headshell diag` son çalıştırmanın ortamını, aşamasını, hata zincirini ve sayılarını
-tek blokta, kopyalanabilir biçimde basar.
+### 0.7 Diagnostics
+`headshell diag` prints the last run's environment, stage, error chain and
+counts in one block, in a copyable form.
 
 ---
 
-### 0.8 Faz 0 kapanış işleri — DURUM: TAMAM
+### 0.8 Phase 0 closing work — STATUS: DONE
 
-Faz 0 kodu yazıldı ve üç kapı da temiz (**69 test**, clippy, fmt).
+The Phase 0 code was written and all three gates are clean (**69 tests**,
+clippy, fmt).
 
-- [x] **D-006** — `import_archive` / `resolve_track` generic'i kalktı; çekirdeğin
-      dışa açık yüzeyinde generic parametre yok. `Arc<dyn MetadataLookup>`,
-      trait `dyn` uyumlu olsun diye kutulanmış future döndürüyor. Yeni bağımlılık yok.
-- [x] **D-007** — `diag` hata zinciri `err.source()`'tan başlıyor; `ADIM:` başlığı
-      tam bir kez basılıyor, regresyon testiyle kilitli.
-- [x] **D-008** — `model::PlayRule` tek tanım. `stats` ve `library search` aynı
-      kuralı çağırıyor; SQL karşılığı kuraldan üretiliyor ve eşliği gerçek SQLite
-      üzerinde testle doğrulanıyor. `SearchHit.plays` → `play_count`; ham sayı
-      (`listen_events`) yalnızca tanı sayaçlarında.
-- [x] **D-009** — Küme 15 → **69 vaka** (21 negatif), sınıf etiketli, sınıf bazında
-      kırılım basılıyor. Küme küçülürse test düşüyor.
+- [x] **D-006** — the generics of `import_archive` / `resolve_track` are gone;
+      there is no generic parameter on the core's public surface.
+      `Arc<dyn MetadataLookup>`; the trait returns a boxed future so that it is
+      `dyn`-compatible. No new dependency.
+- [x] **D-007** — the `diag` error chain starts from `err.source()`; the
+      `STEP:` heading is printed exactly once, locked with a regression test.
+- [x] **D-008** — `model::PlayRule` is the single definition. `stats` and
+      `library search` call the same rule; the SQL counterpart is generated
+      from the rule and the parity is verified with a test on a real SQLite.
+      `SearchHit.plays` → `play_count`; the raw count (`listen_events`) only in
+      the diagnostic counters.
+- [x] **D-009** — The set went from 15 → **69 cases** (21 negative),
+      class-labelled, with a per-class breakdown printed. If the set shrinks,
+      the test fails.
 
-**Kimlik doğruluğu — projenin en önemli metriği:**
+**Identity accuracy — the project's most important metric:**
 
-| Aşama | Oran |
+| Stage | Rate |
 |---|---|
-| Eski küme (15 vaka) | 15/15 = %100 — *ölçüm değil* |
-| Yeni küme, eski algoritma | 62/69 = **%89.9** |
-| Yeni küme, düzeltilmiş algoritma | 68/69 = **%98.6** |
-| D-010 karara bağlandıktan sonra | 69/69 = **%100** (22 negatif) |
+| The old set (15 cases) | 15/15 = 100% — *not a measurement* |
+| The new set, the old algorithm | 62/69 = **89.9%** |
+| The new set, the corrected algorithm | 68/69 = **98.6%** |
+| After D-010 was decided | 69/69 = **100%** (22 negative) |
 
-Büyüyen küme iki gerçek kusur buldu: canlı kayıtlar stüdyo kaydına %100 güvenle
-bağlanıyordu (`live` etiketi atılabilir sürüm eki sayılıyordu), ve yabancı bir
-sanatçı yalnızca başlık benzerliğiyle eşiği geçebiliyordu. İkisi de düzeltildi;
-ayrıntı ve sayılar `DECISIONS.md` D-009'da. Test eşiği %90 → %95 → **%97**.
+The growing set found two real flaws: live recordings were linked to the studio
+recording with 100% confidence (the `live` tag was counted as a droppable
+version suffix), and a foreign artist could pass the threshold on title
+similarity alone. Both were fixed; the details and numbers are in
+`DECISIONS.md` D-009. The test threshold went 90% → 95% → **97%**.
 
-Kalan tek vaka (radio edit) bir kusur değil cevaplanmamış bir soruydu; **D-010**
-ile "radio edit ayrı bir kayıttır" diye karara bağlandı. Kod değişmedi, vaka
-yeniden etiketlendi.
+The one remaining case (a radio edit) was not a flaw but an unanswered
+question; with **D-010** it was decided that "a radio edit is a separate
+recording". The code didn't change; the case was relabelled.
 
-**Faz 0 kapandı.** Sıradaki iş Faz 0.5 (Sleeve). Rasterizasyon kararı bağlandı
-(**D-011**: resvg, opsiyonel `render-png` feature'ı), kart tasarımı kararı bağlandı
-(**D-012**: sabit tasarım) ve **D-005 (lisans)** kapandı: MIT OR Apache-2.0.
-
----
-
-# FAZ 0.5 — Paylaşılabilir Sleeve
-
-**Amaç:** Faz 0'ın çıktısı terminal metni; terminal metni yayılmaz. Topluluk hedefi (D-002, D-004)
-paylaşılabilir bir görsel artefakt gerektiriyor. Aralık yıl sonu kartı sezonu (Spotify Wrapped®) yılda bir açılıyor
-ve bedava dikkat penceresi.
-
-**Bitti sayılır:** `headshell sleeve --year 2026 --out kart.png` çalışıyor ve çıkan görsel
-sosyal medyada açıklamasız paylaşılabilir kalitede.
-
-### 0.5.1 Kart üreticisi çekirdekte yaşar
-SVG üret, PNG'ye rasterize et. **`stats/` üstünde, `sleeve/` modülü olarak çekirdekte.**
-CLI yalnızca sürer. GUI ve mobil aynı üreticiyi çağıracak — burada yazılan kod üç kez yazılmaz.
-
-### 0.5.2 Biçimler
-Kare (feed) ve dikey 9:16 (story) en az. Ölçüler parametre, gömülü sabit değil.
-
-### 0.5.3 İçerik
-Toplam süre, en çok dinlenen sanatçı/parça/albüm, keşif zaman çizelgesi, ilk dinleme tarihi.
-**Ayırt edici nokta:** "8 yıllık geçmişin" — sağlayıcının 12 ayla sınırlı yıl sonu kartının (Spotify Wrapped®)
-yapamadığı şey. Kart bunu görünür kılmalı.
-
-> KARAR NOKTASI: Rasterizasyon nasıl yapılacak? **KAPANDI — D-011:** resvg opsiyonel
-> `render-png` feature'ı arkasında. Çekirdek her zaman SVG üretir; PNG yalnızca
-> feature açıkken derlenir. CLI açar, mobil açmaz.
-
-> KARAR NOKTASI: Kart tasarımı tema sisteminin (Faz 3) önizlemesi mi olsun, yoksa
-> sabit mi? **KAPANDI — D-012:** sabit tasarım, isimli iç sabitlerle. Ölçüler
-> parametre (`CardSize`), renkler modül içi sabitler; token sözleşmesi Faz 3'te
-> tasarlanır.
-
-### 0.5.4 Yayın hijyeni (D-002)
-README, LİSANS (**D-005 kapandı: MIT OR Apache-2.0**), CONTRIBUTING, sürüm etiketleme.
-Faz 0.5 muhtemelen ilk public sürüm olacak — repo o gün hazır olmalı.
+**Phase 0 closed.** The next job is Phase 0.5 (Sleeve). The rasterization
+decision was made (**D-011**: resvg, an optional `render-png` feature), the
+card design decision was made (**D-012**: a fixed design), and **D-005
+(license)** closed: MIT OR Apache-2.0.
 
 ---
 
-### 0.5.5 Faz 0.5 durum — TAMAM (`v0.0.1-beta`)
+# PHASE 0.5 — The Shareable Sleeve
 
-Kart üreticisi çekirdekte (`sleeve/`), CLI yalnızca sürüyor. Üç kapı temiz
-(**87 test**, clippy, fmt).
+**Goal:** Phase 0's output is terminal text; terminal text doesn't spread. The
+community goal (D-002, D-004) needs a shareable visual artifact. The December
+year-end card season (Spotify Wrapped®) opens once a year and is a free window
+of attention.
 
-- [x] **0.5.1** — `sleeve/` modülü üç katman: `data` (veri türetme),
-      `svg` (çizim), `png` (rasterizasyon, feature'lı). CLI'de yalnızca
-      argüman ayrıştırma + `Session::sleeve` çağrısı + çıktı biçimleme var.
-      `CardFormat` (clap `ValueEnum`) CLI'de duruyor ki `clap` çekirdeğe sızmasın.
-- [x] **0.5.2** — `CardSize` parametre; `square()` 1080×1080, `story()` 1080×1920.
-      Ölçüler gömülü sabit değil, `CardSize::new` ile herhangi bir ölçü verilebilir.
-- [x] **0.5.3** — Toplam süre, en çok dinlenen sanatçı/parça/albüm, keşif
-      çizelgesi, ilk dinleme tarihi, yıllara göre bar grafiği. Alt bilgi
-      arşivin yaşını basıyor ("1 Ocak 2023'dan beri (2 yıl)") — sağlayıcının
-      Spotify Wrapped®'ın 12 aylık penceresinin yapamadığı şey burada görünür.
-- [x] **0.5.4** — Yayın hijyeni tamam. README (ne/neden/nasıl + örnek kart),
-      `LICENSE-MIT` + `LICENSE-APACHE` (D-005), CONTRIBUTING (üç kapı,
-      Altın Kural, değişmez kurallar, doğruluk kümesi yordamı).
-      Repo `git init` edildi ve ilk commit atıldı; sürüm `0.0.0` → **`0.0.1-beta`**,
-      `v0.0.1-beta` etiketi Faz 0.5 kapanışına konuldu.
-      `target/`, `spike/`, `tmp/` commit dışında; fixture'lar sentetik.
+**Counts as done:** `headshell sleeve --year 2026 --out card.png` works, and the
+image it produces is good enough to share on social media without explanation.
 
-**D-011 ölçüldü:** `render-png` kapalıyken bağımlılık ağacı **56 crate**,
-açıkken **114**. Yani kararın gerekçesi (mobil binary boyutu, K7) gerçek:
-mobil bağlamalar 58 crate'lik rasterizasyon ağacını taşımıyor, CLI taşıyor.
+### 0.5.1 The card generator lives in the core
+Generate SVG, rasterize to PNG. **In the core as the `sleeve/` module, on top of
+`stats/`.** The CLI only drives it. The GUI and mobile will call the same
+generator — code written here is not written three times.
 
-**Keşif mantığının iki kipi var** ve bu kasıtlı: yıl kartında "bu yıl ilk kez
-dinlediklerin" (ilk dinleme yılı = sorgu yılı), tüm zamanlar kartında ise en
-çok dinlediklerinin ilk dinleme yılları, kronolojik. İkisi de sanatçının
-**tüm arşivdeki** ilk yılına bakar — yıl filtresi keşfi tanımlamaz, yalnızca
-kapsamı daraltır. Aksi halde her yıl her sanatçı "yeni keşif" görünürdü.
+### 0.5.2 Formats
+Square (feed) and vertical 9:16 (story) at least. The dimensions are
+parameters, not embedded constants.
 
-**Düzen sığdırması testle kilitli.** İlk çalışan sürümde bar bölümü kartın
-alt kenarından taşıp alt bilgiyle çakışıyordu; sebep `tall = h >= w`
-karşılaştırmasının kare kartı da "uzun" sayıp ona 5 keşif satırı + 260px bar
-alanı vermesiydi. Artık `h > w` ve içerik sığmıyorsa keşif satırı sayısı,
-sonra bar yüksekliği kısılıyor. `content_never_spills_past_the_card` ve
-`a_long_archive_still_fits_the_square_card` testleri çizilen en alt `y`
-koordinatını ölçüp kart yüksekliğiyle karşılaştırıyor — taşma sessizce
-geri gelemez.
+### 0.5.3 Content
+Total time, the most listened artist/track/album, the discovery timeline, the
+first listen date. **The distinguishing point:** "your 8-year history" —
+something the provider's year-end card (Spotify Wrapped®), limited to 12
+months, can't do. The card must make this visible.
 
-**Faz 0.5 kapandı.** Sıradaki iş bir karar: Faz 1 (oynatma) mı önce gelecek,
-Faz 3 (GUI + tema) mi — aşağıdaki Faz 1 karar noktası. Bu, aralık yıl sonu kartı
-penceresine ne yetişeceğini belirliyor ve **cevaplanmadan kod yazılmaz.**
+> DECISION POINT: How will rasterization be done? **CLOSED — D-011:** resvg
+> behind an optional `render-png` feature. The core always produces SVG; PNG
+> is compiled only with the feature on. The CLI turns it on, mobile doesn't.
+
+> DECISION POINT: Should the card design be a preview of the theme system
+> (Phase 3), or fixed? **CLOSED — D-012:** a fixed design, with named internal
+> constants. The dimensions are a parameter (`CardSize`), the colours are
+> module-internal constants; the token contract is designed in Phase 3.
+
+### 0.5.4 Release hygiene (D-002)
+README, LICENSE (**D-005 closed: MIT OR Apache-2.0**), CONTRIBUTING, release
+tagging. Phase 0.5 will probably be the first public release — the repo must be
+ready that day.
 
 ---
 
-# FAZ 1 — Oynatma
+### 0.5.5 Phase 0.5 status — DONE (`v0.0.1-beta`)
 
-**Amaç:** Yerel dosyalar ve Subsonic/Jellyfin'den çalabilmek. **Bu andan sonra
-scrobble'ı sen üretirsin** — geçmiş artık hiçbir sağlayıcıda oluşmaz.
+The card generator is in the core (`sleeve/`); the CLI only drives it. All
+three gates are clean (**87 tests**, clippy, fmt).
 
-**Bitti sayılır:** `headshell play` ile yerel ve uzak kaynaktan kesintisiz çalıyor,
-her çalma bir `listen` kaydı üretiyor.
+- [x] **0.5.1** — the `sleeve/` module has three layers: `data` (deriving the
+      data), `svg` (drawing), `png` (rasterization, behind a feature). The CLI
+      only has argument parsing + the `Session::sleeve` call + output
+      formatting. `CardFormat` (a clap `ValueEnum`) stays in the CLI so that
+      `clap` doesn't leak into the core.
+- [x] **0.5.2** — `CardSize` is a parameter; `square()` is 1080×1080,
+      `story()` 1080×1920. The dimensions are not embedded constants; any size
+      can be given with `CardSize::new`.
+- [x] **0.5.3** — Total time, the most listened artist/track/album, the
+      discovery timeline, the first listen date, a bar chart by year. The
+      footer prints the archive's age ("since 1 January 2023 (2 years)") — what
+      the 12-month window of the provider's Spotify Wrapped® can't do is
+      visible here.
+- [x] **0.5.4** — Release hygiene is done. README (what/why/how + a sample
+      card), `LICENSE-MIT` + `LICENSE-APACHE` (D-005), CONTRIBUTING (the three
+      gates, the Golden Rule, the invariant rules, the accuracy set procedure).
+      The repo was `git init`-ed and the first commit made; the version went
+      `0.0.0` → **`0.0.1-beta`**, and the `v0.0.1-beta` tag was put on the
+      Phase 0.5 closing.
+      `target/`, `spike/`, `tmp/` are outside the commit; the fixtures are
+      synthetic.
 
-**Dikkat (D-003):** Geliştiricinin yerel arşivi yok. Bu fazı **dogfood edemezsin** —
-kendi kullanımınla test edemediğin kod, sezgiyle değil yalnızca testle doğrulanır.
+**D-011 was measured:** with `render-png` off the dependency tree is **56
+crates**, with it on **114**. So the decision's reasoning (mobile binary size,
+K7) is real: the mobile bindings don't carry the 58-crate rasterization tree;
+the CLI does.
 
-Sonuçları:
-1. Faz 1 başlamadan önce telifsiz test fixture'ları üret (Creative Commons / public domain,
-   kısa kayıtlar, farklı formatlar: FLAC, MP3, OGG, bozuk etiketli örnekler dahil).
-2. Yerel sağlayıcı ile Subsonic sağlayıcısından hangisinin önce geleceği, hangi ortamın
-   gerçekten test edilebildiğine bağlı.
-3. **Faz sırası sorgulanabilir.** Sleeve + topluluk hedefi (D-004) göz önüne alındığında
-   Faz 3 (GUI + tema) Faz 1'den önce gelebilir — çünkü topluluk motoru temalar, ve
-   oynatma geliştirici tarafından denenemiyor. Karşı argüman: müzik çalmayan bir müzik
-   uygulamasının kimliği zayıf.
+**The discovery logic has two modes**, and that is deliberate: on a year card,
+"what you listened to for the first time this year" (first listen year = the
+query year); on the all-time card, the first listen years of your most
+listened, chronologically. Both look at the artist's first year **in the whole
+archive** — the year filter doesn't define discovery, it only narrows the
+scope. Otherwise every artist would look like a "new discovery" every year.
 
-> KARAR NOKTASI: Faz 0.5 sonrası sıra — önce Faz 1 (oynatma) mı, önce Faz 3 (GUI + tema) mi?
-> **KAPANDI — D-014: önce Faz 1 (oynatma).** Oynatma bir taban; GUI ve tema
-> onun üstüne kurulur. D-003'ün dogfood kısıtı kabul edilmiş risk olarak
-> taşınıyor — telifsiz fixture'larla ve testle doğrulanacak.
+**Fitting the layout is locked with a test.** In the first working version the
+bar section overflowed the card's bottom edge and collided with the footer; the
+cause was that the comparison `tall = h >= w` counted the square card as "tall"
+too and gave it 5 discovery rows + a 260px bar area. Now it is `h > w`, and if
+the content doesn't fit, the number of discovery rows is cut first, then the
+bar height. The tests `content_never_spills_past_the_card` and
+`a_long_archive_still_fits_the_square_card` measure the lowest `y` coordinate
+drawn and compare it with the card height — an overflow cannot come back
+silently.
 
-### 1.1 Provider trait tasarımı — TAMAM
-Yetenek bayrakları şart: `SEARCH | BROWSE | STREAM | CONTROL`.
-Hepsi aynı şeyi yapamaz — Spotify ileride yalnızca `CONTROL` olacak.
-Trait'i tek tip varsayarsan soyutlama ilk uzak oynatıcıda çöker.
+**Phase 0.5 closed.** The next job is a decision: will Phase 1 (playback) come
+first, or Phase 3 (GUI + theme) — the Phase 1 decision point below. It decides
+what will make it to the December year-end card window, and **no code is
+written before it is answered.**
 
-> KARAR NOKTASI: Trait imzalarını yazmadan önce sun. **KAPANDI — D-015:**
-> durum çapa ile açılır (`PlaybackAnchor`), observer/callback yok.
+---
 
-**Uygulandı.** `provider::Provider` trait'i `Arc<dyn>` uyumlu (K7): kutulanmış
-future döndürür, generic/lifetime/closure taşımaz. `Capabilities` bit maskesi
-`uniffi` için `u32`. Yeteneği olmayan bir çağrı **açık hata** döndürür
-(`ErrorKind::Unsupported`), sessiz boş liste değil — "yapamıyorum" ile
-"sonuç yok" farklı şeylerdir (K9). `rescan` trait'e varsayılan uygulamalı
-metot olarak kondu: downcast yerine, eklentiler (Faz 2) de kendi taramasını
-verebilsin diye.
+# PHASE 1 — Playback
 
-### 1.2 Yerel dosya sağlayıcı — TAMAM
-Dizin tarama, etiket okuma, izleme (watch), kütüphane indeksleme, SQLite FTS ile arama.
+**Goal:** to be able to play from local files and Subsonic/Jellyfin. **From
+this moment on, you produce the scrobble yourself** — history no longer forms
+at any provider.
 
-**Yapıldı:** özyinelemeli dizin tarama, symphonia ile etiket okuma
-(sanatçı/başlık/albüm/ISRC/süre), etiket yoksa dosya adından türetme.
-Tarama K9'a uygun özet döndürüyor: `files_seen / audio_files / indexed /
-tag_fallback / failed / unreadable_dirs / unchanged`. Bozuk dosya taramayı
-düşürmüyor ama **sayılıyor**; okunamayan alt dizin de öyle.
+**Counts as done:** `headshell play` plays without interruption from local and
+remote sources, and every play produces a `listen` record.
 
-**İndeks artık kalıcı** (şema v2, `provider_tracks` + FTS5). `headshell play`
-tarama yapmıyor; kullanıcı bir kez `headshell provider scan` der, sonraki
-çalmalar katalogdan okur. Arama da doğrusal değil FTS.
+**Beware (D-003):** The developer has no local archive. You **can't dogfood**
+this phase — code you can't test through your own use is verified only by
+tests, not by intuition.
 
-Üç tasarım kararı:
-- **Katalog `tracks`/`listens`'tan ayrı tablo.** `tracks` "ne dinledin"
-  (ham olaylardan türer, asla silinmez), `provider_tracks` "ne çalabilirsin"
-  (kaynağın aynası, dosya silinince satır da gider). Birleştirmek, diskten
-  sildiğin bir dosyanın **geçmişini** de silmek olurdu — testle kilitli
+Consequences:
+1. Before Phase 1 starts, produce royalty-free test fixtures (Creative Commons
+   / public domain, short recordings, different formats: FLAC, MP3, OGG,
+   including samples with broken tags).
+2. Whether the local provider or the Subsonic provider comes first depends on
+   which environment can really be tested.
+3. **The phase order can be questioned.** Considering Sleeve + the community
+   goal (D-004), Phase 3 (GUI + theme) could come before Phase 1 — because the
+   community's engine is themes, and playback can't be tried by the developer.
+   The counter-argument: a music app that doesn't play music has a weak
+   identity.
+
+> DECISION POINT: The order after Phase 0.5 — Phase 1 (playback) first, or
+> Phase 3 (GUI + theme) first? **CLOSED — D-014: Phase 1 (playback) first.**
+> Playback is a foundation; the GUI and the theme are built on top of it.
+> D-003's dogfood constraint is carried as an accepted risk — it will be
+> verified with royalty-free fixtures and tests.
+
+### 1.1 Provider trait design — DONE
+Capability flags are a must: `SEARCH | BROWSE | STREAM | CONTROL`.
+Not all of them can do the same thing — Spotify will later be `CONTROL` only.
+If you assume the trait is uniform, the abstraction collapses at the first
+remote player.
+
+> DECISION POINT: Present the trait signatures before writing them.
+> **CLOSED — D-015:** state is exposed through an anchor (`PlaybackAnchor`);
+> no observer/callback.
+
+**Applied.** The `provider::Provider` trait is `Arc<dyn>`-compatible (K7): it
+returns boxed futures and carries no generics/lifetimes/closures. The
+`Capabilities` bit mask is a `u32` for `uniffi`. A call without the capability
+returns an **explicit error** (`ErrorKind::Unsupported`), not a silent empty
+list — "I can't" and "no results" are different things (K9). `rescan` was put
+on the trait as a method with a default implementation: instead of a downcast,
+so that plugins (Phase 2) can provide their own scanning too.
+
+### 1.2 Local file provider — DONE
+Directory scanning, tag reading, watching, library indexing, search with
+SQLite FTS.
+
+**Done:** recursive directory scanning, tag reading with symphonia
+(artist/title/album/ISRC/duration), deriving from the file name when there are
+no tags. The scan returns a summary in line with K9: `files_seen / audio_files
+/ indexed / tag_fallback / failed / unreadable_dirs / unchanged`. A broken file
+doesn't bring the scan down, but it **is counted**; so is an unreadable
+subdirectory.
+
+**The index is now persistent** (schema v2, `provider_tracks` + FTS5).
+`headshell play` doesn't scan; the user says `headshell provider scan` once,
+and later plays read from the catalog. Search, too, is FTS rather than linear.
+
+Three design decisions:
+- **The catalog is a table separate from `tracks`/`listens`.** `tracks` is
+  "what you listened to" (derived from raw events, never deleted);
+  `provider_tracks` is "what you can play" (a mirror of the source; when a file
+  is deleted its row goes too). Merging them would mean also deleting the
+  **history** of a file you deleted from disk — locked with a test
   (`dropping_a_file_from_the_catalog_never_touches_its_history`).
-- **Artımlı tarama mtime damgasıyla.** Damgası değişmemiş dosyanın etiketi
-  yeniden okunmuyor; taramanın pahalı kısmı buydu. Fixture dizininde ikinci
-  tarama 4/4 dosyayı `unchanged` sayıyor.
-- **`resolve_source` kök kontrolü `canonicalize` ile.** Eskiden bellek
-  indeksine bakılıyordu; indeks katalogda olduğu için artık yol, taranan
-  köklerin altında mı diye sınanıyor. `<kök>/../../etc/passwd` reddediliyor.
+- **Incremental scanning with an mtime stamp.** The tags of a file whose stamp
+  hasn't changed are not read again; that was the expensive part of the scan.
+  In the fixture directory, a second scan counts 4/4 files as `unchanged`.
+- **`resolve_source`'s root check uses `canonicalize`.** It used to look at an
+  in-memory index; since the index is in the catalog, the path is now checked
+  for being under the scanned roots. `<root>/../../etc/passwd` is rejected.
 
-**Dizin izleme yerine bayatlık yoklaması (D-025).** `notify` bağımlılığı
-eklenmedi: `headshell provider scan --if-stale` sağlayıcıya ucuz bir soru soruyor
-(`catalog_changed_since`) ve yalnızca gerekiyorsa tarıyor. Yerel sağlayıcı
-bunu **yalnızca dizinleri** gezerek cevaplıyor — dosyalar `stat` edilmiyor.
+**A staleness probe instead of directory watching (D-025).** The `notify`
+dependency was not added: `headshell provider scan --if-stale` asks the
+provider a cheap question (`catalog_changed_since`) and scans only if needed.
+The local provider answers it by walking **only directories** — files are not
+`stat`-ed.
 
-Üç cevap üçü de farklı şey: değişmiş / değişmemiş / **bilmiyorum**.
-"Bilmiyorum" bir tarama sebebi, atlama sebebi değil.
+The three answers are three different things: changed / unchanged / **I don't
+know**. "I don't know" is a reason to scan, not a reason to skip.
 
-Görmediği şey açıkça yazılı: dosyanın **yerinde yeniden etiketlenmesi**
-(dosya değişir, dizin damgası değişmez). O durumda düz `provider scan`
-gerekiyor ve komut yardımı bunu söylüyor. Gerçek zamanlı izleme gerekirse
-Faz 3'te GUI'nin olay döngüsüyle birlikte yeniden bakılır.
+What it doesn't see is written down explicitly: **retagging a file in place**
+(the file changes, the directory stamp doesn't). In that case a plain
+`provider scan` is needed, and the command's help says so. If real-time
+watching is needed, it will be looked at again in Phase 3 together with the
+GUI's event loop.
 
-### 1.3 Subsonic / Jellyfin istemcisi — TAMAM (gerçek sunucuda doğrulandı)
-Subsonic API yaygın standart. Bu, ileride kendi sunucunun Subsonic uyumlu
-konuşması ihtimalini de açık tutar.
+### 1.3 Subsonic / Jellyfin client — DONE (verified on a real server)
+The Subsonic API is a widespread standard. It also keeps open the possibility
+of our own server speaking Subsonic-compatibly later.
 
-> KARAR NOKTASI: 1.3'e başlamak §0.1'deki üç tetikleyiciye birden basıyor —
-> **yeni bağımlılık**, **bilmediğin servis davranışı**, **geri alınamaz tasarım**.
-> **KAPANDI — D-019…D-022.** Aşağıdaki dört alt soru da cevaplandı; asıl soru
-> metni tarih olarak bu bölümün sonunda duruyor.
+> DECISION POINT: Starting 1.3 presses all three triggers in §0.1 at once —
+> **a new dependency**, **service behaviour you don't know**, **an
+> irreversible design**. **CLOSED — D-019…D-022.** The four sub-questions below
+> were answered too; the original question text stays at the end of this
+> section as history.
 
-**Uygulandı.** Dört karar da koda döndü:
+**Applied.** All four decisions turned into code:
 
-- **D-019 (kapsam):** Subsonic **ve** Jellyfin. `provider/remote/` altında
-  ortak plumbing (sunucu kaydı, kimlik saklama, akış kaynağı) + `subsonic.rs`
-  + `jellyfin.rs`. Ayrışan yalnızca uç nokta ve JSON şekli.
-- **D-020 (taşıma):** `net::HttpClient` trait'i **her zaman** derleniyor;
-  somut istemci (`ureq` + rustls) `http-client` feature'ı arkasında. Sağlayıcı
-  mantığı feature kapalıyken de derleniyor ve test ediliyor — çağıran kendi
-  `Arc<dyn HttpClient>`'ını verirse çalışıyor da. Ağaç ölçümü D-020'de.
-- **D-021 (kimlik):** `servers.json`, veri dizininde, unix'te `0600`. Şema
-  değişmedi. Subsonic'te parola diske düz yazılmıyor (salt + `md5(parola+salt)`),
-  Jellyfin'de bir kez erişim anahtarına çevriliyor. md5 için bağımlılık
-  eklenmedi, RFC 1321 çekirdekte (`provider/remote/md5.rs`).
-- **D-022 (test yolu):** `tests/remote_http.rs` — `std::net` ile elle yazılmış
-  sahte sunucu, **gerçek `UreqClient`** ile konuşuyor. Yeni bağımlılık yok.
+- **D-019 (scope):** Subsonic **and** Jellyfin. Shared plumbing under
+  `provider/remote/` (the server registry, credential storage, the stream
+  source) + `subsonic.rs` + `jellyfin.rs`. Only the endpoints and the JSON
+  shapes diverge.
+- **D-020 (transport):** the `net::HttpClient` trait is **always** compiled;
+  the concrete client (`ureq` + rustls) is behind the `http-client` feature.
+  The provider logic compiles and is tested with the feature off too — and if
+  the caller gives its own `Arc<dyn HttpClient>`, it even works. The tree
+  measurement is in D-020.
+- **D-021 (credentials):** `servers.json`, in the data directory, `0600` on
+  Unix. The schema didn't change. For Subsonic the password is not written to
+  disk in plain text (salt + `md5(password+salt)`); for Jellyfin it is turned
+  into an access key once. No dependency was added for md5; RFC 1321 is in the
+  core (`provider/remote/md5.rs`).
+- **D-022 (test path):** `tests/remote_http.rs` — a fake server written by
+  hand with `std::net`, talking to the **real `UreqClient`**. No new
+  dependency.
 
-`AudioSource::HttpStream` artık çalınıyor. `playback/http_source.rs` akışı
-arka planda indirirken çözücü ilk baytları okumaya başlıyor; `Player`'ın
-eski "Faz 1.3'te gelecek" hatası yerini **derleme kararını söyleyen** bir
-hataya bıraktı (`http-client` kapalıysa: "bu derlemede yok", K9).
+`AudioSource::HttpStream` now plays. `playback/http_source.rs` downloads the
+stream in the background while the decoder starts reading the first bytes; the
+`Player`'s old "coming in Phase 1.3" error gave way to an error that **states
+the build decision** (with `http-client` off: "not in this build", K9).
 
-Üç ayrıntı kayda değer:
+Three details are worth recording:
 
-- **Subsonic hatayı HTTP 200 ile gönderiyor.** Zarftaki `status: "failed"`
-  okunmazsa "her şey yolunda" sanılırdı. Zarf her yanıtta denetleniyor ve
-  hata `ErrorKind::RemoteApi` oluyor — taşıma hatasından (`Network`,
-  `HttpStatus`) ayrı, çünkü "sunucuya ulaşamadım" ile "sunucu hayır dedi"
-  farklı tanılar ve farklı çözümler (K9). Yeni aşama: `NETWORK_REQUEST`.
-- **Kimlik nerede taşınır sağlayıcıya göre değişiyor.** Subsonic'te sorgu
-  dizesinde (protokolün dayattığı yol), Jellyfin'de `Authorization`
-  başlığında. İkincisi kasıtlı: akış adresi log'a ya da ekrana düşerse
-  anahtar sızmasın. Testler ikisini de kilitliyor.
-- **Ulaşılamamak bir sağlık cevabıdır**, komutun hatası değil. `provider test`
-  sebebi gösteriyor; `health()` `Err` döndürmüyor.
+- **Subsonic sends an error with HTTP 200.** If the envelope's
+  `status: "failed"` weren't read, "all is well" would be assumed. The
+  envelope is checked in every response and the error becomes
+  `ErrorKind::RemoteApi` — separate from a transport error (`Network`,
+  `HttpStatus`), because "I couldn't reach the server" and "the server said no"
+  are different diagnoses with different fixes (K9). A new stage:
+  `NETWORK_REQUEST`.
+- **Where the credential is carried depends on the provider.** For Subsonic in
+  the query string (the path the protocol imposes), for Jellyfin in the
+  `Authorization` header. The second is deliberate: if the stream address ends
+  up in a log or on the screen, the key doesn't leak. The tests lock both.
+- **Being unreachable is a health answer**, not the command's error.
+  `provider test` shows the reason; `health()` doesn't return `Err`.
 
-**Otomatik doğrulama.** `remote_http.rs`'in 10 testi gerçek soket üzerinden
-şunları kilitliyor: kaydın parolayı tele hiç çıkarmadığı, Jellyfin'in parolayı
-anahtara çevirdiği, 200+`failed` tuzağı, kapalı portun sebepli bir sağlık
-cevabı olduğu, akışın tam inip geriye arandığı ve **fixture FLAC'ının HTTP
-üzerinden gerçekten çalındığı** (ses aygıtı yoksa test kendini atlıyor,
-nedenini `stderr`'e yazarak).
+**Automatic verification.** The 10 tests of `remote_http.rs` lock the
+following over a real socket: that registering never puts the password on the
+wire, that Jellyfin turns the password into a key, the 200+`failed` trap, that
+a closed port is a health answer with a reason, that the stream downloads fully
+and seeks backwards, and that **the fixture FLAC really plays over HTTP** (if
+there is no audio device the test skips itself, writing the reason to
+`stderr`).
 
-**Gerçek sunucu doğrulaması — 2026-08-31, YAPILDI.** Docker'da Navidrome
-0.63.2 ve Jellyfin 10.11.11 kuruldu; ikisinde de kayıt → doğrulama → arama →
-**akış** → scrobble zinciri uçtan uca çalıştı. Ayrıntı, yordam ve hâlâ
-sınanmayanlar (TLS, ters vekil, transcode, büyük kütüphane, Navidrome dışı
-Subsonic uygulamaları) **D-022'nin doğrulama bölümünde**.
+**Real server verification — 2026-08-31, DONE.** Navidrome 0.63.2 and Jellyfin
+10.11.11 were set up in Docker; on both, the chain register → verify → search →
+**stream** → scrobble worked end to end. The details, the procedure and what is
+still untested (TLS, a reverse proxy, transcoding, a large library, Subsonic
+implementations other than Navidrome) are **in D-022's verification section**.
 
-Gerçeğin gösterdiği tek kusur: doğrulama başarısız olduğunda dıştaki cümle
-"erişilemedi" diyordu, oysa sunucu erişilebilirdi ve parolayı reddetmişti.
-Artık "doğrulanamadı" diyor; sebebi `detail` taşıyor (K9). Sahte sunucu bunu
-gösteremezdi çünkü kusur protokolde değil, **iki farklı başarısızlığı tek
-cümlede birleştirmekteydi**.
+The one flaw reality showed: when verification failed, the outer sentence said
+"could not be reached", while the server was reachable and had rejected the
+password. Now it says "could not be verified"; `detail` carries the reason (K9).
+The fake server couldn't have shown this, because the flaw was not in the
+protocol but in **merging two different failures into one sentence**.
 
-**CLI yüzeyi** (Altın Kural sınavı geçildi — kabukta karar yok):
+**The CLI surface** (the Golden Rule test passed — no decisions in the shell):
 
 ```
-headshell provider add subsonic --url https://muzik.ev --user adin [--name ev] [--no-verify]
-headshell provider add jellyfin --url https://jf.ev --user adin [--api-key ANAHTAR]
-headshell provider servers      # kimlik bilgisi gösterilmez
-headshell provider remove <ad>
+headshell provider add subsonic --url https://music.home --user yourname [--name home] [--no-verify]
+headshell provider add jellyfin --url https://jf.home --user yourname [--api-key KEY]
+headshell provider servers      # credentials are not shown
+headshell provider remove <name>
 ```
 
-Parola **argüman değil**: `HEADSHELL_PASSWORD`'dan ya da terminalden yankısız
-okunuyor — komut satırına yazılan parola kabuk geçmişine ve `ps` çıktısına
-düşerdi. Tty yoksa sessizce yankılı okumaya düşülmüyor, `HEADSHELL_PASSWORD`
-gösteriliyor. Yankısız okuma için yeni bağımlılık yok (`crossterm` zaten
-TUI için vardı). Ad önerisi (`https://muzik.ev:4533` → `muzik`) çekirdekte,
-CLI'de değil: GUI de aynı öneriyi gösterecek.
+The password is **not an argument**: it is read from `HEADSHELL_PASSWORD` or
+from the terminal without echo — a password typed on the command line would
+land in the shell history and the `ps` output. Without a tty it does not
+silently fall back to echoed reading; `HEADSHELL_PASSWORD` is pointed out. No
+new dependency for reading without echo (`crossterm` was already there for the
+TUI). The name suggestion (`https://music.home:4533` → `music`) is in the core,
+not the CLI: the GUI will show the same suggestion.
 
 <details>
-<summary>Karar noktasının özgün metni (tarih olarak duruyor)</summary>
+<summary>The original text of the decision point (kept as history)</summary>
 
 ```
-KARAR GEREKLİ: Faz 1.3 uzak sağlayıcı — kapsam, taşıma katmanı, kimlik, test yolu
+DECISION NEEDED: Phase 1.3 remote provider — scope, transport layer, credentials, test path
 
-Bağlam:  headshell-core'un bağımlılık ağacında bugün HTTP/TLS yok; `tokio` bile
-         yalnızca dev-dependency (genel API çalışma zamanından bağımsız, K:
-         "çekirdek #[tokio::main] kurmasın"). İlk ağ çağrısı bu dengeyi
-         değiştirir. Ayrıca D-017 "kullanıcının çalışan bir Subsonic/Jellyfin
-         sunucusu YOK" varsayımını kayda geçirmişti; D-003 ise "hangi ortam
-         gerçekten test edilebiliyorsa o önce gelmeli" diyor.
+Context: Today there is no HTTP/TLS in headshell-core's dependency tree; even
+         `tokio` is only a dev-dependency (the public API is runtime-independent,
+         C: "the core does not set up #[tokio::main]"). The first network call
+         changes this balance. Also, D-017 had recorded the assumption "the user
+         has NO running Subsonic/Jellyfin server"; and D-003 says "whichever
+         environment can really be tested should come first".
 
-S1 — Kapsam
-  A: Yalnızca Subsonic (OpenSubsonic). Jellyfin de Subsonic eklentisiyle
-     konuşabiliyor. — artı: tek API, tek test yüzeyi, 1.3 hızlı kapanır.
-     eksi: eklentisiz Jellyfin kurulumları dışarıda kalır.
-  B: Subsonic + yerel Jellyfin API'si. — artı: kapsama geniş.
-     eksi: iki ayrı istemci, iki auth modeli; 1.3 iki katına çıkar.
-  Önerim: A. PLAN'ın kendi gerekçesi ("Subsonic yaygın standart") bunu
-  destekliyor; Jellyfin'i ayrı sağlayıcı olarak Faz 2'de eklenti sınırının
-  ilk gerçek müşterisi yapmak daha temiz.
+Q1 — Scope
+  A: Subsonic (OpenSubsonic) only. Jellyfin can also talk through a Subsonic
+     plugin. — pro: one API, one test surface, 1.3 closes quickly.
+     con: Jellyfin installs without the plugin are left out.
+  B: Subsonic + the native Jellyfin API. — pro: wide coverage.
+     con: two separate clients, two auth models; 1.3 doubles.
+  My advice: A. The PLAN's own reasoning ("Subsonic is a widespread
+  standard") supports it; making Jellyfin a separate provider in Phase 2, as
+  the plugin boundary's first real customer, is cleaner.
 
-S2 — Taşıma katmanı / bağımlılık
-  A: Çekirdeğe `reqwest` (rustls, default-features kapalı). — artı: async
-     API'ye doğrudan oturur. eksi: en büyük ağaç büyümesi (hyper+tokio+rustls),
-     tokio'yu çekirdeğe **kalıcı** bağımlılık yapar; mobil binary boyutu.
-  B: Çekirdeğe `ureq` (rustls). — artı: küçük ağaç, tokio yok.
-     eksi: bloklayan API; async trait metodunun içinde yürütücüyü bloklar,
-     sarmalamak gerekir.
-  C: Çekirdekte `HttpClient` trait'i + Subsonic mantığı; somut istemci
-     `http-client` feature'ı arkasında (tıpkı `audio` gibi), CLI açar.
-     — artı: K "ağa dokunan her şey trait arkasında olsun, testler sahte
-     kullansın" kuralının tam karşılığı; ağ olmadan test edilebilir; mobil
-     kendi taşımasını verebilir. eksi: bir dolaylılık katmanı daha.
-  Önerim: C — trait çekirdekte, somut istemci feature arkasında. Feature
-  içinde hangi crate (ureq mi reqwest mi) ikincil ve geri alınabilir bir
-  seçime dönüşür; asıl karar olan "çekirdek ağa doğrudan bağlanmasın" korunur.
+Q2 — Transport layer / dependency
+  A: `reqwest` in the core (rustls, default-features off). — pro: sits
+     directly on the async API. con: the biggest tree growth
+     (hyper+tokio+rustls), makes tokio a **permanent** dependency of the core;
+     mobile binary size.
+  B: `ureq` in the core (rustls). — pro: a small tree, no tokio.
+     con: a blocking API; it blocks the executor inside an async trait method,
+     it has to be wrapped.
+  C: An `HttpClient` trait + the Subsonic logic in the core; the concrete
+     client behind an `http-client` feature (just like `audio`), turned on by
+     the CLI. — pro: the exact counterpart of the convention "everything that
+     touches the network sits behind a trait so that tests use a fake";
+     testable without a network; mobile can provide its own transport.
+     con: one more layer of indirection.
+  My advice: C — the trait in the core, the concrete client behind a feature.
+  Which crate goes inside the feature (ureq or reqwest) becomes a secondary,
+  reversible choice; the real decision, "the core doesn't connect to the
+  network directly", is kept.
 
-S3 — Kimlik doğrulama ve saklama
-  Subsonic auth: `t=md5(parola+salt)&s=salt` (md5 için bir crate gerekir) ya
-  da HTTPS üzerinde düz `p=`. Sunucu adresi + kimlik nereye yazılacak?
-  A: `config.rs`'in yanında düz metin config dosyası (0600).
-  B: SQLite'ta yeni tablo (şema v3 → migration).
-  C: OS anahtarlığı (`keyring` crate) — yeni bağımlılık, başsız Linux'ta kırılgan.
-  Önerim: A + md5 token (parolayı diskte düz tutmamak için salt/token yolu),
-  şema değişmeden. Anahtarlık Faz 2'de eklenti izin modeliyle birlikte.
+Q3 — Authentication and storage
+  Subsonic auth: `t=md5(password+salt)&s=salt` (md5 needs a crate) or a plain
+  `p=` over HTTPS. Where will the server address + the credential be written?
+  A: A plain-text config file next to `config.rs` (0600).
+  B: A new table in SQLite (schema v3 → a migration).
+  C: The OS keyring (the `keyring` crate) — a new dependency, fragile on
+     headless Linux.
+  My advice: A + an md5 token (the salt/token route, so the password isn't kept
+  in plain text on disk), with no schema change. The keyring in Phase 2
+  together with the plugin permission model.
 
-S4 — Test yolu (bunu cevaplamadan 1.3 "bitti" sayılamaz)
-  Elinde çalışan bir Subsonic/Jellyfin sunucusu **var mı**?
-  Yoksa doğrulama, testte ayağa kalkan sahte bir HTTP sunucusuna dayanır
-  (std::net ile elle yazılabilir, yeni bağımlılık gerekmez) — gerçek sunucuya
-  karşı hiç koşmamış bir istemci olur. D-003'ün kısıtı burada yeniden çıkıyor.
-  Önerim: sunucu yoksa S2/C artı elle yazılmış sahte sunucu; ve 1.3
-  "kod tamam, gerçek sunucuda doğrulanmadı" diye açıkça işaretlensin.
+Q4 — Test path (1.3 can't count as "done" before this is answered)
+  **Do you have** a running Subsonic/Jellyfin server?
+  If not, verification relies on a fake HTTP server brought up in the test
+  (it can be written by hand with std::net, no new dependency needed) — it
+  would be a client that has never run against a real server. D-003's
+  constraint comes up again here.
+  My advice: if there is no server, Q2/C plus a hand-written fake server; and
+  1.3 should be marked explicitly as "code done, not verified on a real
+  server".
 ```
 
 </details>
 
-### 1.4 Oynatma hattı — TAMAM
-`symphonia` (çözme) + `cpal` (çıkış). Saf Rust, harici bağımlılık yok.
-Video kapsam dışı — gerekirse ayrı sağlayıcı olarak tartışılır.
+### 1.4 The playback pipeline — DONE
+`symphonia` (decoding) + `cpal` (output). Pure Rust, no external dependency.
+Video is out of scope — if needed, it is discussed as a separate provider.
 
-**Uygulandı (D-016).** Çözme arka plan iş parçacığında, çıkış cpal geri
-çağrısında; aralarında halka tamponu var ve **ses geri çağrısı hiç bloklanmıyor**
-(kilit alınamazsa sessizlik yazılıyor — cızırtı yerine boşluk).
+**Applied (D-016).** Decoding runs on a background thread, output in the cpal
+callback; there is a ring buffer between them, and **the audio callback never
+blocks** (if the lock can't be taken, silence is written — a gap instead of a
+crackle).
 
-İki tasarım kararı kayda değer:
-1. **Pozisyon çıkışa verilmiş kareden hesaplanıyor**, çözülmüş kareden değil.
-   Aradaki fark bir tampon dolusu zamandır; çözülene bakmak ilerleme çubuğunu
-   sesin önüne düşürürdü.
-2. **`Buffering` ayrı bir durum.** `Paused` kullanıcının kararı, `Buffering`
-   hattın beklemesi; ikisini birleştirmek kullanıcıya yanlış şey söyler.
+Two design decisions are worth recording:
+1. **The position is computed from the frames handed to the output**, not from
+   the decoded frames. The difference between them is a buffer's worth of
+   time; looking at the decoded ones would put the progress bar ahead of the
+   audio.
+2. **`Buffering` is a separate state.** `Paused` is the user's decision,
+   `Buffering` is the pipeline waiting; merging the two tells the user the
+   wrong thing.
 
-Yeniden örnekleme en yakın komşu (mono→stereo kopyalama dahil). Kaliteli
-resampling gerekirse ayrıca ölçülür — Faz 1'in hedefi doğru ses üretmekti.
+Resampling is nearest-neighbour (including mono→stereo copying). If
+high-quality resampling is needed, it is measured separately — Phase 1's goal
+was to produce correct audio.
 
-### 1.5 Kuyruk ve oynatma durumu — TAMAM
-Kuyruk, tekrar, karıştırma, gapless. Durum çekirdekte tutulur, CLI yalnızca gösterir.
+### 1.5 Queue and playback state — DONE
+The queue, repeat, shuffle, gapless. The state is kept in the core; the CLI
+only shows it.
 
-**Yapıldı:** kuyruk, `RepeatMode::{Off,All,One}`, karıştırma. Durum çekirdekte;
-CLI yalnızca gösteriyor.
+**Done:** the queue, `RepeatMode::{Off,All,One}`, shuffle. The state is in the
+core; the CLI only shows it.
 
-İki ince nokta testle kilitli:
-- **Karıştırma sırayı bozmaz**, ayrı bir çalma sırası tutar. Kapatınca kullanıcı
-  listesini kaybetmez; açarken çalan parça **altından çekilmez**, başta kalır.
-- **`RepeatMode::One` yalnızca doğal bitişte tekrar eder.** Kullanıcı "sonraki"
-  derse tekrar kipinde de ilerler — yoksa tuş bozukmuş gibi görünür.
-  Ayrım `Queue::next` ile `advance_after_finish` arasında.
+Two subtle points are locked with tests:
+- **Shuffling doesn't disturb the order**; it keeps a separate play order.
+  When it is turned off, the user doesn't lose their list; when it is turned
+  on, the playing track **is not pulled out from under them** — it stays
+  first.
+- **`RepeatMode::One` only repeats on a natural end.** If the user says
+  "next", it moves on in repeat mode too — otherwise the key would look
+  broken. The distinction is between `Queue::next` and `advance_after_finish`.
 
-**Gapless geldi (D-024).** cpal akışı ve halka tamponu parçalar arasında
-**açık kalıyor**; çözme iş parçacığı bir parça bitince sıradakini alıp aynı
-tampona yazmayı sürdürüyor. Eskiden her parça için yeni bir aygıt + yeni bir
-çözücü kuruluyordu, boşluk buydu.
+**Gapless arrived (D-024).** The cpal stream and the ring buffer **stay open**
+between tracks; when a track ends, the decoding thread takes the next one and
+keeps writing into the same buffer. It used to set up a new device + a new
+decoder for every track; that was the gap.
 
-Pozisyon artık **dilimlerden** okunuyor: tampon birden çok parçanın örneklerini
-yan yana taşıdığı için tek bir sayaç yetmiyor. Her parça çıkış karesi cinsinden
-nerede başladığını biliyor; çalan parça, `frames_played`'in düştüğü dilim.
-Geçiş **duyulduğunda** ilerliyoruz — sıraya girmiş ama henüz çalınmamış parça
-"çalıyor" sayılmıyor, yoksa arayüz duyulmayan parçayı gösterirdi.
+The position is now read from **slices**: since the buffer carries samples of
+several tracks side by side, a single counter is not enough. Every track knows
+where it started in output frames; the playing track is the slice
+`frames_played` falls into. We move on when the transition **is heard** — a
+track that has been queued but not yet played does not count as "playing",
+otherwise the interface would show a track that can't be heard.
 
-Kullanıcı isteğiyle geçiş (`next`, `enter`) kasten gapless **değil**: motor
-yeniden kuruluyor. Önden okunmuş sesi çalmak, kullanıcının seçmediği parçayı
-duyurmak olurdu.
+A transition requested by the user (`next`, `enter`) is deliberately **not**
+gapless: the engine is set up again. Playing audio that was read ahead would
+mean playing a track the user didn't choose.
 
-Ölçüm: 4 fixture parçası (5 sn ses) uçtan uca 5.47 sn'de çalındı.
+Measurement: 4 fixture tracks (5 s of audio) played end to end in 5.47 s.
 
-**Bir tutarsızlık da bu sırada kapandı.** Etiketsiz dosyaların süresi katalogda
-bilinmediği için `PlayRule`'un "parçanın yarısı" kolu çalışmıyor, kural 30 sn
-eşiğine düşüyordu: baştan sona dinlenen 1 sn'lik parça scrobble üretmiyordu.
-Süre artık kaptan okunuyor ve hem kurala hem kayda giriyor — yoksa CLI "4
-dinleme kaydedildi" derken `stats` 2 gösteriyordu. Testle kilitli.
+**An inconsistency was closed along the way too.** Since the duration of
+untagged files was unknown in the catalog, `PlayRule`'s "half of the track"
+branch didn't work and the rule fell back to the 30 s threshold: a 1 s track
+listened to from start to finish produced no scrobble. The duration is now read
+from the container and goes into both the rule and the record — otherwise the
+CLI said "4 listens recorded" while `stats` showed 2. Locked with a test.
 
-### 1.6 Scrobbling — TAMAM
-Her çalma bir `listen` kaydı. Faz 0'daki import verisiyle aynı tabloya yazılır —
-geçmiş ve bugün tek bir zaman çizelgesi olur.
+### 1.6 Scrobbling — DONE
+Every play is a `listen` record. It is written to the same table as the
+import data from Phase 0 — the past and today become a single timeline.
 
-**Uygulandı ve uçtan uca doğrulandı.** `headshell play` ile çalınan parça
-`stats` ve `library search` çıktısında görünüyor; CLI testi bunu kilitliyor
+**Applied and verified end to end.** A track played with `headshell play`
+shows up in the output of `stats` and `library search`; a CLI test locks this
 (`playing_a_local_file_records_a_listen_in_the_same_table_as_imports`).
 
-Süre olarak **çıkışa verilen ses** yazılıyor, geçen duvar saati değil —
-duraklatılan süre dinlenmiş sayılmaz. Eşik D-008'deki tek `PlayRule`;
-burada ikinci bir yorum yok.
+What is written as the duration is **the audio handed to the output**, not
+the wall clock time that passed — paused time does not count as listened. The
+threshold is the single `PlayRule` from D-008; there is no second
+interpretation here.
 
-### 1.7 CLI oynatıcı arayüzü — TAMAM
-`ratatui` ile TUI. Bu, GUI'nin prototipi değil; çekirdeğin tam kullanılabilir olduğunun kanıtı.
+### 1.7 The CLI player interface — DONE
+A TUI with `ratatui`. This is not the GUI's prototype; it is the proof that the
+core is fully usable.
 
-**Uygulandı:** `headshell play <sorgu> --tui`. Çalan parça + durum, ilerleme çubuğu,
-kuyruk (çalan `▸` ile işaretli), tekrar/karıştırma göstergesi, tuş yardımı.
-Tuşlar: boşluk duraklat, `n`/`b` sonraki/önceki, `↑↓`/`jk` seçim, `enter` seçileni
-çal, `s` karıştır, `r` tekrar kipi, `q`/`Esc`/`Ctrl+C` çık.
+**Applied:** `headshell play <query> --tui`. The playing track + state, a
+progress bar, the queue (the playing one marked with `▸`), a repeat/shuffle
+indicator, key help. Keys: space pause, `n`/`b` next/previous, `↑↓`/`jk`
+select, `enter` play the selected one, `s` shuffle, `r` repeat mode,
+`q`/`Esc`/`Ctrl+C` quit.
 
-**Altın Kural'ın sınavını geçti.** TUI'de karar veren tek satır yok: tuş →
-eylem eşlemesi (`action_for`) ve eylem → çekirdek çağrısı (`apply`) ayrı, ikisi
-de yalnızca iletiyor. "Duraklat mı sürdür mü" kararı bile çekirdekte
-(`Player::toggle_pause`) — TUI ve GUI aynı kararı iki kez vermesin diye.
+**It passed the Golden Rule's test.** Not a single line in the TUI makes a
+decision: the key → action mapping (`action_for`) and the action → core call
+(`apply`) are separate, and both only forward. Even the decision "pause or
+resume" is in the core (`Player::toggle_pause`) — so the TUI and the GUI don't
+make the same decision twice.
 
-Pozisyon **yoklanmıyor**: TUI kendi çizim hızında `anchor.position_now()`
-çağırıyor, formül çekirdekte (D-015). Bu, PLAN 3.2'nin GUI için istediği
-davranışın aynısı — yani TUI o tasarımın çalıştığının kanıtı oldu.
+The position **is not polled**: the TUI calls `anchor.position_now()` at its
+own drawing rate; the formula is in the core (D-015). This is exactly the
+behaviour PLAN 3.2 asks of the GUI — so the TUI became the proof that that
+design works.
 
-İki ayrıntı:
-- `TerminalGuard` `Drop` ile ham kipi geri veriyor: panik olsa bile
-  kullanıcının terminali bozuk kalmıyor.
-- Çekirdekten gelen hata TUI'yi **düşürmüyor**; alt satırda gösteriliyor ve
-  döngü sürüyor. Terminal hiç açılamazsa `ADIM: PLAYBACK_OUTPUT` ile düşüyor
-  (testle kilitli) — sessizce metin kipine kaçmıyor.
+Two details:
+- `TerminalGuard` gives the raw mode back with `Drop`: even on a panic, the
+  user's terminal isn't left broken.
+- An error from the core **doesn't bring the TUI down**; it is shown on the
+  bottom line and the loop goes on. If the terminal can't be opened at all it
+  fails with `STEP: PLAYBACK_OUTPUT` (locked with a test) — it doesn't
+  silently escape to text mode.
 
 ---
 
-### 1.8 Faz 1 durum — KAPANDI
+### 1.8 Phase 1 status — CLOSED
 
-**203 test**, clippy ve fmt temiz. `headshell play` ve `headshell play --tui` uçtan uca
-çalışıyor; yerel dosyadan da, Navidrome/Jellyfin'den de.
+**203 tests**, clippy and fmt clean. `headshell play` and
+`headshell play --tui` work end to end; from a local file as well as from
+Navidrome/Jellyfin.
 
-| Bölüm | Durum |
+| Section | Status |
 |---|---|
-| 1.1 Provider trait | TAMAM |
-| 1.2 Yerel sağlayıcı | TAMAM — indeks kalıcı; `--if-stale` (D-025) |
-| 1.3 Subsonic/Jellyfin | TAMAM — Navidrome + Jellyfin'de doğrulandı (D-022) |
-| 1.4 Ses hattı | TAMAM |
-| 1.5 Kuyruk | TAMAM — gapless dahil (D-024) |
-| 1.6 Scrobbling | TAMAM |
-| 1.7 TUI | TAMAM |
+| 1.1 Provider trait | DONE |
+| 1.2 Local provider | DONE — persistent index; `--if-stale` (D-025) |
+| 1.3 Subsonic/Jellyfin | DONE — verified on Navidrome + Jellyfin (D-022) |
+| 1.4 Audio pipeline | DONE |
+| 1.5 Queue | DONE — gapless included (D-024) |
+| 1.6 Scrobbling | DONE |
+| 1.7 TUI | DONE |
 
-**Test fixture'ları üretildi (PLAN'ın Faz 1 ön koşulu):** `fixtures/audio/`
-altında `ffmpeg` ile üretilmiş sinüs tonları — telifsiz, toplam 84 KB.
-FLAC (etiketli), MP3 (etiketli), OGG (etiketsiz), alt dizinde etiketsiz FLAC
-ve kasten bozuk bir dosya. D-003'ün "dogfood edilemez" kısıtı böylece
-kısmen aşıldı: ses hattı gerçek dosyalarla, gerçek aygıtta sınanıyor.
+**The test fixtures were produced (the PLAN's precondition for Phase 1):**
+sine tones produced with `ffmpeg` under `fixtures/audio/` — royalty-free, 84 KB
+in total. FLAC (tagged), MP3 (tagged), OGG (untagged), an untagged FLAC in a
+subdirectory and a deliberately broken file. D-003's "cannot be dogfooded"
+constraint was thus partly overcome: the audio pipeline is tested with real
+files, on a real device.
 
-**Ses aygıtı olmayan ortamda testler kendini atlıyor** (CI için). Atlama
-sessiz değil: nedenini `stderr`'e yazıyor.
+**In an environment without an audio device the tests skip themselves** (for
+CI). The skip is not silent: it writes the reason to `stderr`.
 
-**Faz 1'in bitti ölçütü karşılandı:** "yerel **ve uzak** kaynaktan çalıyor,
-her çalma bir `listen` kaydı üretiyor" — uzak yarısı 2026-08-31'de gerçek
-Navidrome ve gerçek Jellyfin üzerinde doğrulandı (D-022). Yedi bölümün
-yedisi de TAMAM; Faz 2'ye geçişin önünde bloklayıcı bir iş kalmadı.
+**Phase 1's done criterion is met:** "it plays from local **and remote**
+sources, and every play produces a `listen` record" — the remote half was
+verified on 2026-08-31 on a real Navidrome and a real Jellyfin (D-022). All
+seven sections are DONE; nothing blocks the move to Phase 2.
 
-**Faz 2'ye devredilenler** (hiçbiri Faz 1'i eksik bırakmıyor):
-- `keyring` kararı (D-021) — kimlik bilgisi bugün `servers.json`'da `0600`
-  ile duruyor; eklenti izin modeliyle birlikte yeniden bakılacak.
-- Gerçek zamanlı dizin izleme (D-025) — bugün tetiklenince bakan bir yoklama
-  var; Faz 3'te GUI'nin olay döngüsü geldiğinde yeniden değerlendirilir.
-- TLS/ters vekil/transcode altında uzak sağlayıcı doğrulaması (D-022) —
-  kod bunları desteklemek üzere yazıldı ama denenmedi.
+**Handed over to Phase 2** (none of these leaves Phase 1 incomplete):
+- The `keyring` decision (D-021) — today the credential sits in `servers.json`
+  with `0600`; it will be looked at again together with the plugin permission
+  model.
+- Real-time directory watching (D-025) — today there is a probe that looks
+  when triggered; it will be reconsidered in Phase 3 when the GUI's event loop
+  arrives.
+- Remote provider verification under TLS/a reverse proxy/transcoding (D-022) —
+  the code was written to support them but they weren't tried.
 
-**Faz 2'ye devredilen borç:** `keyring` kararı (D-021, kimlik bilgisi
-`servers.json`'da düz duruyor — token/anahtar, parola değil) eklenti izin
-modeliyle birlikte yeniden bakılacak.
+**A debt handed over to Phase 2:** the `keyring` decision (D-021; the
+credential sits in plain text in `servers.json` — a token/key, not a password)
+will be looked at again together with the plugin permission model.
 
 ---
 
-# FAZ 2 — Eklenti Sınırı ve Sağlayıcı Genişlemesi
+# PHASE 2 — The Plugin Boundary and Provider Expansion
 
-**Amaç:** Sağlayıcılar çekirdeğin dışına çıkar. Üçüncü taraf eklenti yazabilir hale gelir.
+**Goal:** Providers move out of the core. Third parties become able to write
+plugins.
 
-**Bitti sayılır:** Rust olmayan bir referans eklenti çalışıyor ve çekirdek onu
-sürüm uyumsuzluğunda çökmeden reddedebiliyor.
+**Counts as done:** A non-Rust reference plugin works, and the core can reject
+it on a version mismatch without crashing.
 
-### 2.1 JSON-RPC eklenti protokolü — TAMAM, api 2 ile yerini QuickJS'e bıraktı (§2.9)
-Yaşam döngüsü, el sıkışma, **sürümleme**, zaman aşımı, çökme izolasyonu.
-Protokol sürümlenir; uyumsuz eklenti yüklenmez, hata mesajı verir.
+### 2.1 The JSON-RPC plugin protocol — DONE; with api 2 it gave way to QuickJS (§2.9)
+Lifecycle, handshake, **versioning**, timeouts, crash isolation. The protocol
+is versioned; an incompatible plugin is not loaded, and an error message is
+given.
 
-> **D-069:** Aşağısı api 1'in kaydı. Tel protokolü (JSON-RPC, alt süreç, el
-> sıkışma) kalktı; `transport.rs` ve `client.rs` silindi. Korunan: manifest +
-> onay defteri + sır ad alanı + sürüm reddi + zaman aşımı + sayılı yeniden
-> başlatma. Güncel hâli §2.9'da.
+> **D-069:** What follows is the record of api 1. The wire protocol (JSON-RPC,
+> a subprocess, a handshake) is gone; `transport.rs` and `client.rs` were
+> deleted. Kept: the manifest + the consent ledger + the secret namespace +
+> version rejection + timeouts + counted restarts. The current state is in
+> §2.9.
 
-**Yapıldı** (`crates/headshell-core/src/plugin/`). Beş dosya, beş iş: `protocol`
-(tel biçimi), `manifest` (`plugin.json` + izin beyanı), `consent` (onay
-defteri), `transport` (alt süreç + satır çerçeveleme), `client` (id eşleme +
-zaman aşımı). Üstünde `PluginProvider` — var olan `Provider` trait'ini
-uyguluyor, yani kuyruk, arama ve çalma hattı eklentiden haberdar bile değil.
+**Done** (`crates/headshell-core/src/plugin/`). Five files, five jobs:
+`protocol` (the wire format), `manifest` (`plugin.json` + the permission
+declaration), `consent` (the consent ledger), `transport` (the subprocess +
+line framing), `client` (id matching + timeouts). On top of them,
+`PluginProvider` — it implements the existing `Provider` trait, so the queue,
+search and the playback pipeline don't even know about the plugin.
 
-Kararlar ve sebepleri:
+The decisions and their reasons:
 
-1. **api 1'in metotları dar:** `handshake`, `health`, `search`,
-   `resolve_source`, `shutdown`. `scan_catalog` ve `catalog_changed_since`
-   **bilerek dışarıda** — ikisi de trait'te varsayılanı olan opsiyonel
-   metotlar ve ilk referans eklentinin (SoundCloud) taranacak yerel kataloğu
-   yok. Kullanıcısı olmayan bir tel biçimi tahmindir. Sürüm kuralı D-039'un
-   aynısı: **eklemek `api`'yi artırmaz**, eski eklentiler `-32601` döner ve
-   çekirdek onu "desteklemiyor" diye okur.
-2. **Başlatma tembel.** Süreç ilk çağrıda açılıyor; `headshell stats` yanında altı
-   süreç açmıyor, `provider list` hiç açmıyor. Bunu mümkün kılan şey
-   yeteneklerin manifestte de yazması — çelişirse el sıkışma kazanır ve fark
-   uyarı olarak raporlanır.
-3. **Zaman aşımı okumayı iş parçacığına taşıdı.** `std`'de boruya zaman aşımı
-   yok; `mpsc::recv_timeout` var. Asılı kalan eklenti çekirdeği asmıyor.
-4. **Sınır neyi tutuyor:** kimlik alanı (eklenti çıplak `id` gönderir,
-   sağlayıcı adını çekirdek ekler — başka sağlayıcının ad alanına yazamaz),
-   sır alanı (yalnızca kendi ad alanı), zaman, yaşam. **Tutmadığı:** dosya ve
-   ağ (D-040).
-5. **Yeniden başlatma sayılı** (`MAX_STARTS = 3`). Sonsuz yeniden başlatma bir
-   çökme döngüsünü sessiz kılardı. Sürüm uyuşmazlığında hiç denenmiyor:
-   tekrarla düzelmez.
+1. **api 1's methods are narrow:** `handshake`, `health`, `search`,
+   `resolve_source`, `shutdown`. `scan_catalog` and `catalog_changed_since`
+   are **left out on purpose** — both are optional methods with a default on
+   the trait, and the first reference plugin (SoundCloud) has no local catalog
+   to scan. A wire format without a user is a guess. The versioning rule is
+   the same as D-039's: **adding doesn't raise `api`**; old plugins return
+   `-32601`, and the core reads that as "not supported".
+2. **Starting is lazy.** The process is opened on the first call;
+   `headshell stats` doesn't open six processes alongside, and
+   `provider list` opens none. What makes this possible is that the
+   capabilities are written in the manifest too — if they contradict, the
+   handshake wins and the difference is reported as a warning.
+3. **The timeout moved reading onto a thread.** In `std` there is no timeout
+   on a pipe; there is `mpsc::recv_timeout`. A hung plugin doesn't hang the
+   core.
+4. **What the boundary holds:** the ID space (the plugin sends a bare `id`, the
+   core adds the provider name — it can't write into another provider's
+   namespace), the secret space (only its own namespace), time, life. **What
+   it doesn't hold:** files and the network (D-040).
+5. **Restarts are counted** (`MAX_STARTS = 3`). Endless restarts would make a
+   crash loop silent. On a version mismatch it isn't even tried: repetition
+   won't fix it.
 
-Aşamalar: `PLUGIN_LOAD` (manifest/onay), `PLUGIN_HANDSHAKE` (başlatma/sürüm),
-`PROVIDER_CALL` (çağrı). Hata tipleri de ayrı: `PluginCrashed` /
-`PluginTimeout` / `PluginRpc` / `PluginIncompatible` — "öldü", "cevap
-vermedi", "hayır dedi" ve "konuşamıyoruz" dört farklı tanıdır (K9).
+Stages: `PLUGIN_LOAD` (manifest/consent), `PLUGIN_HANDSHAKE` (start/version),
+`PROVIDER_CALL` (the call). The error types are separate too: `PluginCrashed`
+/ `PluginTimeout` / `PluginRpc` / `PluginIncompatible` — "it died", "it didn't
+answer", "it said no" and "we can't talk" are four different diagnoses (K9).
 
 CLI: `headshell plugin list|approve|disable|enable|forget`,
-`headshell secret list|set|remove`. Hepsi `--json`.
-Eklenti yazarı belgesi: `docs/eklenti-yazma.md`.
+`headshell secret list|set|remove`. All `--json`.
+The plugin author's document: `docs/writing-plugins.md`.
 
-**Sınama.** Birim testleri betiklenmiş bir taşımayla protokol mantığını
-sınıyor; `crates/headshell-core/tests/plugin_process.rs` **gerçek bir Python
-eklentisini** (`fixtures/plugins/echo`) çalıştırıyor: el sıkışma, arama,
-kaynak çözme, sürüm reddi, çökme + yeniden başlatma, zaman aşımı, izin
-büyümesi, sır yalıtımı. Fixture kötü eklenti taklidini komut satırı
-bayraklarıyla yapıyor (`--api 99`, `--crash-on`, `--hang-on`, `--noise`) —
-ortam değişkeni değil, çünkü `set_var` Rust 2024'te `unsafe` ve workspace
-`unsafe_code = "forbid"` diyor (D-031'in aynı duvarı).
+**Testing.** The unit tests check the protocol logic with a scripted
+transport; `crates/headshell-core/tests/plugin_process.rs` runs **a real
+Python plugin** (`fixtures/plugins/echo`): handshake, search, source
+resolution, version rejection, crash + restart, timeout, permission growth,
+secret isolation. The fixture imitates a bad plugin with command-line flags
+(`--api 99`, `--crash-on`, `--hang-on`, `--noise`) — not environment
+variables, because `set_var` is `unsafe` in Rust 2024 and the workspace says
+`unsafe_code = "forbid"` (the same wall as D-031).
 
-> KARAR NOKTASI: Eklenti izin modeli (ağ/dosya erişimi kısıtlanacak mı?).
-> **KAPANDI — D-040: beyan + onay, zorlama sonraya.** Manifestte makine
-> okunur izin beyanı (`net` ana bilgisayarları, `fs` yol önekleri), ilk
-> yüklemede kullanıcı onayı, onay `<data_dir>/plugins.json`'da özetiyle
-> saklanır. İşletim sistemi hapsi **yok** ve bu kullanıcıya böyle söylenir —
-> beyan bir güvenlik duvarı değil sözleşmedir. Landlock/bwrap sonradan
-> `api` kırmadan takılabilir.
+> DECISION POINT: The plugin permission model (will network/file access be
+> restricted?). **CLOSED — D-040: declaration + consent, enforcement later.**
+> A machine-readable permission declaration in the manifest (`net` hosts, `fs`
+> path prefixes), user consent on first load, the consent stored with its
+> digest in `<data_dir>/plugins.json`. There is **no** operating-system jail,
+> and the user is told so — the declaration is a contract, not a firewall.
+> Landlock/bwrap can be fitted later without breaking `api`.
 >
-> Sırlar D-042'de tek kavrama bağlandı: `<data_dir>/secrets.json`, `0600`,
-> ad alanlı; eklenti yalnızca kendi ad alanını görür. `keyring` yine yok.
+> Secrets were tied to a single concept in D-042: `<data_dir>/secrets.json`,
+> `0600`, namespaced; a plugin sees only its own namespace. Still no
+> `keyring`.
 
-### 2.2 Referans eklenti — SoundCloud (D-027)
-Rust olmayan bir dilde yazılmış bir sağlayıcı — sözleşmenin çekirdeğin dışında
-yazılabildiğinin kanıtı. İlk yazımı Python'du; D-069'da JS'e taşındı
-(`plugins/soundcloud/main.js`) ve canlı testleri yeniden geçti. D-071'den beri
-bu depoda değil: `headshell/plugins` kataloğunda, `soundcloud/` (§2.10).
+### 2.2 The reference plugin — SoundCloud (D-027)
+A provider written in a language other than Rust — proof that the contract can
+be written outside the core. Its first version was Python; in D-069 it was
+moved to JS (`plugins/soundcloud/main.js`) and passed its live tests again.
+Since D-071 it isn't in this repository: it is in the `headshell/plugins`
+catalog, `soundcloud/` (§2.10).
 
-Platform seçimi katalog kalitesine göre değil **sınanabilirliğe** göre yapıldı:
-SoundCloud abonelik gerektirmeyen tek aday, yani CI'da ve başkasının makinesinde
-çalışabilen tek aday. Referans eklentinin işi protokolü kanıtlamak, katalog sunmak
-değil.
+The platform was chosen not by catalog quality but by **testability**:
+SoundCloud is the only candidate that needs no subscription, so the only one
+that can run in CI and on someone else's machine. The reference plugin's job
+is to prove the protocol, not to offer a catalog.
 
-**TAMAM.** `plugins/soundcloud/` — Python, yalnızca standart kütüphane
-(`pip install` gerektirmez), ~330 satır. `echo` fixture olarak kaldı
-(protokol regresyon testi); SoundCloud onun yerine geçmedi.
+**DONE.** `plugins/soundcloud/` — Python, standard library only (no
+`pip install` needed), ~330 lines. `echo` stayed as a fixture (the protocol
+regression test); SoundCloud didn't replace it.
 
-Faz 2'nin "bitti sayılır" ölçütünün **ilk yarısı** buydu ve karşılandı:
-Rust olmayan bir eklenti gerçek bir servise bağlanıp arıyor ve **çalıyor**.
-`headshell play "nujabes aruarian dance"` SoundCloud'dan 250 saniyelik parçayı
-baştan sona çaldı ve bir `listen` kaydı üretti — import verisiyle aynı
-tabloya (§1.6).
+This was **the first half** of Phase 2's "counts as done" criterion, and it
+was met: a non-Rust plugin connects to a real service, searches and **plays**.
+`headshell play "nujabes aruarian dance"` played a 250-second track from
+SoundCloud from start to finish and produced a `listen` record — into the same
+table as the import data (§1.6).
 
-Kararlar D-043'te. Özet:
+The decisions are in D-043. In short:
 
-1. **client_id üç kaynaktan**, bu sırayla: kullanıcının sırrı → disk
-   önbelleği → SoundCloud'un web istemcisinden keşif. `health()` hangisinin
-   kullanıldığını söylüyor. Sır varsa keşfe hiç gidilmiyor; kullanıcının
-   anahtarı reddedilirse arkasından dolanılmıyor, kendisine söyleniyor.
-2. **Yalnızca `progressive` (düz HTTP MP3).** Ölçüldü: 200 parçalık örnekte
-   %99 kapsama. Kalan %1 yalnızca HLS sunuyor ve açık hata alıyor —
-   sessizce boş sonuç değil (K9). HLS çözücü §2.2'nin işi değil.
-3. **Akış adresi imzalı ve süreli**, önbelleğe alınmıyor; her çalmada
-   yeniden çözülüyor.
-4. **`policy: SNIP`** parçalar 30 sn önizleme; başlığa `[önizleme]`
-   ekleniyor çünkü api 1'de bunu taşıyacak alan yok.
+1. **The client_id from three sources**, in this order: the user's secret →
+   the disk cache → discovery from SoundCloud's web client. `health()` says
+   which one was used. If there is a secret, discovery is never attempted; if
+   the user's key is rejected, it isn't worked around — the user is told.
+2. **`progressive` only (plain HTTP MP3).** Measured: 99% coverage in a sample
+   of 200 tracks. The remaining 1% offers only HLS and gets an explicit error —
+   not a silent empty result (K9). An HLS decoder is not §2.2's job.
+3. **The stream address is signed and time-limited**; it is not cached, and
+   it is resolved again on every play.
+4. Tracks with **`policy: SNIP`** are 30 s previews; `[preview]` is appended
+   to the title because api 1 has no field to carry it.
 
-**Canlı testler varsayılan koşumda** (D-043, kullanıcının kararı; önerim
-`--ignored` arkasıydı). Bedeli açık: SoundCloud düşerse paket kırmızı yanar.
-Karşılığında eklentinin bozulduğu gün *o gün* öğreniliyor. Ağ yoksa testler
-kendini atlıyor, sebebini yazarak — "ulaşamadım" ile "hayır dedi" ayrı (K9).
+**The live tests are in the default run** (D-043, the user's decision; my
+advice was behind `--ignored`). The price is clear: if SoundCloud goes down,
+the package turns red. In return, the day the plugin breaks is learned *that
+day*. Without a network the tests skip themselves, writing the reason — "I
+couldn't reach it" and "it said no" are separate (K9).
 
-**Canlı koşum Faz 1'den kalan bir kusuru buldu (D-044).** `headshell play`
-SoundCloud parçasını kuyruğa alıp `kaydedilen dinleme: 0` deyip anında
-çıkıyordu; hata yok, `diag` temiz, ses yok. Sebep motorun yeni gönderilen işi
-bir sonraki ses geri çağrısına kadar `Stopped` göstermesiydi — pencere yerel
-dosyada milisaniye, HTTP'de saniyeler. Sahte bir sunucu bunu gösteremezdi;
-kusur protokolde değil **zamanlamadaydı**.
+**The live run found a flaw left over from Phase 1 (D-044).** `headshell play`
+queued the SoundCloud track, said `listens recorded: 0` and quit instantly; no
+error, a clean `diag`, no sound. The cause was that the engine showed a newly
+submitted job as `Stopped` until the next audio callback — the window is
+milliseconds for a local file, seconds over HTTP. A fake server couldn't have
+shown this; the flaw was not in the protocol but **in the timing**.
 
-### 2.3 Kimlik çözümlemesi olgunlaşır — TAMAM
-AcoustID / Chromaprint parmak izi. Etiketleri bozuk yerel dosyalar için.
+### 2.3 Identity resolution matures — DONE
+AcoustID / Chromaprint fingerprinting. For local files with broken tags.
 
-**AcoustID yarısı TAMAM (D-046).** `identity/fingerprint.rs` symphonia'nın
-PCM'inden Chromaprint parmak izi üretiyor, `identity/acoustid.rs` onu
-AcoustID'ye soruyor, `Resolver::resolve_file` ikisini zincire bağlıyor.
-`headshell resolve --file <yol>` bir ses dosyasını dördünden birden geçiriyor.
+**The AcoustID half is DONE (D-046).** `identity/fingerprint.rs` produces a
+Chromaprint fingerprint from symphonia's PCM, `identity/acoustid.rs` asks
+AcoustID about it, and `Resolver::resolve_file` ties the two into the chain.
+`headshell resolve --file <path>` runs an audio file through all four.
 
-Sıra korunuyor: önce dosyanın **kendi etiketlerinden** üç metin halkası,
-yalnızca sonuç `LocalKey`'e düşerse ses. Parmak izi en pahalı halka.
+The order is kept: first the three text links from the file's **own tags**,
+and audio only if the result falls to `LocalKey`. The fingerprint is the most
+expensive link.
 
-İki başarısızlık ayrı (K9): parmak izinin **üretilememesi** zinciri düşürmez
-(sebebi loglanır, yerel anahtarla biter); AcoustID'ye **sorulamaması**
-propagate edilir. Anahtar sır deposundan ya da gömülü varsayılandan gelir ve
-ikisi de yoksa çağrı *ne yapılacağını söyleyerek* reddedilir.
+Two failures are separate (K9): **failing to produce** a fingerprint doesn't
+bring the chain down (the reason is logged, and it ends with the local key);
+**failing to ask** AcoustID is propagated. The key comes from the secret store
+or the embedded default, and if there is neither, the call is refused *saying
+what to do*.
 
-**Gerçek anahtarla canlı sınandı (D-046 eki 3).** AcoustID ürettiğimiz parmak
-izini kabul ediyor, bozuk bir dizeyi reddediyor (yani "kabul etti" boş bir
-iddia değil), ve eşleşme yolu artık **gerçekten** çalışıyor: `duration` alanı
-ondalık geliyor (`309.0`), `Option<u32>` yazılmıştı ve ilk gerçek eşleşme bir
-JSON hatasıyla düşecekti. Kusuru gizleyen şey elle yazılmış fixture'dı; fixture
-artık canlı servisten alınıyor ve donmuş hâlinin yalana dönmesini ayrı bir
-canlı test kolluyor.
+**Tested live with a real key (D-046 addendum 3).** AcoustID accepts the
+fingerprint we produce and rejects a broken string (so "it accepted it" is not
+an empty claim), and the match path now **really** works: the `duration` field
+arrives as a decimal (`309.0`), it had been written as `Option<u32>`, and the
+first real match would have fallen over with a JSON error. What hid the flaw
+was a hand-written fixture; the fixture is now taken from the live service,
+and a separate live test guards against its frozen state turning into a lie.
 
-> **Açık borç — gömülü anahtar boş.** `EMBEDDED_API_KEY` bilerek boş
-> bırakıldı; `acoustid.org/new-application` adresinden proje adına bir anahtar
-> alınana kadar 4. halka yalnızca kullanıcının kendi anahtarıyla çalışır.
-> Kullanıcının kişisel anahtarı `.env`'de duruyor ve testlerde
-> `HEADSHELL_ACOUSTID_KEY` olarak kullanılıyor — kaynağa gömmek onu herkese açık
-> yapacağı için ayrıca sorulacak.
+> **Open debt — the embedded key is empty.** `EMBEDDED_API_KEY` was left empty
+> on purpose; until a key is obtained in the project's name from
+> `acoustid.org/new-application`, the 4th link works only with the user's own
+> key. The user's personal key sits in `.env` and is used in the tests as
+> `HEADSHELL_ACOUSTID_KEY` — embedding it in the source would make it public,
+> so that will be asked separately.
 
-**MusicBrainz yarısı TAMAM.** `identity/musicbrainz.rs` — `MetadataLookup`'ın
-ilk gerçek uygulaması; zincirin 2. ve 3. halkası artık çalışıyor.
-`headshell --online resolve "Şebnem Ferah - Sil Baştan"` gerçek MusicBrainz'e
-bağlanıp MBID döndürüyor. Hız sınırı (1 istek/sn), `User-Agent`, Lucene
-kaçırma ve `503` yeniden denemesi içeride; `--online` varsayılan kapalı.
+**The MusicBrainz half is DONE.** `identity/musicbrainz.rs` — the first real
+implementation of `MetadataLookup`; the chain's 2nd and 3rd links now work.
+`headshell --online resolve "Şebnem Ferah - Sil Baştan"` connects to the real
+MusicBrainz and returns an MBID. The rate limit (1 request/s), the
+`User-Agent`, Lucene escaping and the `503` retry are inside; `--online` is off
+by default.
 
-Canlı koşum üç kusur buldu ve üçü de düzeltildi (ayrıntı D-045 ekinde):
-canlı kayıtlar **başlıkta değil `disambiguation`'da** işaretli, beraberlikte
-seçim sunucunun sırasına teslimdi (aynı sorgu iki farklı MBID verdi), ve
-beraberlik "%100 güven" diye raporlanıyordu. Doğruluk kümesi %97.2 → %100
-(72 vaka); yeni sınıf `mb_disambiguation`.
+The live run found three flaws, and all three were fixed (details in the D-045
+addendum): live recordings are marked **not in the title but in
+`disambiguation`**, on a tie the choice was left to the server's order (the
+same query gave two different MBIDs), and a tie was reported as "100%
+confidence". The accuracy set went 97.2% → 100% (72 cases); a new class,
+`mb_disambiguation`.
 
-> KARAR NOKTASI: AcoustID anahtarı nereden gelir, 4. halka zincire nereden
-> bağlanır? **KAPANDI — D-046.** Anahtar: gömülü varsayılan + sır deposundan
-> kullanıcı geçersiz kılması. Bağlantı: `TrackRef`'e alan eklenmedi, ayrı bir
-> giriş noktası açıldı (`Resolver::resolve_file`) — `resolve()` ve `TrackRef`
-> hiç değişmedi.
+> DECISION POINT: Where does the AcoustID key come from, and where is the 4th
+> link tied into the chain? **CLOSED — D-046.** The key: an embedded default +
+> a user override from the secret store. The connection: no field was added to
+> `TrackRef`; a separate entry point was opened (`Resolver::resolve_file`) —
+> `resolve()` and `TrackRef` didn't change at all.
 
-> KARAR NOKTASI: MusicBrainz araması koşumlar arası kararsız. **KAPANDI —
-> D-046 (S3).** `mb_stability_probe` ölçtü: aynı `Radiohead — Creep` araması
-> art arda iki kez 25 aday döndürüyor ve bazı koşumlarda **ortak aday sayısı
-> sıfır** — MusicBrainz aramayı birden çok indeks kopyasından sunuyor.
-> D-045'in belirlenimci sıralaması bunu çözemez, çünkü sıralanacak küme her
-> seferinde başka. **Karar: ayırt edici kanıt yoksa otorite iddia edilmez** —
-> zincir yerel anahtarla biter ve `tied_candidates` kanıtın zayıflığını
-> kayıtta tutar. Sayfalama ve eser (work) düzeyi kimlik reddedildi (gerekçeler
-> D-046'da; work düzeyi ertelendi, iptal değil).
+> DECISION POINT: MusicBrainz search is unstable between runs. **CLOSED —
+> D-046 (Q3).** `mb_stability_probe` measured it: the same `Radiohead — Creep`
+> search, twice in a row, returns 25 candidates, and in some runs **the number
+> of shared candidates is zero** — MusicBrainz serves search from several index
+> replicas. D-045's deterministic ordering can't solve this, because the set to
+> be ordered is different each time. **Decision: without distinguishing
+> evidence, no authority is claimed** — the chain ends with the local key, and
+> `tied_candidates` keeps the weakness of the evidence on record. Paging and
+> work-level identity were rejected (reasons in D-046; the work level was
+> postponed, not cancelled).
 >
-> Kuralın açtığı ikinci kusur da düzeltildi: **süre kanıtı çöpe gidiyordu.**
-> `Şebnem Ferah — Sil Baştan` için 309, 313 ve 315 sn'lik üç aday, sorgu 309 sn
-> olmasına rağmen üçü de tam 1.0000 alıyordu (`clamp` + bantlı süre karşılaştırması).
-> Süre farkı artık sıralamada üçüncü eşitlik bozucu. Ölçülen etki: doğruluk
-> kümesi %100'de kaldı ve zincir artık ISRC halkasının verdiği **aynı** kaydı
-> buluyor — düzeltmeden önce yanlış kaydı seçiyordu.
+> The second flaw the rule exposed was fixed too: **the duration evidence was
+> being thrown away.** For `Şebnem Ferah — Sil Baştan`, three candidates of
+> 309, 313 and 315 s all got exactly 1.0000, although the query was 309 s
+> (`clamp` + a banded duration comparison). The duration difference is now the
+> third tie-breaker in the ordering. The measured effect: the accuracy set
+> stayed at 100%, and the chain now finds **the same** recording the ISRC link
+> gives — before the fix it picked the wrong recording.
 
-> KARAR NOKTASI: bu turun kapsamı ve sırası. **KAPANDI — D-045.** Tur açıldı
-> ve **üçünü de** (§2.3 + §2.4 + §2.5) kapsıyor; sıra §2.3 → §2.4 → §2.5.
-> §2.3'ün içinde sıra PLAN'ın yazdığının tersi: **önce MusicBrainz, sonra
-> AcoustID.** Sebep turdan önce ölçüldü — `default_lookup()` her zaman
-> `OfflineLookup` döndürüyor, yani K6'nın 2. ve 3. halkası bugün hiç
-> çalışmıyor ve AcoustID dosyası olmayan import kayıtlarına dokunamaz.
-> Parmak izi yolu: **`rusty-chromaprint`** (saf Rust; PCM symphonia'dan),
-> `fpcalc` alt süreci değil.
+> DECISION POINT: this round's scope and order. **CLOSED — D-045.** The round
+> was opened and covers **all three** (§2.3 + §2.4 + §2.5); the order is §2.3 →
+> §2.4 → §2.5. Inside §2.3 the order is the reverse of what the PLAN wrote:
+> **MusicBrainz first, then AcoustID.** The reason was measured before the
+> round — `default_lookup()` always returned `OfflineLookup`, so K6's 2nd and
+> 3rd links didn't work at all, and AcoustID can't touch import records that
+> have no file. The fingerprint path: **`rusty-chromaprint`** (pure Rust; the
+> PCM from symphonia), not an `fpcalc` subprocess.
 
-### 2.4 Torrent sağlayıcı — PARK EDİLDİ (D-069)
-`librqbit`. Sıralı akış.
+### 2.4 The torrent provider — PARKED (D-069)
+`librqbit`. Sequential streaming.
 
-> **D-069:** Eklenti sistemi QuickJS'e geçerken torrent "bizimle gelmedi"
-> (kullanıcının kararı). Kod `parked/`'da, workspace'in dışında, silinmedi;
-> geri dönüşün açık soruları `parked/README.md`'de. Aşağısı çalıştığı günün
-> kaydı. Bash prototipinin varisi —
-oradaki dersler geçerli: her torrent kendi dizinine, hazırlık için sabit `sleep` yerine
-gerçek hazır olma kontrolü, peer sayısı ve indirme hızı raporlanır.
+> **D-069:** When the plugin system moved to QuickJS, torrent "didn't come
+> with us" (the user's decision). The code is in `parked/`, outside the
+> workspace, not deleted; the open questions about its return are in
+> `parked/README.md`. What follows is the record of the days it worked. The
+> heir of the bash prototype — the lessons from there still hold: every
+> torrent into its own directory, a real readiness check instead of a fixed
+> `sleep` for preparation, the peer count and download speed reported.
 
-> KARAR NOKTASI: torrent çekirdekte mi, eklentide mi? Bu bölüm "`librqbit`"
-> diyerek çekirdeği ima ediyordu, K5 ise "sağlayıcılar alt süreç eklentisidir"
-> diyor. **KAPANDI — D-047: eklenti.** Ağaç bedeli karardan önce ölçüldü:
-> `librqbit` `headshell-core`'a **+179 crate** ekliyordu (77 → 256) ve o ağaç
-> `uniffi` ile mobile de gidecekti. Sağlayıcı artık `crates/headshell-plugin-torrent`,
-> ayrı bir Rust ikilisi; `headshell-core`'un ağacı 77'de kaldı.
+> DECISION POINT: is torrent in the core or in a plugin? This section implied
+> the core by saying "`librqbit`", while K5 said "providers are subprocess
+> plugins". **CLOSED — D-047: a plugin.** The tree cost was measured before
+> the decision: `librqbit` added **+179 crates** to `headshell-core` (77 → 256),
+> and that tree would have gone to mobile too, through `uniffi`. The provider
+> became `crates/headshell-plugin-torrent`, a separate Rust binary;
+> `headshell-core`'s tree stayed at 77.
 >
-> Aynı kararda iki alt soru daha kapandı. **Ses teslimi:** eklenti
-> `127.0.0.1`'de sıralı bir HTTP akışı sunuyor ve `resolve_source`
-> `HttpStream` döndürüyor — protokolde tek satır değişmedi, ve indirmenin
-> bitmesi beklenmiyor. **Arama:** Torznab (Prowlarr/Jackett) — tek standart
-> API, tek ayrıştırıcı; depoda hiçbir siteye özel kazıyıcı yok. Torznab
-> yapılandırılmamışsa arama sessiz boş küme değil, ne yazılacağını söyleyen
-> bir hata döndürüyor (K9).
+> Two more sub-questions closed in the same decision. **Audio delivery:** the
+> plugin offers a sequential HTTP stream on `127.0.0.1` and `resolve_source`
+> returns `HttpStream` — not a single line of the protocol changed, and the
+> download doesn't have to finish. **Search:** Torznab (Prowlarr/Jackett) —
+> one standard API, one parser; there is no site-specific scraper in the
+> repository. If Torznab isn't configured, search returns not a silent empty
+> set but an error that says what to write (K9).
 >
-> Torznab bir *yayım* döndürür, bir parça değil. api 1 büyütülmeden iki adımla
-> çözüldü: `search "<sorgu>"` → yayımlar (`<infohash>`), `search "<infohash>"`
-> → içindeki ses dosyaları (`<infohash>/<sıra>`). Birden çok dosya varken
-> `resolve_source` tahmin etmiyor.
+> Torznab returns a *release*, not a track. It was solved in two steps without
+> growing api 1: `search "<query>"` → releases (`<infohash>`),
+> `search "<infohash>"` → the audio files inside it (`<infohash>/<index>`).
+> When there are several files, `resolve_source` doesn't guess.
 >
-> **Bu karar bir kez geri alındı ve geri konuldu.** D-050 S3 (2026-09-09)
-> tutarlılık gerekçesiyle torrent'ı çekirdeğe feature'lı bir sağlayıcı olarak
-> taşımayı kararlaştırmıştı; **D-056 (2026-09-19) o kararı iptal etti** ve
-> D-047 yürürlükte kaldı. Ölçüm iptalin gerekçesi: taşınacak şey 2.335 satır
-> kaynak + 647 satır test, 56 test — "henüz yazılmamış" değil, çalışan bir
-> eklenti. Bedeli ödenmiş bir mimariyi ilk sürümden önce sökmenin karşılığı
-> yok.
+> **This decision was reversed once and then restored.** D-050 Q3
+> (2026-09-09) had decided, on grounds of consistency, to move torrent into
+> the core as a provider behind a feature; **D-056 (2026-09-19) cancelled that
+> decision**, and D-047 stayed in force. A measurement was the reason for the
+> cancellation: what would have been moved was 2,335 lines of source + 647
+> lines of tests, 56 tests — not "not yet written", but a working plugin.
+> Tearing out an architecture whose price had been paid, before the first
+> release, would have bought nothing.
 
-### 2.5 Yayın platformu eklentileri
-Hangi platformdan ses çalınabileceği API'nin varlığına değil **DRM'e** bağlı.
-Tam liste, gerekçeler ve hukuki çizgi: **EK — Yayın platformları**.
+### 2.5 Streaming platform plugins
+Which platforms audio can be played from depends not on whether an API exists
+but on **DRM**. The full list, the reasons and the legal line: **APPENDIX —
+Streaming platforms**.
 
-Özet: SoundCloud / Qobuz / YouTube Music akıtılabilir; Tidal / Apple Music /
-Deezer yalnızca metadata verir; Spotify yalnızca `CONTROL` (K4);
-Amazon Music / Pandora / Idagio / Tencent kapalı.
+In short: SoundCloud / Qobuz / YouTube Music can be streamed; Tidal / Apple
+Music / Deezer only provide metadata; Spotify only `CONTROL` (K4); Amazon Music
+/ Pandora / Idagio / Tencent are closed.
 
-Hepsi eklenti — hiçbiri çekirdeğe girmez. Sebep yalnızca K5 değil: bu API'ler
-haber vermeden bozulur, ve bozulduğunda **çalan müzik durmamalı**, yalnızca o
-eklenti düşmeli.
+All of them are plugins — none enters the core. The reason is not only K5:
+these APIs break without warning, and when they break **the music that is
+playing must not stop**; only that plugin should fail.
 
-> KARAR NOKTASI: §2.2'nin referans eklentisi hangi platform olacak ve bu fazda
-> kaç tane yazılacak? **KAPANDI — D-027 (platform: SoundCloud) + D-041 (sayı:
-> bir).** Bu tur yalnızca §2.1 + §2.2. §2.3 (AcoustID), §2.4 (torrent) ve
-> §2.5 (yayın platformları) iptal değil, protokol oturduktan sonraya alındı:
-> ikinci bir sağlayıcı protokole yeni bir şey kanıtlamaz, ilk sağlayıcının
-> hatalarını iki kere yazdırır.
+> DECISION POINT: Which platform will §2.2's reference plugin be, and how many
+> will be written in this phase? **CLOSED — D-027 (platform: SoundCloud) +
+> D-041 (count: one).** This round is only §2.1 + §2.2. §2.3 (AcoustID), §2.4
+> (torrent) and §2.5 (streaming platforms) aren't cancelled; they were moved
+> to after the protocol settles: a second provider proves nothing new about
+> the protocol, and it has the first provider's mistakes written twice.
 
-> KARAR NOKTASI: §2.5'te hangi platform yazılacak? **KAPANDI — D-048: YouTube
-> Music, tek eklenti.** Qobuz abonelik ister, yani canlı koşturulamazdı — ve
-> D-044'ten D-047'ye kadar her turun dersi "kusuru yalnızca gerçek koşum
-> gösterdi" oldu. Bu turun bir *protokol* turu değil bir *ürün değeri* turu
-> olduğu baştan kabul edildi.
+> DECISION POINT: Which platform will be written in §2.5? **CLOSED — D-048:
+> YouTube Music, a single plugin.** Qobuz needs a subscription, so it couldn't
+> be run live — and the lesson of every round from D-044 to D-047 was "only a
+> real run showed the flaw". It was accepted from the start that this round
+> is not a *protocol* round but a *product value* round.
 >
-> EK'in "yol yt-dlp" satırı **yazmadan önce sınandı ve yarısı yanlış çıktı.**
-> yt-dlp'nin araması yalnızca `title` + `id` veriyor (sanatçı yok, süre yok),
-> yani K6'nın bulanık eşleşme halkası onunla çalışamaz. İş bölümü ikiye
-> ayrıldı: **arama InnerTube'dan** (`WEB_REMIX`, şarkı süzgeci; sanatçı +
-> albüm + süre + `videoId` veriyor), **akış yt-dlp'den** (alt süreç, kütüphane
-> değil).
+> The APPENDIX's "the way is yt-dlp" line **was tested before writing, and half
+> of it turned out wrong.** yt-dlp's search only gives `title` + `id` (no
+> artist, no duration), so K6's fuzzy match link can't work with it. The work
+> was split in two: **search from InnerTube** (`WEB_REMIX`, the songs filter;
+> gives artist + album + duration + `videoId`), **the stream from yt-dlp** (a
+> subprocess, not a library).
 >
-> İki tuzak daha ölçüldü. **`bestaudio` çalınamaz:** opus/webm seçiyor ve
-> çekirdeğin symphonia'sında ne o kodek ne o kap var — format m4a'ya (AAC-LC)
-> sabitlendi. **Düz GET kısıtlanıyor:** aynı adres düz istekte 32 KB/s,
-> `Range: bytes=0-` başlığıyla 8 MB/s — 250 kat. Başlık protokolün var olan
-> `source.headers` alanından geçiyor; çekirdekte tek satır değişmedi.
+> Two more traps were measured. **`bestaudio` can't be played:** it picks
+> opus/webm, and the core's symphonia has neither that codec nor that
+> container — the format was pinned to m4a (AAC-LC). **Plain GET is
+> throttled:** the same address gives 32 KB/s on a plain request, 8 MB/s with a
+> `Range: bytes=0-` header — 250 times. The header travels through the
+> protocol's existing `source.headers` field; not a single line changed in the
+> core.
 
-### 2.6 Faz 2 durum — D-041'in kapsamı KAPANDI
+### 2.6 Phase 2 status — D-041's scope CLOSED
 
-| Bölüm | Durum |
+| Section | Status |
 |---|---|
-| 2.1 JSON-RPC protokolü | TAMAM — izin modeli (D-040), sırlar (D-042), gerçek süreçle sınandı |
-| 2.2 Referans eklenti (SoundCloud) | TAMAM — canlı SoundCloud'da arıyor ve çalıyor (D-043) |
-| 2.3 AcoustID | TAMAM — parmak izi + AcoustID + `resolve --file` (D-046), gerçek anahtarla canlı sınandı; tek borç: `EMBEDDED_API_KEY` hâlâ boş |
-| 2.4 Torrent sağlayıcı | PARK EDİLDİ (D-069) — çalışan alt süreç eklentisiydi (D-047); api 2'ye taşınmadı, `parked/`'da |
-| 2.5 Yayın platformu eklentileri | TAMAM — `plugins/ytmusic` (D-048; D-071'den beri `headshell/plugins` kataloğunda): InnerTube araması, yt-dlp ile m4a akışı, kısıtlamayı kaldıran `Range` başlığı; canlı serviste baştan sona çaldı |
+| 2.1 JSON-RPC protocol | DONE — permission model (D-040), secrets (D-042), tested with a real process |
+| 2.2 Reference plugin (SoundCloud) | DONE — searches and plays on the live SoundCloud (D-043) |
+| 2.3 AcoustID | DONE — fingerprint + AcoustID + `resolve --file` (D-046), tested live with a real key; the one debt: `EMBEDDED_API_KEY` is still empty |
+| 2.4 Torrent provider | PARKED (D-069) — it was a working subprocess plugin (D-047); not ported to api 2, in `parked/` |
+| 2.5 Streaming platform plugins | DONE — `plugins/ytmusic` (D-048; in the `headshell/plugins` catalog since D-071): InnerTube search, an m4a stream through yt-dlp, the `Range` header that lifts the throttling; played start to finish on the live service |
 
-**Faz 1'den taşınan borçlar:**
-- `keyring` (D-021) — **kapandı**: D-042 tek sır kavramını tanımladı,
-  `keyring` bağımlılığı yine eklenmedi ve gerekçesi yazıldı.
-- Gerçek zamanlı dizin izleme (D-025) — hâlâ açık, `--if-stale` yoklaması
-  yerinde duruyor.
+**Debts carried over from Phase 1:**
+- `keyring` (D-021) — **closed**: D-042 defined a single secret concept, the
+  `keyring` dependency still wasn't added, and the reasoning was written down.
+- Real-time directory watching (D-025) — still open; the `--if-stale` probe
+  stays in place.
 
-**D-041'in çizdiği tur (§2.1 + §2.2) bitti; üç kapı temiz.**
+**The round D-041 drew (§2.1 + §2.2) is finished; all three gates are clean.**
 
-Bugünkü koşum: **433 test geçiyor**, 7 test kendini atlıyor ve sebebini
-yazıyor (AcoustID anahtarsız ×3, Torznab yapılandırmasız ×3, ses aygıtı
-açılamadı ×1). Atlanan test geçmiş sayılmaz — D-043'ün kuralı.
-Faz 2'nin "bitti sayılır" ölçütünün ikisi de karşılandı: Rust olmayan bir
-referans eklenti gerçek bir serviste çalışıyor (§2.2) ve çekirdek sürüm
-uyumsuzluğunda çökmeden reddediyor (§2.1, `plugin_process.rs`).
+Today's run: **433 tests pass**, 7 tests skip themselves and write the reason
+(AcoustID without a key ×3, Torznab without configuration ×3, the audio device
+couldn't be opened ×1). A skipped test does not count as passed — D-043's
+rule. Both parts of Phase 2's "counts as done" criterion are met: a non-Rust
+reference plugin works on a real service (§2.2), and the core rejects it on a
+version mismatch without crashing (§2.1, `plugin_process.rs`).
 
-D-045'in açtığı tur §2.3 (D-046), §2.4 (D-047) ve §2.5 (D-048) ile bitti.
-**Faz 2'nin bütün bölümleri TAMAM.**
+The round D-045 opened ended with §2.3 (D-046), §2.4 (D-047) and §2.5 (D-048).
+**All of Phase 2's sections are DONE.**
 
-Faz 2'den çıkarken açık kalan beş borcun biri kapandı (eklenti motoru,
-D-055), dördü duruyor ve bir tanesi küçüldü:
+Of the five debts left open on the way out of Phase 2, one closed (the plugin
+engine, D-055), four remain, and one got smaller:
 
-- **~~Eklenti motoru~~ — KAPANDI (D-055).** Motor yazıldı, `ytmusic` ve
-  `soundcloud` ondan geçiyor.
-- ~~**`torrent` kullanıcıya `cargo build --release` yaptırıyor**~~ — torrent
-  park edildi (D-069); dağıtım sorusu geri dönüşün sorularından biri
-  (`parked/README.md`).
-- **Gömülü AcoustID anahtarı yok** (`EMBEDDED_API_KEY` boş, D-046).
-- ~~**İzin sözlüğü joker kabul etmiyor** (D-040)~~ — **KAPANDI (D-069)**:
-  `*.googlevideo.com` beyan edilebiliyor ve izinler artık zorlanıyor.
-  "Rastgele peer" hâlâ ifade edilemiyor ve edilmemeli — torrent'in geri
-  dönüş sorusu.
-- **Gerçek zamanlı dizin izleme** (D-025) — `--if-stale` yoklaması yerinde.
-- **`play --dry-run` sağlayıcı parça kimliğini insan çıktısına yazmıyor**
-  (D-054'te ölçüldü).
+- **~~The plugin engine~~ — CLOSED (D-055).** The engine was written; `ytmusic`
+  and `soundcloud` go through it.
+- ~~**`torrent` makes the user run `cargo build --release`**~~ — torrent was
+  parked (D-069); the distribution question is one of the questions of its
+  return (`parked/README.md`).
+- **No embedded AcoustID key** (`EMBEDDED_API_KEY` is empty, D-046).
+- ~~**The permission vocabulary doesn't accept wildcards** (D-040)~~ —
+  **CLOSED (D-069)**: `*.googlevideo.com` can be declared, and the permissions
+  are now enforced. "A random peer" still can't be expressed, and shouldn't
+  be — the question of torrent's return.
+- **Real-time directory watching** (D-025) — the `--if-stale` probe is in
+  place.
+- **`play --dry-run` doesn't write the provider track ID in the human output**
+  (measured in D-054).
 
-### 2.7 Eklenti bağımlılık sözleşmesi — KURAL KAPANDI (D-049), UYGULAMA §2.8'de TAMAM
+### 2.7 The plugin dependency contract — RULE CLOSED (D-049), IMPLEMENTATION DONE in §2.8
 
-**Kural: hiçbir eklenti root yetkisi ya da sistem çapında kurulum isteyemez.**
-Bir eklenti ya bağımlılıklarını kendisi getirir, ya da onları root'suz kuran
-bir yordam sunar. "Paket yöneticinle kur" bir kurulum yordamı değildir: her
-dağıtım ve her işletim sistemi için ayrı bir destek yüzeyi açar ve o yüzeyi
-eklenti yazarı değil biz taşırız.
+**The rule: no plugin may ask for root privileges or a system-wide install.**
+A plugin either brings its dependencies itself, or it offers a procedure that
+installs them without root. "Install it with your package manager" is not an
+installation procedure: it opens a separate support surface for every
+distribution and every operating system, and that surface is carried not by the
+plugin author but by us.
 
-Kural yazıldığında **üç eklenti de** ihlal ediyordu. D-055'ten sonra biri
-kaldı:
+When the rule was written, **all three plugins** broke it. After D-055 one was
+left:
 
-| eklenti | istediği | durum |
+| plugin | what it asks for | status |
 |---|---|---|
-| `soundcloud` | hiçbir şey | gömülü motor — **uyuyor** (D-069) |
-| `ytmusic` | yt-dlp | platform ikilisi motorca kuruluyor, Python yok — **uyuyor** (D-069) |
-| `torrent` | `cargo build --release` | **park edildi** (D-069) — geri dönüşte çözülecek |
+| `soundcloud` | nothing | the embedded engine — **complies** (D-069) |
+| `ytmusic` | yt-dlp | the platform binary is installed by the engine, no Python — **complies** (D-069) |
+| `torrent` | `cargo build --release` | **parked** (D-069) — to be solved on its return |
 
-Kuralın kaçmaması gereken yer: D-048 bilerek "yt-dlp'yi kullanıcı kendi paket
-yöneticisiyle günceller"e yaslanmıştı, çünkü YouTube onu düzenli bozuyor ve
-tamiri yt-dlp yapıyor. Kural "depoya bir kopya dondur"a dönüşürse o bakım
-yükünü biz devralırız. Üç şart birden: **root yok + her işletim sistemi +
-güncel kalabilir.**
+Where the rule must not slip: D-048 had deliberately leaned on "the user
+updates yt-dlp with their own package manager", because YouTube breaks it
+regularly and yt-dlp does the repair. If the rule turns into "freeze a copy
+into the repository", we take over that maintenance burden. Three conditions at
+once: **no root + every operating system + able to stay current.**
 
-Tanılama tarafı zaten ayaktaydı: eksik bağımlılık sessizce "sonuç yok"a
-dönüşmüyor, `headshell provider test` KULLANILAMIYOR deyip sebebini yazıyordu (K9).
-Kırık olan **kurulabilirlikti**, görünürlük değil — ve D-055 onu iki
-eklentide onardı. Görünürlük ayrıca ileri gitti: eksiklik artık süreç
-açılmadan, `headshell plugin list` çıktısında görünüyor.
+The diagnostics side was already up: a missing dependency didn't silently turn
+into "no results"; `headshell provider test` said UNAVAILABLE and wrote the
+reason (K9). What was broken was **installability**, not visibility — and D-055
+repaired it in two plugins. Visibility went further too: the gap now shows
+without a process being opened, in the output of `headshell plugin list`.
 
-> KARAR NOKTASI: kural nasıl uygulanacak? **KAPANDI — D-050: eklenti motoru.**
-> Çalışma zamanı eklentinin değil **host'un** işi. `headshell`'un tek bir motoru
-> olur, çalışma zamanı Python'dur ve `headshell`'un kendi gereksinimi olarak bir kez
-> ilan edilir (yorumlayıcı gömülmez — "gerekli olduğu söylenir yeter").
-> Eklentiler o motorun üstünde koşan betiklerdir.
+> DECISION POINT: how will the rule be applied? **CLOSED — D-050: a plugin
+> engine.** The runtime is the **host's** job, not the plugin's. `headshell`
+> has a single engine, the runtime is Python, and it is declared once as
+> `headshell`'s own requirement (the interpreter isn't embedded — "it's enough
+> to say it's required"). Plugins are scripts running on top of that engine.
 >
-> Düğüm paketlerdeydi: "Python var" demek yt-dlp'yi getirmiyor, çünkü yt-dlp
-> yorumlayıcı değil bir **paket**. Çözüm eklentiye bırakılmadı — eklenti
-> `plugin.json`'da `requires` ile ne istediğini **beyan eder**, kurulumu
-> **motor yapar**, veri dizinindeki kendi özel ortamına. Eklenti hiçbir şey
-> kurmaz, indirmez, `pip` çağırmaz.
+> The knot was in the packages: saying "there's Python" doesn't bring yt-dlp,
+> because yt-dlp is not an interpreter but a **package**. The solution wasn't
+> left to the plugin — the plugin **declares** what it wants with `requires` in
+> `plugin.json`, and **the engine does** the installing, into its own private
+> environment in the data directory. The plugin installs nothing, downloads
+> nothing, doesn't call `pip`.
 >
-> Torrent eklenti olmaktan çıkıp **feature kapılı yerleşik sağlayıcı** olur:
-> kullanıcı hiçbir şey derlemez, ama D-047'nin ölçtüğü +179 crate yalnızca
-> kapıyı açan derlemeye girer ve `cargo tree -p headshell-core` mobilde yine 77 der.
+> Torrent stops being a plugin and becomes a **built-in provider behind a
+> feature gate**: the user builds nothing, but the +179 crates D-047 measured go
+> only into the build that opens the gate, and `cargo tree -p headshell-core`
+> still says 77 on mobile.
 >
-> **K5 değişmiyor:** alt süreç + JSON-RPC sınırı herkese açık kalır, motor tek
-> yol değil *kurulum gerektirmeyen desteklenen yol* olur. Depoda dağıtılan her
-> eklenti ondan geçer. — **D-069 bunu değiştirdi:** alt süreç yolu kalktı, K5
-> yeniden yazıldı, motor tek yol.
+> **K5 doesn't change:** the subprocess + JSON-RPC boundary stays open to
+> everyone; the engine becomes not the only way but *the supported way that
+> needs no installation*. Every plugin distributed in the repository goes
+> through it. — **D-069 changed this:** the subprocess way is gone, K5 was
+> rewritten, the engine is the only way.
 
-### 2.8 Eklenti motoru — TAMAM (D-050 karar, D-055 uygulama) — Python kısmı §2.9 ile geçersiz
+### 2.8 The plugin engine — DONE (D-050 decision, D-055 implementation) — the Python part void since §2.9
 
-> **D-069:** Bu bölümün Python'a dair her şeyi (yorumlayıcı bulma, 3.9+,
-> `HEADSHELL_PYTHON`, README'deki ilan) geçersiz. Eser mekanizması (madde 2,
-> sabitlenmiş sürüm + karma) duruyor ve platform başına genişledi.
+> **D-069:** Everything in this section about Python (finding the
+> interpreter, 3.9+, `HEADSHELL_PYTHON`, the declaration in the README) is
+> void. The artifact mechanism (item 2, a pinned version + hash) stays, and it
+> grew per platform.
 
-D-050'nin kararı yazıldı. Altı maddenin beşi bitti, biri açık:
+D-050's decision was written. Five of the six items are finished, one is open:
 
-1. **Motor yazıldı** — `plugin/runtime.rs`. Python bulma + sürüm kontrolü
-   (3.9+), `requires` çözümü, eserin indirilip karmasının doğrulanması, ve
-   eksiklikte hangi adımda ne eksik diyen tanı (`ADIM: PLUGIN_RUNTIME`).
-   Eksik bağımlılık artık süreç açılmadan, `headshell plugin list` çıktısında
-   görünüyor.
-2. **`plugin.json` → `requires`** eklendi. `api` kırılmadı; alan eklemek
-   sürümü artırmaz (§2.1). Eski manifestler boş listeyle okunuyor ve bunu
-   bir test kilitliyor.
-3. **`ytmusic`** kendi yt-dlp arayışını bıraktı. `HEADSHELL_YTDLP` → `PATH` →
-   `python3 -m yt_dlp` üçlüsü silindi; eklenti yolu el sıkışmadaki
-   `requirements` haritasından alıyor.
-4. **`soundcloud` + `echo`** motora geçti — ikisi de `python3` yazıyor,
-   yorumlayıcıyı motor çözüyor, `requires` boş.
-5. **`torrent` — TAŞIMA İPTAL (D-056).** D-050 S3'ün "çekirdeğe feature'lı
-   sağlayıcı olarak taşı" kararı **geri alındı**. Torrent eklenti olarak
-   kalıyor, `crates/headshell-plugin-torrent` ve `plugins/torrent/` yerinde.
+1. **The engine was written** — `plugin/runtime.rs`. Finding Python + a version
+   check (3.9+), resolving `requires`, downloading the artifact and verifying
+   its hash, and on a gap a diagnosis that says what is missing at which step
+   (`STEP: PLUGIN_RUNTIME`). A missing dependency now shows without a process
+   being opened, in the output of `headshell plugin list`.
+2. **`plugin.json` → `requires`** was added. `api` didn't break; adding a field
+   doesn't raise the version (§2.1). Old manifests are read with an empty
+   list, and a test locks that.
+3. **`ytmusic`** dropped its own search for yt-dlp. The
+   `HEADSHELL_YTDLP` → `PATH` → `python3 -m yt_dlp` trio was deleted; the
+   plugin takes the path from the `requirements` map in the handshake.
+4. **`soundcloud` + `echo`** moved to the engine — both write `python3`, the
+   engine resolves the interpreter, `requires` is empty.
+5. **`torrent` — MOVE CANCELLED (D-056).** D-050 Q3's decision "move it into
+   the core as a provider behind a feature" **was reversed**. Torrent stays a
+   plugin; `crates/headshell-plugin-torrent` and `plugins/torrent/` stay where
+   they are.
 
-   Geriye kalan borç taşıma değil **dağıtım**: eklenti kullanıcıya
-   `cargo build --release` yaptırıyor ve D-049'u ihlal eden tek şey bu.
-   **`TODO: AFTER FIRST RELEASE`** — ilk sürümden sonra ele alınacak.
-6. **Python 3.9+ ilan edildi** — `README` ve `CONTRIBUTING`.
+   The remaining debt is not the move but **distribution**: the plugin makes
+   the user run `cargo build --release`, and that is the only thing that breaks
+   D-049. **`TODO: AFTER FIRST RELEASE`** — to be dealt with after the first
+   release.
+6. **Python 3.9+ was declared** — in the `README` and `CONTRIBUTING`.
 
-> KARAR NOKTASI: motorun özel ortamı nasıl kurulacak? **KAPANDI — D-055.**
-> `venv` + `pip` **seçilmedi**: `ensurepip` her dağıtımda yok (Debian
-> `python3-venv`'i ayrı paketliyor) ve orada motor kullanıcıya root'suz bir
-> çıkış yolu sunamazdı — D-049'un tam kaçındığı yer. Yerine **sabitlenmiş tek
-> dosyalık eser**: eklenti manifestinde sürüm + adres + sha256 beyan eder,
-> motor indirir ve doğrular. `pip` hiç gerekmiyor.
+> DECISION POINT: how will the engine's private environment be set up?
+> **CLOSED — D-055.** `venv` + `pip` **were not chosen**: `ensurepip` isn't on
+> every distribution (Debian packages `python3-venv` separately), and there the
+> engine couldn't offer the user a way out without root — exactly the place
+> D-049 avoids. Instead, **a pinned single-file artifact**: the plugin declares
+> a version + an address + a sha256 in its manifest, and the engine downloads
+> and verifies it. `pip` is not needed at all.
 >
-> Ölçüm soruyu keskinleştirmişti: bu makinede sistem `pip`'i **yok**
-> (`python3 -m pip` → "No module named pip") ama `ensurepip` var, yani venv
-> 1,4 sn'de 13 MB'lık bir ortam kurabiliyordu. "pip yok" ile "venv kuramam"
-> aynı şey değil; Debian'ın paket ayrımı ikisini birden götürüyor.
+> A measurement had sharpened the question: on this machine the system `pip`
+> **is missing** (`python3 -m pip` → "No module named pip") but `ensurepip` is
+> there, so a venv could set up a 13 MB environment in 1.4 s. "No pip" and "I
+> can't set up a venv" are not the same thing; Debian's package split takes
+> away both at once.
 >
-> **İzin sözlüğü (D-040):** motorun indirmesi eklentinin `permissions.net`
-> listesine **karışmıyor**, onay ekranında ayrı bir `motor` satırında
-> görünüyor. Karışsaydı kullanıcı "bu eklenti github.com'a bağlanıyor" diye
-> okurdu; bağlanan motor. D-040'ın joker açığı bu turda kapanmadı ama
-> **büyümedi** de.
+> **The permission vocabulary (D-040):** the engine's download **doesn't mix
+> into** the plugin's `permissions.net` list; it shows on a separate `engine`
+> line on the consent screen. If it did mix in, the user would read "this
+> plugin connects to github.com"; the one connecting is the engine. D-040's
+> wildcard gap didn't close in this round, but it **didn't grow** either.
 >
-> **Çevrimdışı:** dört ayrı tanı var ve hiçbiri ötekine benzemiyor —
-> `kurulu değil`, `karma tutmuyor`, `kurulamadı` (ağ), `YETİM` (kaynak 404).
-> Sonuncusu kullanıcının düzeltemeyeceği tek durum ve mesaj bunu söylüyor.
+> **Offline:** there are four separate diagnoses, and none resembles another —
+> `not installed`, `hash mismatch`, `could not install` (the network),
+> `ORPHANED` (the source is 404). The last one is the only case the user can't
+> fix, and the message says so.
 
-### 2.9 Eklenti motoru v2 — QuickJS — TAMAM (D-069), temiz makine sınaması YAPILACAK
+### 2.9 The plugin engine v2 — QuickJS — DONE (D-069), clean-machine testing TODO
 
-**Sorun:** api 1'in eklentileri Python'du ve D-050 Python'u "projenin
-gereksinimi" ilan etmişti. Pratikte eklentiyi denemek isteyen herkes önce bir
-çalışma zamanı kurmak zorundaydı (Windows'ta yok, Debian'da `venv` ayrı
-paket) — kullanıcının ifadesiyle "kime göndersem bir sorun yaşadı".
+**The problem:** api 1's plugins were Python, and D-050 had declared Python "a
+requirement of the project". In practice everyone who wanted to try a plugin
+first had to install a runtime (Windows doesn't have one, Debian ships `venv`
+as a separate package) — in the user's words, "whoever I sent it to ran into a
+problem".
 
-**Yapıldı** (`crates/headshell-core/src/plugin/`):
+**Done** (`crates/headshell-core/src/plugin/`):
 
-1. **Motor** — `script.rs`: her eklenti kendi iş parçacığında, kendi QuickJS
-   çalışma zamanında. Çağrı süresi 20 sn, yükleme 5 sn, bellek 128 MB; döngü
-   `try/catch` içinde bile kesiliyor. `plugin-engine` feature'ı arkasında
-   (+4 crate, ~1,3 MB); CLI ve masaüstü açıyor.
-2. **`host`** — `host.rs`: `http`, `secrets`, `storage`, `tools`, `log` ve
-   `console`. Eşzamanlı. Yükleme sırasında ağ ve araç yasak.
-3. **İzinler zorlanıyor** — istekte, her yönlendirmede (istemci yönlendirme
-   izlemiyor, motor izliyor), akış adresinde. Joker (`*.alan.adi`) geldi.
-   Tek istisna motorun kurduğu araçlar ve bu her çıktıda yazıyor.
-4. **Platform başına eser** — `artifact.rs`: `requires[].assets`, anahtar
-   çekirdeğin derlendiği hedeften. İndirme diske akıyor (40 MB'lık ikili).
-   "Bu platform için yayın yok" beşinci tanı.
-5. **Sözleşme api 2** — `health`, `search`, `resolve_source` dışa aktarılır;
-   manifestte `main`. api 1 manifestleri "sürüm uyuşmuyor" diye görünüyor ve
-   ne yapılacağı yazıyor.
-6. **Eklentiler taşındı** — `soundcloud` ve `ytmusic` JS'e; canlı testleri
-   (10/10) geçiyor, ikisi de sesi gerçekten çalıyor. `echo` fikstürü JS'e.
-7. **Torrent park edildi** — `parked/`.
+1. **The engine** — `script.rs`: every plugin on its own thread, in its own
+   QuickJS runtime. Call time 20 s, loading 5 s, memory 128 MB; a loop is cut
+   off even inside `try/catch`. Behind the `plugin-engine` feature (+4 crates,
+   ~1.3 MB); the CLI and the desktop turn it on.
+2. **`host`** — `host.rs`: `http`, `secrets`, `storage`, `tools`, `log` and
+   `console`. Synchronous. The network and tools are forbidden while loading.
+3. **The permissions are enforced** — on the request, on every redirect (the
+   client doesn't follow redirects; the engine does), on the stream address.
+   Wildcards (`*.domain.name`) arrived. The one exception is the tools the
+   engine installs, and that is written in every output.
+4. **An artifact per platform** — `artifact.rs`: `requires[].assets`, keyed by
+   the target the core was built for. The download streams to disk (a 40 MB
+   binary). "No release for this platform" is the fifth diagnosis.
+5. **The contract is api 2** — `health`, `search`, `resolve_source` are
+   exported; `main` in the manifest. api 1 manifests show up as "version
+   mismatch", with what to do written down.
+6. **The plugins were moved** — `soundcloud` and `ytmusic` to JS; they pass
+   their live tests (10/10), and both really play the audio. The `echo`
+   fixture to JS.
+7. **Torrent was parked** — `parked/`.
 
-Aşamalar: `PLUGIN_LOAD` (manifest/onay), `PLUGIN_RUNTIME` (araç kurulumu),
-`PLUGIN_START` (betiği yükleme, dışa aktarım denetimi — eski
-`PLUGIN_HANDSHAKE`), `PROVIDER_CALL` (çağrı). Hata tipleri: `PluginThrew`
-("hayır dedi", mesaj + `main.js:satır`), `PluginContract` ("kodu motorla
-anlaşamıyor"), `PluginTimeout`, `PluginCrashed`, `PluginIncompatible`.
+Stages: `PLUGIN_LOAD` (manifest/consent), `PLUGIN_RUNTIME` (tool
+installation), `PLUGIN_START` (loading the script, checking the exports — the
+old `PLUGIN_HANDSHAKE`), `PROVIDER_CALL` (the call). Error types:
+`PluginThrew` ("it said no", a message + `main.js:line`), `PluginContract`
+("its code can't agree with the engine"), `PluginTimeout`, `PluginCrashed`,
+`PluginIncompatible`.
 
-**Sınama:** motorun 73 birim testi gerçek QuickJS + sahte ağla; CLI'de
-**ortamı tamamen boşaltılmış** bir süreçte (`PATH` yok) eklenti cevap veriyor.
+**Testing:** the engine's 73 unit tests with a real QuickJS + a fake network;
+in the CLI, the plugin answers in a process whose **environment was emptied
+completely** (no `PATH`).
 
-**Temiz Linux — ilk ölçüm TAMAM:** Python, yt-dlp ve Node olmayan bir
-`archlinux` konteynerinde kurulum, onay, yt-dlp indirmesi, sağlık, arama ve
-akış çözümü geçti; çalma yalnızca konteynerin ses kartı olmadığı için
-`PLAYBACK_OUTPUT`'ta durdu (D-069).
+**Clean Linux — the first measurement DONE:** in an `archlinux` container
+without Python, yt-dlp or Node, installation, consent, the yt-dlp download,
+health, search and stream resolution passed; playback stopped at
+`PLAYBACK_OUTPUT` only because the container had no sound card (D-069).
 
-**YAPILACAK — Windows ve macOS'ta temiz makine sınaması.** Python ve yt-dlp
-kurulu olmayan bir ortamda `plugin install ytmusic` + `play`. D-070 bunun
-önünü açtı (Windows'ta uygulama `HOME` yüzünden hiç açılmıyordu) ve CI'a
-Windows/macOS test işini ekledi; elle deneme hâlâ yapılmadı (§3.7).
+**TODO — clean-machine testing on Windows and macOS.** `plugin install
+ytmusic` + `play` in an environment without Python and yt-dlp. D-070 cleared
+the way for this (on Windows the app didn't open at all because of `HOME`) and
+added a Windows/macOS test job to CI; trying it by hand still hasn't been done
+(§3.7).
 
-> KARAR NOKTASI: yt-dlp JS çalışma zamanı istiyor. 2026.08.19 "JS runtimes:
-> none" deyip YouTube çözümünü sürdürüyor ama bunun kullanımdan kaldırıldığını
-> yazıyor (ölçüldü). O yol kapandığında motor bir JS çalışma zamanını da
-> (deno ya da `qjs`) aynı `requires` mekanizmasıyla indirmek zorunda kalacak.
-> Bugün bir iş değil — **sor**, kapandığında.
+> DECISION POINT: yt-dlp wants a JS runtime. 2026.08.19 says "JS runtimes:
+> none" and carries on with YouTube resolution, but writes that this is
+> deprecated (measured). When that road closes, the engine will have to
+> download a JS runtime too (deno or `qjs`) through the same `requires`
+> mechanism. Not a job today — **ask** when it closes.
 
-### 2.10 Eklenti kataloğu — TAMAM (D-071)
+### 2.10 The plugin catalog — DONE (D-071)
 
-**Sorun:** eklentiler ana depodaki `plugins/`'te duruyordu ve kullanıcı onları
-veri dizinine `cp` ile kopyalıyordu. Bir eklentiyi güncellemek (YouTube
-yt-dlp'yi bozduğunda sabitlenmiş sürümü artırmak gibi) bir uygulama sürümü
-ya da elle kopyalama demekti. Kullanıcının isteği: *"obsidian gibi bir
-repoda tutalım ve eklentiler listesi bu repodaki eklentilerden gelsin."*
+**The problem:** the plugins sat in `plugins/` in the main repository, and the
+user copied them into the data directory with `cp`. Updating a plugin (like
+raising the pinned version when YouTube breaks yt-dlp) meant an app release or
+copying by hand. The user's request: *"let's keep them in a repo like obsidian
+does, and have the plugin list come from the plugins in that repo."*
 
-**Yapıldı:**
+**Done:**
 
-1. **Ayrı depo: [`headshell/plugins`](https://github.com/headshell/plugins).**
-   Eklentiler orada dizin olarak yaşıyor; geçmişleri `git subtree split` ile
-   taşındı. Kökteki `index.json` her eklentinin manifestini ve dosyalarının
-   adresi + sha256'sını taşıyor. Dosya adresleri `<ad>-<sürüm>` etiketine
-   sabitli: GitHub'ın ham içerik önbelleği 5 dakika tutuyor (ölçüldü,
-   `max-age=300`) ve `main`'e sabitli bir adres yeni bir sürüm yayımlanırken
-   yeni indeksi eski dosyayla eşleştirirdi.
-2. **Çekirdek: `plugin/catalog.rs`.** İndeksi okur (bozuk girdi ötekileri
-   gizlemez, her biri sebebini taşır), eklentiyi kurar (her dosyanın karması
-   doğrulanır, inen `plugin.json` indeksin gösterdiğiyle karşılaştırılır,
-   geçici bir dizinde hazırlanıp tek adımda yerine konur), günceller ve
-   kaldırır. İndeksi de o üretir (`build_index`): kurulumdaki doğrulamanın
-   aynısıyla — katalog kendi kuralını yazmıyor.
-3. **Köken kaydı (`origin.json`):** katalogdan kurulan eklenti hangi sürümle
-   hangi dosyaları getirdiğini kaydeder. Güncelleme **yalnızca** kaydı olan
-   ve dosyaları kayıtla aynı olan eklentiye dokunur: elle konmuş ya da elle
-   değiştirilmiş bir eklentinin üstüne yazılmaz.
-4. **Onay değişmedi (kullanıcının kararı):** kurulan eklenti onay bekler;
-   güncelleme izinleri büyütürse yeniden onay ister (D-040). Araç (yt-dlp)
-   değişikliği onay **istemez** ama `update` çıktısı onu ayrıca yazar.
-5. **Ağ:** katalog yalnızca açık bir komutla okunur (`plugin catalog`,
-   `install` eklenti diskte yoksa, `update`). Adres
-   `HEADSHELL_PLUGIN_INDEX` ile değişir; `https://` şart, düz `http`
-   yalnızca bu makineye.
-6. **Yüzey:** CLI `plugin catalog | install | update [<ad>] | remove <ad> |
-   index <dizin>`; masaüstünde eklenti panelinin altında bir katalog bölümü.
-   Yeni aşama: `PLUGIN_CATALOG`.
+1. **A separate repository: [`headshell/plugins`](https://github.com/headshell/plugins).**
+   The plugins live there as directories; their history was moved over with
+   `git subtree split`. The `index.json` at the root carries every plugin's
+   manifest and the address + sha256 of its files. The file addresses are
+   pinned to the `<name>-<version>` tag: GitHub's raw content cache holds for
+   5 minutes (measured, `max-age=300`), and an address pinned to `main` would
+   pair the new index with the old file while a new version was being
+   published.
+2. **The core: `plugin/catalog.rs`.** It reads the index (a broken entry
+   doesn't hide the others; each carries its reason), installs the plugin
+   (every file's hash is verified, the downloaded `plugin.json` is compared
+   with what the index shows, it is prepared in a temporary directory and put
+   in place in one step), updates it and removes it. It also produces the
+   index (`build_index`): with the same verification as installing — the
+   catalog doesn't write its own rule.
+3. **The origin record (`origin.json`):** a plugin installed from the catalog
+   records which files it brought with which version. An update touches
+   **only** a plugin that has a record and whose files are the same as the
+   record: it never writes over a plugin placed or changed by hand.
+4. **Consent didn't change (the user's decision):** an installed plugin waits
+   for consent; if an update grows the permissions, it asks for consent again
+   (D-040). A tool (yt-dlp) change **doesn't** ask for consent, but the
+   `update` output writes it separately.
+5. **Network:** the catalog is read only on an explicit command
+   (`plugin catalog`, `install` when the plugin isn't on disk, `update`). The
+   address changes with `HEADSHELL_PLUGIN_INDEX`; `https://` is required, plain
+   `http` only to this machine.
+6. **Surface:** the CLI's `plugin catalog | install | update [<name>] |
+   remove <name> | index <dir>`; on the desktop, a catalog section under the
+   plugin panel. A new stage: `PLUGIN_CATALOG`.
 
-**Sınama:** çekirdekte 27 birim testi (sahte ağ, gerçek disk: karma tutmazsa
-hiçbir şey yazılmıyor, manifest indeksle çelişirse kurulmuyor, güncelleme
-`state/`'i koruyor, yarıda kalmış güncelleme yerel değişiklik sayılmıyor,
-bağlantıyla konmuş eklentinin yalnızca bağlantısı kaldırılıyor). CLI'de
-`127.0.0.1`'de açılan bir sunucuya karşı uçtan uca: indeks üretimi →
-katalog → kurulum → onay → motor → yeni sürüm → güncelleme → kaldırma.
-SoundCloud ve YouTube Music'in canlı testleri eklentiyi artık **canlı
-katalogdan** kuruyor.
+**Testing:** 27 unit tests in the core (a fake network, a real disk: if the
+hash doesn't match nothing is written, if the manifest contradicts the index it
+isn't installed, an update keeps `state/`, an update left half-done doesn't
+count as a local change, for a plugin placed through a link only the link is
+removed). In the CLI, end to end against a server opened on `127.0.0.1`: index
+generation → catalog → install → consent → engine → a new version → update →
+removal. The live tests of SoundCloud and YouTube Music now install the plugin
+**from the live catalog**.
 
 ---
 
-# FAZ 3 — GUI ve Tema
+# PHASE 3 — GUI and Theme
 
-> **SIRADAKİ FAZ — D-027.** Faz 1 kapandıktan sonra Faz 2 yerine bu seçildi:
-> topluluk motoru burasıdır (D-002, D-004), geciktirilmesi pahalıdır.
-> Faz 2 ertelendi, iptal edilmedi.
+> **THE NEXT PHASE — D-027.** After Phase 1 closed, this was chosen instead of
+> Phase 2: this is where the community's engine is (D-002, D-004), and
+> delaying it is expensive. Phase 2 was postponed, not cancelled.
 
-**Amaç:** Tauri masaüstü arayüzü + kullanıcıların yazabildiği tema sistemi.
-Tema ekosistemi bu projenin dağıtım kanalıdır, sonradan eklenecek bir süs değil.
+**Goal:** A Tauri desktop interface + a theme system users can write. The theme
+ecosystem is this project's distribution channel, not an ornament to be added
+later.
 
-### 3.1 GO / NO-GO ölçümü — TAMAM (koşullu GO)
-Tauri'de 50.000 satırlık sanallaştırılmış liste + CSS animasyon + IPC yükü prototipi.
-**Linux'ta WebKitGTK ölç.** Hedef kitle Linux ağırlıklı ve WebKitGTK üç platformun
-en zayıfı.
+### 3.1 GO / NO-GO measurement — DONE (conditional GO)
+A prototype in Tauri with a 50,000-row virtualized list + CSS animation + IPC
+load. **Measure WebKitGTK on Linux.** The audience is mostly Linux, and
+WebKitGTK is the weakest of the three platforms.
 
-> KARAR NOKTASI: Ölçüm sonucunu sun. Kabul edilemezse Dioxus/yerel Rust GUI
-> tartışılır — ama o durumda CSS tema ekosistemi kaybedilir.
-> **KAPANDI — D-028: GO, ortam şartıyla.**
+> DECISION POINT: Present the measurement result. If it's unacceptable,
+> Dioxus/a native Rust GUI is discussed — but in that case the CSS theme
+> ecosystem is lost. **CLOSED — D-028: GO, with an environment condition.**
 
-**Ölçüldü** (Intel HD 6000 / 2015, WebKitGTK 2.52.6, Tauri 2). Eşikler ölçümden
-önce yazıldı (`spike/tauri-gonogo/ESIKLER.md`). Sekiz ölçünün sekizi de GO;
-yalnızca "saf CSS" fazı sınırda.
+**Measured** (Intel HD 6000 / 2015, WebKitGTK 2.52.6, Tauri 2). The thresholds
+were written before the measurement (`spike/tauri-gonogo/THRESHOLDS.md`). All
+eight measures are GO; only the "pure CSS" phase is borderline.
 
-Üç şey buradan çıktı ve sonraki bölümleri bağlıyor:
+Three things came out of this, and they bind the following sections:
 
-1. **Linux'ta `GDK_BACKEND=x11` + `WEBKIT_DISABLE_DMABUF_RENDERER=1` şart.**
-   Varsayılan ortamda kare hızı 2.4× düşüyor (58.8 → 23.8 fps). İkisi **birlikte**
-   gerekiyor; tek başına her biri işe yaramıyor, biri kaydırmayı kötüleştiriyor.
-   **D-029: uygulamanın kendisi kuruyor** — `main()`'in ilk işi, yalnızca Linux'ta,
-   yalnızca değişken tanımlı değilse. Doğrulandı: dış değişken olmadan 23.8 → 55.6 fps.
-   Açık pürüz: `set_var` Rust 2024'te `unsafe` ve workspace `unsafe_code = "forbid"`
-   diyor — GUI paketi açılırken çözülecek (D-029).
-2. **§3.2'nin gerekçesi değişti** — aşağıya bak.
-3. **§3.3 bir kısıt kazandı** — aşağıya bak.
+1. **On Linux `GDK_BACKEND=x11` + `WEBKIT_DISABLE_DMABUF_RENDERER=1` are
+   required.** In the default environment the frame rate drops 2.4× (58.8 →
+   23.8 fps). Both are needed **together**; each alone doesn't help, and one
+   makes scrolling worse. **D-029: the app sets them up itself** — the first
+   thing `main()` does, only on Linux, only if the variable isn't defined.
+   Verified: without the outside variable, 23.8 → 55.6 fps. An open snag:
+   `set_var` is `unsafe` in Rust 2024 and the workspace says
+   `unsafe_code = "forbid"` — to be solved when the GUI package is opened
+   (D-029).
+2. **§3.2's reasoning changed** — see below.
+3. **§3.3 gained a constraint** — see below.
 
-Suçlunun donanım değil motor olduğu **kontrol deneyiyle** ayrıldı: aynı makinede
-aynı sayfayı Firefox dört fazın dördünde de 58.8 fps çiziyor. Donanım tavanı
-olsaydı yerel Rust GUI'ye kaçmak da kurtarmazdı.
+That the culprit is the engine, not the hardware, was established with a
+**control experiment**: on the same machine, Firefox draws the same page at
+58.8 fps in all four phases. If it were the hardware's ceiling, escaping to a
+native Rust GUI wouldn't have saved it either.
 
-### 3.2 IPC sözleşmesi — TAMAM
-~~Webview ile çekirdek arasında saniyede yüzlerce mesaj = takılma.~~
-**D-028 bunu ölçtü ve doğrulamadı:** IPC gidiş-dönüş p95 **1 ms**, 30 Hz yoklama
-kare süresine **1 ms** ekliyor, köprü **~10.000 olay/sn** taşıyor. Toplu gönderim
-performans için gerekli değil.
+### 3.2 The IPC contract — DONE
+~~Hundreds of messages per second between the webview and the core = stutter.~~
+**D-028 measured this and didn't confirm it:** the IPC round trip p95 is
+**1 ms**, 30 Hz polling adds **1 ms** to the frame time, and the bridge carries
+**~10,000 events/s**. Batching isn't needed for performance.
 
-Oynatma pozisyonu webview'de yine **çapadan tahmin edilir** — ama gerekçesi
-performans değil:
-- IPC duraksarsa arayüz donmaz, tahmin yürümeye devam eder.
-- Faz 4'ün oda primitifi zaten aynı tip (D-015); iki ayrı pozisyon kavramı
-  tutulmaz.
+The playback position is still **predicted from the anchor** in the webview —
+but the reason isn't performance:
+- If IPC stalls, the interface doesn't freeze; the prediction keeps walking.
+- Phase 4's room primitive is the same type anyway (D-015); two separate
+  position concepts aren't kept.
 
-Yanlış gerekçeyle savunulan doğru tasarım ilk itirazda düşer; sözleşme bu
-düzeltilmiş gerekçeyle yazılacak.
+A correct design defended with the wrong reason falls at the first objection;
+the contract will be written with this corrected reasoning.
 
-**Çekirdek tarafı hazır (D-032).** `playback::LiveSession` — `Player` ile
-`Session`'ı bağlar, tek `tick()` ilerletir + biriken dinlemeleri yazar +
-`TickReport` döndürür. Kabuk yalnızca döngüyü sürer. TUI buna geçirildi;
-GUI aynı tipi kullanacak, dans ikinci kez yazılmayacak.
+**The core side is ready (D-032).** `playback::LiveSession` — it ties `Player`
+and `Session` together; a single `tick()` advances + writes the accumulated
+listens + returns a `TickReport`. The shell only drives the loop. The TUI was
+moved onto it; the GUI will use the same type, and the dance won't be written a
+second time.
 
-Yazma artık **her turda**, çıkışta değil: saatlerce açık kalan bir arayüzde
-çökme bütün oturumun geçmişini götürürdü. Yazılamayan kayıt atılmıyor, elde
-tutulup yeniden deneniyor; `store_error` ve `listens_pending` bunu görünür
-kılıyor (K9).
+Writing now happens **every round**, not on exit: in an interface left open for
+hours, a crash would take the whole session's history with it. A record that
+can't be written isn't thrown away; it is held and retried; `store_error` and
+`listens_pending` make this visible (K9).
 
-**Paket düzeni (D-030):** üç paket — `headshell-core`, `headshell-cli`, `headshell` (GUI).
-Bağımlılık tek yönlü: `headshell-cli` ile `headshell` birbirini hiç görmez. Biri
-diğerinden bir şey isterse o şey çekirdeğe aittir.
+**Package layout (D-030):** three packages — `headshell-core`,
+`headshell-cli`, `headshell` (GUI). The dependency goes one way:
+`headshell-cli` and `headshell` never see each other. If one wants something
+from the other, that thing belongs to the core.
 
-#### Sözleşmenin şekli
+#### The shape of the contract
 
-**Sözleşme = çekirdeğin yüzeyi + serde.** Ayrı bir "IPC tipi" katmanı
-yazılmıyor: her komut zaten var olan bir çekirdek tipini döndürüyor. Çevirmen
-katmanı iki tipi zamanla kaydırırdı ve kaymayı hiçbir şey yakalamazdı.
-`--json` çıktısı bunu zaten kanıtlıyor — CLI ile GUI **aynı** veriyi alıyor.
+**The contract = the core's surface + serde.** No separate "IPC type" layer is
+written: every command already returns an existing core type. A translator
+layer would make the two types drift over time, and nothing would catch the
+drift. The `--json` output already proves this — the CLI and the GUI get
+**the same** data.
 
-**Komutlar** CLI'nin alt komutlarıyla birebir örtüşüyor, çünkü ikisi de aynı
-çekirdeğin kabuğu:
+**The commands** match the CLI's subcommands one to one, because both are
+shells of the same core:
 
-| Alan | Komutlar |
+| Area | Commands |
 |---|---|
-| Kütüphane | `search`, `stats`, `sleeve` |
-| İçe aktarma | `import` |
-| Kimlik | `resolve` |
-| Sağlayıcı | `providers`, `provider_test`, `provider_scan`, `servers_list`, `server_add`, `server_remove` |
-| Oynatma | `play`, `toggle_pause`, `stop`, `next`, `previous`, `jump_to`, `set_shuffle`, `set_repeat` |
-| Durum | `anchor`, `queue` |
-| Tanılama | `diag`, `diag_text` (D-072: `DiagReport::render()`'ın metni) |
+| Library | `search`, `stats`, `sleeve` |
+| Import | `import` |
+| Identity | `resolve` |
+| Provider | `providers`, `provider_test`, `provider_scan`, `servers_list`, `server_add`, `server_remove` |
+| Playback | `play`, `toggle_pause`, `stop`, `next`, `previous`, `jump_to`, `set_shuffle`, `set_repeat` |
+| State | `anchor`, `queue` |
+| Diagnostics | `diag`, `diag_text` (D-072: the text of `DiagReport::render()`) |
 
-Ayrıca `environment` var: veri dizini, veritabanı yolu, müzik dizinleri. Yeni
-bir "durum" tipi değil — hata mesajının yanında "hangi kütüphaneye baktım"
-sorusu cevapsız kalmasın diye (K9).
+There is also `environment`: the data directory, the database path, the music
+directories. Not a new "state" type — so that the question "which library did
+I look at" isn't left unanswered next to an error message (K9).
 
-**Olaylar** yalnızca **bir şey değiştiğinde** gönderilir, zamanlayıcıyla değil.
-GUI'nin Rust tarafı `LiveSession::tick()` döngüsünü sürer; `TickReport`
-webview'e ancak şunlardan biri varsa geçer:
+**Events** are sent only **when something changed**, not on a timer. The GUI's
+Rust side drives the `LiveSession::tick()` loop; a `TickReport` crosses to the
+webview only if one of these is present:
 
-- `track_changed`, `listens_recorded`, `store_error`, `finished`, **ya da**
-- **çapanın tahmine girdi olan kısmı değişmişse** — durum, hız, süre, parça
-  kimliği. `position_ms` bilerek listede yok: tahminin işi zaten o.
+- `track_changed`, `listens_recorded`, `store_error`, `finished`, **or**
+- **the part of the anchor that feeds the prediction has changed** — the
+  state, the rate, the duration, the track ID. `position_ms` is deliberately
+  not on the list: predicting it is the prediction's job.
 
-Son madde **D-035**. İlk liste onsuz yazıldı ve arayüzü sessizce dondurdu:
-ses `Buffering` başlayıp `Playing`'e geçiyor, geçiş gönderilmediği için
-webview elindeki `Buffering` çapasıyla kalıyor ve `Buffering` ilerlemediği
-için ilerleme çubuğu 0:00'da donuyordu. Hiçbir hata görünmüyordu. Bu kuralda
-asıl risk fazla mesaj değil **eksik** mesajdır: fazlası ölçülür, eksiği iz
-bırakmaz.
+The last item is **D-035**. The first list was written without it, and it
+silently froze the interface: the audio started as `Buffering` and moved to
+`Playing`; since the transition wasn't sent, the webview stayed with the
+`Buffering` anchor it had, and since `Buffering` doesn't advance, the progress
+bar froze at 0:00. No error showed. In this rule the real risk is not too many
+messages but **missing** ones: the excess is measured, the missing leaves no
+trace.
 
-Aradaki sessizlikte pozisyon çapadan tahmin edilir.
+In the silence between, the position is predicted from the anchor.
 
-Uzun komutlar (`import`, `resolve`, `provider_scan`, `provider_test`,
-`server_add`, `play`) ayrıca `headshell://busy` gönderir — bu da bir durum
-değişimi, zamanlayıcı değil.
+Long commands (`import`, `resolve`, `provider_scan`, `provider_test`,
+`server_add`, `play`) also send `headshell://busy` — that too is a state
+change, not a timer.
 
-#### Sürümleme gerekmiyor — ve bunun bir sınırı var
+#### No versioning needed — and that has a limit
 
-§3.3'ün aksine burada **iki taraf da aynı ikilinin içinde**: webview varlıkları
-uygulamayla birlikte paketleniyor, bağımsız güncellenemiyor. Çalışma zamanında
-sürüm anlaşması yapmak, yalnızca kendisiyle konuşabilen bir sürece el sıkışma
-öğretmek olurdu.
+Unlike §3.3, here **both sides are inside the same binary**: the webview
+assets are packaged with the app and can't be updated independently.
+Negotiating a version at run time would be teaching a handshake to a process
+that can only talk to itself.
 
-**Sınır şurada:** temalara (§3.3) IPC yüzeyi açılırsa sözleşme *dış* bir
-sözleşmeye dönüşür ve o gün sürümleme borcu doğar. §3.3 token setini
-tasarlarken bu soru cevaplanmalı — tema IPC çağırabilecek mi?
+**The limit is here:** if an IPC surface is opened to themes (§3.3), the
+contract turns into an *external* contract, and that day the versioning debt
+is born. This question must be answered while §3.3 designs the token set —
+will a theme be able to call IPC?
 
-#### Kayma koruması: paylaşılan doğruluk kümesi
+#### Drift protection: a shared accuracy set
 
-Pozisyon webview'de çekirdeğe sorulmadan tahmin ediliyor, yani formülün ikinci
-bir kopyası JS'te yaşıyor. İki kopya zamanla kayar ve kayma kimsenin fark
-etmediği yerde başlar — ilerleme çubuğu birkaç yüz milisaniye yalan söyler,
-kimse şikâyet etmez, sonra **Faz 4'te aynı formül oda senkronunu sürer.**
+In the webview the position is predicted without asking the core, so a second
+copy of the formula lives in JS. Two copies drift over time, and the drift
+starts where nobody notices — the progress bar lies by a few hundred
+milliseconds, nobody complains, and then **in Phase 4 the same formula drives
+room sync.**
 
-`fixtures/anchor/position_cases.json` iki tarafın da okuduğu tek doğruluk
-kaynağı (12 vaka). Rust tarafını `headshell-core/tests/anchor_parity.rs`, JS
-tarafını `headshell/ui/anchor.js` + `headshell/tests/anchor_parity_js.rs` bağlıyor.
+`fixtures/anchor/position_cases.json` is the single source of truth both sides
+read (12 cases). `headshell-core/tests/anchor_parity.rs` binds the Rust side;
+`headshell/ui/anchor.js` + `headshell/tests/anchor_parity_js.rs` bind the JS
+side.
 
-Kümenin en değerli vakası yazılırken bulundu: `rate = 1.001` ile 100 sn'de
-çekirdek **100099 ms** diyor, 100100 değil — `100000 × 1.001` ikilik tabanda
-tam değil ve `as u64` kırpıyor. JS `Math.round` kullanırsa iki kopya tam
-buradan ayrılır. Doğru karşılık `Math.floor(gecen_ms * rate)`.
+The set's most valuable case was found while writing it: with `rate = 1.001`
+at 100 s, the core says **100099 ms**, not 100100 — `100000 × 1.001` isn't
+exact in binary, and `as u64` truncates. If JS used `Math.round`, the two
+copies would split exactly here. The right counterpart is
+`Math.floor(elapsed_ms * rate)`.
 
-JS koşumu bir zamanlar `node` istiyordu ve `node` yoksa test **atlanmıyor,
-düşüyordu**: atlanabilir olsaydı kurulu olmayan bir makinede yeşil yanıp
-hiçbir şey kanıtlamazdı — D-032'de tam bu yüzden bir test silinmişti. D-070
-kuralı korudu, bedelini kaldırdı: `anchor.js` artık çekirdeğin eklenti
-motoruyla aynı gömülü QuickJS'te değerlendiriliyor; test yine hiç atlanmıyor
-ama makineden hiçbir şey istemiyor.
+The JS run once needed `node`, and without `node` the test **didn't skip, it
+failed**: if it could be skipped, it would turn green on a machine where it
+isn't installed and prove nothing — a test had been deleted in D-032 for
+exactly this reason. D-070 kept the rule and removed its price: `anchor.js` is
+now evaluated in the same embedded QuickJS as the core's plugin engine; the
+test still never skips, but it asks nothing of the machine.
 
-#### Paket — TAMAM
+#### Package — DONE
 
-`crates/headshell/`: Tauri kabuğu, ikili adı `headshell-desktop` (D-034). Rust tarafı
-`main.rs` + `env.rs` (D-031 ortam düzeltmesi) + `state.rs` + `core_thread.rs`
-+ `commands.rs`; webview `ui/` altında düz statik dosya — bundler yok, npm
-yok, `frontendDist: "ui"`.
+`crates/headshell/`: the Tauri shell, binary name `headshell-desktop` (D-034).
+The Rust side is `main.rs` + `env.rs` (the D-031 environment fix) + `state.rs`
++ `core_thread.rs` + `commands.rs`; the webview is plain static files under
+`ui/` — no bundler, no npm, `frontendDist: "ui"`.
 
-**Çekirdek kendi iş parçacığında yaşıyor (D-034):** `Session` `Send` ama
-`Sync` değil ve `import_archive`'ın future'ı `Send` değil, Tauri ise komut
-future'larının `Send` olmasını istiyor. Kilit yerine kanal: komutlar çekirdek
-iş parçacığına bir kapanış gönderip cevabı bekliyor, tik döngüsü de aynı
-iş parçacığında. Çekirdek bunun için değişmedi.
+**The core lives on its own thread (D-034):** `Session` is `Send` but not
+`Sync`, and `import_archive`'s future isn't `Send`, while Tauri wants command
+futures to be `Send`. A channel instead of a lock: commands send a closure to
+the core thread and wait for the answer, and the tick loop is on the same
+thread. The core didn't change for this.
 
-Doğrulandı: pencere açılıyor, `environment`/`queue`/`anchor` cevaplıyor,
-tarama ve arama sonuçları CLI'nin `--json` çıktısıyla aynı sayıları veriyor,
-yerel dosya çalıyor ve ilerleme çubuğu çapadan yürüyor. Hata yolu da
-görüldü — `ADIM: PLAYBACK_RESOLVE` aşamasıyla, tam zinciri katlanmış hâlde.
+Verified: the window opens, `environment`/`queue`/`anchor` answer, scan and
+search results give the same numbers as the CLI's `--json` output, a local file
+plays and the progress bar walks from the anchor. The error path was seen too —
+with the `STEP: PLAYBACK_RESOLVE` stage, its full chain folded.
 
-### 3.3 Tema API'si — sürümlenmiş sözleşme
-Spicetify'ın en büyük derdi: üst uygulama değişiyor, temalar bozuluyor.
-Bunu yaşamamak için semantik token seti (CSS custom properties), taahhüt edilen
-slot isimleri ve **sürümlenmiş tema formatı** baştan tasarlanır.
-İçeride ne değişirse değişsin bu yüzey sabit kalır.
+### 3.3 The theme API — a versioned contract
+Spicetify's biggest headache: the host app changes, and the themes break. To
+avoid living through that, a semantic token set (CSS custom properties),
+committed slot names and a **versioned theme format** are designed from the
+start. Whatever changes inside, this surface stays fixed.
 
-**D-028'den gelen kısıt — sözleşme neyin canlandırılabileceğini de söylemeli.**
-Düzeltilmiş ortamda bile `height` / `box-shadow` / `filter` /
-`background-position` animasyonları 58.8 → 47.6 fps götürüyor; `transform` +
-`opacity` hiç düşürmüyor. Tema yazarına bu söylenmezse fark **kullanıcının**
-makinesinde ortaya çıkar ve suçlanan tema değil uygulama olur.
+**A constraint from D-028 — the contract must also say what can be animated.**
+Even in the corrected environment, `height` / `box-shadow` / `filter` /
+`background-position` animations take 58.8 → 47.6 fps; `transform` +
+`opacity` don't drop it at all. If the theme author isn't told this, the
+difference shows up on **the user's** machine, and the one blamed is the app,
+not the theme.
 
-**Dil kapandı (D-036):** token adları — ve genel olarak bütün tanımlayıcılar —
-İngilizce. Tema seti bu projenin en dışa dönük yüzeyi; onu tüketen tanımadığımız
-bir tema yazarı. Yorum ve arayüz metni Türkçe kalır. Bu karar uygulanırken
-`crates/headshell`, paylaşılan doğruluk kümesi ve ses fixture'ları da çevrildi.
+**Language closed (D-036):** token names — and all identifiers in general — are
+English. The theme set is this project's most outward-facing surface; the one
+consuming it is a theme author we don't know. Comments and interface text
+stayed Turkish — until D-073 made them English too. While this decision was
+applied, `crates/headshell`, the shared accuracy set and the audio fixtures
+were translated as well.
 
-> KARAR NOKTASI: Token setini yazmadan önce sun. Bu bir kez yayınlandıktan sonra
-> geriye dönük uyumluluk borcu doğar.
+> DECISION POINT: Present the token set before writing it. Once it is
+> published, a backward-compatibility debt is born.
 >
-> Cevaplanacak dört soru: (1) granülerlik — dar semantik küme mi, bölge
-> geçersiz kılmalı katmanlı küme mi; (2) seçici vaadi — `data-headshell="..."`
-> öznitelikleri mi, sınıf adları mı, hiçbiri mi; (3) temaya IPC açılacak mı
-> (D-033 bunu buraya bıraktı: açılırsa sözleşme *dış* sözleşmeye döner ve o
-> gün sürümleme borcu doğar); (4) paket biçimi ve `api` sürüm alanı.
+> Four questions to answer: (1) granularity — a narrow semantic set, or a
+> layered set with region overrides; (2) the selector promise —
+> `data-headshell="..."` attributes, class names, or neither; (3) will IPC be
+> opened to themes (D-033 left this here: if it opens, the contract turns into
+> an *external* contract, and that day the versioning debt is born); (4) the
+> package format and the `api` version field.
 >
-> **KAPANDI — D-037:** (1) dar semantik küme; (2) sınıf adları sözleşmenin
-> parçası (mevcut `.topbar` vb. artık stabil, D-036'nın "iç ayrıntı" varsayımı
-> burada geçersiz); (3) hayır, temalar yalnızca görünüm — IPC yok; (4) manifest
-> + `api` sürüm alanı, uyuşmazsa açıkça reddedilir.
+> **CLOSED — D-037:** (1) a narrow semantic set; (2) class names are part of
+> the contract (the existing `.topbar` etc. are now stable; D-036's "internal
+> detail" assumption is void here); (3) no, themes are appearance only — no
+> IPC; (4) a manifest + an `api` version field, explicitly rejected on a
+> mismatch.
 >
-> **Yeni açık madde — "mod" paketleri.** D-037'de kullanıcı, tema paketleriyle
-> birlikte dağıtılan, davranış değiştiren bir "mod" kavramı önerdi. Bilinçli
-> olarak ertelendi. Bir mod'un webview içinde çalışıp IPC çağırması K5'in
-> sağlayıcı eklentileri için şart koştuğu "alt süreç + JSON-RPC" modelinden
-> köklü biçimde farklı bir güvenlik sınıfı taşır (aynı webview'de çöküp bütün
-> arayüzü dondurabilir). §3.3 kapandıktan sonra ayrı bir tur gerekiyor:
+> **A new open item — "mod" packages.** In D-037 the user proposed a "mod"
+> concept, distributed together with theme packages, that changes behaviour.
+> It was deliberately postponed. A mod running inside the webview and calling
+> IPC carries a security class radically different from the "subprocess +
+> JSON-RPC" model K5 requires for provider plugins (it can crash in the same
+> webview and freeze the whole interface). A separate round is needed after
+> §3.3 closes:
 >
-> KARAR NOKTASI: Mod'lar nasıl çalışır — ayrı bir süreç mi (K5 modeli, ama o
-> zaman "webview içinde" vaadi düşer), yoksa sınırlı/izinli bir webview JS
-> sandbox'ı mı? IPC'nin hangi alt kümesi (varsa) açılır? Tema ile aynı paket
-> biçimini mi paylaşır yoksa ayrı mı? **Sor.**
+> DECISION POINT: How do mods work — a separate process (the K5 model, but
+> then the "inside the webview" promise falls), or a limited/permissioned
+> webview JS sandbox? Which subset of IPC (if any) is opened? Do they share
+> the theme's package format, or a separate one? **Ask.**
 >
-> **D-069 notu:** "K5 modeli" artık alt süreç değil, çekirdeğe gömülü
-> QuickJS + `host` kapıları. Mod sorusu açılınca üçüncü bir seçenek var:
-> mod'u webview'de değil eklentilerin motorunda koşturmak, izinli bir `host`
-> alt kümesiyle. Soru hâlâ kapanmadı.
+> **D-069 note:** "the K5 model" is no longer a subprocess but QuickJS
+> embedded in the core + the `host` gates. When the mod question opens, there
+> is a third option: running a mod not in the webview but in the plugins'
+> engine, with a permissioned subset of `host`. The question is still not
+> closed.
 
-#### Token seti v1 — TAMAM (D-037)
+#### Token set v1 — DONE (D-037)
 
-`crates/headshell/ui/style.css`'in `:root` bloğu artık sözleşmenin kendisi. On dört
-token, hepsi dosyada en az bir yerde kullanılıyor — kullanılmayan token yok:
+The `:root` block of `crates/headshell/ui/style.css` is now the contract
+itself. Fourteen tokens, each used at least once in the file — no unused
+token:
 
-| Token | Değer | Anlamı |
+| Token | Value | Meaning |
 |---|---|---|
-| `--headshell-color-scheme` | `dark` | motorun kendi çizdiği parçalar (onay kutusu, imleç, kaydırma çubuğu) |
-| `--headshell-bg` | `#12100e` | sayfa arka planı |
-| `--headshell-surface` | `#1b1815` | panel arka planı (topbar, sidebar, player, block) |
-| `--headshell-surface-raised` | `#221e1a` | etkileşimli/hover arka planı (input, aktif nav, hover, toast) |
-| `--headshell-border` | `#2e2925` | kenarlık, ayraç, ilerleme çubuğu izi |
-| `--headshell-text` | `#eae2d8` | birincil metin |
-| `--headshell-text-dim` | `#9a8f83` | ikincil/soluk metin |
-| `--headshell-accent` | `#ffb454` | marka + etkileşim vurgusu |
-| `--headshell-success` | `#7bd88f` | çalıyor / başarı durumu |
-| `--headshell-error` | `#ff6b6b` | hata durumu |
-| `--headshell-info` | `#79c0ff` | arabelleğe alma / bilgi durumu |
-| `--headshell-radius-sm` | `6px` | kontrol köşe yarıçapı (nav, buton, girdi, kuyruk satırı) |
-| `--headshell-radius-lg` | `8px` | panel köşe yarıçapı (block, toast, dropzone) |
-| `--headshell-duration` | `120ms` | tek canlandırma süresi (yalnızca `opacity`/`transform`, D-028) |
+| `--headshell-color-scheme` | `dark` | the parts the engine draws itself (checkbox, caret, scrollbar) |
+| `--headshell-bg` | `#12100e` | page background |
+| `--headshell-surface` | `#1b1815` | panel background (topbar, sidebar, player, block) |
+| `--headshell-surface-raised` | `#221e1a` | interactive/hover background (input, active nav, hover, toast) |
+| `--headshell-border` | `#2e2925` | border, divider, progress bar track |
+| `--headshell-text` | `#eae2d8` | primary text |
+| `--headshell-text-dim` | `#9a8f83` | secondary/dim text |
+| `--headshell-accent` | `#ffb454` | brand + interaction accent |
+| `--headshell-success` | `#7bd88f` | playing / success state |
+| `--headshell-error` | `#ff6b6b` | error state |
+| `--headshell-info` | `#79c0ff` | buffering / info state |
+| `--headshell-radius-sm` | `6px` | control corner radius (nav, button, input, queue row) |
+| `--headshell-radius-lg` | `8px` | panel corner radius (block, toast, dropzone) |
+| `--headshell-duration` | `120ms` | the single animation duration (`opacity`/`transform` only, D-028) |
 
-`--headshell-color-scheme` on üçüncü değil **on dördüncüdür**: ilk sette yoktu,
-§3.4'ün açık teması yazılırken ortaya çıktı ve sonradan eklendi (D-039).
-Token'lar yalnızca *bizim* çizdiğimiz renkleri değiştiriyor; onay kutusu,
-metin imleci ve kaydırma çubuğu motorun kendi çizdiği parçalar ve açık bir
-palette koyu kalıyorlardı. Referans temanın işi tam olarak buydu.
+`--headshell-color-scheme` is not the thirteenth but **the fourteenth**: it
+wasn't in the first set; it came up while §3.4's light theme was being written
+and was added later (D-039). The tokens only change the colours *we* draw; the
+checkbox, the text caret and the scrollbar are parts the engine draws itself,
+and they stayed dark on a light palette. That was exactly the reference
+theme's job.
 
-Hover/focus/disabled ayrı renk token'ı almadı — hover zaten var olan
-token'ların bileşimiyle ifade ediliyor (`.nav:hover` → `--headshell-text`,
-`button:hover` → `--headshell-accent` kenarlık). Şu an hiçbir kural `:focus-visible`
-veya devre dışı durum tanımlamıyor; kullanılmayan bir token yazmak yerine bu
-**bilinen bir boşluk** olarak bırakıldı — gerçek bir görsel kural yazılınca
-token da gelir.
+Hover/focus/disabled got no separate colour token — hover is already expressed
+as a combination of existing tokens (`.nav:hover` → `--headshell-text`,
+`button:hover` → a `--headshell-accent` border). Right now no rule defines
+`:focus-visible` or a disabled state; instead of writing an unused token, this
+was left as **a known gap** — the token comes when a real visual rule is
+written.
 
-Sınıf adları (D-037/2) artık sözleşmenin parçası: `.topbar`, `.sidebar`,
+Class names (D-037/2) are now part of the contract: `.topbar`, `.sidebar`,
 `.nav`, `.content`, `.queue` (+ `.index`, `.current`), `.player`, `.controls`,
 `.now`, `.state.{playing,paused,buffering,stopped}`, `.bar`, `.fill`, `.time`,
 `.toast` (+ `.stage`, `.info`), `.block`, `.summary` (+ `.big`, `.label`),
 `.table`, `.ranking`, `.dropzone` (+ `.over`), `.busy`, `.brand`, `.check`,
-`.row`, `.grid`, `.hint`, `.empty`, `.two-col`, ve tema ekranının kendisi:
+`.row`, `.grid`, `.hint`, `.empty`, `.two-col`, and the theme screen itself:
 `.themes`, `.theme` (+ `.name`, `.author`, `.current`), `.tag` (+ `.warn`),
 `.rejected` (+ `.id`).
 
-Yeni sınıf **eklemek** `api`'yi artırmaz — eski temalar onu hedeflemiyordu.
-Artıran şey var olanı kaldırmak ya da anlamını değiştirmek. Aynı kural
-token'lar için de geçerli, ve `--headshell-color-scheme` bunun ilk örneği.
+**Adding** a new class doesn't raise `api` — old themes didn't target it. What
+raises it is removing an existing one or changing its meaning. The same rule
+holds for tokens, and `--headshell-color-scheme` is its first example.
 
-#### Manifest biçimi ve yükleyici — TAMAM
+#### Manifest format and loader — DONE
 
-Bir tema iki dosyalı bir dizin:
+A theme is a directory of two files:
 
 ```
-<tema-dizini>/
+<theme-directory>/
   theme.json   # manifest
-  theme.css    # yalnızca :root { --headshell-*: ...; } — ek seçici yok
+  theme.css    # only :root { --headshell-*: ...; } — no extra selectors
 ```
 
 `theme.json`:
 
 ```json
 {
-  "name": "Örnek Tema",
-  "author": "Birisi",
+  "name": "Example Theme",
+  "author": "Someone",
   "api": 1
 }
 ```
 
-`api`, bu tablodaki token/sınıf sözleşmesinin sürümü. Uygulama başlangıçta
-kendi desteklediği `api` sayısıyla karşılaştırır; uyuşmazsa temayı **sessizce
-yok saymaz**, hangi temanın hangi sürüm beklediğini söyleyip reddeder (K9).
-`theme.css`'in `:root` dışına taşması (ör. `.topbar { ... }` yazıp yeni bir
-seçiciye dayanması) şimdilik engellenmiyor — motoru CSS, kısıtlamak ayrı bir
-adım (aşağıya bak).
+`api` is the version of the token/class contract in this table. At startup the
+app compares it with the `api` number it supports itself; on a mismatch it
+**doesn't silently ignore** the theme but rejects it, saying which theme
+expects which version (K9). `theme.css` spilling outside `:root` (e.g. writing
+`.topbar { ... }` and relying on a new selector) isn't prevented for now — its
+engine is CSS, and restricting it is a separate step (see below).
 
-> KARAR NOKTASI (uygulama öncesi, küçük): `theme.css` `:root` dışına
-> yazarsa (örn. doğrudan `.topbar` hedefleyip token'ları atlarsa) reddedilsin
-> mi, yoksa serbest mi bırakılsın? Reddetmek sözleşmeyi token seviyesinde
-> kilitler ama tema yazarına en ufak esnekliği (örn. tek bir öğeye özel bir
-> `box-shadow` eklemek — ki D-028 zaten bunu önermez) kapatır.
+> DECISION POINT (before implementation, small): if `theme.css` writes
+> outside `:root` (e.g. targets `.topbar` directly and skips the tokens),
+> should it be rejected or left free? Rejecting locks the contract at the
+> token level but takes away the theme author's slightest flexibility (e.g.
+> adding a special `box-shadow` to a single element — which D-028 doesn't
+> recommend anyway).
 >
-> **KAPANDI — D-038: ne reddet ne serbest, işaretle.** Yükleyici yükler ama
-> tema listesinde "genişletilmiş / garantisi yok" diye etiketler. Garanti
-> her zaman yalnızca `:root`'taki token'lar için geçerli.
+> **CLOSED — D-038: neither reject nor allow freely — flag it.** The loader
+> loads it, but labels it in the theme list as "extended / no guarantee". The
+> guarantee always applies only to the tokens in `:root`.
 
-**Uygulandı:** `crates/headshell/src/theme.rs` — çekirdekte değil kabukta, çünkü bu
-headshell-core'un taşıyacağı bir domain kavramı değil, webview'e özgü bir CSS
-mekanizması. Mobil bağlamalar CSS custom property kullanmayacak; Altın
-Kural'ın "çekirdek bunu sunabilir mi" testi burada `crates/headshell`'u işaret
-ediyor. Üç IPC komutu: `themes_list`, `theme_active`, `theme_select`.
+**Applied:** `crates/headshell/src/theme.rs` — in the shell, not the core,
+because this isn't a domain concept headshell-core would carry but a CSS
+mechanism specific to the webview. The mobile bindings won't use CSS custom
+properties; the Golden Rule's test "can the core offer this" points at
+`crates/headshell` here. Three IPC commands: `themes_list`, `theme_active`,
+`theme_select`.
 
-Seçim `<data_dir>/ui.json`'da; şema değişmedi, veritabanına dokunulmadı.
-Depo durum tutmuyor, her çağrı diski okuyor — tema yazarı dosyayı düzenleyip
-"listeyi yenile" deyince değişikliği görüyor, uygulamayı kapatması gerekmiyor.
+The selection is in `<data_dir>/ui.json`; the schema didn't change, the
+database wasn't touched. The store keeps no state; every call reads the disk —
+the theme author edits the file, says "refresh the list" and sees the change,
+without having to close the app.
 
-Dört davranış K9'a bağlı ve testle kilitli (18 test):
+Four behaviours are tied to K9 and locked with tests (18 tests):
 
-- **`api` uyuşmazlığı reddedilir ve iki sürüm de yazılır** ("tema sürüm 9
-  istiyor, bu yapı sürüm 1 sunuyor"). "Temam görünmüyor" bir tanı sorusu
-  olmamalı.
-- **`:root` dışına taşan tema yüklenir ama işaretlenir** (D-038): listede
-  "genişletilmiş · garantisi yok".
-- **Seçili tema silinmişse varsayılana dönülür ama sebebiyle.** Sessiz dönüş,
-  kullanıcının temasının neden kaybolduğunu hiç öğrenememesi olurdu.
-- **Yerleşik bir temanın adını gölgeleyen dizin sessizce kazanmaz**, sebebiyle
-  reddedilir — hangi dosyanın kazandığı tahmin edilmemeli.
+- **An `api` mismatch is rejected, and both versions are written** ("the theme
+  wants version 9, this build offers version 1"). "My theme doesn't show up"
+  shouldn't be a diagnostic question.
+- **A theme spilling outside `:root` is loaded but flagged** (D-038): in the
+  list, "extended · no guarantee".
+- **If the selected theme was deleted, it falls back to the default, but with
+  the reason.** A silent fallback would mean the user never learns why their
+  theme disappeared.
+- **A directory that shadows a built-in theme's name doesn't silently win**;
+  it is rejected with the reason — which file wins shouldn't be a guess.
 
-Sıra da kasıtlı: **önce doğrula, sonra yaz.** Yüklenemeyen bir temayı seçim
-olarak kaydetmek, uygulamayı bir dahaki açılışta bozuk bir seçimle
-başlatırdı; test bunu kilitliyor.
+The order is deliberate too: **validate first, then write.** Saving a theme
+that can't be loaded as the selection would start the app with a broken
+selection the next time it opens; a test locks this.
 
-### 3.4 Referans temalar — TAMAM
-En az iki farklı temada tema API'sinin yeterli olduğunu kanıtla.
+### 3.4 Reference themes — DONE
+Prove on at least two different themes that the theme API is sufficient.
 
-**İkisi de `crates/headshell/themes/` altında ve uygulamayla birlikte geliyor**
-(`include_str!`) — ama **ayrıcalıkları yok**: diskteki bir tema gibi aynı
-doğrulamadan geçiyorlar. Ayrıcalıklı olsalardı sözleşmenin yeterli olduğunu
-değil yalnızca kendilerini kanıtlarlardı.
+**Both are under `crates/headshell/themes/` and ship with the app**
+(`include_str!`) — but **they have no privileges**: they go through the same
+validation as a theme on disk. If they were privileged, they would prove only
+themselves, not that the contract is sufficient.
 
-| Tema | Sınadığı eksen |
+| Theme | The axis it tests |
 |---|---|
-| **Gün Işığı** (`daylight`) | renk — temel arayüz koyu yazılmıştı, aynı sözleşmeyle açık bir arayüz çıkıyor |
-| **Yüksek Karşıtlık** (`contrast`) | renk **dışı** — `--headshell-radius-*` sıfıra iniyor, `--headshell-duration` `0ms` |
+| **Daylight** (`daylight`) | colour — the base interface was written dark; with the same contract a light interface comes out |
+| **High Contrast** (`contrast`) | **not** colour — `--headshell-radius-*` drops to zero, `--headshell-duration` to `0ms` |
 
-İkinci tema bilerek ikinci bir palet değil: iki paletle "iki tema" ölçütü
-kâğıt üstünde karşılanır ama token setinin renk dışındaki ekseni hiç
-sınanmamış olurdu. Yarıçap ve süre token'ları gerçekten kullanılıyorsa bu
-temada görünür — kullanılmıyorsa ölü token demektir. Test bunu kilitliyor
-(`the_two_reference_themes_differ_on_more_than_color`).
+The second theme is deliberately not a second palette: with two palettes the
+"two themes" criterion would be met on paper, but the token set's non-colour
+axis would never have been tested. If the radius and duration tokens are really
+used, it shows in this theme — if they aren't, they are dead tokens. A test
+locks this (`the_two_reference_themes_differ_on_more_than_color`).
 
-**Ve sözleşme yetmedi.** Açık tema token'ların hepsini doğru uyguladığı hâlde
-onay kutuları, metin imleci ve kaydırma çubuğu koyu kalıyordu: bunları biz
-değil motor çiziyor. Eksik `--headshell-color-scheme` olarak kapandı (D-039).
-§3.4'ün "yeterli olduğunu kanıtla" ölçütü tam olarak bunu yakalamak içindi ve
-yakaladı — iki tema yazılmasaydı eksik, ilk tema yazarının makinesinde
-ortaya çıkardı.
+**And the contract wasn't enough.** Although the light theme applied all the
+tokens correctly, the checkboxes, the text caret and the scrollbar stayed dark:
+they are drawn not by us but by the engine. The gap was closed as
+`--headshell-color-scheme` (D-039). §3.4's "prove it is sufficient" criterion
+was exactly for catching this, and it caught it — if two themes hadn't been
+written, the gap would have shown up on the first theme author's machine.
 
-**Uçtan uca doğrulandı** (2026-09-01, WebKitGTK): seçim `ui.json`'dan
-okunup açılışta uygulanıyor, tema ekranı yerleşik/genişletilmiş/reddedilen
-üç durumu da doğru gösteriyor, `api: 9` isteyen tema listede sebebiyle
-duruyor.
+**Verified end to end** (2026-09-01, WebKitGTK): the selection is read from
+`ui.json` and applied at startup, the theme screen shows all three states —
+built-in/extended/rejected — correctly, and a theme asking for `api: 9` stays
+in the list with its reason.
 
 ---
 
-### 3.5 Kabuk Faz 2'yi yakalar + paketleme — TAMAM (D-057)
+### 3.5 The shell catches up with Phase 2 + packaging — DONE (D-057)
 
-Faz 3 yazıldığında Faz 2 ertelenmişti (D-027) ve sıra sonradan tersine döndü:
-kabuk, sonradan gelen yeteneklerden habersiz kaldı. Bu bölüm o farkı kapatıyor
-ve masaüstünü paketlenebilir hâle getiriyor.
+When Phase 3 was written, Phase 2 had been postponed (D-027), and the order
+later reversed: the shell was left unaware of the capabilities that came
+afterwards. This section closes that gap and makes the desktop packageable.
 
-**Arayüz Faz 2'yi kazandı.** Eklenti listesi, onay/kurulum/kapatma ve sır
-girişi artık arayüzde; `headshell plugin …` ve `headshell secret …` ile **aynı** çekirdek
-çağrıları. `sleeve` kartı da görünür oldu — IPC'de kayıtlıydı ama `app.js` onu
-hiç çağırmıyordu, yani Faz 0.5'in ürünü masaüstünde yoktu.
+**The interface gained Phase 2.** The plugin list, consent/install/disable and
+secret entry are now in the interface; they are **the same** core calls as
+`headshell plugin …` and `headshell secret …`. The `sleeve` card became visible
+too — it was registered in IPC, but `app.js` never called it, so Phase 0.5's
+product wasn't on the desktop.
 
-**Eklenti durumu seçmeden gösteriliyor.** CLI tek satıra sığmak için manifest
-sorunu / eksik eser / onay durumu arasında öncelik seçer; arayüzde o sıkışıklık
-yok, üçü de yan yana duruyor. Böylece seçim mantığının ikinci bir kopyası
-doğmadı — kopyalanmayan mantık kayamaz.
+**The plugin state is shown without choosing.** To fit on one line, the CLI
+chooses a priority between a manifest problem / a missing artifact / the
+consent state; the interface has no such squeeze, and all three stand side by
+side. That way no second copy of the choosing logic was born — logic that isn't
+copied can't drift.
 
-**Paketleme açıldı.** `bundle.active: false` üç şeyi gizliyordu: 103 baytlık
-yer tutucu ikonlar, eksik `.desktop` verisi, ve iki yerde yazılı sürüm.
-`tauri.conf.json`'dan `version` alanı kaldırıldı — Tauri onu `Cargo.toml`'dan
-okuyor, kaynak tek. Paketler `.github/workflows/release.yml` ile üretiliyor:
-`v*` etiketi taslak bir sürüme yüklüyor, elle tetik yalnızca artifact bırakıyor.
+**Packaging was turned on.** `bundle.active: false` hid three things: 103-byte
+placeholder icons, missing `.desktop` data, and a version written in two
+places. The `version` field was removed from `tauri.conf.json` — Tauri reads it
+from `Cargo.toml`, so there is one source. The packages are produced by
+`.github/workflows/release.yml`: a `v*` tag uploads to a draft release, and a
+manual trigger only leaves an artifact.
 
-**Arayüzün sessiz kırılması testli.** `crates/headshell/tests/ui_contract.rs`:
-`app.js`'in aradığı her `id` sayfada var mı, kenar çubuğu ile `Ctrl`+sayı
-kısayolu aynı panelleri mi adlandırıyor, D-037/2'nin sınıf adları hâlâ
-ulaşılabilir mi, ilan edilen her token kullanılıyor mu. Webview'de tip denetimi
-yok: bir id yazım hatası pencereyi boş bırakır ve derleyici görmez.
+**The interface's silent breakage is tested.**
+`crates/headshell/tests/ui_contract.rs`: does every `id` `app.js` looks for
+exist in the page, do the sidebar and the `Ctrl`+number shortcut name the same
+panels, are D-037/2's class names still reachable, is every declared token
+used. There is no type checking in the webview: a typo in an id leaves the
+window empty, and the compiler doesn't see it.
 
-**Kullanıcıya dönük değişiklikler:** boş kuyruk yerine üç adımlı *başlarken*
-kartı; içe aktarma kendi sekmesinde (eskiden "tanı"nın altındaydı) ve raporu
-sayılarla özet; klavye kısayolları (`?` ile listelenir); kapatılabilir uyarılar;
-panoya kopyalanan tanı raporu; her boş durumda ne yapılacağını söyleyen metin.
+**User-facing changes:** a three-step *getting started* card instead of an
+empty queue; importing in its own tab (it used to be under "diagnostics") with
+its report summarised in numbers; keyboard shortcuts (listed with `?`);
+dismissible notices; a diagnostics report copied to the clipboard; text saying
+what to do in every empty state.
 
-**Yerelde doğrulandı** (Arch, WebKitGTK): `.deb` ve `.rpm` üretiliyor, paketin
-içinde ikonlar, `AudioVideo;Audio;Music;` kategorili `.desktop` girdisi,
-`/usr/share/doc/headshell/` altında `copyright` + iki lisans dosyası ve
-`Cargo.toml`'dan gelen `0.0.1-beta` sürümü var. Lisans dosyaları
-`bundle.linux.{deb,rpm}.files` ile giriyor: `bundle.licenseFile` alanı
-Linux paketleyicilerine geçmiyor ve bu ancak paketin içi açılınca görüldü.
+**Verified locally** (Arch, WebKitGTK): `.deb` and `.rpm` are produced, and the
+package contains the icons, a `.desktop` entry with the categories
+`AudioVideo;Audio;Music;`, `copyright` + the two license files under
+`/usr/share/doc/headshell/`, and the version `0.0.1-beta` coming from
+`Cargo.toml`. The license files go in through `bundle.linux.{deb,rpm}.files`:
+the `bundle.licenseFile` field doesn't reach the Linux packagers, and that was
+seen only when the package was opened up.
 
-**İki borç da kapandı — ölçüldü, varsayılmadı.**
+**Both debts closed too — measured, not assumed.**
 
-1. **AppImage CI'da üretiliyor.** Yerelde (Arch) düşmeye devam ediyor:
-   linuxdeploy kendi eski `strip`'ini taşıyor ve `.relr.dyn` bölümlü
-   kütüphaneleri tanımıyor. Ubuntu runner'da beklenen davranış çıktı —
-   `headshell_0.0.1-beta_amd64.AppImage`, 85 MB, taslak sürümde duruyor.
-   Ayrı adımda kalmaya devam ediyor: bir arıza deb/rpm'i de götürmesin.
-2. **macOS ve Windows elle koşuldu.** `workflow_dispatch` (koşum
-   35571122203) üç platformda da yeşil; etiket koşumu (35597289680) da öyle.
-   Taslak sürümde dokuz varlık var: `.deb`, `.rpm`, `.AppImage`, `.dmg`,
-   `.msi`, NSIS `.exe` ve üç CLI arşivi.
+1. **The AppImage is produced in CI.** Locally (Arch) it keeps failing:
+   linuxdeploy carries its own old `strip`, which doesn't recognise libraries
+   with a `.relr.dyn` section. On the Ubuntu runner the expected behaviour came
+   out — `headshell_0.0.1-beta_amd64.AppImage`, 85 MB, sitting in the draft
+   release. It stays in a separate step: a failure shouldn't take deb/rpm with
+   it.
+2. **macOS and Windows were run by hand.** `workflow_dispatch` (run
+   35571122203) is green on all three platforms; so is the tag run
+   (35597289680). The draft release has nine assets: `.deb`, `.rpm`,
+   `.AppImage`, `.dmg`, `.msi`, an NSIS `.exe` and three CLI archives.
 
-> **macOS yalnızca arm64'tü** — D-070 kapattı: `.dmg` ve CLI arşivi artık
-> evrensel ikili (`universal-apple-darwin`, `lipo`), aynı arm64 koşucusunda
-> çapraz derleniyor; ikinci bir koşucu gerekmedi. İlk `workflow_dispatch`
-> koşumuna kadar doğrulanmadı.
+> **macOS was arm64-only** — D-070 closed that: the `.dmg` and the CLI archive
+> are now a universal binary (`universal-apple-darwin`, `lipo`),
+> cross-compiled on the same arm64 runner; a second runner wasn't needed. Not
+> verified until the first `workflow_dispatch` run.
 
-### AUR paketleri
+### AUR packages
 
-Arch tarafı `packaging/aur/` altında, üç PKGBUILD ve dört paket: kaynaktan
-derleyen split package (`headshell` + `headshell-cli`), ve önceden derlenmiş
-ikisi ayrı ayrı (`headshell-bin`, `headshell-cli-bin` — orada paylaşılan bir
-derleme yok). Masaüstü girdisi tek bir dosyada, `packaging/headshell.desktop`.
-Paketler Arch konteynerinde `makepkg` ile derlendi, `namcap` üçünde de temiz;
-kaynak paketin tam derlemesi henüz gerçek bir Arch makinesinde koşulmadı.
-Karar ve gerekçe **D-066**; sürüm yayımlama sırası `packaging/aur/README.md`.
+The Arch side is under `packaging/aur/`: three PKGBUILDs and four packages — a
+split package that builds from source (`headshell` + `headshell-cli`), and the
+two prebuilt ones separately (`headshell-bin`, `headshell-cli-bin` — there is
+no shared build there). The desktop entry is in a single file,
+`packaging/headshell.desktop`. The packages were built with `makepkg` in an
+Arch container, and `namcap` is clean on all three; a full build of the source
+package hasn't yet been run on a real Arch machine. The decision and reasoning
+are **D-066**; the release publishing order is in `packaging/aur/README.md`.
 
-> **`-bin` paketi sürüm taslaktan çıkana kadar çalışmaz:** taslak sürümün
-> varlıkları anonim indirilemez. Kaynak paketin böyle bir borcu yok, etiket
-> arşivi taslaktan bağımsız.
+> **The `-bin` package doesn't work until the release leaves draft:** the
+> assets of a draft release can't be downloaded anonymously. The source
+> package has no such debt; the tag archive is independent of the draft.
 
 ---
 
-### 3.6 Faz 3 durum — KAPANDI
+### 3.6 Phase 3 status — CLOSED
 
-**458 test**, clippy ve fmt temiz.
+**458 tests**, clippy and fmt clean.
 
-| Bölüm | Durum |
+| Section | Status |
 |---|---|
-| 3.1 GO/NO-GO ölçümü | TAMAM — koşullu GO (D-028), ortamı uygulama kuruyor (D-029/D-031) |
-| 3.2 IPC sözleşmesi | TAMAM — çekirdeğin yüzeyi + serde (D-033), olaylar değişimde (D-035) |
-| 3.3 Tema API'si | TAMAM — 14 token + sınıf adları + manifest/yükleyici (D-037…D-039) |
-| 3.4 Referans temalar | TAMAM — `daylight` (renk) + `contrast` (yarıçap/süre) |
-| 3.5 Faz 2 yüzeyi + paketleme | TAMAM — eklenti/sır/sleeve arayüzde, bundle açık (D-057) |
+| 3.1 GO/NO-GO measurement | DONE — conditional GO (D-028); the app sets up the environment (D-029/D-031) |
+| 3.2 IPC contract | DONE — the core's surface + serde (D-033), events on change (D-035) |
+| 3.3 Theme API | DONE — 14 tokens + class names + manifest/loader (D-037…D-039) |
+| 3.4 Reference themes | DONE — `daylight` (colour) + `contrast` (radius/duration) |
+| 3.5 Phase 2 surface + packaging | DONE — plugins/secrets/sleeve in the interface, bundle on (D-057) |
 
-Tema yazarına dönük belge: `crates/headshell/themes/README.md`.
+The document for theme authors: `crates/headshell/themes/README.md`.
 
-**Faz 3'ten devredilen açık karar:** "mod" paketleri — davranış değiştiren,
-tema paketleriyle birlikte dağıtılan eklentiler. §3.3'te bilinçli ertelendi;
-karar noktası metni orada duruyor. Tema sözleşmesi kapandığı için artık ayrı
-bir tur olarak açılabilir. **Faz 3'ü eksik bırakmıyor:** temalar bugün
-tasarlandıkları gibi çalışıyor ve mod'lar onların üstüne değil yanına gelecek.
+**An open decision handed over from Phase 3:** "mod" packages — plugins that
+change behaviour, distributed together with theme packages. Deliberately
+postponed in §3.3; the decision point text stays there. Since the theme
+contract is closed, it can now be opened as a separate round. **It doesn't
+leave Phase 3 incomplete:** themes work today as they were designed, and mods
+will come beside them, not on top of them.
 
-> Bu bölümün sonu bir zamanlar "sıradaki iş **Faz 2**" diyordu — sıra
-> D-027'de tersine dönmüş, Faz 3 önce bitmişti. **Faz 2 o cümleden sonra
-> kapandı** (§2.6); cümle bayatlayınca kaldırıldı.
+> The end of this section once said "the next job is **Phase 2**" — the order
+> had reversed in D-027, and Phase 3 finished first. **Phase 2 closed after
+> that sentence** (§2.6); the sentence was removed once it went stale.
 
-Faz 3 kapandığında geriye kalan iş kod değil **dağıtım**: ilk sürümün
-yayımlanması. Bkz. yukarıda §3.5 — paketler üretiliyor, AUR paketleri yazıldı,
-sürüm hâlâ taslak.
+With Phase 3 closed, the remaining job is not code but **distribution**:
+publishing the first release. See §3.5 above — the packages are produced, the
+AUR packages are written, the release is still a draft.
 
-### 3.7 Platform taşınabilirliği — TAMAM (D-070), elle Windows/macOS denemesi YAPILACAK
+### 3.7 Platform portability — DONE (D-070), trying Windows/macOS by hand TODO
 
-**Sorun:** kod yalnızca Linux'ta yazılıp sınanmıştı ve üç yerde Unix'e,
-birkaç yerde de tek bir makineye bağlı kalmıştı:
+**The problem:** the code had been written and tested only on Linux, and it
+stayed tied to Unix in three places and to a single machine in a few:
 
-1. **Veri dizini** yalnızca `HOME`'a bakıyordu; standart bir Windows `HOME`
-   tanımlamaz. CLI hata verip duruyordu, masaüstü **hiçbir şey demeden**
-   kapanıyordu (Windows sürüm derlemesi konsolsuz).
-2. **Müzik dizin listesi** `:` ile bölünüyordu — `C:\Müzik` ikiye ayrılırdı.
-3. **Subsonic tuzu** `/dev/urandom`'dan okunuyordu; Windows'ta her seferinde
-   zayıf yedeğe düşüyordu (söyleyerek, ama düşüyordu).
-4. **Testler** `/tmp`'ye dizin açıp hiç silmiyordu: bir geliştirme
-   makinesinde 1.100 dizin, 1,2 GB — o makinede `/tmp` bir tmpfs, yani bellek.
-   YouTube Music testlerinin önbelleği ölmüş bir indirme adresini o makinede
-   gizleyebilirdi.
-5. **Bir test `node` istiyordu** (§3.2).
-6. **Satır sonları** korunmuyordu: Windows'ta `core.autocrlf` açık bir
-   checkout snapshot'ları kırardı.
-7. **Linux paketleri** Ubuntu 24.04'te derleniyordu ve glibc 2.39 istiyordu —
-   Debian 12'de açılmıyordu (ölçüldü). **macOS paketi** yalnızca arm64'tü.
+1. **The data directory** looked only at `HOME`; a standard Windows doesn't
+   define `HOME`. The CLI gave an error and stopped; the desktop closed
+   **without saying anything** (the Windows release build has no console).
+2. **The music directory list** was split on `:` — `C:\Music` would be cut in
+   two.
+3. **The Subsonic salt** was read from `/dev/urandom`; on Windows it fell back
+   to a weak fallback every time (saying so, but falling back).
+4. **The tests** opened directories in `/tmp` and never deleted them: on a
+   development machine, 1,100 directories, 1.2 GB — and on that machine `/tmp`
+   is a tmpfs, that is, memory. The YouTube Music tests' cache could hide a
+   dead download address on that machine.
+5. **A test needed `node`** (§3.2).
+6. **Line endings** weren't preserved: a checkout on Windows with
+   `core.autocrlf` on would break the snapshots.
+7. **The Linux packages** were built on Ubuntu 24.04 and needed glibc 2.39 —
+   they didn't open on Debian 12 (measured). **The macOS package** was
+   arm64-only.
 
-**Yapıldı:**
+**Done:**
 
-- Veri dizini sistem başına: Linux/BSD `~/.local/share/headshell`, macOS
+- The data directory per system: Linux/BSD `~/.local/share/headshell`, macOS
   `~/Library/Application Support/headshell`, Windows
-  `%LOCALAPPDATA%\headshell` (kullanıcının kararı). `HEADSHELL_DATA_DIR` ve
-  açıkça tanımlanmış `XDG_DATA_HOME` her sistemde önce. Çözüm saf bir
-  fonksiyonda; üç sistemin dalı her makinede sınanıyor.
-- Müzik listesi `std::env::split_paths` ile; olağan müzik dizini sistem başına.
-- Tuz: `/dev/urandom` yoksa işletim sisteminin rastgeleliğiyle anahtarlanmış
-  `RandomState`.
-- Masaüstü açılamazsa hata bir **pencerede** gösteriliyor (her sistemde).
-- Testler kendini silen dizinler kullanıyor; entegrasyon testleri
-  `target/tmp`'de. yt-dlp önbelleği her koşumda karmayı ve adresin yaşadığını
-  denetliyor.
-- `anchor_parity_js` gömülü QuickJS'te; `node` gerekmiyor.
-- `.gitattributes`: her yerde LF, ikili fikstürler dönüşümsüz.
-- CI'a Windows ve macOS işi: clippy + testler. Araç testlerinin Windows
-  karşılığı `cmd.exe` kopyasıyla.
-- Sürüm hattı: Linux 22.04'te (glibc 2.35), macOS evrensel ikili.
-- **BSD'ler derlenebilir, denenmedi (canary):** eklenti motorunun bağlaması
-  orada `libclang` ile derleme anında üretiliyor (kullanıcının kararı:
-  "derlenebilir olsunlar ama not tested olarak yazılsın").
+  `%LOCALAPPDATA%\headshell` (the user's decision). `HEADSHELL_DATA_DIR` and an
+  explicitly defined `XDG_DATA_HOME` come first on every system. The
+  resolution is in a pure function; all three systems' branches are tested on
+  every machine.
+- The music list goes through `std::env::split_paths`; the usual music
+  directory per system.
+- The salt: if there is no `/dev/urandom`, a `RandomState` keyed with the
+  operating system's randomness.
+- If the desktop can't open, the error is shown in a **window** (on every
+  system).
+- The tests use self-deleting directories; the integration tests are in
+  `target/tmp`. The yt-dlp cache checks the hash and that the address is alive
+  on every run.
+- `anchor_parity_js` runs in the embedded QuickJS; `node` isn't needed.
+- `.gitattributes`: LF everywhere, binary fixtures without conversion.
+- A Windows and macOS job in CI: clippy + the tests. The Windows counterpart of
+  the tool tests uses a copy of `cmd.exe`.
+- The release pipeline: Linux on 22.04 (glibc 2.35), macOS a universal binary.
+- **The BSDs can be built, not tried (canary):** the plugin engine's bindings
+  are generated there at build time with `libclang` (the user's decision:
+  "let them be buildable, but write them down as not tested").
 
-**Sınama:** Linux'ta üç kapı. Windows hedefine çapraz derleme (Zig ile) —
-çekirdek ve CLI, testler dahil, clippy temiz: `cfg(windows)` kodunun ilk
-derlenmesi. Ubuntu 22.04 konteynerinde derlenen CLI'nin Debian 12'de açıldığı
-ölçüldü. Açılış hatası penceresinin metni taşıması, Tauri'nin kullandığı `url`
-sürümüyle ve QuickJS'teki `decodeURIComponent` ile ayrı ayrı doğrulandı;
-pencerenin içeriği bu makinede görüntü olarak yakalanamadı.
+**Testing:** the three gates on Linux. A cross-compile to the Windows target
+(with Zig) — the core and the CLI, tests included, clippy clean: the first
+compile of the `cfg(windows)` code. It was measured that the CLI built in an
+Ubuntu 22.04 container opens on Debian 12. That the startup error window
+carries the text was verified separately with the `url` version Tauri uses and
+with `decodeURIComponent` in QuickJS; the window's content couldn't be captured
+as an image on this machine.
 
-**YAPILACAK:** Windows ve macOS'ta **elle** deneme — CI işi testleri koşturur
-ama bir masaüstünde pencere açmaz, ses çalmaz. §2.9'un "temiz makinede
-`plugin install ytmusic` + `play`" maddesi de burada.
+**TODO:** trying it **by hand** on Windows and macOS — the CI job runs the
+tests but doesn't open a window on a desktop or play audio. §2.9's "on a clean
+machine, `plugin install ytmusic` + `play`" item is here too.
 
-### 3.8 Arayüz yeniden tasarımı — TAMAM (D-072)
+### 3.8 Interface redesign — DONE (D-072)
 
-**Sorun:** arayüz son değişikliklerin gerisinde kalmıştı ve gelecek fazlara
-yer açmıyordu. Eklenti paneli D-069/D-071'den sonra üst üste eklenmiş üç
-bölümdü (kurulu, katalog, sırlar) ve her eklentide durumdan bağımsız beş
-düğme vardı. Arayüz CLI'nin gösterdiğinin altındaydı: istatistikte albümler,
-yıllar ve süreler, içe aktarmada parmak izi ve yerel anahtar halkaları yoktu;
-çözümleme ve `diag` ham JSON basıyordu. Düz sekiz sekmelik liste, Faz 4'ün
-odaları ve mod'lar geldiğinde yalnızca uzayacaktı.
+**The problem:** the interface had fallen behind the recent changes and made
+no room for the coming phases. After D-069/D-071 the plugin panel was three
+sections stacked on top of each other (installed, catalog, secrets), and every
+plugin had five buttons regardless of its state. The interface was below what
+the CLI shows: statistics had no albums, years or durations, importing had no
+fingerprint and local-key links; resolution and `diag` printed raw JSON. A flat
+list of eight tabs would only get longer when Phase 4's rooms and the mods
+arrived.
 
-**Yapıldı:**
+**Done:**
 
-1. **İskelet** — tam boy kenar çubuğu, dört grup: *dinle* (çalan,
-   kütüphane), *geçmiş* (istatistik, sleeve, içe aktar), *kaynaklar*
-   (sağlayıcılar, eklentiler), *sistem* (görünüm, tanı). Gelecek bir bölüm
-   yeni bir düz sekme değil, bir grubun yeni satırı: odalar *dinle*'ye.
-   Bugün hiçbiri için yer tutucu yok (K10). Sleeve kendi bölümünde (D-004).
-   Dar pencerede kenar çubuğu simgelere iner.
-2. **Hareket katmanı** — `ui/motion.js`: yay (sönüm oranı + tepki),
-   kesilebilirlik, hız devri, momentum izdüşümü, lastik bant; bağımlılık yok.
-   Yalnızca `transform` ve `opacity` (D-028). Tepki `--headshell-duration`'ın
-   üç katı; `0ms` hareket yok, `prefers-reduced-motion` konum hareketini
-   kapatır.
-3. **Eksikler kapandı** — istatistikte yıl çubukları (aynı zamanda yıl
-   seçici), albümler ve süreler; içe aktarmada zincirin beş halkası;
-   çözümleme okunur; tanı çekirdeğin `render()` metni (`diag_text`); tema
-   listesinde her temanın kendi renkleriyle önizlemesi (`theme.rs`).
-4. **Eklentiler** — *kurulu / katalog / sırlar* sekmeleri; düğmeler duruma
-   göre (onay bekleyene "onayla", kurulumla düzelecek bir eksiği olana
-   "araçları kur"); kenar çubuğunda kullanıcıdan bir şey bekleyen eklenti
-   sayısı. Katalog hâlâ yalnızca düğmeyle okunuyor (D-071).
+1. **The skeleton** — a full-height sidebar with four groups: *listen* (now
+   playing, library), *history* (stats, sleeve, import), *sources* (providers,
+   plugins), *system* (appearance, diagnostics). A future section is not a new
+   flat tab but a new row in a group: rooms go into *listen*. Today there is no
+   placeholder for any of them (K10). Sleeve has its own section (D-004). In a
+   narrow window the sidebar collapses to icons.
+2. **The motion layer** — `ui/motion.js`: springs (damping ratio + response),
+   interruptibility, velocity handoff, momentum projection, rubber-banding; no
+   dependency. `transform` and `opacity` only (D-028). The response is three
+   times `--headshell-duration`; `0ms` means no motion, and
+   `prefers-reduced-motion` turns off positional motion.
+3. **The gaps were closed** — year bars in statistics (which are also a year
+   picker), albums and durations; the chain's five links in importing;
+   resolution is readable; diagnostics is the core's `render()` text
+   (`diag_text`); in the theme list, a preview of each theme in its own
+   colours (`theme.rs`).
+4. **Plugins** — *installed / catalog / secrets* tabs; buttons by state
+   ("approve" for one awaiting consent, "install the tools" for one with a gap
+   that installing will fix); in the sidebar, the number of plugins waiting for
+   something from the user. The catalog is still read only with a button
+   (D-071).
 
-**Sözleşme değişmedi:** on dört token ve değerleri aynı, `CONTRACT_CLASSES`'tan
-hiçbir sınıf kalkmadı ve anlamı değişmedi — `api` 1. Yerleşim değişti; konum
-varsayan genişletilmiş temalar (garantisi yok) bunu hissedebilir, tema
-rehberinde yazılı.
+**The contract didn't change:** the fourteen tokens and their values are the
+same, and no class was removed from `CONTRACT_CLASSES` or changed its meaning —
+`api` 1. The layout changed; extended themes that assume positions (no
+guarantee) may feel it, and that is written in the theme guide.
 
-**Sınama:** `motion_js.rs` (9 test, gömülü QuickJS; yay formülüne sokulan
-kasıtlı bir işaret hatasını üçü yakaladı), `ui_contract.rs` +3 (simge seti,
-işaretleme yasağı, satır içi `style`), `theme.rs` +5 (önizleme).
+**Testing:** `motion_js.rs` (9 tests, embedded QuickJS; a deliberate sign error
+put into the spring formula was caught by three of them), `ui_contract.rs` +3
+(the icon set, the markup ban, inline `style`), `theme.rs` +5 (the preview).
 
-**Doğrulama:** Debian 13 konteynerinde, ana makineyle aynı WebKitGTK
-(2.52.6), Xvfb ve null ses aygıtıyla — ana makinenin ekranı kilitliydi.
-Yedi kusur yalnızca ekran görüntüsünde göründü ve düzeltildi (D-072).
+**Verification:** in a Debian 13 container, with the same WebKitGTK as the host
+(2.52.6), Xvfb and a null audio device — the host's screen was locked. Seven
+flaws showed only in screenshots and were fixed (D-072).
 
-**Açık kalanlar:** "çalıyor" durumunun kendisi görülmedi (null aygıt
-gerçek zamanlı beklemiyor); Windows ve macOS webview'leri denenmedi; sarma ve
-ses düzeyi çekirdekte bir komut olmadığı için yok (D-033).
+**Still open:** the "playing" state itself wasn't seen (the null device doesn't
+wait in real time); the Windows and macOS webviews weren't tried; seeking and
+volume aren't there because the core has no command for them (D-033).
 
 ---
 
-# FAZ 4 — Odalar (backend burada başlar)
+# PHASE 4 — Rooms (the backend starts here)
 
-**Amaç:** Birlikte senkron dinleme. Discord müzik botlarının bıraktığı boşluk.
+**Goal:** Listening together in sync. The gap Discord music bots left behind.
 
-**Ön koşul:** D-002 gereği kapsamdadır. Ama sunucu işletmek gelir gerektirmeyen bir
-maliyet doğurur — bu faza başlamadan önce kullanıcı tabanının var olduğu kanıtlanmış olmalı.
-Faz 0.5 ve 3 kullanıcı getirmediyse Faz 4'e girme.
+**Precondition:** It is in scope because of D-002. But running a server creates
+a cost that requires no revenue — before this phase starts, it must be proven
+that a user base exists. If Phase 0.5 and 3 didn't bring users, don't enter
+Phase 4.
 
-### 4.1 Çapa protokolü
-Tek primitif:
+### 4.1 The anchor protocol
+A single primitive:
 ```
 { track: CanonicalId, anchor_wall_time: T, anchor_position: P, rate: f64, state: Playing|Paused }
 ```
-İstemci kendi pozisyonunu hesaplar: `pos = P + (now - T) * rate`.
-Olay yayını değil çapa yayını — sonradan katılan tek mesajla yerine oturur,
-paket kaybı kendini düzeltir.
+The client computes its own position: `pos = P + (now - T) * rate`.
+An anchor broadcast, not an event broadcast — a late joiner settles into place
+with a single message, and packet loss corrects itself.
 
-### 4.2 Saat senkronu
-NTP tarzı offset: `offset = ((t2-t1) + (t3-t4)) / 2`. Birkaç ölçümün medyanı, periyodik tekrar.
+### 4.2 Clock sync
+An NTP-style offset: `offset = ((t2-t1) + (t3-t4)) / 2`. The median of several
+measurements, repeated periodically.
 
-### 4.3 Zamanlanmış başlangıç
-Sağlayıcılar farklı gecikmelerle açılır (yerel ~20ms, uzak ~800ms).
-"Şimdi başla" değil, "T+2sn'de başla" — herkes önceden buffer'lar ve seek eder.
-Parça geçişlerinde sonraki parça önceden duyurulur.
+### 4.3 Scheduled start
+Providers open with different latencies (local ~20ms, remote ~800ms). Not
+"start now" but "start at T+2s" — everyone buffers and seeks beforehand. On
+track transitions the next track is announced in advance.
 
-### 4.4 Sürüklenme düzeltmesi
-Tolerans geniş: farklı evlerde 50-100ms fark fark edilmez.
-Yumuşak düzeltme (hızda %0.1 oynama veya mikro-seek). Snapcast'in ~1ms hedefi gerekmiyor.
+### 4.4 Drift correction
+The tolerance is wide: a 50-100ms difference between different homes isn't
+noticed. Soft correction (a 0.1% change in rate, or a micro-seek). Snapcast's
+~1ms target isn't needed.
 
-### 4.5 v1: tek sağlayıcı, v2: karışık
-v1'de herkes aynı sağlayıcıdaysa kanonik çözümleme gerekmez — `provider_track_id` yeter.
-Karışık sağlayıcı v2'ye bırakılır. Bu, odaların kimlik katmanı olgunlaşmadan çıkmasını sağlar.
+### 4.5 v1: a single provider, v2: mixed
+In v1, if everyone is on the same provider, canonical resolution isn't needed —
+`provider_track_id` is enough. Mixed providers are left to v2. This lets rooms
+ship before the identity layer matures.
 
-### 4.6 Röle sunucusu
-Yalnızca sinyal taşır (K3). Katılımcı başına bir websocket, saniyede birkaç bayt.
-P2P sinyal için **gereksiz** — tek doğruluk kaynağı basitliği kazandırır.
-P2P sadece ileride sesli sohbet eklenirse tartışılır.
+### 4.6 The relay server
+It carries only signals (K3). One websocket per participant, a few bytes per
+second. P2P is **unnecessary** for signalling — a single source of truth brings
+simplicity. P2P is discussed only if voice chat is added later.
 
-> KARAR NOKTASI: Sesli sohbet kapsamda mı? Öneri: **hayır**, kullanıcılar zaten
-> Discord'da konuşuyor. Eklenecekse WebRTC + TURN maliyeti hesaplanmalı. **Sor.**
-
----
-
-# FAZ 5 — Sosyal Graf
-
-Arkadaşlık **kurulmaz, türetilir**: "sık sık birlikte dinlediklerin" odalardan birikir.
-Boş bir "arkadaş ekle" ekranıyla açılış yapma — soğuk başlangıç problemi.
+> DECISION POINT: Is voice chat in scope? The advice: **no**, users already
+> talk on Discord. If it is to be added, the cost of WebRTC + TURN must be
+> calculated. **Ask.**
 
 ---
 
-# FAZ 6 — Mobil
+# PHASE 5 — The Social Graph
 
-**Onaylı hedef (D-001).** `uniffi` ile Kotlin/Swift bağlamaları.
-
-Uygulama bu fazda, ama **kısıt bugünden geçerli**: çekirdeği değiştirmeden gelmeli.
-Gelmiyorsa çekirdek yanlış tasarlanmış demektir (K7).
-
-**Erken uyarı mekanizması:** Faz 1'den itibaren CI'da `uniffi` scaffolding üretimi
-denensin — derlenmesi bile gerekmez, sadece "bu API ifade edilebilir mi?" sorusunu
-her commit'te sorar. Aksi halde ihlaller aylarca birikir ve toplu halde ortaya çıkar.
-
-> **KARAR NOKTASI KAPANDI — D-052 / D-053.** Uyarı haklı çıktı: `PlayOptions<'a>`
-> tam olarak böyle birikti, aylarca dışa açılan yüzeyde lifetime taşıdı.
->
-> Bugün konan şey **gerçek scaffolding üretimi değil**, ondan önce gelen ucuz
-> süzgeç: `crates/headshell-core/tests/k7_surface.rs` public tiplerde lifetime ve
-> public imzalarda closure arıyor, CI'ın üçüncü kapısında koşuyor (D-053).
->
-> **D-069 notu:** eklenti motoru (`rquickjs-sys`) masaüstü hedefleri için
-> hazır bağlamalarla geliyor ama Android/iOS için gelmiyor; o derlemelerde
-> `bindgen` feature'ı (derleme anında libclang) açılacak. Motorun kendisi
-> mobile uygun — api 1'in alt süreçleri iOS'ta hiç çalışamazdı.
->
-> Gerçek `uniffi` kontrolü hâlâ bu fazın işi ve iki şey istiyor: çekirdekteki
-> ~60-80 tipin `#[derive(uniffi::Record)]` ile işaretlenmesi, ve aşağıdaki dört
-> trait'in yeniden yazılması — `uniffi` bir trait metodunun dönüşünde
-> `Pin<Box<dyn Future + Send + 'a>>` ifade edemiyor:
-> `Provider`, `HttpClient`, `MetadataLookup`, `FingerprintLookup` (D-052 borcu).
+Friendships are **not declared, they are derived**: "the people you often
+listen with" accumulate from rooms. Don't open with an empty "add a friend"
+screen — the cold start problem.
 
 ---
 
-# EK — Yayın platformları
+# PHASE 6 — Mobile
 
-"Hangi platformdan çalabiliriz" sorusunun cevabı burada durur.
+**An approved goal (D-001).** Kotlin/Swift bindings with `uniffi`.
 
-> **Buradaki API bilgileri doğrulanmadı.** Platformlar arayüzlerini haber vermeden
-> değiştirir. Bir eklenti yazılmadan önce ilgili satır yeniden sınanır — ASLA YAPMA
-> listesindeki "bilmediğin bir API şeklini varsayma" buraya da geçerli.
+The implementation is in this phase, but **the constraint holds from today**:
+it must come without changing the core. If it doesn't, the core was designed
+wrong (K7).
 
-## Ayırıcı çizgi teknik değil, hukuki
+**An early-warning mechanism:** from Phase 1 on, try generating the `uniffi`
+scaffolding in CI — it doesn't even need to compile; it only asks the question
+"can this API be expressed?" on every commit. Otherwise violations pile up for
+months and come out all at once.
 
-Soru "resmî API var mı" değil. Soru: **ses DRM ile korunuyor mu?**
+> **DECISION POINT CLOSED — D-052 / D-053.** The warning proved right:
+> `PlayOptions<'a>` piled up exactly like this, carrying a lifetime on the
+> public surface for months.
+>
+> What was put in place today is **not real scaffolding generation** but the
+> cheap filter that comes before it: `crates/headshell-core/tests/k7_surface.rs`
+> looks for lifetimes in public types and closures in public signatures, and it
+> runs in CI's third gate (D-053).
+>
+> **D-069 note:** the plugin engine (`rquickjs-sys`) comes with ready bindings
+> for the desktop targets but not for Android/iOS; in those builds the
+> `bindgen` feature (libclang at build time) will be turned on. The engine
+> itself suits mobile — api 1's subprocesses could never have worked on iOS.
+>
+> The real `uniffi` check is still this phase's job, and it needs two things:
+> marking ~60-80 types in the core with `#[derive(uniffi::Record)]`, and
+> rewriting the four traits below — `uniffi` can't express
+> `Pin<Box<dyn Future + Send + 'a>>` in the return of a trait method:
+> `Provider`, `HttpClient`, `MetadataLookup`, `FingerprintLookup` (the D-052
+> debt).
 
-- **DRM yok** → eklenti akışı doğrudan çözebilir. Belgelenmemiş bir API kullanmak
-  hizmet şartlarını ihlal edebilir; bu bir risk, ama ayrı bir suç değil.
-- **DRM var** (Widevine, FairPlay, Deezer'ın Blowfish'i) → akışı açmak bir
-  **teknolojik koruma önlemini aşmaktır.** Bu çoğu ülkede ayrı bir kanun maddesidir
-  (DMCA §1201, EU 2001/29 m.6) ve telif ihlalinden bağımsız olarak yasaktır.
-  **Bu projede yazılmaz.** D-002 gereği bu yayınlanacak bir üründür; kişisel kullanım
-  muafiyeti yoktur — K4'ün Spotify için dediğinin aynısı.
+---
 
-DRM'li platformlar için geriye iki yol kalır: platformun **kendi** oynatıcısını
-sürmek (`CONTROL`), ya da yalnızca metadata almak.
+# APPENDIX — Streaming platforms
 
-## Tablo
+The answer to the question "which platforms can we play from" lives here.
 
-| Platform | Yetenek | Gerekçe |
+> **The API information here was not verified.** Platforms change their
+> interfaces without warning. Before a plugin is written, the relevant row is
+> tested again — the NEVER DO item "don't assume an API shape you don't know"
+> applies here too.
+
+## The dividing line is legal, not technical
+
+The question isn't "is there an official API". The question is: **is the
+audio protected with DRM?**
+
+- **No DRM** → a plugin can resolve the stream directly. Using an undocumented
+  API may break the terms of service; that is a risk, but not a separate
+  offence.
+- **DRM** (Widevine, FairPlay, Deezer's Blowfish) → opening the stream is
+  **circumventing a technological protection measure.** In most countries that
+  is a separate article of law (DMCA §1201, EU 2001/29 art. 6), forbidden
+  independently of copyright infringement. **It is not written in this
+  project.** Because of D-002 this is a product to be published; there is no
+  personal-use exemption — the same thing K4 says about Spotify.
+
+For platforms with DRM two ways remain: driving the platform's **own** player
+(`CONTROL`), or taking metadata only.
+
+## The table
+
+| Platform | Capability | Reasoning |
 |---|---|---|
-| **SoundCloud** | `SEARCH BROWSE STREAM` | DRM yok. Resmî API var ama anahtar başvurusu yıllardır kapalı/aralıklı; pratik yol yt-dlp. §2 K5'in referans eklentisi zaten bu. Bazı parçalar (Go+, gizli) erişilemez — eklenti bunu **sayıp raporlar**, sessizce atlamaz (K9). |
-| **Qobuz** | `SEARCH BROWSE STREAM` | DRM yok; FLAC aboneye şifresiz iniyor. Resmî public API yok, tersine mühendislikle biliniyor. Abonelik şart. Hi-res katalog en temiz kaynak. |
-| **YouTube Music** | `SEARCH BROWSE STREAM` | DRM yok, yol yt-dlp. **Bakım maliyeti en yükseği:** YouTube aktif olarak zorlaştırıyor (nsig, PO token). Tam da bu yüzden eklenti — bozulduğunda çekirdek ayakta kalır. |
-| **Tidal** | `SEARCH BROWSE` | Resmî geliştirici API'si katalog/arama veriyor. Tam akış partner programına bağlı, yüksek kalite katmanları DRM'li. Tidal Connect sertifikalı cihaz programı, herkese açık değil. |
-| **Apple Music** | `SEARCH BROWSE` | MusicKit **resmî ve meşru** — developer token + user token ile katalog ve kullanıcının kütüphanesi alınır. Ama çalmak MusicKit çalışma zamanı ister: Linux'ta yok, WebKitGTK'da FairPlay yok. Faz 6'nın iOS/macOS sürümlerinde `STREAM` açılabilir. |
-| **Deezer** | `SEARCH BROWSE` | Public API metadata için resmî ve iyi. Akış Blowfish ile şifreli → koruma önlemi → çizginin öbür tarafı. |
-| **Spotify** | `CONTROL` | K4. Ayrı depo, ayrı paket; çekirdeğin bağımlılık ağacında görünmez. Web API'nin player uçları Premium ister. librespot ToS ihlali. Metadata çekilmez, veritabanına yazılmaz — geçmiş export yoluyla gelir (K2). |
-| **Amazon Music** | — | Public API yok, Widevine. Metadata bile alınamıyor. |
-| **Pandora** | — | 2011'den beri public API yok, ABD'ye kilitli. Ayrıca **model uyumsuz:** biz parça adresliyoruz, Pandora istasyon adresliyor. |
-| **Idagio** | — | Public API yok, DRM'li. Ayrıca veri modeli farklı (eser / bölüm / icra), parça değil. Klasik müzik kimliği kendi başına bir iş — sağlayıcı işi değil, `identity/` işi. |
-| **Tencent (QQ/Kugou/Kuwo)** | — | Anakara Çin'e kilitli; Çin telefonu ve ödeme yöntemi şart, akışlar şifreli. **Ama K5'in var oluş sebebi tam olarak bu:** o bölgedeki biri eklentiyi kendi yazabilir. Biz protokolü veririz, listeyi değil. |
+| **SoundCloud** | `SEARCH BROWSE STREAM` | No DRM. There is an official API, but key applications have been closed/intermittent for years; the practical way is yt-dlp. §2 K5's reference plugin is this one anyway. Some tracks (Go+, private) can't be accessed — the plugin **counts and reports** them, it doesn't silently skip them (K9). |
+| **Qobuz** | `SEARCH BROWSE STREAM` | No DRM; FLAC downloads to the subscriber unencrypted. No official public API; it is known through reverse engineering. A subscription is required. The cleanest source for a hi-res catalog. |
+| **YouTube Music** | `SEARCH BROWSE STREAM` | No DRM; the way is yt-dlp. **The highest maintenance cost:** YouTube actively makes it harder (nsig, PO tokens). That is exactly why it is a plugin — when it breaks, the core stays up. |
+| **Tidal** | `SEARCH BROWSE` | The official developer API gives catalog/search. Full streaming depends on the partner program; the high-quality tiers have DRM. Tidal Connect is a certified-device programme, not open to everyone. |
+| **Apple Music** | `SEARCH BROWSE` | MusicKit is **official and legitimate** — with a developer token + a user token the catalog and the user's library are fetched. But playing needs the MusicKit runtime: it isn't on Linux, and WebKitGTK has no FairPlay. `STREAM` could be opened in Phase 6's iOS/macOS versions. |
+| **Deezer** | `SEARCH BROWSE` | The public API is official and good for metadata. The stream is encrypted with Blowfish → a protection measure → the other side of the line. |
+| **Spotify** | `CONTROL` | K4. A separate repository, a separate package; invisible in the core's dependency tree. The Web API's player endpoints need Premium. librespot breaks the ToS. Metadata isn't pulled or written to the database — history comes through the export (K2). |
+| **Amazon Music** | — | No public API, Widevine. Not even metadata can be fetched. |
+| **Pandora** | — | No public API since 2011, locked to the US. Also **the model doesn't fit:** we address tracks, Pandora addresses stations. |
+| **Idagio** | — | No public API, DRM. Also a different data model (work / movement / performance), not tracks. Classical music identity is a job in itself — not a provider job but an `identity/` job. |
+| **Tencent (QQ/Kugou/Kuwo)** | — | Locked to mainland China; a Chinese phone number and payment method are required, and the streams are encrypted. **But this is exactly K5's reason for existing:** someone in that region can write the plugin themselves. We provide the protocol, not the list. |
 
-## İçe aktarma tarafı bu çizgiyi tanımıyor
+## The import side doesn't recognise this line
 
-K2'nin bütün meselesi bu: **export bir yasal haktır, hizmet şartı onu kısıtlayamaz.**
-Tablonun "kapalı" satırları bile dinleme geçmişini verir.
+This is the whole point of K2: **an export is a legal right; terms of service
+can't restrict it.** Even the table's "closed" rows give listening history.
 
-GDPR/CCPA kapsamında export veren: Spotify (yapıldı, §0.2), Apple, Google/YouTube
-(Takeout), Deezer, Qobuz, Tidal, SoundCloud, Amazon. Pandora ve Tencent daha zayıf —
-talep üzerine ve biçimleri belgelenmemiş.
+Those that provide an export under the GDPR/CCPA: Spotify (done, §0.2), Apple,
+Google/YouTube (Takeout), Deezer, Qobuz, Tidal, SoundCloud, Amazon. Pandora and
+Tencent are weaker — on request, and their formats are undocumented.
 
-Yani: **çalabildiğimiz platform üç, dinleme kimliğini alabildiğimiz platform on.**
-Ürün ikincisiydi — CLAUDE.md'nin ilk cümlesi.
-
----
-
-# ASLA YAPMA
-
-- CLI'ye iş mantığı koyma
-- Sağlayıcı API'sinden geçmiş/kütüphane çekme — export kullan
-- Sunucudan ses akıtma
-- **DRM'li bir akışı çözen kod yazma** (D-026) — Widevine, FairPlay, Deezer'ın
-  Blowfish'i. Koruma önlemi aşmak telif ihlalinden ayrı bir kanun maddesidir;
-  D-002 gereği kişisel kullanım muafiyeti yok. Bkz. EK — Yayın platformları
-- Çekirdeğe Spotify bağımlılığı ekleme
-- Faz sınırını aşma ("ileride lazım olur" diye kod yazma)
-- Çekirdek API'sine `uniffi`'nin ifade edemeyeceği tip sızdırma
-- Ham `listen` kayıtlarını silme veya üzerine yazma
-- İzinsiz bağımlılık ekleme
-- Kırılan testi susturma
-- Bilmediğin bir format/API şeklini varsayma — sor veya doğrula
+So: **three platforms we can play from, ten platforms we can take the listening
+identity from.** The product was the second — CLAUDE.md's first sentence.
 
 ---
 
-# SÖZLÜK
+# NEVER DO
 
-| Terim | Anlamı |
+- Don't put business logic in the CLI
+- Don't pull history/a library from a provider API — use the export
+- Don't stream audio from a server
+- **Don't write code that decrypts a DRM-protected stream** (D-026) —
+  Widevine, FairPlay, Deezer's Blowfish. Circumventing a protection measure is
+  an article of law separate from copyright infringement; because of D-002
+  there is no personal-use exemption. See APPENDIX — Streaming platforms
+- Don't add a Spotify dependency to the core
+- Don't cross a phase boundary (don't write code "because it'll be needed
+  later")
+- Don't leak a type `uniffi` can't express into the core API
+- Don't delete or overwrite raw `listen` records
+- Don't add a dependency without permission
+- Don't silence a broken test
+- Don't assume a format/API shape you don't know — ask or verify
+
+---
+
+# GLOSSARY
+
+| Term | Meaning |
 |---|---|
-| **canonical id** | Sağlayıcıdan bağımsız parça kimliği (tercihen MBID) |
-| **provider** | Ses kaynağı: yerel, Subsonic, SoundCloud, torrent… |
-| **plugin** | JS ile yazılmış, çekirdeğe gömülü QuickJS'te koşan sağlayıcı (api 2, D-069) |
-| **host** | Motorun eklentiye verdiği tek kapı: `http`, `secrets`, `storage`, `tools`, `log` |
-| **eser (artifact)** | Eklentinin beyan ettiği, motorun platform başına indirip karmasını doğruladığı araç (yt-dlp) |
-| **listen** | Tek dinleme olayı: parça + zaman damgası + süre + kaynak |
-| **anchor** | `{track, wall_time, position, rate, state}` — oda senkronunun tek primitifi |
-| **resolve** | Parçayı kanonik kimliğe, oradan sağlayıcı kimliğine eşleme |
-| **doğruluk kümesi** | `fixtures/identity/cases.json` — elle etiketlenmiş eşleşme testleri |
+| **canonical id** | A provider-independent track ID (preferably an MBID) |
+| **provider** | An audio source: local, Subsonic, SoundCloud, torrent… |
+| **plugin** | A provider written in JS, running in the QuickJS embedded in the core (api 2, D-069) |
+| **host** | The single gate the engine gives a plugin: `http`, `secrets`, `storage`, `tools`, `log` |
+| **artifact** | A tool the plugin declares, which the engine downloads per platform and verifies the hash of (yt-dlp) |
+| **listen** | A single listening event: track + timestamp + duration + source |
+| **anchor** | `{track, wall_time, position, rate, state}` — the single primitive of room sync |
+| **resolve** | Matching a track to a canonical ID, and from there to a provider ID |
+| **accuracy set** | `fixtures/identity/cases.json` — hand-labelled matching tests |

@@ -1,9 +1,13 @@
 # §3.1 GO / NO-GO — sonuç
 
+> **Türkçe kopya.** Kanonik metin İngilizcedir: [`RESULTS.md`](RESULTS.md).
+> Bu kopya 2026-09-25 tarihli hâlidir; İngilizce metinle birlikte güncel
+> tutulacağı garanti değildir (D-073).
+
 **Tarih:** 2026-08-31
 **Makine:** Intel HD 6000 (Broadwell GT3, 2015), 4 çekirdek, 8 GB, Wayland
 **Motor:** WebKitGTK 2.52.6 (webkit2gtk-4.1), Tauri 2, 431 crate, 11 MB ikili
-**Eşikler:** `ESIKLER.md` — **ölçümden önce** yazıldı.
+**Eşikler:** `THRESHOLDS.tr.md` — **ölçümden önce** yazıldı.
 
 ## Karar: GO — ama koşullu
 
@@ -27,7 +31,7 @@ kabul edilemez.
 
 ## Bulgu 3 — Suçlu donanım değil, motorun yolu
 
-Kontrol deneyi (`kontrol.py`): **aynı makinede, aynı sayfada, aynı GPU'da**
+Kontrol deneyi (`check.py`): **aynı makinede, aynı sayfada, aynı GPU'da**
 Firefox 154 dört fazın dördünde de **58.8 fps** — saf CSS dahil.
 
 Bu ayrım kararı belirledi. Donanım tavanı olsaydı yerel Rust GUI'ye kaçmak da
@@ -70,9 +74,9 @@ kullanıcının makinesinde ortaya çıkar.
 
 ```bash
 cargo build --release
-GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER=1 ./olc.sh   # Tauri
-./varyant.sh                                                # 4 ortam varyantı
-python3 kontrol.py firefox                                  # kontrol deneyi
+GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER=1 ./measure.sh   # Tauri
+./variant.sh                                                # 4 ortam varyantı
+python3 check.py firefox                                  # kontrol deneyi
 ```
 
 ## Sınırlar — ölçülmeyen ne var

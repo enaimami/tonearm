@@ -1,9 +1,10 @@
-# İkonlar
+# Icons
 
-Kaynak tek dosya: `icon.svg`. Ötekiler ondan üretilir — elle düzenlenmez,
-yeniden üretilir. Renkler varsayılan temanın değerleriyle aynı
-(`ui/style.css`: `--headshell-bg`, `--headshell-surface`, `--headshell-accent`); ikon temanın
-parçası **değildir**, kullanıcı tema değiştirince değişmez.
+The source is a single file: `icon.svg`. The others are generated from it —
+they aren't edited by hand, they are regenerated. The colours are the same as
+the default theme's values (`ui/style.css`: `--headshell-bg`,
+`--headshell-surface`, `--headshell-accent`); the icon is **not** part of the
+theme and doesn't change when the user changes the theme.
 
 ```sh
 cd crates/headshell/icons
@@ -19,9 +20,9 @@ src.resize((1024, 1024), Image.LANCZOS).save('icon.icns')
 "
 ```
 
-`tauri.conf.json`'daki `bundle.icon` listesi bu adları bekler. `icon.png`
-listede yok ama AppImage ve pencere ikonu için duruyor.
+The `bundle.icon` list in `tauri.conf.json` expects these names. `icon.png`
+isn't on the list, but it's there for the AppImage and the window icon.
 
-Bu dosyalar bir zamanlar 103 baytlık tek renkli bir yer tutucuydu ve
-`bundle.active` kapalı olduğu için kimse fark etmemişti — paketleme açılınca
-ortaya çıktı.
+These files were once a 103-byte single-colour placeholder, and nobody had
+noticed because `bundle.active` was off — it came out when packaging was
+turned on.

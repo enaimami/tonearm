@@ -1,69 +1,74 @@
 # CLAUDE.md
 
-Her oturumda okunan **operasyonel özet**. Normatif metin burada değil:
-değişmez kurallar, faz planı ve çalışma protokolü [`PLAN.md`](PLAN.md)'de yaşar.
-Çelişki olursa **PLAN.md geçerlidir**.
+The **operational summary** read in every session. The normative text is not
+here: the invariant rules, the phase plan and the working protocol live in
+[`PLAN.md`](PLAN.md). If they contradict each other, **PLAN.md wins**.
 
-Bu dosya şunların tek sahibidir: workspace ağacı, komutlar, CLI test yüzeyi,
-kod konvansiyonları, tanılama pratiği, test düzeni. Bunları PLAN.md tekrar
-etmez, buraya işaret eder.
+This file is the sole owner of: the workspace tree, the commands, the CLI test
+surface, the code conventions, the diagnostics practice, the test layout.
+PLAN.md does not repeat these; it points here.
 
-> Proje adı `headshell` (D-058). Pikap kolu: plağı seçmez, ne koyarsan onu okur.
-
----
-
-## Proje nedir
-
-Sağlayıcıdan bağımsız bir müzik dinleme katmanı. Ürün ses değil — **dinleme kimliği**:
-geçmiş, istatistikler, çalma listeleri ve sosyal bağlar kullanıcıya ait olur, sağlayıcıya değil.
-Ses nereden gelirse gelsin (yerel dosya, Subsonic/Jellyfin, SoundCloud, YouTube Music,
-torrent, FTP) üstteki katman aynı kalır.
-
-Çekirdek bir Rust kütüphanesidir; onu bir CLI, bir Tauri masaüstü kabuğu ve
-(ileride) `uniffi` üzerinden mobil bağlamalar tüketir.
+> The project is named `headshell` (D-058). A turntable's headshell doesn't
+> pick the record; it reads whatever you put on.
 
 ---
 
-## ALTIN KURAL (K1)
+## What the project is
 
-**CLI ince bir kabuktur. Bütün mantık `headshell-core` içindedir.**
+A provider-independent music listening layer. The product is not audio — it is
+the **listening identity**: history, statistics, playlists and social ties
+belong to the user, not to the provider. Wherever the audio comes from (a local
+file, Subsonic/Jellyfin, SoundCloud, YouTube Music, torrent, FTP), the layer on
+top stays the same.
 
-Test: bir özellik CLI'den silindiğinde çekirdek onu hâlâ sunabiliyor olmalı.
-CLI yalnızca şunları yapar — argüman ayrıştırma, çekirdek çağrısı, çıktı biçimleme, çıkış kodu.
-
-CLI içinde **asla**: iş mantığı, veri dönüşümü, ağ çağrısı, SQL, eşleştirme algoritması.
-Bir şeyi CLI'de yazmak istiyorsan önce "bunu GUI de isteyecek mi?" diye sor. Cevap evetse çekirdeğe koy.
-
-Aynısı Tauri kabuğu (`crates/headshell`) için de geçerlidir: o da bir kabuktur.
-
-> Tam metin ve gerekçe: PLAN.md §2, K1. Burada tekrarlanmasının tek sebebi,
-> kod yazarken en sık ihlal edilen kural olması.
+The core is a Rust library; a CLI, a Tauri desktop shell and (later) mobile
+bindings through `uniffi` consume it.
 
 ---
 
-## Değişmez kurallar — indeks
+## THE GOLDEN RULE (K1)
 
-Tam metin ve gerekçeleri **[`PLAN.md` §2](PLAN.md)**'de. Aşağısı yalnızca hatırlatma
-indeksidir; bir kuralı uygulamadan önce oradaki metni oku.
+**The CLI is a thin shell. All logic lives in `headshell-core`.**
 
-| # | Kural |
+The test: when a feature is deleted from the CLI, the core must still be able
+to offer it. The CLI only does this — argument parsing, calling the core,
+formatting the output, the exit code.
+
+**Never** in the CLI: business logic, data transformation, network calls, SQL,
+matching algorithms. If you want to write something in the CLI, first ask
+"will the GUI want this too?" If the answer is yes, put it in the core.
+
+The same goes for the Tauri shell (`crates/headshell`): it is a shell too.
+
+> Full text and reasoning: PLAN.md §2, K1. The only reason it is repeated here
+> is that it is the rule most often broken while writing code.
+
+---
+
+## Invariant rules — index
+
+The full text and reasoning are in **[`PLAN.md` §2](PLAN.md)**. What follows is
+only a reminder index; read the text there before applying a rule.
+
+| # | Rule |
 |---|---|
-| **K1** | Altın Kural: CLI ince kabuktur |
-| **K2** | İçe aktarma export dosyalarından yapılır, API'den değil |
-| **K3** | Ses asla röle edilmez, yalnızca pozisyon senkronlanır |
-| **K4** | Spotify çekirdeğe girmez |
-| **K5** | Eklentiler gömülü JS motorunda (QuickJS) koşar; dışarıya yalnızca `host`'tan çıkar |
-| **K6** | Kanonik kimlik zinciri sırası: ISRC → MBID → bulanık → AcoustID |
-| **K7** | Çekirdek API'si `uniffi` ile ifade edilebilir olmalı |
-| **K8** | `headshell-core` içinde `unwrap()` / `expect()` / `panic!()` yok |
-| **K9** | Her başarısızlık hangi aşamada olduğunu söyler |
-| **K10** | Faz sınırı aşılmaz |
+| **K1** | The Golden Rule: the CLI is a thin shell |
+| **K2** | Importing is done from export files, not from APIs |
+| **K3** | Audio is never relayed; only the position is synced |
+| **K4** | Spotify does not enter the core |
+| **K5** | Plugins run in an embedded JS engine (QuickJS); they reach the outside only through `host` |
+| **K6** | The order of the canonical identity chain: ISRC → MBID → fuzzy → AcoustID |
+| **K7** | The core API must be expressible with `uniffi` |
+| **K8** | No `unwrap()` / `expect()` / `panic!()` in `headshell-core` |
+| **K9** | Every failure says which stage it happened in |
+| **K10** | Phase boundaries are not crossed |
 
-Bir kuralı ihlal etmen gerekiyorsa **dur ve sor** — PLAN.md §0.1.
+If you need to break a rule, **stop and ask** — PLAN.md §0.1.
 
-> K7 hakkında sık yapılan hata: kural *lifetime, generic parametre ve closure
-> parametresini* yasaklar. `Arc<dyn Trait>` ve `async fn` **serbesttir**
-> (D-006 düzeltmesi). Kuralın "trait object yok" diyen ilk yazımı geçersizdir.
+> A common mistake about K7: the rule forbids *lifetimes, generic parameters
+> and closure parameters*. `Arc<dyn Trait>` and `async fn` are **allowed**
+> (the D-006 correction). The rule's first wording, which said "no trait
+> objects", is void.
 
 ---
 
@@ -72,201 +77,220 @@ Bir kuralı ihlal etmen gerekiyorsa **dur ve sor** — PLAN.md §0.1.
 ```
 headshell/
 ├── Cargo.toml                  # workspace
-├── CLAUDE.md                   # bu dosya — operasyonel özet
-├── PLAN.md                     # kurallar, faz planı, protokol (normatif)
-├── DECISIONS.md                # karar defteri (D-001…)
-├── CONTRIBUTING.md             # katkıcı süreci
+├── CLAUDE.md                   # this file — the operational summary
+├── PLAN.md                     # rules, phase plan, protocol (normative)
+├── DECISIONS.md                # the decision log (D-001…)
+├── CONTRIBUTING.md             # the contributor process
 ├── crates/
-│   ├── headshell-core/              # BÜTÜN mantık burada
+│   ├── headshell-core/              # ALL the logic is here
 │   │   ├── src/
-│   │   │   ├── import/         # export zip ayrıştırıcıları
-│   │   │   ├── identity/       # kanonik çözümleme (+ musicbrainz, acoustid, fuzzy)
-│   │   │   ├── stats/          # dinleme istatistikleri
-│   │   │   ├── sleeve/         # paylaşılabilir kart (svg + png)
+│   │   │   ├── import/         # export zip parsers
+│   │   │   ├── identity/       # canonical resolution (+ musicbrainz, acoustid, fuzzy)
+│   │   │   ├── stats/          # listening statistics
+│   │   │   ├── sleeve/         # shareable card (svg + png)
 │   │   │   ├── library/        # SQLite + FTS
-│   │   │   ├── provider/       # sağlayıcı trait'leri + local + remote/{subsonic,jellyfin}
-│   │   │   ├── plugin/         # QuickJS motoru (script) + host kapıları + eserler (artifact) + katalog
+│   │   │   ├── provider/       # provider traits + local + remote/{subsonic,jellyfin}
+│   │   │   ├── plugin/         # QuickJS engine (script) + host gates + artifacts + catalog
 │   │   │   ├── playback/       # symphonia + cpal
-│   │   │   ├── net/            # HTTP trait'i + ureq istemcisi + fake
-│   │   │   ├── diag/           # tanılama, aşağıya bak
-│   │   │   └── session.rs      # dışa açılan komut yüzeyi (Session)
-│   │   ├── examples/           # elle koşulan probe'lar (fingerprint, mb, playback)
-│   │   └── tests/              # fixtures/ üzerinden entegrasyon testleri
-│   ├── headshell-cli/               # ince kabuk (ikili adı: `headshell`)
-│   │   └── tests/snapshots/    # --json çıktısının snapshot'ları
-│   └── headshell/                   # Tauri masaüstü kabuğu (ikili adı: `headshell-desktop`)
+│   │   │   ├── net/            # HTTP trait + ureq client + fake
+│   │   │   ├── diag/           # diagnostics, see below
+│   │   │   └── session.rs      # the outward command surface (Session)
+│   │   ├── examples/           # probes run by hand (fingerprint, mb, playback)
+│   │   └── tests/              # integration tests over fixtures/
+│   ├── headshell-cli/               # thin shell (binary name: `headshell`)
+│   │   └── tests/snapshots/    # snapshots of the --json output
+│   └── headshell/                   # Tauri desktop shell (binary name: `headshell-desktop`)
 │       ├── src/                # main + env + state + core_thread + commands
-│       ├── ui/                 # düz statik webview — bundler yok, npm yok
-│       ├── icons/              # icon.svg kaynak, ötekiler üretilir (icons/README.md)
-│       └── themes/             # iki referans tema (contrast, daylight)
-├── parked/                     # DERLENMEYEN, silinmemiş kod — torrent (D-069)
-├── packaging/                  # dağıtım: copyright, .desktop girdisi, aur/ (D-066)
-├── docs/                       # eklenti yazma rehberi, tanıtım sayfası
-├── spike/                      # ATILABILIR prototipler — workspace DIŞI, CI DIŞI
-└── fixtures/                   # test verisi: kırpılmış export'lar, doğruluk kümesi
+│       ├── ui/                 # plain static webview — no bundler, no npm
+│       ├── icons/              # icon.svg is the source, the others are generated (icons/README.md)
+│       └── themes/             # two reference themes (contrast, daylight)
+├── parked/                     # code that is NOT BUILT but not deleted — torrent (D-069)
+├── packaging/                  # distribution: copyright, .desktop entry, aur/ (D-066)
+├── docs/                       # the plugin writing guide, the landing page
+├── spike/                      # THROWAWAY prototypes — OUTSIDE the workspace, OUTSIDE CI
+└── fixtures/                   # test data: trimmed exports, the accuracy set
 ```
 
-`spike/` derlenmez, test edilmez, CI'ya girmez. Eşleştirme sezgilerini önce burada
-dene; doğruluk tatmin edici olunca `identity/`'ye porta.
+`spike/` is not built, not tested and not in CI. Try matching heuristics there
+first; port them to `identity/` once the accuracy is satisfying.
 
-**Eklentiler bu depoda değil** (D-071): [`headshell/plugins`](https://github.com/headshell/plugins)
-deposunda dizin olarak yaşarlar ve uygulama onları o deponun `index.json`'undan
-kurar. İndeksi `headshell plugin index <katalog-deposu>` üretir; elle yazılmaz.
-SoundCloud/YouTube Music'in canlı testleri bu depoda kalır ve eklentiyi canlı
-katalogdan kurar — katalogdaki bozuk bir sürüm burada kırmızı yanar.
+**The plugins are not in this repository** (D-071): they live as directories in
+the [`headshell/plugins`](https://github.com/headshell/plugins) repository, and
+the app installs them from that repository's `index.json`. The index is
+generated by `headshell plugin index <catalog-repo>`; it is not written by
+hand. The live tests for SoundCloud/YouTube Music stay in this repository and
+install the plugin from the live catalog — a broken release in the catalog
+turns red here.
 
-`parked/` workspace'in `exclude`'unda: derlenmez, test edilmez, CI'a girmez.
-`spike/`'tan farkı, oradaki kodun atılabilir değil **geri dönmesi beklenen**
-kod olması. Bugün tek sakini torrent sağlayıcısı: api 1'in alt süreç
-protokolüne yazılmıştı ve eklenti sistemi QuickJS'e geçerken (D-069)
-kullanıcının kararıyla taşınmadı. Geri dönüşün açık soruları
-`parked/README.md`'de; karar verilmeden workspace'e geri alınmaz.
+`parked/` is in the workspace's `exclude`: not built, not tested, not in CI.
+The difference from `spike/` is that the code there is not throwaway but
+**expected to come back**. Today its only resident is the torrent provider: it
+was written for api 1's subprocess protocol, and when the plugin system moved
+to QuickJS (D-069) it was not ported, by the user's decision. The open
+questions about its return are in `parked/README.md`; it is not taken back
+into the workspace before they are decided.
 
 ---
 
-## Komutlar
+## Commands
 
 ```bash
-cargo run -p headshell-cli -- <alt-komut>
-cargo run -p headshell            # masaüstü arayüzü
+cargo run -p headshell-cli -- <subcommand>
+cargo run -p headshell            # the desktop interface
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 ```
 
-Aynılarının kısayolu `Makefile`'da (yalnızca Unix; Windows'ta komutlar doğrudan
-koşulur); `make` ya da `make help` hedefleri listeler.
-`make gates` üç kapıyı CI sırasıyla koşar (biçim en ucuzu, en önce düşsün),
-`make core-features` çekirdeği feature'lar birleşmeden denetler (D-054),
-`make cli ARGS="stats --year 2024"` CLI'yi çağırır, `make aur-test PKG=…`
-bir AUR paketini Arch konteynerinde derler. Makefile bir kural koymuyor,
-yalnızca buradaki komutları tek yerden koşulur hâle getiriyor.
+Shortcuts for the same are in the `Makefile` (Unix only; on Windows the
+commands are run directly); `make` or `make help` lists the targets.
+`make gates` runs the three gates in CI order (formatting is the cheapest, so
+it fails first), `make core-features` checks the core without features being
+merged (D-054), `make cli ARGS="stats --year 2024"` calls the CLI, and
+`make aur-test PKG=…` builds an AUR package in an Arch container. The Makefile
+sets no rule; it only makes the commands here runnable from one place.
 
-Bir değişikliği bitmiş saymadan önce üçü de temiz geçmeli: `test`, `clippy`, `fmt`.
-Tam "bitti" ölçütü: PLAN.md §0.4.
+All three must pass clean before a change counts as done: `test`, `clippy`,
+`fmt`. The full "done" criterion: PLAN.md §0.4.
 
-> `cargo test -p headshell-core` tek başına koşulduğunda feature'lar birleşmediği için
-> workspace koşumunda görünmeyen `dead_code` uyarıları çıkar. Üç kapı **workspace**
-> üzerinden geçer; tek crate koşumu bir tanı aracıdır, kapı değil.
+> When `cargo test -p headshell-core` is run on its own, the features are not
+> merged, so `dead_code` warnings appear that are invisible in the workspace
+> run. The three gates run over the **workspace**; a single-crate run is a
+> diagnostic tool, not a gate.
 
 ---
 
-## CLI test yüzeyi
+## The CLI test surface
 
-CLI'nin amacı çekirdeği elle sınamak. Her çekirdek yeteneğinin bir alt komutu olmalı.
+The CLI's purpose is to exercise the core by hand. Every core capability must
+have a subcommand.
 
 ```
-headshell import <zip|dizin>                     # export içe aktar
+headshell import <zip|dir>                       # import an export
 headshell stats [--year N] [--top N] [--min-ms MS]
-headshell resolve "<sanatçı> - <başlık>" | --file <ses>
-headshell library search <sorgu> [--limit N] [--min-ms MS]
-headshell sleeve [--year N] [--out <dosya>] [--format square|story]
-headshell provider list | test <ad> | scan [--if-stale]
-headshell provider add <tür> --url U --user K [--name AD] [--api-key A] [--verify]
-headshell provider remove <ad> | servers
-headshell plugin list | approve <ad> | install <ad> | disable <ad> | enable <ad> | forget <ad>
-headshell plugin catalog | update [<ad>] | remove <ad>
-headshell plugin index <katalog-deposu> [--url-template T] [--check]
-headshell secret list | set <ad-alanı> <anahtar> | remove <ad-alanı> <anahtar>
-headshell play <parça> [--all] [--shuffle] [--dry-run] [--tui]
-headshell diag                                   # son çalıştırmanın tanı raporu
+headshell resolve "<artist> - <title>" | --file <audio>
+headshell library search <query> [--limit N] [--min-ms MS]
+headshell sleeve [--year N] [--out <file>] [--format square|story]
+headshell provider list | test <name> | scan [--if-stale]
+headshell provider add <kind> --url U --user K [--name NAME] [--api-key A] [--verify]
+headshell provider remove <name> | servers
+headshell plugin list | approve <name> | install <name> | disable <name> | enable <name> | forget <name>
+headshell plugin catalog | update [<name>] | remove <name>
+headshell plugin index <catalog-repo> [--url-template T] [--check]
+headshell secret list | set <namespace> <key> | remove <namespace> <key>
+headshell play <track> [--all] [--shuffle] [--dry-run] [--tui]
+headshell diag                                   # the last run's diagnostics report
 ```
 
-Küresel bayraklar: `--json`, `--data-dir <DİZİN>`, `--online`, `-v/-vv`.
+Global flags: `--json`, `--data-dir <DIR>`, `--online`, `-v/-vv`.
 
-Her komut `--json` desteklemeli — hem betiklenebilirlik hem de GUI'nin aynı veriyi
-alacağının kanıtı olarak. Masaüstü kabuğunun IPC komutları bu listeyi birebir
-yansıtır (D-033); arayüze bir yetenek eklemek, önce burada bir alt komut
-olmasını gerektirir. İnsan okunur çıktı ayrı bir biçimlendirme katmanıdır
+Every command must support `--json` — both for scriptability and as proof that
+the GUI gets the same data. The desktop shell's IPC commands mirror this list
+one to one (D-033); adding a capability to the interface first requires a
+subcommand here. The human-readable output is a separate formatting layer
 (`headshell-cli/src/output.rs`).
 
-`--online` varsayılan **kapalı**: bir export'u içe aktarmak kimseyi sessizce
-ağa bağlamaz. Bayrak yokken kimlik zinciri yalnızca yerel halkaları koşar.
-İndirmenin **komutun kendisi** olduğu yerler (`plugin catalog`, `install`,
-`update`) bayrağı beklemez; katalog adresi `HEADSHELL_PLUGIN_INDEX` ile
-değişir (D-071).
+`--online` is **off** by default: importing an export does not silently
+connect anyone to the network. Without the flag the identity chain runs only
+its local links. Where downloading **is the command itself** (`plugin
+catalog`, `install`, `update`), the flag is not required; the catalog address
+changes with `HEADSHELL_PLUGIN_INDEX` (D-071).
 
 ---
 
-## Tanılama kültürü
+## Diagnostics culture
 
-Bu proje bir bash prototipinden doğdu ve orada işe yarayan tek şey **her başarısızlığın
-nerede olduğunu söylemesiydi.** Bunu koru (K9):
+This project was born from a bash prototype, and the only thing that worked
+there was **every failure saying where it was.** Keep that (K9):
 
-- Her başarısızlık **hangi aşamada** olduğunu söylemeli (`ADIM: IDENTITY_RESOLVE`).
-- `headshell diag` son çalıştırmanın ortam bilgisi, aşama, hata zinciri ve ilgili sayıları
-  tek blokta, kopyalanıp yapıştırılabilir şekilde basmalı.
-- Loglama `tracing` ile; `println!` yalnızca CLI'nin kullanıcıya dönük çıktısında.
-- Sessiz `unwrap_or_default()` yasak — veri kaybını yutar. Ya hata döndür ya say ve raporla.
-- **"Bakmadım" ile "bulamadım" ayrı tanılardır.** Yapılandırılmamış bir sağlayıcı
-  boş küme değil, ne yazılacağını söyleyen bir hata döndürür.
+- Every failure must say **which stage** it happened in (`STEP: IDENTITY_RESOLVE`).
+- `headshell diag` must print the last run's environment, stage, error chain
+  and the relevant counts in one block that can be copied and pasted.
+- Logging goes through `tracing`; `println!` only in the CLI's user-facing
+  output.
+- A silent `unwrap_or_default()` is forbidden — it swallows data loss. Either
+  return an error or count it and report it.
+- **"I didn't look" and "I couldn't find it" are different diagnoses.** An
+  unconfigured provider returns not an empty set but an error that says what
+  to write.
 
-Eşleştirme gibi kısmi başarı üreten işlemler **her zaman** özet döndürsün:
-kaç kayıt geldi, kaçı ISRC ile, kaçı bulanık, kaçı eşleşmedi.
-
----
-
-## Kod konvansiyonları
-
-- **İsimlendirme dili (D-036): tanımlayıcılar İngilizce, yazı Türkçe.**
-  Fonksiyon, tip, değişken, CSS sınıfı, HTML id, JSON anahtarı, fixture dosya
-  adı, tema token'ı — hepsi İngilizce. Yorum, doküman, CLI yardım metni,
-  arayüz yazısı ve `ADIM:` çıktısı Türkçe. Ayrım kod dili değil, kimin
-  okuduğu: tanımlayıcıyı yabancı bir katkıcı okur, metni kullanıcı.
-- `headshell-core` hataları `thiserror` ile tiplenmiş; `headshell-cli` `anyhow` kullanabilir.
-- Genel API'de `async` — çalışma zamanını çağıran seçsin, çekirdek `#[tokio::main]` kurmasın.
-- Yeni bağımlılık eklemeden önce sor. Ağaç küçük kalmalı (mobil binary boyutu).
-  Zorunlu değilse opsiyonel bir cargo feature arkasına koy (`render-png`, `audio`,
-  `fingerprint`, `http-client`, `plugin-engine`).
-- Ağ ve dosya sistemine dokunan her şey trait arkasında olsun ki testler sahte (fake) kullanabilsin.
-- Kimlikler tip güvenli: `CanonicalId`, `ProviderTrackId`, `ListenId` ayrı newtype'lar, `String` değil.
+Operations that produce partial success, such as matching, **always** return a
+summary: how many records came in, how many by ISRC, how many fuzzy, how many
+did not match.
 
 ---
 
-## Test
+## Code conventions
 
-- `headshell-core`: birim testleri + `fixtures/` üzerinden entegrasyon testleri.
-- Gerçek export zip'lerini kırpıp fixture yap.
-- **Ağa bağlı test yazılabilir (D-043)** ama "ulaşamamak" başarısızlık değildir:
-  ağ yoksa test kendini atlar ve sebebini `stderr`'e yazar; ulaşıp beklenmeyeni
-  alırsa düşer. Sınır "ağa çıkma" değil, iki başarısızlığı ayırmaktır (K9).
-  Atlanan test **geçmiş sayılmaz** — raporlarken "atlandı" de.
-- Kimlik çözümlemesi için **etiketli bir doğruluk kümesi** tut (`fixtures/identity/cases.json`).
-  Her değişiklikte doğruluk oranını ölç — bu sayı projenin en önemli metriğidir:
+- **Language (D-073): everything is English.** Identifiers (functions, types,
+  variables, CSS classes, HTML ids, JSON keys, fixture file names, theme
+  tokens) and text (comments, documentation, CLI help, interface text, `STEP:`
+  output) alike. D-036 had split them — identifiers English, text Turkish;
+  D-073 replaced its text-language half. Turkish snapshots of the documents
+  sit next to them as `*.tr.md` (as of 2026-09-25) and are not kept up to
+  date; the English text is canonical. Real data stays as it is: artist and
+  track names in fixtures, the `Müzik` folder the music directory search
+  looks for.
+- `headshell-core` errors are typed with `thiserror`; `headshell-cli` may use
+  `anyhow`.
+- `async` in the public API — let the caller choose the runtime; the core does
+  not set up `#[tokio::main]`.
+- Ask before adding a new dependency. The tree must stay small (mobile binary
+  size). If it isn't required, put it behind an optional cargo feature
+  (`render-png`, `audio`, `fingerprint`, `http-client`, `plugin-engine`).
+- Everything that touches the network and the file system sits behind a trait
+  so that tests can use a fake.
+- IDs are type-safe: `CanonicalId`, `ProviderTrackId`, `ListenId` are separate
+  newtypes, not `String`.
+
+---
+
+## Tests
+
+- `headshell-core`: unit tests + integration tests over `fixtures/`.
+- Trim real export zips and make them fixtures.
+- **Network tests may be written (D-043)**, but "can't reach it" is not a
+  failure: without a network the test skips itself and writes the reason to
+  `stderr`; if it reaches the service and gets the unexpected, it fails. The
+  line is not "going to the network" but telling the two failures apart (K9).
+  A skipped test **does not count as passed** — say "skipped" when you report.
+- Keep a **labelled accuracy set** for identity resolution
+  (`fixtures/identity/cases.json`). Measure the accuracy rate with every
+  change — this number is the project's most important metric:
   `cargo test -p headshell-core --test identity_accuracy`
-- CLI için: alt komutların `--json` çıktısını snapshot testiyle doğrula.
-- **Testler makinede iz bırakmaz (D-070).** Geçici dizin kendini silen bir
-  yardımcıyla açılır: çekirdekte `crate::test_support::TempDir`/`TestConfig`,
-  entegrasyon testlerinde `tests/support/mod.rs` (kök `target/tmp`). Doğrudan
-  `std::env::temp_dir()` altına dizin açma — testler bir zamanlar orada 1,2 GB
-  bırakmıştı.
-- **Testler dışarıda bir program istemez.** `node`, `python3`, `sh` gibi bir
-  çalışma zamanına yaslanan test başka bir makinede ya başarısız olur ya
-  sessizce atlanır. JS gerekiyorsa gömülü QuickJS kullanılır (D-070); bir
-  işletim sistemine özgü program gerekiyorsa test o sisteme kapılanır
-  (`cfg(unix)` / `cfg(windows)`) ve öteki sistemin karşılığı yazılır.
-- Yol karşılaştırmasında dize değil `PathBuf` kullan: `/` ve `\` ayırıcısı
-  Windows'ta ikisi de geçerli, dize karşılaştırması orada yanlış düşer.
+- For the CLI: verify the subcommands' `--json` output with snapshot tests.
+- **Tests leave no trace on the machine (D-070).** A temporary directory is
+  opened with a helper that deletes itself: `crate::test_support::TempDir` /
+  `TestConfig` in the core, `tests/support/mod.rs` in the integration tests
+  (root `target/tmp`). Don't open a directory directly under
+  `std::env::temp_dir()` — the tests once left 1.2 GB there.
+- **Tests don't need a program from outside.** A test that leans on a runtime
+  like `node`, `python3` or `sh` either fails or silently skips on another
+  machine. If JS is needed, the embedded QuickJS is used (D-070); if a program
+  specific to one operating system is needed, the test is gated to that system
+  (`cfg(unix)` / `cfg(windows)`) and the other system's counterpart is written.
+- Compare paths with `PathBuf`, not strings: both `/` and `\` are valid
+  separators on Windows, and a string comparison gets it wrong there.
 
 ---
 
-## Nerede ne var
+## Where things are
 
-| Arıyorsan | Bak |
+| If you're looking for | Look at |
 |---|---|
-| Bir kuralın tam metni ve gerekçesi | PLAN.md §2 |
-| Ne zaman durup soracağım | PLAN.md §0.1 |
-| Hangi fazdayız, sırada ne var | PLAN.md — faz başlıkları ve alt bölüm durumları |
-| Bir kararın gerekçesi (D-001…) | DECISIONS.md |
-| "Asla yapma" listesi | PLAN.md — ASLA YAPMA |
-| Terimler (canonical id, anchor, listen…) | PLAN.md — SÖZLÜK |
-| Hangi platform hukuken hangi tarafta | PLAN.md — EK: Yayın platformları |
-| Eklenti nasıl yazılır (JS, `host` API'si) | docs/eklenti-yazma.md |
-| Eklenti kataloğu, yeni sürüm yayımlamak | `headshell/plugins` deposunun README'si |
-| Park edilmiş kod neden orada | parked/README.md |
-| Tema nasıl yazılır | crates/headshell/themes/README.md |
-| Masaüstü paketleri nasıl üretilir | .github/workflows/release.yml, crates/headshell/icons/README.md |
-| AUR paketi nasıl yayımlanır | packaging/aur/README.md |
+| The full text and reasoning of a rule | PLAN.md §2 |
+| When to stop and ask | PLAN.md §0.1 |
+| Which phase we're in, what's next | PLAN.md — the phase headings and section statuses |
+| The reasoning behind a decision (D-001…) | DECISIONS.md |
+| The "never do" list | PLAN.md — NEVER DO |
+| Terms (canonical id, anchor, listen…) | PLAN.md — GLOSSARY |
+| Which platform is on which side legally | PLAN.md — APPENDIX: Streaming platforms |
+| How to write a plugin (JS, the `host` API) | docs/writing-plugins.md |
+| The plugin catalog, publishing a new version | the README of the `headshell/plugins` repository |
+| Why parked code is there | parked/README.md |
+| How to write a theme | crates/headshell/themes/README.md |
+| How the desktop packages are produced | .github/workflows/release.yml, crates/headshell/icons/README.md |
+| How the AUR package is published | packaging/aur/README.md |
 
-**Faz durumunu bu dosyaya yazma.** Tek yerde dursun ki bayatlamasın: PLAN.md'nin
-faz başlıkları ve `TAMAM` / `YAPILACAK` işaretleri.
+**Don't write the phase status into this file.** Keep it in one place so it
+doesn't go stale: PLAN.md's phase headings and their `DONE` / `TODO` marks.

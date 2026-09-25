@@ -1,5 +1,9 @@
 # GO / NO-GO eşikleri
 
+> **Türkçe kopya.** Kanonik metin İngilizcedir: [`THRESHOLDS.md`](THRESHOLDS.md).
+> Bu kopya 2026-09-25 tarihli hâlidir; İngilizce metinle birlikte güncel
+> tutulacağı garanti değildir (D-073).
+
 **Bu dosya ölçümden ÖNCE yazıldı.** Sebep: eşiği sonuçları gördükten sonra
 koymak ölçüm değil, kararı ölçüme uydurmaktır.
 

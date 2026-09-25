@@ -1,68 +1,70 @@
-# Tema yazma
+# Writing a theme
 
-Bir tema `headshell`'un renklerini, köşe yarıçaplarını ve canlandırma süresini
-değiştirir. JavaScript çalıştırmaz, veriye erişmez, uygulamanın davranışını
-değiştirmez — yalnızca görünüm.
+A theme changes `headshell`'s colours, corner radii and animation duration. It
+runs no JavaScript, accesses no data and doesn't change the app's behaviour —
+appearance only.
 
-Bu dizindeki iki tema (`daylight`, `contrast`) uygulamayla birlikte geliyor ve
-aynı zamanda örnek: kopyalayıp kendinizinkini yazabilirsiniz.
+The two themes in this directory (`daylight`, `contrast`) ship with the app and
+are examples at the same time: copy one and write your own.
 
-## Kurulum
+## Installing
 
-Bir tema, içinde iki dosya olan bir dizindir:
+A theme is a directory with two files in it:
 
 ```
-<veri-dizini>/themes/<tema-adi>/
+<data-directory>/themes/<theme-name>/
   theme.json
   theme.css
 ```
 
-Veri dizininin yolu uygulamada **görünüm** bölümünde yazıyor (genellikle
-`~/.local/share/headshell`). Dizini oraya koyup **listeyi yenile** deyin —
-uygulamayı kapatmanız gerekmez. Dizin adı temanın kimliğidir.
+The data directory's path is written in the app's **appearance** section
+(usually `~/.local/share/headshell`). Put the directory there and say
+**refresh the list** — you don't need to close the app. The directory name is
+the theme's ID.
 
-Listede her tema kendi renkleriyle çizilmiş küçük bir pencereyle görünür:
-`:root`'ta yazdığınız `--headshell-bg`, `--headshell-surface`,
-`--headshell-text` ve `--headshell-accent`, yazmadıklarınız varsayılan
-temadan — uygulandığında göreceğinizin aynısı. `@media` içindeki koşullu
-değerler önizlemeye girmez.
+In the list, every theme shows up as a small window drawn in its own colours:
+the `--headshell-bg`, `--headshell-surface`, `--headshell-text` and
+`--headshell-accent` you wrote in `:root`, and for the ones you didn't write,
+the default theme's — exactly what you'll see when it's applied. Conditional
+values inside `@media` don't go into the preview.
 
 `theme.json`:
 
 ```json
 {
-  "name": "Tema Adım",
-  "author": "Siz",
+  "name": "My Theme",
+  "author": "You",
   "api": 1
 }
 ```
 
-`api`, aşağıdaki sözleşmenin sürümü. Uyuşmazsa tema **sessizce yok sayılmaz**;
-listede hangi sürümü istediğiyle birlikte görünür.
+`api` is the version of the contract below. On a mismatch the theme **isn't
+silently ignored**; it shows up in the list together with the version it asks
+for.
 
-## Sözleşme: token'lar
+## The contract: tokens
 
-Garanti edilen yüzey **yalnızca** `theme.css`'in `:root` bloğundaki bu
-değişkenlerdir. Yazmadığınız token varsayılan değerinde kalır.
+The guaranteed surface is **only** these variables in the `:root` block of
+`theme.css`. A token you don't write stays at its default value.
 
-| Token | Varsayılan | Anlamı |
+| Token | Default | Meaning |
 |---|---|---|
-| `--headshell-color-scheme` | `dark` | `dark` \| `light` — onay kutusu, imleç, kaydırma çubuğu gibi motorun kendi çizdiği parçalar için |
-| `--headshell-bg` | `#12100e` | sayfa arka planı |
-| `--headshell-surface` | `#1b1815` | panel arka planı (üst çubuk, kenar çubuğu, oynatıcı) |
-| `--headshell-surface-raised` | `#221e1a` | etkileşimli/üzerine gelinen arka plan (girdi, aktif sekme, uyarı) |
-| `--headshell-border` | `#2e2925` | kenarlık, ayraç, ilerleme çubuğu izi |
-| `--headshell-text` | `#eae2d8` | birincil metin |
-| `--headshell-text-dim` | `#9a8f83` | ikincil/soluk metin |
-| `--headshell-accent` | `#ffb454` | marka + etkileşim vurgusu |
-| `--headshell-success` | `#7bd88f` | çalıyor / başarı |
-| `--headshell-error` | `#ff6b6b` | hata |
-| `--headshell-info` | `#79c0ff` | arabelleğe alınıyor / bilgi |
-| `--headshell-radius-sm` | `6px` | kontrol köşe yarıçapı |
-| `--headshell-radius-lg` | `8px` | panel köşe yarıçapı |
-| `--headshell-duration` | `120ms` | canlandırma süresi (`0ms` = hareket yok) |
+| `--headshell-color-scheme` | `dark` | `dark` \| `light` — for the parts the engine draws itself, like checkboxes, the caret and the scrollbar |
+| `--headshell-bg` | `#12100e` | page background |
+| `--headshell-surface` | `#1b1815` | panel background (top bar, sidebar, player) |
+| `--headshell-surface-raised` | `#221e1a` | interactive/hovered background (input, active tab, notice) |
+| `--headshell-border` | `#2e2925` | border, divider, progress bar track |
+| `--headshell-text` | `#eae2d8` | primary text |
+| `--headshell-text-dim` | `#9a8f83` | secondary/dim text |
+| `--headshell-accent` | `#ffb454` | brand + interaction accent |
+| `--headshell-success` | `#7bd88f` | playing / success |
+| `--headshell-error` | `#ff6b6b` | error |
+| `--headshell-info` | `#79c0ff` | buffering / info |
+| `--headshell-radius-sm` | `6px` | control corner radius |
+| `--headshell-radius-lg` | `8px` | panel corner radius |
+| `--headshell-duration` | `120ms` | animation duration (`0ms` = no motion) |
 
-En kısa çalışan tema:
+The shortest working theme:
 
 ```css
 :root {
@@ -70,52 +72,55 @@ En kısa çalışan tema:
 }
 ```
 
-## `:root` dışına çıkmak
+## Going outside `:root`
 
-Sınıf adları da (`.topbar`, `.player`, `.queue`, `.toast`, …) sözleşmenin
-parçası ve habersiz yeniden adlandırılmıyorlar — tam liste
-`crates/headshell/tests/ui_contract.rs` içindeki `CONTRACT_CLASSES` dizisidir ve
-bir test onu tutuyor. Ama `:root` dışına yazan bir
-tema listede **"genişletilmiş · garantisi yok"** diye işaretlenir.
+Class names (`.topbar`, `.player`, `.queue`, `.toast`, …) are part of the
+contract too, and they aren't renamed without notice — the full list is the
+`CONTRACT_CLASSES` array in `crates/headshell/tests/ui_contract.rs`, and a test
+holds it. But a theme that writes outside `:root` is flagged in the list as
+**"extended · no guarantee"**.
 
-Reddedilmez — engellemiyoruz, saklamıyoruz da. Bir `api` sürüm atlamasında
-geriye dönük uyumluluk yalnızca yukarıdaki token'lar için taahhüt ediliyor.
+It isn't rejected — we don't block it, and we don't hide it either. Across an
+`api` version bump, backward compatibility is committed only for the tokens
+above.
 
-Sınıf adlarının yerinde kalması **yerleşimin** aynı kalacağı anlamına
-gelmiyor. D-072'de iskelet değişti: kenar çubuğu tam boy oldu, `.topbar`
-içerik sütununun üstüne, `.player` onun altına geçti, `.state` bir glif
-değil bir nokta oldu (rengi hâlâ `.state.playing { color: … }` ile
-değişiyor). Hiçbir sınıf kaldırılmadı ve anlamı değişmedi — `api` 1'de
-kaldı — ama konum varsayan genişletilmiş bir tema bunu hissedebilir.
+Class names staying in place doesn't mean **the layout** will stay the same.
+The skeleton changed in D-072: the sidebar became full height, `.topbar` moved
+above the content column and `.player` below it, and `.state` became a dot
+instead of a glyph (its colour still changes with
+`.state.playing { color: … }`). No class was removed or changed its meaning —
+it stayed at `api` 1 — but an extended theme that assumes positions may feel
+it.
 
-## Canlandırma: yalnızca `transform` ve `opacity`
+## Animation: `transform` and `opacity` only
 
-Bu bir üslup tercihi değil, ölçüm. WebKitGTK'da (Linux'ta varsayılan motor)
-`height`, `box-shadow`, `filter` ve `background-position` canlandırmaları
-kare hızını 58.8'den 47.6'ya düşürüyor; `transform` ve `opacity` hiç
-düşürmüyor.
+This isn't a matter of style; it's a measurement. In WebKitGTK (the default
+engine on Linux), `height`, `box-shadow`, `filter` and `background-position`
+animations drop the frame rate from 58.8 to 47.6; `transform` and `opacity`
+don't drop it at all.
 
-Bu yüzden ilerleme çubuğu `scaleX` ile çiziliyor, genişlikle değil. Aynısını
-yapın — yoksa fark **kullanıcının** makinesinde ortaya çıkar ve suçlanan tema
-değil uygulama olur.
+That's why the progress bar is drawn with `scaleX`, not with width. Do the
+same — otherwise the difference shows up on **the user's** machine, and the one
+blamed is the app, not the theme.
 
-### `--headshell-duration` bütün hareketi ölçekler
+### `--headshell-duration` scales all motion
 
-Arayüzün hareketi iki türlü: kısa geçişler (üstüne gelme, sürükle-bırak
-alanı) doğrudan bu süreyi kullanır; konum hareketleri (seçim göstergesi,
-bölüm geçişi, uyarılar, kısayol penceresi) **yaydır** ve yayın tepkisi bu
-sürenin üç katıdır — varsayılan 120ms → 0.36 sn.
+The interface's motion comes in two kinds: short transitions (hover, the
+drag-and-drop area) use this duration directly; positional motion (the
+selection indicator, section transitions, notices, the shortcut window) is a
+**spring**, and the spring's response is three times this duration — the
+default 120ms → 0.36 s.
 
-- `0ms` hiçbir şeyin hareket etmediği demek: yaylar da, dönen meşguliyet
-  halkası da durur. Yüksek Karşıtlık teması bunu kullanıyor.
-- Daha uzun bir süre bütün hareketi orantılı olarak yavaşlatır.
-- Sistemin "hareketi azalt" tercihi temadan bağımsız uygulanır: konum ve
-  ölçek hareketi kalkar, opaklık geçişi kalır.
+- `0ms` means nothing moves: the springs stop, and so does the spinning busy
+  ring. The High Contrast theme uses this.
+- A longer duration slows all motion down proportionally.
+- The system's "reduce motion" preference applies independently of the theme:
+  positional and scale motion goes away, opacity transitions stay.
 
-## Sürümleme
+## Versioning
 
-- Yeni token **eklenmesi** `api`'yi artırmaz: temanız onu yazmıyordu,
-  varsayılanını alır ve çalışmaya devam eder.
-- Bir token'ın **kaldırılması** ya da anlamının değişmesi artırır.
+- **Adding** a new token doesn't raise `api`: your theme didn't write it, so it
+  gets the default and keeps working.
+- **Removing** a token or changing its meaning raises it.
 
-Şu anki sürüm: **`api: 1`**.
+The current version: **`api: 1`**.

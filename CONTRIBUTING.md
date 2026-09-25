@@ -1,21 +1,26 @@
-# Katkı
+# Contributing
 
-Proje erken aşamada ve mimari kararlar hâlâ veriliyor. Kod yazmadan önce
-[`PLAN.md`](PLAN.md) ve [`DECISIONS.md`](DECISIONS.md) okunmalı — çoğu "neden
-böyle yapılmamış?" sorusunun cevabı orada, gerekçesiyle duruyor.
+The project is at an early stage and architectural decisions are still being
+made. Before writing code, read [`PLAN.md`](PLAN.md) and
+[`DECISIONS.md`](DECISIONS.md) — the answer to most "why wasn't this done like
+that?" questions is there, with its reasoning.
 
-## Önce oku
+## Read first
 
-- [`PLAN.md`](PLAN.md) — yol haritası, değişmez kurallar (§2), faz sınırları,
-  ASLA YAPMA, sözlük. **Kurallarda bu dosya geçerlidir.**
-- [`CLAUDE.md`](CLAUDE.md) — workspace ağacı, komutlar, kod konvansiyonları,
-  CLI test yüzeyi, tanılama pratiği. **Operasyonel bilgide bu dosya geçerlidir.**
-- [`DECISIONS.md`](DECISIONS.md) — verilmiş kararlar ve gerekçeleri.
-  Aynı soru iki kez tartışılmaz.
+- [`PLAN.md`](PLAN.md) — the roadmap, the invariant rules (§2), phase
+  boundaries, NEVER DO, the glossary. **For rules, this file is authoritative.**
+- [`CLAUDE.md`](CLAUDE.md) — the workspace tree, commands, code conventions,
+  the CLI test surface, diagnostics practice. **For operational knowledge, this
+  file is authoritative.**
+- [`DECISIONS.md`](DECISIONS.md) — the decisions that have been made and their
+  reasoning. The same question is not argued twice.
 
-## Üç kapı
+The documents are written in English. Turkish snapshots of them sit next to
+them as `*.tr.md`; they are not kept up to date (D-073).
 
-Bir değişiklik bunlar temiz geçmeden bitmiş sayılmaz:
+## The three gates
+
+A change is not done until these pass clean:
 
 ```bash
 cargo test --workspace
@@ -23,160 +28,171 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 ```
 
-Üçünü birden: `make gates` (yalnızca Unix; `make` ve `sh` istiyor —
-Windows'ta yukarıdaki üç `cargo` komutu doğrudan koşulur).
+All three at once: `make gates` (Unix only; it needs `make` and `sh` — on
+Windows the three `cargo` commands above are run directly).
 
-Tam "bitti" ölçütü PLAN.md §0.4'te. Üçü CI'da da koşuyor
-([`.github/workflows/ci.yml`](.github/workflows/ci.yml), D-053): Linux'ta
-üçü, Windows ve macOS'ta clippy ile testler (D-070). Ama önce kendi
-makinende geçmeli — CI bir hatırlatıcıdır, ilk savunma hattı değil.
+The full "done" criterion is in PLAN.md §0.4. The three also run in CI
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml), D-053): all three on
+Linux, clippy and the tests on Windows and macOS (D-070). But they must pass on
+your own machine first — CI is a reminder, not the first line of defence.
 
-### Çalışma zamanı gereksinimi
+### Runtime requirements
 
-Yok. Eklenti motoru (QuickJS) çekirdeğe gömülü (D-069); eklentileri koşturan
-testler ve komutlar makinede hiçbir yorumlayıcı aramaz. Eklentilerin ihtiyaç
-duyduğu araçları (yt-dlp) motor, platformun kendi kendine yeten ikilisi
-olarak indirir. Derleme için bir C derleyicisi gerekir — ama SQLite
-(`rusqlite` `bundled`) onu zaten istiyordu.
+None. The plugin engine (QuickJS) is embedded in the core (D-069); the tests
+and commands that run plugins look for no interpreter on the machine. The
+tools plugins need (yt-dlp) are downloaded by the engine as the platform's
+self-contained binary. Building needs a C compiler — but SQLite (`rusqlite`
+`bundled`) already wanted one.
 
-Testler de dışarıda bir şey istemiyor: webview'in çapa formülünü sınayan
-test eskiden `node` çalıştırıyordu, artık aynı dosyayı gömülü QuickJS'te
-değerlendiriyor (D-070).
+The tests don't need anything from outside either: the test that checks the
+webview's anchor formula used to run `node`; it now evaluates the same file in
+the embedded QuickJS (D-070).
 
-### Testler makinede iz bırakmaz
+### Tests leave no trace on the machine
 
-Her test açtığı geçici dizini **siler** — düşen bir test de (`Drop` panikte
-koşar). Birim testleri işletim sisteminin geçici dizinini, entegrasyon
-testleri Cargo'nun `target/tmp`'sini kullanır; öldürülmüş bir koşumun artığı
-bile ortak `/tmp`'ye değil projeye düşer ve `cargo clean` ile gider. Yeni bir
-test yazarken `std::env::temp_dir()`'e doğrudan dizin açma: çekirdekte
-`crate::test_support::TempDir`, entegrasyon testlerinde
-`tests/support/mod.rs` var. Kural bir ölçümden doğdu: testler bir geliştirme
-makinesinin tmpfs'i olan `/tmp`'sinde 1.100 dizin, 1,2 GB bırakmıştı.
+Every test **deletes** the temporary directory it opened — a failing test too
+(`Drop` runs during a panic). Unit tests use the operating system's temporary
+directory, integration tests Cargo's `target/tmp`; even the leftovers of a
+killed run land in the project, not in the shared `/tmp`, and go away with
+`cargo clean`. When writing a new test, don't open a directory directly under
+`std::env::temp_dir()`: the core has `crate::test_support::TempDir`, the
+integration tests have `tests/support/mod.rs`. The rule came from a
+measurement: the tests had left 1,100 directories, 1.2 GB, in the `/tmp` of a
+development machine, which was a tmpfs.
 
-YouTube Music testlerinin indirdiği yt-dlp (~40 MB) `target/tmp`'de
-önbellekte tutulur, ama önbellek körü körüne kullanılmaz: her koşumda karması
-ve indirme adresinin hâlâ yaşadığı denetlenir — önbellek, ölmüş bir adresi bu
-makinede yeşil göstermesin.
+The yt-dlp that the YouTube Music tests download (~40 MB) is cached in
+`target/tmp`, but the cache is not used blindly: on every run its hash is
+checked, and so is whether the download address is still alive — so the cache
+doesn't show a dead address as green on this machine.
 
-### Windows ve macOS'ta geliştirme
+### Developing on Windows and macOS
 
-Derleme ve testler aynı `cargo` komutlarıyla koşar. Farklar:
+Building and the tests run with the same `cargo` commands. The differences:
 
-- Veri dizini Windows'ta `%LOCALAPPDATA%\headshell`, macOS'ta
-  `~/Library/Application Support/headshell`. Denemeler için
-  `HEADSHELL_DATA_DIR` ya da CLI'de `--data-dir` ile ayrı bir dizin verin.
-- `HEADSHELL_MUSIC_DIRS` listesi `PATH` gibi yazılır: Windows'ta `;`,
-  ötekilerde `:` ile.
-- Depo her platformda LF satır sonlarıyla çıkar (`.gitattributes`). Windows'ta
-  `core.autocrlf` açık olsa da snapshot'lar bayt bayt tutar.
-- Araç çalıştırma testleri Unix'te bir `sh` betiği, Windows'ta sistemin
-  `cmd.exe`'sinin bir kopyasını "eser" olarak kuruyor.
+- The data directory is `%LOCALAPPDATA%\headshell` on Windows and
+  `~/Library/Application Support/headshell` on macOS. For experiments, give a
+  separate directory with `HEADSHELL_DATA_DIR` or the CLI's `--data-dir`.
+- The `HEADSHELL_MUSIC_DIRS` list is written like `PATH`: with `;` on Windows,
+  with `:` elsewhere.
+- The repository checks out with LF line endings on every platform
+  (`.gitattributes`). Even with `core.autocrlf` on in Windows, the snapshots
+  match byte for byte.
+- The tool-running tests install, as an "artifact", an `sh` script on Unix and
+  a copy of the system's `cmd.exe` on Windows.
 
-### Kendini atlayan testler
+### Tests that skip themselves
 
-Ağa bağlı testler (D-043) ulaşamadıklarında **düşmez, kendilerini atlar ve
-sebebini `stderr`'e yazar.** Atlanan test geçmiş sayılmaz — rapor ederken
-"atlandı" de. Bugün Linux'ta 447 test koşuyor ve 3'ü kendini atlıyor
-(AcoustID anahtarı yok); torrent'in 56 testi eklentiyle birlikte park edildi
-(D-069). Testleri bir terminalden koşarsan iki CLI testi daha atlanır: "terminal
-yokken ne olur" sorusu, çocuk süreç terminale ulaşabildiği sürece sınanamaz
-(D-070 eki). `playback_local`'in ses testi ses aygıtı olan ama yük altındaki bir
-makinede aralıklı düşebiliyor (D-059, D-070).
+Network tests (D-043) **don't fail when they can't reach the service — they
+skip themselves and write the reason to `stderr`.** A skipped test does not
+count as passed — say "skipped" when you report. Today 466 tests run on Linux
+and 3 of them skip themselves (no AcoustID key); torrent's 56 tests were parked
+together with the plugin (D-069). If you run the tests from a terminal, two
+more CLI tests skip: the question "what happens with no terminal" cannot be
+tested while the child process can reach the terminal (D-070 addendum). The
+audio test in `playback_local` can fail intermittently on a machine that has an
+audio device but is under load (D-059, D-070).
 
-Atlananları gerçekten koşturmak için gereken ortam değişkenleri:
+The environment variables needed to really run the skipped ones:
 
-| Değişken | Neyi açar |
+| Variable | What it turns on |
 |---|---|
-| `HEADSHELL_ACOUSTID_KEY` | AcoustID canlı sınamaları (3 test). Anahtarsız derlemede `EMBEDDED_API_KEY` boş olduğu için atlanırlar. |
-| `HEADSHELL_TEST_YTMUSIC_COOKIES` | YouTube'un bot duvarını aşmak için çerez (D-061). Yalnızca veri merkezi adreslerinde gerekiyor; ev bağlantısında testler çerezsiz de koşuyor. |
-| `HEADSHELL_PLUGIN_INDEX` | SoundCloud ve YouTube Music canlı testlerinin eklentiyi kurduğu katalog (D-071). Varsayılan `headshell/plugins`'in yayımlanmış indeksi; yayımlanmamış bir eklenti değişikliğini sınamak için `headshell plugin index` ile üretilmiş yerel bir aynayı gösterebilir (düz `http` yalnızca `127.0.0.1`'e). |
+| `HEADSHELL_ACOUSTID_KEY` | The live AcoustID checks (3 tests). In a build without a key they skip, because `EMBEDDED_API_KEY` is empty. |
+| `HEADSHELL_TEST_YTMUSIC_COOKIES` | Cookies to get past YouTube's bot wall (D-061). Only needed on data centre addresses; on a home connection the tests run without cookies too. |
+| `HEADSHELL_PLUGIN_INDEX` | The catalog the SoundCloud and YouTube Music live tests install the plugin from (D-071). The default is the published index of `headshell/plugins`; to test an unpublished plugin change it can point at a local mirror made with `headshell plugin index` (plain `http` only to `127.0.0.1`). |
 
-`HEADSHELL_PYTHON` ve `HEADSHELL_YTDLP` **kaldırıldı** (D-055, D-069): motor
-Python aramıyor, yt-dlp'yi eklenti değil motor kuruyor. `ytmusic` testleri
-onu manifestteki sabitlenmiş sürümden, bu platformun ikilisi olarak
-indiriyor. Eklentilerin kendisi bu depoda değil (D-071): canlı testler onları
-kataloğa ulaşamazsa kendini atlıyor, ulaşıp kuramazsa düşüyor. Torznab değişkenleri torrent eklentisiyle birlikte park edildi
-(`parked/`, D-069).
+`HEADSHELL_PYTHON` and `HEADSHELL_YTDLP` **were removed** (D-055, D-069): the
+engine doesn't look for Python, and yt-dlp is installed by the engine, not the
+plugin. The `ytmusic` tests download it from the pinned version in the
+manifest, as this platform's binary. The plugins themselves are not in this
+repository (D-071): the live tests skip themselves if they can't reach the
+catalog, and fail if they reach it but can't install. The Torznab variables
+were parked together with the torrent plugin (`parked/`, D-069).
 
-Depo kökündeki `.env` **hiçbir kod tarafından okunmaz** — `dotenv` benzeri bir
-bağımlılık yok. Oraya yazdığınız değer kendiliğinden ortama girmez; kabuğunuza
-siz aktarmalısınız (`set -a; . ./.env; set +a`). Dosya `.gitignore`'da.
+The `.env` at the repository root **is read by no code** — there is no
+`dotenv`-like dependency. A value you write there does not enter the
+environment on its own; you have to load it into your shell yourself
+(`set -a; . ./.env; set +a`). The file is in `.gitignore`.
 
-Yeni bir yetenek eklediysen ayrıca:
+If you added a new capability, also:
 
-- CLI'de bir alt komutu var ve `--json` destekliyor.
-- Kimlik veya içe aktarmaya dokunduysan doğruluk kümesi çalıştırıldı ve
-  oran PR açıklamasında yazıyor.
+- It has a CLI subcommand, and that subcommand supports `--json`.
+- If you touched identity or importing, the accuracy set was run and the rate
+  is written in the PR description.
 
-## Altın Kural (K1)
+## The Golden Rule (K1)
 
-**CLI ince bir kabuktur. Bütün mantık `headshell-core` içindedir.**
+**The CLI is a thin shell. All logic lives in `headshell-core`.**
 
-Testi şu: bir özellik CLI'den silindiğinde çekirdek onu hâlâ sunabiliyor olmalı.
-CLI yalnızca argüman ayrıştırır, çekirdeği çağırır, çıktıyı biçimler, çıkış kodu
-verir. CLI'de iş mantığı, veri dönüşümü, ağ çağrısı, SQL veya eşleştirme
-algoritması **olmaz**. Aynısı Tauri kabuğu için de geçerlidir.
+The test: when a feature is deleted from the CLI, the core must still be able
+to offer it. The CLI only parses arguments, calls the core, formats the output
+and sets the exit code. The CLI has **no** business logic, data
+transformation, network calls, SQL or matching algorithms. The same goes for
+the Tauri shell.
 
-Bir şeyi CLI'de yazmak istiyorsan önce sor: "bunu GUI de isteyecek mi?"
-Cevap evetse çekirdeğe koy. Bu kural GUI'nin ve `uniffi` üzerinden mobil
-bağlamaların sıfır kod tekrarıyla çalışması için var.
+If you want to write something in the CLI, first ask: "will the GUI want this
+too?" If the answer is yes, put it in the core. This rule exists so that the
+GUI and the mobile bindings through `uniffi` work with zero code duplication.
 
-## Değişmez kurallar
+## Invariant rules
 
-Tartışmaya kapalı. İhlal etmen gerektiğini düşünüyorsan kod yazma — bir issue aç
-ve neden gerektiğini anlat.
+Not open for debate. If you think you need to break one, don't write code —
+open an issue and explain why it's needed.
 
-Tam metin ve gerekçeleri **[`PLAN.md` §2](PLAN.md)**'de, K1–K10 olarak numaralı.
-Aşağısı yalnızca indekstir; burada tekrarlanmamalarının sebebi, bir zamanlar üç
-dosyada birden yazılı olmaları ve kopyaların birbiriyle çelişecek kadar
-kaymasıydı.
+The full text and reasoning are in **[`PLAN.md` §2](PLAN.md)**, numbered
+K1–K10. What follows is only an index; they are not repeated here because they
+were once written in three files at once, and the copies drifted far enough to
+contradict each other.
 
-| # | Kural |
+| # | Rule |
 |---|---|
-| **K1** | Altın Kural: CLI ince kabuktur |
-| **K2** | İçe aktarma export dosyalarından yapılır, API'den değil |
-| **K3** | Ses asla röle edilmez, yalnızca pozisyon senkronlanır |
-| **K4** | Spotify çekirdeğe girmez |
-| **K5** | Eklentiler gömülü JS motorunda koşar; dışarıya yalnızca motorun kapılarından çıkar |
-| **K6** | Kanonik kimlik zinciri sırası: ISRC → MBID → bulanık → AcoustID |
-| **K7** | Çekirdek API'si `uniffi` ile ifade edilebilir olmalı |
-| **K8** | `headshell-core` içinde `unwrap()` / `expect()` / `panic!()` yok |
-| **K9** | Her başarısızlık hangi aşamada olduğunu söyler |
-| **K10** | Faz sınırı aşılmaz |
+| **K1** | The Golden Rule: the CLI is a thin shell |
+| **K2** | Importing is done from export files, not from APIs |
+| **K3** | Audio is never relayed; only the position is synced |
+| **K4** | Spotify does not enter the core |
+| **K5** | Plugins run in an embedded JS engine; they reach the outside only through the engine's gates |
+| **K6** | The order of the canonical identity chain: ISRC → MBID → fuzzy → AcoustID |
+| **K7** | The core API must be expressible with `uniffi` |
+| **K8** | No `unwrap()` / `expect()` / `panic!()` in `headshell-core` |
+| **K9** | Every failure says which stage it happened in |
+| **K10** | Phase boundaries are not crossed |
 
-Ayrıca **ASLA YAPMA** listesi (DRM, ses rölesi, ham `listen` kaydını silme…)
-PLAN.md'nin sonundadır.
+The **NEVER DO** list (DRM, audio relaying, deleting raw `listen`
+records…) is at the end of PLAN.md.
 
-## Kod konvansiyonları
+## Code conventions
 
-Tek sahibi [`CLAUDE.md`](CLAUDE.md), "Kod konvansiyonları" başlığı — hata tipleri,
-`async` sözleşmesi, newtype kimlikler, bağımlılık politikası ve isimlendirme dili
-(D-036: tanımlayıcılar İngilizce, yazı Türkçe).
+Owned solely by [`CLAUDE.md`](CLAUDE.md), under "Code conventions" — error
+types, the `async` contract, newtype IDs, the dependency policy and the naming
+language (D-073: identifiers and text are both English; it replaced D-036's
+"text in Turkish" rule).
 
-Workspace ağacı ve komutlar da orada.
+The workspace tree and the commands are there too.
 
-## Tanılama kültürü ve bağımlılıklar
+## Diagnostics culture and dependencies
 
-Tek sahibi [`CLAUDE.md`](CLAUDE.md). Özü (K9): her başarısızlık **hangi aşamada**
-olduğunu söyler, kısmi başarı üreten her işlem özet döndürür, atlanan kayıt
-sayılır ve raporlanır — sessizce düşürülmez.
+Owned solely by [`CLAUDE.md`](CLAUDE.md). The gist (K9): every failure says
+**which stage** it happened in, every operation that produces partial success
+returns a summary, and a skipped record is counted and reported — never
+silently dropped.
 
-Yeni bağımlılık eklemeden **önce sor**; ağaç küçük kalmalı (mobil binary boyutu).
+**Ask before** adding a new dependency; the tree must stay small (mobile
+binary size).
 
-## Kimlik doğruluğu
+## Identity accuracy
 
-`fixtures/identity/cases.json` elle etiketlenmiş bir doğruluk kümesidir ve
-oradaki oran **projenin en önemli metriğidir**. Eşleştirme koduna dokunuyorsan:
+`fixtures/identity/cases.json` is a hand-labelled accuracy set, and the rate
+there is **the project's most important metric**. If you touch the matching
+code:
 
 ```bash
 cargo test -p headshell-core --test identity_accuracy
 ```
 
-Test sınıf bazında kırılım basar — toplam oran tek bir sınıftaki çöküşü
-gizleyebilir. Yeni bir hata sınıfı bulduysan **önce vakayı ekle, testin
-düştüğünü gör**, sonra düzelt.
+The test prints a per-class breakdown — the overall rate can hide a collapse in
+a single class. If you found a new class of error, **add the case first and see
+the test fail**, then fix it.
 
-## Lisans
+## License
 
-Katkın MIT veya Apache-2.0 (çift lisans) altında yayımlanmayı kabul eder.
+Your contribution agrees to be published under MIT or Apache-2.0 (dual
+license).

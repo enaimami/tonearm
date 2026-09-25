@@ -1,5 +1,9 @@
 # Eklenti yazma rehberi (sözleşme api 2)
 
+> **Türkçe kopya.** Kanonik metin İngilizcedir: [`writing-plugins.md`](writing-plugins.md).
+> Bu kopya 2026-09-25 tarihli hâlidir; İngilizce metinle birlikte güncel
+> tutulacağı garanti değildir (D-073).
+
 `headshell` eklentileri **JavaScript** ile yazılır ve `headshell`'un içine
 gömülü **QuickJS** motorunda koşar (D-069). Kullanıcının makinesinde Python,
 Node ya da başka bir çalışma zamanı gerekmez: eklentiyi bir dizine koymak

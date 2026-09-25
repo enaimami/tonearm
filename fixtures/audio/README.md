@@ -1,30 +1,32 @@
 # `fixtures/audio/`
 
-Buradaki ses dosyalarının **hiçbiri gerçek müzik değildir.** Hepsi sentetik
-olarak üretildi ya da elle yazıldı; depo hiçbir telifli kaydı taşımıyor ve
-taşımamalı. Yeni bir ses fixture'ı eklerken kuralı koru: üretim komutunu
-buraya yaz, üretilemeyen bir ikiliyi commit etme.
+**None** of the audio files here is real music. All of them were produced
+synthetically or written by hand; the repository carries no copyrighted
+recording and must not. When adding a new audio fixture, keep the rule: write
+the command that produces it here, and don't commit a binary that can't be
+reproduced.
 
-| Dosya | Ne için | Nasıl üretildi |
+| File | What for | How it was produced |
 |---|---|---|
-| `fingerprint_sample.flac` | Chromaprint parmak izi (D-045) | aşağıdaki `ffmpeg` komutu |
-| `Test Artist - Mp3 Track.mp3` | dosya adından etiket çıkarma; parmak izi için **kasten çok kısa** | 2 sn sentetik ton |
-| `Other Artist - Ogg Track.ogg` | kap çeşitliliği | sentetik ton |
-| `tagged.flac` | gömülü etiketlerin okunması | sentetik ton + Vorbis yorumları |
-| `corrupt.flac` | çözücünün aşamayı bildirmesi | geçerli olmayan 24 bayt |
-| `cover.jpg` | kapak görseli yolu | 5 baytlık yer tutucu |
-| `Dir Artist/` | dizin yapısından çıkarım | boş dizin ağacı |
+| `fingerprint_sample.flac` | Chromaprint fingerprint (D-045) | the `ffmpeg` command below |
+| `Test Artist - Mp3 Track.mp3` | deriving tags from the file name; **deliberately too short** for a fingerprint | a 2 s synthetic tone |
+| `Other Artist - Ogg Track.ogg` | container variety | a synthetic tone |
+| `tagged.flac` | reading embedded tags | a synthetic tone + Vorbis comments |
+| `corrupt.flac` | the decoder reporting its stage | 24 invalid bytes |
+| `cover.jpg` | the cover image path | a 5-byte placeholder |
+| `Dir Artist/` | inference from the directory structure | an empty directory tree |
 
 ## `fingerprint_sample.flac`
 
-15 saniye, 44.1 kHz, mono, 16 bit. Her 2.5 saniyede bir yarım ses yukarı
-kayan dört sesli bir akor — sabit bir ton chroma özelliklerini düz bırakır,
-gürültü ise parmak izini anlamsızlaştırır; ikisinin arasında duran tonal ama
-değişen bir sinyal gerekiyordu.
+15 seconds, 44.1 kHz, mono, 16 bit. A four-voice chord that shifts up a
+semitone every 2.5 seconds — a steady tone leaves the chroma features flat,
+while noise makes the fingerprint meaningless; a signal was needed that sits
+between the two, tonal but changing.
 
-Uzunluk kaza değil: Chromaprint ilk parmak izi öğesini üretmek için birkaç
-saniyelik pencere ister, bu yüzden 2 saniyelik `Test Artist - Mp3 Track.mp3`
-"çok kısa" hatası verir — o dosya artık bu sınırın testi.
+The length is no accident: Chromaprint needs a window of a few seconds to
+produce the first fingerprint item, so the 2-second
+`Test Artist - Mp3 Track.mp3` gives a "too short" error — that file is now the
+test of this limit.
 
 ```sh
 ffmpeg -y \
@@ -36,6 +38,7 @@ ffmpeg -y \
   -sample_fmt s16 "fixtures/audio/fingerprint_sample.flac"
 ```
 
-Sentetik olduğu için AcoustID veritabanında **karşılığı yoktur** ve olmaması
-gerekir: canlı AcoustID testi "eşleşme bulunamadı" ile "servise ulaşılamadı"
-ayrımını sınar (K9), bilinen bir parçayı tanımayı değil.
+Since it is synthetic, it **has no match** in the AcoustID database, and it
+shouldn't: the live AcoustID test checks the distinction between "no match
+found" and "the service couldn't be reached" (K9), not recognising a known
+track.
