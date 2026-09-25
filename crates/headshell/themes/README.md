@@ -17,9 +17,15 @@ Bir tema, içinde iki dosya olan bir dizindir:
   theme.css
 ```
 
-Veri dizininin yolu uygulamada **görünüm** sekmesinde yazıyor (genellikle
+Veri dizininin yolu uygulamada **görünüm** bölümünde yazıyor (genellikle
 `~/.local/share/headshell`). Dizini oraya koyup **listeyi yenile** deyin —
 uygulamayı kapatmanız gerekmez. Dizin adı temanın kimliğidir.
+
+Listede her tema kendi renkleriyle çizilmiş küçük bir pencereyle görünür:
+`:root`'ta yazdığınız `--headshell-bg`, `--headshell-surface`,
+`--headshell-text` ve `--headshell-accent`, yazmadıklarınız varsayılan
+temadan — uygulandığında göreceğinizin aynısı. `@media` içindeki koşullu
+değerler önizlemeye girmez.
 
 `theme.json`:
 
@@ -75,6 +81,13 @@ tema listede **"genişletilmiş · garantisi yok"** diye işaretlenir.
 Reddedilmez — engellemiyoruz, saklamıyoruz da. Bir `api` sürüm atlamasında
 geriye dönük uyumluluk yalnızca yukarıdaki token'lar için taahhüt ediliyor.
 
+Sınıf adlarının yerinde kalması **yerleşimin** aynı kalacağı anlamına
+gelmiyor. D-072'de iskelet değişti: kenar çubuğu tam boy oldu, `.topbar`
+içerik sütununun üstüne, `.player` onun altına geçti, `.state` bir glif
+değil bir nokta oldu (rengi hâlâ `.state.playing { color: … }` ile
+değişiyor). Hiçbir sınıf kaldırılmadı ve anlamı değişmedi — `api` 1'de
+kaldı — ama konum varsayan genişletilmiş bir tema bunu hissedebilir.
+
 ## Canlandırma: yalnızca `transform` ve `opacity`
 
 Bu bir üslup tercihi değil, ölçüm. WebKitGTK'da (Linux'ta varsayılan motor)
@@ -85,6 +98,19 @@ düşürmüyor.
 Bu yüzden ilerleme çubuğu `scaleX` ile çiziliyor, genişlikle değil. Aynısını
 yapın — yoksa fark **kullanıcının** makinesinde ortaya çıkar ve suçlanan tema
 değil uygulama olur.
+
+### `--headshell-duration` bütün hareketi ölçekler
+
+Arayüzün hareketi iki türlü: kısa geçişler (üstüne gelme, sürükle-bırak
+alanı) doğrudan bu süreyi kullanır; konum hareketleri (seçim göstergesi,
+bölüm geçişi, uyarılar, kısayol penceresi) **yaydır** ve yayın tepkisi bu
+sürenin üç katıdır — varsayılan 120ms → 0.36 sn.
+
+- `0ms` hiçbir şeyin hareket etmediği demek: yaylar da, dönen meşguliyet
+  halkası da durur. Yüksek Karşıtlık teması bunu kullanıyor.
+- Daha uzun bir süre bütün hareketi orantılı olarak yavaşlatır.
+- Sistemin "hareketi azalt" tercihi temadan bağımsız uygulanır: konum ve
+  ölçek hareketi kalkar, opaklık geçişi kalır.
 
 ## Sürümleme
 

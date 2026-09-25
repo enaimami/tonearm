@@ -4117,3 +4117,144 @@ etkilenmiyor; oynatıcı kaydın kendi kopyasını tutuyor.
   Bugün yalnızca "bu katalogdan kurulmuş ama artık listede yok" deniyor.
 - Üçüncü taraf eklenti inceleme süreci yazılmadı; katalog deposunun
   README'sinde yalnızca kurallar var.
+
+## D-072 — Arayüz yeniden tasarımı: tam boy kenar çubuğu, hareket katmanı, kabukta iki ek
+
+**Tarih:** 2026-09-25 · **Durum:** UYGULANDI (2026-09-25)
+
+**Soru:** Kullanıcı: *"arayüzü son değişikliklerle ve gelecek değişikliklere
+uygun olacak şekilde yeniden tasarla"* (Apple'ın akışkan arayüz ilkeleriyle).
+Üç şey soruldu: iskelet, Rust tarafına dokunmanın kapsamı, doğrulama yolu.
+
+**Karar (kullanıcı, üçünde de önerilen seçenek):**
+
+1. **Tam boy kenar çubuğu**, dört grup: *dinle* (çalan, kütüphane), *geçmiş*
+   (istatistik, sleeve, içe aktar), *kaynaklar* (sağlayıcılar, eklentiler),
+   *sistem* (görünüm, tanı). Karşı seçenek bugünkü çerçeveyi koruyup yalnızca
+   yüzeyi yenilemekti.
+2. **Kabukta küçük ekler**, çekirdeğe ve CLI'ye dokunmadan: `diag_text`
+   komutu ve tema listesine renk önizlemesi.
+3. **Doğrulama pencere açılarak**, geçici bir veri diziniyle.
+
+### Arayüz son değişikliklerin gerisindeydi
+
+- **Eklenti paneli D-069 ve D-071'den sonra üst üste eklenmiş üç bölümdü**
+  (kurulu, katalog, sırlar) ve her eklentide durumdan bağımsız beş düğme
+  vardı: onaylı bir eklentide "onayla", platformu desteklenmeyen bir eserde
+  "araçları kur". Artık sekmeler var, düğmeler durumdan geliyor; kurulumdan
+  sonra sonucun yaşadığı "kurulu" sekmesine geçiliyor; kullanıcıdan onay ya da
+  kurulum bekleyen eklenti sayısı kenar çubuğunda.
+- **Arayüz CLI'nin gösterdiğinin altındaydı.** İstatistikte albümler, yıllar
+  ve süreler; içe aktarmada parmak izi ve yerel anahtar halkaları; aramada
+  albüm ve süre yoktu. Çözümleme ve `diag` ham JSON basıyordu — oysa
+  `DiagReport::render()`'ın belgesi "GUI de aynı metni gösterecek" diyor.
+  Hepsi eklendi; veri çekirdekten, biçimleme çekirdeğin kendi metninden.
+- **Başlarken kartı "Spotify/Apple/Google export arşivini ver" diyordu**;
+  bugün yalnızca Spotify'ın export'u okunuyor (`import::parsers`). Metin
+  düzeltildi, eklenti kataloğu da bir müzik kaynağı olarak orada.
+- **Kumandalar emojiydi** ve temanın rengini almıyordu (motorun renkli yazı
+  tipiyle çiziliyor). Yerlerine `currentColor` ile boyanan bir simge seti.
+- **Çizim döngüsü duraklamışken de her karede DOM'a yazıyordu.** Artık
+  yalnızca çalarken koşuyor, yalnızca görünen bir şey değişince yazıyor.
+- **Sır formunun örneği `acoustid` diyordu**; çekirdeğin alanı
+  `identity:acoustid` (`acoustid::SECRET_NAMESPACE`). Eski arayüzden kalma bir
+  yanlış; test koşumundaki atlama mesajı gösterdi.
+
+### İskelet: gelecek bir bölüm bir grubun yeni satırıdır
+
+Faz 4'ün odaları *dinle*'ye, Faz 5'in sosyal grafı *geçmiş*'e, mod'lar
+*sistem*'e girer; düz liste uzamaz. Bugün hiçbiri için yer tutucu yok (K10).
+Sleeve istatistiğin altından kendi bölümüne çıktı: projenin dağıtım kancası
+(D-004) bir kaydırmanın altında duruyordu. Kısayollar `Ctrl`+`1`…`9`; pencere
+1000 px'in altına inince kenar çubuğu simgelere iner.
+
+### Hareket: `ui/motion.js`
+
+Apple'ın akışkan arayüz ilkelerinin (WWDC 2018) web karşılığı, bağımlılıksız:
+iki parametreli yay (sönüm oranı + tepki, kapalı biçim çözüm), kesilebilirlik
+(yeni hedef ekrandaki değerden ve hızdan başlar), hız devri, momentum
+izdüşümü, lastik bant. Kullanıldığı yerler: kenar çubuğunun seçim göstergesi,
+parçalı denetimler, yönlü bölüm geçişi, uyarılar (aşağıdan gelir, sağa
+sürüklenerek kapanır, kalanlar kayarak yer açar), kısayol penceresi (açan
+düğmeden büyür), istatistik çubukları. Seçim fare indiği an yapılıyor,
+düğmeler basıldığı an küçülüyor.
+
+- **Yalnızca `transform` ve `opacity`** (D-028). Gözden geçirmede `.nav`'da
+  bir `color` geçişi bulundu ve kaldırıldı.
+- **Süre temanın:** yay tepkisi `--headshell-duration`'ın üç katı. `0ms`
+  hiçbir şey hareket etmez demek (Yüksek Karşıtlık); `prefers-reduced-motion`
+  konum hareketini kapatır, opaklık kalır. Yeni token yok.
+- **Yarı saydam, bulanık malzeme bilerek yok.** Kayan içeriğin üstündeki bir
+  `backdrop-filter` her karede yeniden bulanıklaştırmak demek; D-028 onu
+  WebKitGTK'da ölçmedi, ölçülmeden varsayılmadı. Üst çubuk düz; içerik altına
+  girince bir kaydırma kenarı gölgesi beliriyor.
+- **Yayla sürülen bir öğenin stil dosyasında kendi `transform`'u olmamalı.**
+  Dinlenen öğe satır içi dönüşümü bırakıyor (katman metni bulanıklaştırmasın);
+  stil dosyasında `scaleX(0)` yazan bir çubuk tam boya oturunca ona geri düşüp
+  kayboluyordu. Kural `motion.js`'e yazıldı.
+
+### Kabukta iki ek
+
+- **`diag_text`** — çekirdeğin `render()` metni; `diag` aynı raporu JSON
+  olarak vermeye devam ediyor, arayüzde katlı duruyor. `sleeve_svg`'nin
+  gerekçesi: biçimleme burada ya da JS'te yapılsaydı, hata bildirirken
+  yapıştırılan blok CLI'ninkinden ayrışırdı.
+- **`ThemePreview`** — temanın `:root` token'ları, yazmadıkları varsayılan
+  temadan (`style.css`'in kendisi `include_str!` ile). `@media` içindeki
+  koşullu değer sayılmıyor; yorum ve `!important` değere karışmıyor. Tema
+  CLI'nin bir kavramı değil (§3.3), o yüzden bir alt komutu yok.
+
+### Tema sözleşmesi değişmedi
+
+On dört token ve değerleri aynı; `CONTRACT_CLASSES`'tan hiçbir sınıf kalkmadı
+ve anlamı değişmedi — `api` 1'de. Yeni sınıflar sözleşmeye **alınmadı**: tema
+yazarına verilen söz büyümedi. Değişen yerleşim: kenar çubuğu tam boy,
+`.topbar` içerik sütununun üstünde, `.state` bir glif değil bir nokta (rengi
+hâlâ `.state.playing { color }` ile değişiyor). Konum varsayan genişletilmiş
+bir tema (D-038, garantisi yok) bunu hissedebilir; tema rehberine yazıldı.
+
+### Sınama
+
+- `tests/motion_js.rs` — 9 test, `motion.js`'in saf hesabı gömülü QuickJS'te
+  (`anchor_parity_js.rs`'in yolu, D-070). Testlerin boş olmadığı ölçüldü: yay
+  hızının türevine sokulan kasıtlı bir işaret hatasını üçü yakaladı.
+- `tests/ui_contract.rs` +3 — kullanılan her simge sette tanımlı (tanımsız
+  simge hata vermez, boş bir kare çizer); hiçbir betik bir dizeyi işaretleme
+  olarak yazmıyor (katalogdaki açıklamalar uzak veri, D-071; `innerHTML` ile
+  yazılsalar IPC'ye erişen bir sayfaya işaretleme sokarlardı); sayfalarda
+  satır içi `style` yok (CSP `style-src 'self'` onu sessizce yok sayar).
+- `src/theme.rs` +5 — önizleme.
+
+### Doğrulama: ana makinenin ekranı kilitliydi, WebKitGTK konteynerde
+
+İlk deneme pencereyi XFCE oturumunda açtı ama görüntü baştan sona siyahtı:
+`xset` "Monitor is Off" diyordu ve `light-locker` çalışıyordu — kilitli
+oturumda X yeni pencereyi hiç çizmiyordu (kullanıcı: *"macbook'un ekranı
+kapalı"*). Doğrulama bir Debian 13 konteynerine taşındı: ana makineyle aynı
+WebKitGTK (2.52.6), Xvfb, null bir ALSA aygıtı, aynı ikili, geçici veri
+dizini; gezinme `xdotool` ile. Konteyner ve imaj sonra silindi.
+
+Yedi kusur yalnızca ekran görüntüsünde göründü ve düzeltildi: kenar
+çubuğundaki sekmeler ortalıydı (genel `button` kuralının `justify-content`'i);
+yıl çubuklarının genişliği sıfırdı (`align-items: center`); tam boya oturan
+çubuk kayboluyordu (yukarıdaki kural); `.row label` simgeli arama kutusunu
+13 px'e indiriyordu; açık temada marka işaretinin plağı zeminle aynı renkteydi;
+yeni dinlemeler istatistiği ve kartı bayat bırakıyordu; onay uyarısı
+çekirdeğin tel değerini ("approve") basıyordu.
+
+Uçtan uca görülenler: klavye (`Ctrl`+sayı, `/`, `?`, `Shift`+`Enter`, `Esc`),
+kuyruk ve çalma (dinleme kaydı dahil), arama, hata ve bilgi uyarısı, sürükleyerek
+kapatma, üç tema, dar pencere, canlı katalog → kurulum → onay.
+
+**Görülemeyenler:** "çalıyor" durumunun kendisi — null aygıt gerçek zamanlı
+beklemiyor, parçalar yüzlerce kat hızla bitiyor ve durum "arabelleğe
+alınıyor"a düşüyor; Windows (WebView2) ve macOS (WKWebView); `color-mix`
+bilmeyen eski WebKit'in yedek renkleri yalnızca kodda.
+
+### Bilerek yapılmayanlar
+
+- **Sarma ve ses düzeyi:** çekirdekte bir komutu yok; arayüze bir yetenek
+  eklemek önce bir CLI alt komutu ister (D-033).
+- **Tanıtım sayfası** (`docs/index.html`) siyah ve mavi; uygulama ve ikon
+  kehribar. Sayfa yer tutucu ve ilk etiketten sonra yeniden yazılacak
+  (D-068); iki kimlik o gün birleştirilmeli.

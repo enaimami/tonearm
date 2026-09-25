@@ -1347,7 +1347,7 @@ katmanı iki tipi zamanla kaydırırdı ve kaymayı hiçbir şey yakalamazdı.
 | Sağlayıcı | `providers`, `provider_test`, `provider_scan`, `servers_list`, `server_add`, `server_remove` |
 | Oynatma | `play`, `toggle_pause`, `stop`, `next`, `previous`, `jump_to`, `set_shuffle`, `set_repeat` |
 | Durum | `anchor`, `queue` |
-| Tanılama | `diag` |
+| Tanılama | `diag`, `diag_text` (D-072: `DiagReport::render()`'ın metni) |
 
 Ayrıca `environment` var: veri dizini, veritabanı yolu, müzik dizinleri. Yeni
 bir "durum" tipi değil — hata mesajının yanında "hangi kütüphaneye baktım"
@@ -1773,6 +1773,55 @@ pencerenin içeriği bu makinede görüntü olarak yakalanamadı.
 **YAPILACAK:** Windows ve macOS'ta **elle** deneme — CI işi testleri koşturur
 ama bir masaüstünde pencere açmaz, ses çalmaz. §2.9'un "temiz makinede
 `plugin install ytmusic` + `play`" maddesi de burada.
+
+### 3.8 Arayüz yeniden tasarımı — TAMAM (D-072)
+
+**Sorun:** arayüz son değişikliklerin gerisinde kalmıştı ve gelecek fazlara
+yer açmıyordu. Eklenti paneli D-069/D-071'den sonra üst üste eklenmiş üç
+bölümdü (kurulu, katalog, sırlar) ve her eklentide durumdan bağımsız beş
+düğme vardı. Arayüz CLI'nin gösterdiğinin altındaydı: istatistikte albümler,
+yıllar ve süreler, içe aktarmada parmak izi ve yerel anahtar halkaları yoktu;
+çözümleme ve `diag` ham JSON basıyordu. Düz sekiz sekmelik liste, Faz 4'ün
+odaları ve mod'lar geldiğinde yalnızca uzayacaktı.
+
+**Yapıldı:**
+
+1. **İskelet** — tam boy kenar çubuğu, dört grup: *dinle* (çalan,
+   kütüphane), *geçmiş* (istatistik, sleeve, içe aktar), *kaynaklar*
+   (sağlayıcılar, eklentiler), *sistem* (görünüm, tanı). Gelecek bir bölüm
+   yeni bir düz sekme değil, bir grubun yeni satırı: odalar *dinle*'ye.
+   Bugün hiçbiri için yer tutucu yok (K10). Sleeve kendi bölümünde (D-004).
+   Dar pencerede kenar çubuğu simgelere iner.
+2. **Hareket katmanı** — `ui/motion.js`: yay (sönüm oranı + tepki),
+   kesilebilirlik, hız devri, momentum izdüşümü, lastik bant; bağımlılık yok.
+   Yalnızca `transform` ve `opacity` (D-028). Tepki `--headshell-duration`'ın
+   üç katı; `0ms` hareket yok, `prefers-reduced-motion` konum hareketini
+   kapatır.
+3. **Eksikler kapandı** — istatistikte yıl çubukları (aynı zamanda yıl
+   seçici), albümler ve süreler; içe aktarmada zincirin beş halkası;
+   çözümleme okunur; tanı çekirdeğin `render()` metni (`diag_text`); tema
+   listesinde her temanın kendi renkleriyle önizlemesi (`theme.rs`).
+4. **Eklentiler** — *kurulu / katalog / sırlar* sekmeleri; düğmeler duruma
+   göre (onay bekleyene "onayla", kurulumla düzelecek bir eksiği olana
+   "araçları kur"); kenar çubuğunda kullanıcıdan bir şey bekleyen eklenti
+   sayısı. Katalog hâlâ yalnızca düğmeyle okunuyor (D-071).
+
+**Sözleşme değişmedi:** on dört token ve değerleri aynı, `CONTRACT_CLASSES`'tan
+hiçbir sınıf kalkmadı ve anlamı değişmedi — `api` 1. Yerleşim değişti; konum
+varsayan genişletilmiş temalar (garantisi yok) bunu hissedebilir, tema
+rehberinde yazılı.
+
+**Sınama:** `motion_js.rs` (9 test, gömülü QuickJS; yay formülüne sokulan
+kasıtlı bir işaret hatasını üçü yakaladı), `ui_contract.rs` +3 (simge seti,
+işaretleme yasağı, satır içi `style`), `theme.rs` +5 (önizleme).
+
+**Doğrulama:** Debian 13 konteynerinde, ana makineyle aynı WebKitGTK
+(2.52.6), Xvfb ve null ses aygıtıyla — ana makinenin ekranı kilitliydi.
+Yedi kusur yalnızca ekran görüntüsünde göründü ve düzeltildi (D-072).
+
+**Açık kalanlar:** "çalıyor" durumunun kendisi görülmedi (null aygıt
+gerçek zamanlı beklemiyor); Windows ve macOS webview'leri denenmedi; sarma ve
+ses düzeyi çekirdekte bir komut olmadığı için yok (D-033).
 
 ---
 

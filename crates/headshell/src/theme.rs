@@ -65,6 +65,11 @@ struct Builtin {
     css: &'static str,
 }
 
+/// Varsayılan temanın kendisi: `style.css`'in `:root` bloğu (D-037).
+/// Önizleme, bir temanın yazmadığı token'ı buradan alır — uygulandığında da
+/// öyle olur.
+const DEFAULT_CSS: &str = include_str!("../ui/style.css");
+
 /// `theme.json`'ın şekli. Bilinmeyen alanlar hata değil: ileri bir sürümün
 /// eklediği alan yüzünden tema düşmesin.
 #[derive(Debug, Deserialize)]
@@ -86,6 +91,45 @@ pub struct ThemeInfo {
     pub extended: bool,
     /// Uygulamayla gelen mi, kullanıcının koyduğu mu.
     pub builtin: bool,
+    /// Tema listesinde çizilen renk örnekleri (D-072).
+    pub preview: ThemePreview,
+}
+
+/// Bir temanın listede gösterilen renkleri.
+///
+/// Değerler temanın **kendi** `:root` token'larından; yazmadığı token
+/// varsayılan temanınkini alır — uygulandığında göreceğinin aynısı. Bir
+/// `@media` içindeki koşullu değer sayılmaz: önizleme her koşulda geçerli
+/// olanı gösterir.
+///
+/// Değer ham CSS metni ve doğrulanmıyor: webview onu `style` üzerinden
+/// uyguluyor, geçersizse örnek boş kalır, tema düşmez. `None` "bu token hiçbir
+/// yerde yazılı değil" demek — varsayılan temada olmaması bir hatadır ve
+/// testle kilitli.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ThemePreview {
+    pub bg: Option<String>,
+    pub surface: Option<String>,
+    pub text: Option<String>,
+    pub accent: Option<String>,
+}
+
+impl ThemePreview {
+    /// `css`'in token'ları, eksikleri varsayılan temadan.
+    fn of(css: &str) -> Self {
+        let defaults = root_tokens(DEFAULT_CSS);
+        let own = root_tokens(css);
+        let pick = |token: &str| {
+            let name = format!("--headshell-{token}");
+            own.get(&name).or_else(|| defaults.get(&name)).cloned()
+        };
+        Self {
+            bg: pick("bg"),
+            surface: pick("surface"),
+            text: pick("text"),
+            accent: pick("accent"),
+        }
+    }
 }
 
 /// Reddedilen tema ve **sebebi**. Sessiz atlama yok (K9).
@@ -105,6 +149,8 @@ pub struct ThemeList {
     pub api: u32,
     /// Seçili tema; `None` ise varsayılan (gömülü `style.css`).
     pub active: Option<String>,
+    /// Varsayılan temanın renk örnekleri — listede o da bir seçenek.
+    pub default_preview: ThemePreview,
     pub themes: Vec<ThemeInfo>,
     pub rejected: Vec<RejectedTheme>,
 }
@@ -191,6 +237,7 @@ impl ThemeStore {
             dir: self.dir.clone(),
             api: THEME_API,
             active: self.selection()?,
+            default_preview: ThemePreview::of(""),
             themes,
             rejected,
         })
@@ -344,9 +391,75 @@ fn parse(
             author: manifest.author,
             extended: !targets_only_root(css),
             builtin,
+            preview: ThemePreview::of(css),
         },
         css.to_owned(),
     ))
+}
+
+/// En dış seviyedeki `:root` bloklarında yazılı `--headshell-*` token'ları.
+///
+/// `targets_only_root` ile aynı süslü parantez sayımı: CSS ayrıştırılmıyor
+/// (D-038). Sonraki blok öncekini ezer — tarayıcının sırası. Başka bir
+/// seçicinin ya da bir `@media`'nın içi okunmaz; önizleme koşulsuz değeri
+/// gösterir.
+fn root_tokens(css: &str) -> std::collections::BTreeMap<String, String> {
+    let css = strip_comments(css);
+    let mut tokens = std::collections::BTreeMap::new();
+    let mut depth = 0_u32;
+    let mut selector = String::new();
+    let mut in_root = false;
+    let mut declaration = String::new();
+
+    for ch in css.chars() {
+        match ch {
+            '{' => {
+                if depth == 0 {
+                    in_root = selector.split_whitespace().collect::<String>() == ":root";
+                    selector.clear();
+                } else if in_root {
+                    declaration.push(ch);
+                }
+                depth += 1;
+            }
+            '}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    if in_root {
+                        take_declaration(&mut declaration, &mut tokens);
+                    }
+                    in_root = false;
+                } else if in_root {
+                    declaration.push(ch);
+                }
+            }
+            // `@import url(…);` gibi blok dışı bir kural seçiciye karışmasın.
+            ';' if depth == 0 => selector.clear(),
+            ';' if depth == 1 && in_root => take_declaration(&mut declaration, &mut tokens),
+            _ if depth == 0 => selector.push(ch),
+            _ if in_root => declaration.push(ch),
+            _ => {}
+        }
+    }
+    tokens
+}
+
+/// `--headshell-ad: değer` bildirimini okur; token değilse atlar.
+fn take_declaration(
+    declaration: &mut String,
+    tokens: &mut std::collections::BTreeMap<String, String>,
+) {
+    if let Some((name, value)) = declaration.split_once(':') {
+        let name = name.trim();
+        let value = value.trim();
+        let value = value
+            .strip_suffix("!important")
+            .map_or(value, str::trim_end);
+        if name.starts_with("--headshell-") && !value.is_empty() {
+            tokens.insert(name.to_owned(), value.to_owned());
+        }
+    }
+    declaration.clear();
 }
 
 /// CSS yalnızca `:root` bloğuna mı yazıyor?
@@ -664,5 +777,86 @@ mod tests {
         fs::write(root.join("ui.json"), "{ bozuk").expect("yazılmalı");
         let err = store(&root).active().expect_err("düşmeli");
         assert!(err.contains("ui.json"), "{err}");
+    }
+
+    // ————————————————— önizleme renkleri (D-072)
+
+    #[test]
+    fn the_default_preview_reads_every_color_it_draws_from_the_stylesheet() {
+        // `style.css`'in `:root`'u gerçekten okunuyor: on dört token'ın
+        // hepsi görünmeli. Bir token yeniden adlandırılırsa ya da blok
+        // okunamaz hâle gelirse varsayılan temanın örneği boş kalırdı.
+        let tokens = root_tokens(DEFAULT_CSS);
+        assert!(tokens.len() >= 14, "{tokens:?}");
+        let preview = ThemePreview::of("");
+        for (token, value) in [
+            ("bg", &preview.bg),
+            ("surface", &preview.surface),
+            ("text", &preview.text),
+            ("accent", &preview.accent),
+        ] {
+            assert_eq!(
+                value.as_ref(),
+                tokens.get(&format!("--headshell-{token}")),
+                "{token}"
+            );
+            assert!(value.is_some(), "varsayılan temada `{token}` yok");
+        }
+    }
+
+    #[test]
+    fn a_theme_inherits_the_tokens_it_does_not_write() {
+        // README'nin "en kısa çalışan tema"sı: yalnızca vurgu. Önizleme,
+        // uygulandığında göreceğini göstermeli — varsayılan zemin üstünde
+        // yeni vurgu.
+        let preview = ThemePreview::of(":root {\n  --headshell-accent: #7aa2f7;\n}\n");
+        let defaults = ThemePreview::of("");
+        assert_eq!(preview.accent.as_deref(), Some("#7aa2f7"));
+        assert_eq!(preview.bg, defaults.bg);
+        assert_eq!(preview.text, defaults.text);
+    }
+
+    #[test]
+    fn conditional_and_foreign_rules_do_not_reach_the_preview() {
+        // `@media` içindeki değer koşullu, `.topbar` içindeki değer yalnızca
+        // o öğe için: ikisi de temanın "rengi" değil.
+        let css = "@media (prefers-color-scheme: light) { :root { --headshell-bg: #ffffff; } }\n\
+                   .topbar { --headshell-accent: red; }\n\
+                   :root { --headshell-text: #111111; }";
+        let preview = ThemePreview::of(css);
+        let defaults = ThemePreview::of("");
+        assert_eq!(preview.bg, defaults.bg);
+        assert_eq!(preview.accent, defaults.accent);
+        assert_eq!(preview.text.as_deref(), Some("#111111"));
+    }
+
+    #[test]
+    fn comments_imports_and_important_do_not_confuse_the_preview() {
+        let css = "@import url(baska.css);\n\
+                   :root {\n  /* --headshell-bg: #000000; */\n  --headshell-surface: #abcdef !important;\n}\n\
+                   :root { --headshell-accent: #010203; }";
+        let preview = ThemePreview::of(css);
+        // Yorumdaki değer okunmadı…
+        assert_eq!(preview.bg, ThemePreview::of("").bg);
+        // …`!important` değere karışmadı (webview onu `style`'a yazıyor ve
+        // `!important` orada geçersiz olurdu)…
+        assert_eq!(preview.surface.as_deref(), Some("#abcdef"));
+        // …ve blok dışı bir kural sonraki `:root`'u gizlemedi.
+        assert_eq!(preview.accent.as_deref(), Some("#010203"));
+    }
+
+    #[test]
+    fn the_list_carries_each_themes_own_colors() {
+        let root = temp_dir("preview");
+        let list = store(&root).list().expect("liste");
+        assert_eq!(list.default_preview, ThemePreview::of(""));
+        let daylight = list
+            .themes
+            .iter()
+            .find(|t| t.id == "daylight")
+            .expect("yerleşik tema");
+        // Açık tema kendi zeminini gösteriyor, varsayılanın koyusunu değil.
+        assert_ne!(daylight.preview.bg, list.default_preview.bg);
+        assert!(daylight.preview.bg.is_some());
     }
 }

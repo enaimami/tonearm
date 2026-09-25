@@ -748,6 +748,28 @@ pub async fn diag(
         .await
 }
 
+/// `diag`'ın okunur hâli: çekirdeğin kendi `DiagReport::render()` metni —
+/// `headshell diag`'ın `--json`'suz çıktısının aynısı (D-072).
+///
+/// Arayüz bir zamanlar raporu ham JSON olarak basıyordu; oysa `render()`'ın
+/// belgesi "GUI de aynı metni gösterecek" diyor. Biçimlemek burada ya da JS'te
+/// yapılsaydı, hata bildirirken yapıştırılan blok CLI'ninkinden ayrışırdı —
+/// `sleeve_svg` ile aynı gerekçe (K1).
+#[tauri::command]
+pub async fn diag_text(state: State<'_, AppState>) -> CommandResult<Option<String>> {
+    state
+        .run_on_core(move |core| {
+            Box::pin(async move {
+                Ok(core
+                    .live
+                    .session()
+                    .last_diag()?
+                    .map(|report| report.render()))
+            })
+        })
+        .await
+}
+
 /// Pencere açılırken bir kez sorulan sabitler.
 ///
 /// Yeni bir "durum" tipi değil, tanı bilgisi: hata mesajının yanında "hangi

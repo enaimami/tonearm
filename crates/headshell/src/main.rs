@@ -193,6 +193,7 @@ fn run(core: Core, themes: ThemeStore, context: tauri::Context) -> Result<(), St
             commands::anchor,
             commands::queue,
             commands::diag,
+            commands::diag_text,
             commands::environment,
         ])
         .run(context)
