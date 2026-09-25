@@ -1,8 +1,8 @@
-# Üç kapı + K7 yüzey denetimi.
+# The three gates + the K7 surface check.
 #
-# Depoda bu dosyadan önce hiç CI yoktu: kurallar PLAN.md'de yazılıydı ve
-# yalnızca elle bakılırsa görülüyordu. `PlayOptions<'a>` aylarca K7'yi ihlal
-# etti çünkü kimse bakmadı (D-052).
+# Before this file the repository had no CI at all: the rules were written in
+# PLAN.md and were only seen if someone looked by hand. `PlayOptions<'a>` broke
+# K7 for months because nobody looked (D-052).
 name: CI
 
 on:
@@ -12,28 +12,28 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # Ağ testleri (D-043) ulaşamazsa kendini atlar. CI'da SoundCloud,
-  # YouTube Music ve MusicBrainz gerçekten koşar; AcoustID anahtarsız olduğu
-  # için atlanır. Eklentiler için makinede hiçbir şey kurulu olması gerekmez:
-  # motor gömülü (QuickJS), yt-dlp'yi platform ikilisi olarak motor indirir
-  # (D-069). Kırmızı yanan bir ağ testi "ulaşamadım" değil, "ulaşıp
-  # beklenmeyeni aldım" demektir.
+  # Network tests (D-043) skip themselves if they cannot reach the service. In CI
+  # SoundCloud, YouTube Music and MusicBrainz really run; AcoustID is skipped
+  # because there is no key. Nothing needs to be installed on the machine for
+  # plugins: the engine is embedded (QuickJS), and the engine downloads yt-dlp as a
+  # platform binary (D-069). A network test that turns red does not mean "I could
+  # not reach it", it means "I reached it and got the unexpected".
   RUST_BACKTRACE: 1
 
 jobs:
-  # Her işin bir süre sınırı var (D-070): Windows'un ilk koşumunda bir test
-  # hiç gelmeyecek bir tuşu bekledi ve iş, GitHub'ın varsayılanı olan 6 saate
-  # kadar kilitli kaldı — günlüğü de iş bitmeden açılmıyordu. Sınırlar
-  # ölçülen sürelerin birkaç katı.
+  # Every job has a time limit (D-070): on the first Windows run a test waited for
+  # a key that would never come, and the job stayed locked up to GitHub's default
+  # of 6 hours — and its log could not be opened until the job ended. The limits
+  # are a few times the measured durations.
   gates:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
-      # cpal ALSA'ya, Tauri kabuğu WebKitGTK'ya bağlanıyor. Bunlar olmadan
-      # `--workspace` derlenmez.
-      - name: Sistem bağımlılıkları
+      # cpal links against ALSA, the Tauri shell against WebKitGTK. Without these
+      # `--workspace` does not build.
+      - name: System dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -45,39 +45,39 @@ jobs:
             libssl-dev \
             patchelf
 
-      - name: Rust araç zinciri
+      - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
 
-      # Üç kapı — CONTRIBUTING.md'deki sırayla. Biçim önce: en ucuzu.
-      - name: Kapı 1 — fmt
+      # The three gates — in the order of CONTRIBUTING.md. Formatting first: the cheapest.
+      - name: Gate 1 — fmt
         run: cargo fmt --all --check
 
-      - name: Kapı 2 — clippy
+      - name: Gate 2 — clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      # K7 yüzey denetimi (tests/k7_surface.rs) bu kapının içinde koşar.
+      # The K7 surface check (tests/k7_surface.rs) runs inside this gate.
       #
-      # `HEADSHELL_TEST_YTMUSIC_COOKIES`: YouTube veri merkezi adreslerine bot
-      # duvarı çıkarıyor ve çerezsiz hiçbir akış çözülemiyor (D-061). Sır
-      # yoksa değişken boş gelir ve o tek test kendini atlar — fork'lardan
-      # gelen PR'lara secret verilmediği için bu normal koşum.
-      - name: Kapı 3 — test
+      # `HEADSHELL_TEST_YTMUSIC_COOKIES`: YouTube puts up a bot wall for data centre
+      # addresses, and without cookies no stream can be resolved (D-061). Without
+      # the secret the variable arrives empty and that one test skips itself —
+      # since PRs from forks get no secrets, that is the normal run.
+      - name: Gate 3 — test
         run: cargo test --workspace
         env:
           HEADSHELL_TEST_YTMUSIC_COOKIES: ${{ secrets.YTMUSIC_COOKIES }}
 
-  # Windows ve macOS'ta derleme + test (D-070).
+  # Build + test on Windows and macOS (D-070).
   #
-  # Kod bu işe kadar yalnızca Linux'ta sınanıyordu ve Windows'a özgü yolların
-  # hiçbiri koşmamıştı: veri dizini (`%LOCALAPPDATA%`), `;` ile bölünen müzik
-  # listesi, `cmd.exe` ile araç testleri, `.exe` uzantılı eserler, boş ortamda
-  # `SystemRoot`. Hepsi `cfg(windows)` ya da çalışma anı dalı — Linux'ta
-  # derlenmeleri bile garanti değildi. `fmt` platformdan bağımsız, burada
-  # tekrarlanmıyor.
+  # Until this job the code was only tested on Linux, and none of the
+  # Windows-specific paths had ever run: the data directory (`%LOCALAPPDATA%`),
+  # the music list split on `;`, the tool tests with `cmd.exe`, artifacts with an
+  # `.exe` extension, `SystemRoot` in an empty environment. All of them are
+  # `cfg(windows)` or run-time branches — it was not even guaranteed that they
+  # compiled on Linux. `fmt` is platform-independent, so it is not repeated here.
   platforms:
     strategy:
       fail-fast: false
@@ -88,7 +88,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Rust araç zinciri
+      - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -103,24 +103,25 @@ jobs:
         env:
           HEADSHELL_TEST_YTMUSIC_COOKIES: ${{ secrets.YTMUSIC_COOKIES }}
 
-  # Feature birleşmesi olmadan çekirdek tek başına temiz mi?
+  # Is the core clean on its own, without features being merged?
   #
-  # `--workspace` koşumunda headshell-cli ve headshell, headshell-core'un audio/http-client
-  # feature'larını açıyor ve varsayılan derlemedeki ölü kodu gizliyor. Mobil
-  # (Faz 6) çekirdeği bu feature'lar olmadan derleyecek, o yüzden ayrı bakılır.
+  # In a `--workspace` run headshell-cli and headshell turn on headshell-core's
+  # audio/http-client features and hide the dead code of the default build. Mobile
+  # (Phase 6) will build the core without these features, so it is checked
+  # separately.
   #
-  # Bu iş bir zamanlar kırmızıydı ve `continue-on-error` ile maskeliydi;
-  # D-054'te düzeltildi ve **kapıya** dönüştü. Tek tek feature'lara da
-  # bakılıyor: borcun biriktiği yer birleşim değil, tek başına açılan
-  # feature'dı (`http-client` açık, `audio` kapalı gibi).
+  # This job was once red and masked with `continue-on-error`; it was fixed in
+  # D-054 and turned into a **gate**. The individual features are checked too:
+  # the debt piled up not in the combination but in a feature turned on alone
+  # (`http-client` on, `audio` off, for example).
   core-features:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
-      # `audio` feature'ı cpal üzerinden ALSA istiyor.
-      - name: Sistem bağımlılıkları
+      # The `audio` feature needs ALSA through cpal.
+      - name: System dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libasound2-dev
@@ -130,10 +131,10 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
 
-      - name: Çekirdek tek başına (varsayılan feature'lar)
+      - name: The core on its own (default features)
         run: cargo clippy -p headshell-core --all-targets -- -D warnings
 
-      - name: Her feature tek tek
+      - name: Every feature on its own
         run: |
           for f in audio http-client fingerprint render-png plugin-engine; do
             echo "::group::$f"
@@ -141,5 +142,5 @@ jobs:
             echo "::endgroup::"
           done
 
-      - name: Hepsi birden
+      - name: All of them at once
         run: cargo clippy -p headshell-core --all-targets --features audio,http-client,fingerprint,render-png,plugin-engine -- -D warnings

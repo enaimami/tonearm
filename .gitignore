@@ -5,26 +5,26 @@
 *.sqlite
 .env
 
-# Canlı SSH/Navidrome kimlik bilgisi içerir — asla versiyonlanmaz.
+# Contains live SSH/Navidrome credentials — never versioned.
 extra.md
 
-# Tauri'nin `build.rs` sırasında ürettiği ACL şemaları — türetilmiş dosya,
-# her derlemede yeniden yazılıyor.
+# The ACL schemas Tauri generates during `build.rs` — derived files, rewritten
+# on every build.
 crates/headshell/gen/
 
-# Python ara çıktıları. `plugins/` altındaki eklentiler **betik** olarak
-# dağıtılır; derlenmiş hâlleri depoya girmez. Kural bir kez girdikten sonra
-# yazıldı: `python3 -m py_compile` ile bir eklentiyi denetlemek `plugins/
-# ytmusic/__pycache__/` bırakıyor ve `git add -A` onu sessizce alıyordu.
+# Python intermediate output. The plugins under `plugins/` are distributed as
+# **scripts**; their compiled forms do not go into the repository. The rule was
+# written after one got in: checking a plugin with `python3 -m py_compile` left
+# `plugins/ytmusic/__pycache__/` behind, and `git add -A` silently picked it up.
 __pycache__/
 *.pyc
 
-# spike/ atılabilir prototipler; çıktıları versiyonlanmaz
+# spike/ is throwaway prototypes; their output is not versioned
 spike/**/__pycache__/
 spike/**/.venv/
 spike/**/out/
-# Kökteki `/target` yalnızca kökü kapsıyor; spike'ın kendi derleme dizini
-# 1,2 GB ve tek `git add -A` uzaktaydı.
+# The `/target` at the root only covers the root; the spike's own build directory
+# was 1.2 GB and a single `git add -A` away.
 spike/**/target/
 spike/**/Cargo.lock
 spike/**/report*.json

@@ -2,6 +2,7 @@
 Type=Application
 Name=headshell
 Comment=Provider-independent music listening layer
+Comment[tr]=Sağlayıcıdan bağımsız müzik dinleme katmanı
 Exec=headshell-desktop
 Icon=headshell-desktop
 Terminal=false

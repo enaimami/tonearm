@@ -1,20 +1,20 @@
-# Masaüstü paketleri (Faz 3 çıktısı, D-057).
+# Desktop packages (the output of Phase 3, D-057).
 #
-# `bundle.active` bir süre `false`'tu ve bu şunu gizledi: ikonlar 103 baytlık
-# bir yer tutucuydu, lisans dosyası paketlenmiyordu, `.desktop` girdisinin
-# kategorisi yoktu. Paketlemeyi yalnızca yayın gününde denemek, bu üçünü de
-# yayın gününde bulmak demekti.
+# `bundle.active` was `false` for a while, and that hid this: the icons were a
+# 103-byte placeholder, the license file was not packaged, and the `.desktop` entry
+# had no category. Trying packaging only on release day meant finding all three on
+# release day.
 #
-# Bu yüzden iki tetik var:
+# That is why there are two triggers:
 #
-#   * `push: tags: v*`  — yayın. Paketler taslak bir GitHub Release'e yüklenir.
-#   * `workflow_dispatch` — elle. Etiket atmadan paketlemenin bozulmadığını
-#     görmek için; çıktı yalnızca artifact olur.
+#   * `push: tags: v*`  — a release. The packages are uploaded to a draft GitHub Release.
+#   * `workflow_dispatch` — by hand. To see that packaging is not broken without
+#     pushing a tag; the output is only an artifact.
 #
-# `pull_request`'te koşmuyor: paketleme ~10 dakika ve üç kapı (ci.yml) zaten
-# her PR'da koşuyor. Kırılan paketleme bir sonraki elle koşumda ya da
-# etiketten önce yakalanır.
-name: Paketler
+# It does not run on `pull_request`: packaging takes ~10 minutes, and the three gates
+# (ci.yml) already run on every PR. Broken packaging is caught on the next manual run
+# or before the tag.
+name: Packages
 
 on:
   push:
@@ -30,15 +30,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Hedef kitle Linux ağırlıklı (D-028) ve WebKitGTK üç motorun en
-          # zayıfı — matrisin ilk satırı bu yüzden Linux.
+          # The audience is mostly Linux (D-028), and WebKitGTK is the weakest of
+          # the three engines — that is why the matrix's first row is Linux.
           #
-          # 22.04, 24.04 değil (D-070): bir ikili, derlendiği makinenin
-          # glibc'sinden eskisinde açılmaz. 24.04'te derlenen sürüm glibc 2.39
-          # istiyordu ve Debian 12'de (2.36) `GLIBC_2.39 not found` diyordu —
-          # ölçüldü. 22.04 (2.35) tabanı Debian 12'yi ve Ubuntu 22.04'ü
-          # kapsıyor. Bu koşucu emekliye ayrılınca taban bir konteynerde
-          # (sabit bir dağıtım) tutulmalı, koşucu sürümüne bırakılmamalı.
+          # 22.04, not 24.04 (D-070): a binary does not open on a machine with an
+          # older glibc than the one it was built on. The build from 24.04 wanted
+          # glibc 2.39 and said `GLIBC_2.39 not found` on Debian 12 (2.36) —
+          # measured. The 22.04 (2.35) floor covers Debian 12 and Ubuntu 22.04.
+          # When this runner retires, the floor should be kept in a container (a
+          # fixed distribution), not left to the runner's version.
           - os: ubuntu-22.04
             name: linux
           - os: macos-14
@@ -46,14 +46,14 @@ jobs:
           - os: windows-2022
             name: windows
     runs-on: ${{ matrix.os }}
-    # Takılan bir adım 6 saat beklemesin (D-070); paketleme ~15-25 dk.
+    # A stuck step must not wait 6 hours (D-070); packaging takes ~15-25 min.
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
-      # cpal ALSA'ya, kabuk WebKitGTK'ya bağlanıyor; `librsvg` ve `patchelf`
-      # AppImage paketleyicisinin istediği araçlar.
-      - name: Sistem bağımlılıkları (Linux)
+      # cpal links against ALSA, the shell against WebKitGTK; `librsvg` and
+      # `patchelf` are tools the AppImage packager wants.
+      - name: System dependencies (Linux)
         if: matrix.name == 'linux'
         run: |
           sudo apt-get update
@@ -67,8 +67,8 @@ jobs:
             patchelf \
             rpm
 
-      # macOS: evrensel ikili için iki hedef — Intel ve Apple Silicon (D-070).
-      # Koşucu arm64; x86_64 ikilisi çapraz derleniyor.
+      # macOS: two targets for a universal binary — Intel and Apple Silicon (D-070).
+      # The runner is arm64; the x86_64 binary is cross-compiled.
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.name == 'macos' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
@@ -77,47 +77,49 @@ jobs:
       - name: Tauri CLI
         run: cargo install tauri-cli --version "^2" --locked
 
-      # Sürüm tek yerde yaşıyor: `tauri.conf.json`'da `version` alanı **yok**,
-      # Tauri onu `Cargo.toml`'dan okuyor. İki yerde yazılsaydı biri kayardı.
-      - name: Paketle (deb + rpm)
+      # The version lives in one place: `tauri.conf.json` has **no** `version` field;
+      # Tauri reads it from `Cargo.toml`. Written in two places, one would drift.
+      - name: Package (deb + rpm)
         if: matrix.name == 'linux'
         run: cargo tauri build --config crates/headshell/tauri.conf.json --bundles deb,rpm
 
-      # AppImage ayrı adımda, çünkü araç zinciri host dağıtımına duyarlı:
-      # linuxdeploy kendi (eski) `strip`'ini taşıyor ve yeni bir dağıtımın
-      # `.relr.dyn` bölümlü kütüphanelerini tanımıyor. Ubuntu runner'da sorun
-      # çıkmaz; Arch gibi yeni bir makinede yerel üretim düşer.
+      # AppImage in a separate step, because its toolchain is sensitive to the host
+      # distribution: linuxdeploy carries its own (old) `strip`, which does not
+      # recognise the `.relr.dyn` section in a newer distribution's libraries. There
+      # is no problem on the Ubuntu runner; a local build on a newer machine like
+      # Arch fails.
       #
-      # Ayrı durmasının sebebi **maskelemek değil**: adım düşerse iş kırmızı
-      # yanar. Ayrım yalnızca deb/rpm'in bir AppImage arızasıyla birlikte
-      # kaybolmasını engelliyor (artifact adımı `always()` ile koşuyor).
-      - name: Paketle (AppImage)
+      # The reason it stands apart is **not masking**: if the step fails the job
+      # turns red. The split only keeps deb/rpm from being lost together with an
+      # AppImage failure (the artifact step runs with `always()`).
+      - name: Package (AppImage)
         if: matrix.name == 'linux'
         run: cargo tauri build --config crates/headshell/tauri.conf.json --bundles appimage
 
-      # `.dmg` bir zamanlar yalnızca arm64'tü (D-066): Intel Mac'ler açamıyordu.
-      - name: Paketle (macOS, evrensel)
+      # The `.dmg` was once arm64-only (D-066): Intel Macs could not open it.
+      - name: Package (macOS, universal)
         if: matrix.name == 'macos'
         run: cargo tauri build --config crates/headshell/tauri.conf.json --target universal-apple-darwin
 
-      - name: Paketle (Windows)
+      - name: Package (Windows)
         if: matrix.name == 'windows'
         run: cargo tauri build --config crates/headshell/tauri.conf.json
 
-      # CLI ikilisi Tauri bundle'ına **girmiyor**: `cargo tauri build` yalnızca
-      # masaüstü uygulamasını paketliyor. Ama CLAUDE.md'ye göre CLI, çekirdeğin
-      # elle sınandığı yüzey ve arayüzdeki her yeteneğin karşılığı orada —
-      # `.deb` kuran kullanıcının ona hiç erişememesi bir eksikti.
+      # The CLI binary **does not go into** the Tauri bundle: `cargo tauri build` only
+      # packages the desktop app. But according to CLAUDE.md the CLI is the surface
+      # the core is tested through by hand, and every capability in the interface has
+      # its counterpart there — a user who installed the `.deb` having no access to
+      # it at all was a gap.
       #
-      # Dosya adında sürüm yok: adres zaten etiketi taşıyor
-      # (`releases/download/v<sürüm>/...`) ve sabit ad, AUR paketinin her
-      # sürümde aynı satırla çalışmasını sağlıyor.
-      - name: CLI ikilisini derle
+      # No version in the file name: the address already carries the tag
+      # (`releases/download/v<version>/...`), and a fixed name lets the AUR package
+      # work with the same line in every version.
+      - name: Build the CLI binary
         if: matrix.name != 'macos'
         run: cargo build --release -p headshell-cli
 
-      # İki mimari ayrı derlenip `lipo` ile tek dosyada birleşiyor.
-      - name: CLI ikilisini derle (macOS, evrensel)
+      # The two architectures are built separately and merged into one file with `lipo`.
+      - name: Build the CLI binary (macOS, universal)
         if: matrix.name == 'macos'
         run: |
           cargo build --release -p headshell-cli --target aarch64-apple-darwin
@@ -127,21 +129,21 @@ jobs:
             target/aarch64-apple-darwin/release/headshell \
             target/x86_64-apple-darwin/release/headshell
 
-      - name: CLI ikilisini paketle (Linux)
+      - name: Package the CLI binary (Linux)
         if: matrix.name == 'linux'
         run: |
           mkdir -p dist
           tar -czf "dist/headshell-cli-linux-$(uname -m).tar.gz" \
             -C target/release headshell
 
-      - name: CLI ikilisini paketle (macOS)
+      - name: Package the CLI binary (macOS)
         if: matrix.name == 'macos'
         run: |
           mkdir -p dist
           tar -czf dist/headshell-cli-macos-universal.tar.gz \
             -C target/universal headshell
 
-      - name: CLI ikilisini paketle (Windows)
+      - name: Package the CLI binary (Windows)
         if: matrix.name == 'windows'
         shell: pwsh
         run: |
@@ -149,17 +151,17 @@ jobs:
           Compress-Archive -Path target/release/headshell.exe `
             -DestinationPath dist/headshell-cli-windows-x86_64.zip
 
-      - name: Paketleri yükle
+      - name: Upload the packages
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: headshell-${{ matrix.name }}
           if-no-files-found: error
-          # `macos/*.app` **yok**: `.app` bir dosya değil dizin ve yükleyici
-          # onu düzleştiriyor — ilk etikette taslağa `Info.plist`, `icon.icns`
-          # ve 25 MB'lık çıplak ikili ayrı ayrı düştü, `.app`'in kendisi
-          # kullanılabilir hâlde çıkmadı. macOS kullanıcısının indirdiği şey
-          # zaten `.dmg`.
+          # **No** `macos/*.app`: an `.app` is a directory, not a file, and the
+          # uploader flattens it — on the first tag `Info.plist`, `icon.icns` and a
+          # bare 25 MB binary landed in the draft separately, and the `.app` itself
+          # did not come out usable. What a macOS user downloads is the `.dmg`
+          # anyway.
           path: |
             target/release/bundle/deb/*.deb
             target/release/bundle/rpm/*.rpm
@@ -169,8 +171,8 @@ jobs:
             target/release/bundle/nsis/*.exe
             dist/headshell-cli-*
 
-  # Paketler tamamlandıktan sonra **taslak** bir sürüm açılır. Taslak, çünkü
-  # yayın metnini ve neyin gerçekten çıkacağını insan onaylar.
+  # After the packages are complete a **draft** release is opened. A draft, because
+  # a human approves the release text and what really ships.
   draft:
     needs: bundle
     if: startsWith(github.ref, 'refs/tags/v')
@@ -182,7 +184,7 @@ jobs:
         with:
           path: packages
 
-      - name: Taslak sürüm
+      - name: Draft release
         uses: softprops/action-gh-release@v2
         with:
           draft: true

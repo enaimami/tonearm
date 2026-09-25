@@ -1,20 +1,21 @@
 # Maintainer: enaimami <1terabyterma@gmail.com>
 #
-# `headshell` komut satırı arayüzünün derlenmiş hâli. Kaynaktan derleyen paket
-# `packaging/aur/headshell/`, masaüstünün derlenmiş hâli `headshell-bin/`.
+# The prebuilt form of the `headshell` command line interface. The package that builds
+# from source is `packaging/aur/headshell/`; the prebuilt desktop is `headshell-bin/`.
 #
-# Masaüstü ile aynı PKGBUILD'de değil, bilerek: split package paylaşılan bir
-# derleme için vardır ve burada derleme yok. Ayrı durunca CLI kuran kullanıcı
-# 10 MB'lık `.deb`i indirmiyor.
+# Not in the same PKGBUILD as the desktop, on purpose: a split package exists for a
+# shared build, and there is no build here. Standing apart, a user installing the CLI
+# does not download the 10 MB `.deb`.
 #
-# İndirilen arşivin adında sürüm yok: `release.yml` onu sabit tutuyor ki
-# aşağıdaki satır her sürümde aynı kalsın. Sürüm adreste zaten var.
+# The downloaded archive has no version in its name: `release.yml` keeps it fixed so
+# the line below stays the same in every version. The version is in the address
+# anyway.
 #
-# Lisans dosyaları kaynak arşivinden geliyor (1,2 MB) — CLI arşivinin içinde
-# yalnızca ikili var.
+# The license files come from the source archive (1.2 MB) — the CLI archive only
+# contains the binary.
 
 pkgname=headshell-cli-bin
-# Sürüm tek satırda — komşu PKGBUILD'lerdeki gerekçenin aynısı (D-063).
+# The version on a single line — the same reasoning as in the sibling PKGBUILDs (D-063).
 pkgver=0.0.1_beta
 _pkgver=${pkgver//_/-}
 pkgrel=1
@@ -26,8 +27,8 @@ depends=('alsa-lib')
 optdepends=('headshell-bin: desktop application')
 provides=("headshell-cli=$pkgver")
 conflicts=('headshell-cli')
-# İkili yukarı akıştan geliyor; yeniden `strip`'lenmesin, boş bir `-debug`
-# paketi de üretilmesin.
+# The binary comes from upstream; it must not be `strip`ped again, and no empty
+# `-debug` package must be produced.
 options=('!strip' '!debug')
 
 _rel="$url/releases/download/v$_pkgver"
@@ -35,9 +36,9 @@ _srcdir="headshell-$_pkgver"
 
 source=("headshell-$pkgver.tar.gz::$url/archive/refs/tags/v$_pkgver.tar.gz")
 source_x86_64=("headshell-cli-$pkgver.tar.gz::$_rel/headshell-cli-linux-$CARCH.tar.gz")
-# Sağlama toplamları **şu anki** `v0.0.1-beta` etiketine ait. Etiket
-# taşınırsa (yeniden kesilirse) arşivin toplamı da değişir — `updpkgsums`
-# koş, elle düzeltme. Sıra `packaging/aur/README.md`'de.
+# The checksums belong to the **current** `v0.0.1-beta` tag. If the tag moves
+# (is cut again), the archive's checksum changes too — run `updpkgsums`, do not
+# fix it by hand. The order is in `packaging/aur/README.md`.
 sha256sums=('252d8c3d4ee72e93e4c8c525973a17a423ee9c004dadc52c88ca8f7339b519eb')
 sha256sums_x86_64=('83547da87fa8ba72a45d5569d6684b6646d97b2bf46cd6815ad1f3047720ae8c')
 

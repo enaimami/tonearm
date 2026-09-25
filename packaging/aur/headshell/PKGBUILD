@@ -1,34 +1,33 @@
 # Maintainer: enaimami <1terabyterma@gmail.com>
 #
-# Split package: tek derlemeden iki paket çıkar.
+# Split package: two packages come out of a single build.
 #
-#   headshell      — masaüstü uygulaması (Tauri + WebKitGTK)
-#   headshell-cli  — komut satırı arayüzü
+#   headshell      — the desktop app (Tauri + WebKitGTK)
+#   headshell-cli  — the command line interface
 #
-# İkisi aynı workspace'ten geliyor ve `build()` bir kez koşuyor. Ayrı
-# PKGBUILD'ler yazılsaydı ikisini birlikte kuran kullanıcı ~500 crate'i iki
-# kez derlerdi.
+# Both come from the same workspace and `build()` runs once. With separate
+# PKGBUILDs, a user installing both would compile ~500 crates twice.
 #
-# `cargo tauri build` **kullanılmıyor**: o bir bundler ve `.deb`/`.AppImage`
-# üretiyor; Arch paketini zaten burada biz kuruyoruz. Düz `cargo build`
-# `tauri-cli`'yi yapım bağımlılığı olmaktan çıkarıyor, karşılığında `.desktop`
-# girdisi ve ikonlar elle kuruluyor.
+# `cargo tauri build` is **not used**: it is a bundler and produces `.deb`/`.AppImage`;
+# we are building the Arch package here ourselves anyway. A plain `cargo build` drops
+# `tauri-cli` as a build dependency; in return the `.desktop` entry and the icons are
+# installed by hand.
 #
-# Derlemeyi ödemek istemeyen için önceden derlenmiş paketler var:
-# `headshell-bin` ve `headshell-cli-bin`, sürüm varlıklarını indirirler.
-# Onlar split **değil**, çünkü paylaştıkları bir derleme yok. Masaüstü girdisi
-# hepsinde aynı dosya: `packaging/headshell.desktop`.
+# For those who do not want to pay for the build there are prebuilt packages:
+# `headshell-bin` and `headshell-cli-bin` download the release assets. They are
+# **not** split, because they share no build. The desktop entry is the same file in
+# all of them: `packaging/headshell.desktop`.
 #
-# Eklentiler için hiçbir çalışma zamanı bağımlılığı yok: motor (QuickJS)
-# ikilinin içinde, yt-dlp'yi motor platform ikilisi olarak indiriyor (D-069).
-# Torrent eklentisi park edildi (`parked/`) ve pakete girmiyor.
+# There is no runtime dependency for plugins: the engine (QuickJS) is inside the
+# binary, and the engine downloads yt-dlp as a platform binary (D-069). The torrent
+# plugin is parked (`parked/`) and does not go into the package.
 
 pkgbase=headshell
 pkgname=('headshell' 'headshell-cli')
-# Sürüm tek satırda yaşıyor. Arch sürümünde `-` pkgrel ayıracı olduğu için
-# `_` yazılır; yukarı akıştaki yazım ondan türetilir (`0.0.1-beta`) ve hem
-# etikette hem açılan dizin adında o kullanılır. D-063 aynı hatanın MSI
-# tarafındaki hâliydi: sürüm iki yerde yazılırsa biri kayar.
+# The version lives on a single line. In an Arch version `-` is the pkgrel separator,
+# so `_` is written; the upstream spelling is derived from it (`0.0.1-beta`) and used
+# both in the tag and in the extracted directory name. D-063 was the MSI side of the
+# same mistake: if the version is written in two places, one drifts.
 pkgver=0.0.1_beta
 _pkgver=${pkgver//_/-}
 pkgrel=1
@@ -38,9 +37,9 @@ url='https://github.com/headshell/headshell'
 license=('MIT' 'Apache-2.0')
 makedepends=('cargo' 'pkgconf' 'webkit2gtk-4.1' 'gtk3' 'alsa-lib')
 source=("$pkgbase-$pkgver.tar.gz::$url/archive/refs/tags/v$_pkgver.tar.gz")
-# Sağlama toplamları **şu anki** `v0.0.1-beta` etiketine ait. Etiket
-# taşınırsa (yeniden kesilirse) arşivin toplamı da değişir — `updpkgsums`
-# koş, elle düzeltme. Sıra `packaging/aur/README.md`'de.
+# The checksums belong to the **current** `v0.0.1-beta` tag. If the tag moves
+# (is cut again), the archive's checksum changes too — run `updpkgsums`, do not
+# fix it by hand. The order is in `packaging/aur/README.md`.
 sha256sums=('252d8c3d4ee72e93e4c8c525973a17a423ee9c004dadc52c88ca8f7339b519eb')
 
 _srcdir="$pkgbase-$_pkgver"
@@ -48,8 +47,8 @@ _srcdir="$pkgbase-$_pkgver"
 prepare() {
   cd "$_srcdir"
   export RUSTUP_TOOLCHAIN=stable
-  # `--locked`: depodaki Cargo.lock neyse o. Paketin derlediği ağaç,
-  # yukarıda üç kapıdan geçen ağacın aynısı olmalı.
+  # `--locked`: whatever the Cargo.lock in the repository says. The tree the package
+  # builds must be the same tree that passed the three gates upstream.
   cargo fetch --locked --target "$(rustc -vV | sed -n 's/^host: //p')"
 }
 
@@ -57,8 +56,8 @@ build() {
   cd "$_srcdir"
   export RUSTUP_TOOLCHAIN=stable
   export CARGO_TARGET_DIR=target
-  # İki ikili, tek derleme: `headshell-cli` → `headshell`,
-  # `headshell` (Tauri kabuğu) → `headshell-desktop`.
+  # Two binaries, one build: `headshell-cli` → `headshell`,
+  # `headshell` (the Tauri shell) → `headshell-desktop`.
   cargo build --frozen --release -p headshell-cli -p headshell
 }
 
@@ -66,13 +65,13 @@ check() {
   cd "$_srcdir"
   export RUSTUP_TOOLCHAIN=stable
   export CARGO_TARGET_DIR=target
-  # Çekirdek testleri. Ağa çıkan ve ses aygıtı isteyen testler kendilerini
-  # atlıyor (D-043, D-059), yani paket derlemesi yapım ortamına bağımlı değil.
+  # The core tests. Tests that go online or want an audio device skip themselves
+  # (D-043, D-059), so the package build does not depend on the build environment.
   #
-  # Tek crate koşumu bir tanı aracı, üç kapı değil (CLAUDE.md): feature'lar
-  # birleşmediği için `dead_code` uyarıları çıkabilir. Kapılar CI'da koşuyor;
-  # buradaki koşumun işi, paketlenen ağacın makinede gerçekten çalıştığını
-  # görmek.
+  # A single-crate run is a diagnostic tool, not the three gates (CLAUDE.md): since
+  # the features are not merged, `dead_code` warnings may appear. The gates run in
+  # CI; the job of the run here is to see that the packaged tree really works on
+  # the machine.
   cargo test --frozen --release -p headshell-core
 }
 
@@ -84,14 +83,15 @@ package_headshell() {
   cd "$_srcdir"
   install -Dm755 "target/release/headshell-desktop" "$pkgdir/usr/bin/headshell-desktop"
 
-  # Masaüstü girdisi depodan geliyor, burada yazılmıyor. İçindeki
-  # `StartupWMClass=headshell-desktop` uydurulmadı: Tauri'nin `.deb` için
-  # ürettiği girdi okundu, pencere sınıfı ikili adından türüyor. `headshell`
-  # yazılsaydı çalışan pencere başlatıcı ikonuyla eşleşmezdi.
+  # The desktop entry comes from the repository, it is not written here. The
+  # `StartupWMClass=headshell-desktop` in it was not made up: the entry Tauri
+  # generates for the `.deb` was read, and the window class is derived from the binary
+  # name. Had `headshell` been written, the running window would not match the
+  # launcher icon.
   install -Dm644 packaging/headshell.desktop \
     "$pkgdir/usr/share/applications/headshell.desktop"
 
-  # İkon adı `.desktop`'taki `Icon=` ile aynı olmak zorunda.
+  # The icon name must be the same as `Icon=` in the `.desktop`.
   local _icons="crates/headshell/icons"
   install -Dm644 "$_icons/32x32.png" \
     "$pkgdir/usr/share/icons/hicolor/32x32/apps/headshell-desktop.png"

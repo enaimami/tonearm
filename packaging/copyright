@@ -1,12 +1,12 @@
-headshell — Sağlayıcıdan bağımsız müzik dinleme katmanı
+headshell — A provider-independent music listening layer
 https://github.com/headshell/headshell
 
-Telif hakkı (c) headshell katkıcıları.
+Copyright (c) headshell contributors.
 
-Bu yazılım iki lisanstan **dilediğinizin** koşullarıyla kullanılabilir:
+This software can be used under the terms of **either** of two licenses, at your option:
 
-  * MIT lisansı      — /usr/share/doc/headshell/LICENSE-MIT
-  * Apache Lisansı 2.0 — /usr/share/doc/headshell/LICENSE-APACHE
+  * The MIT License        — /usr/share/doc/headshell/LICENSE-MIT
+  * The Apache License 2.0 — /usr/share/doc/headshell/LICENSE-APACHE
 
-Aksi açıkça belirtilmedikçe, katkı olarak gönderdiğiniz her çalışma da
-Apache-2.0'ın tanımladığı biçimde bu ikili lisansla dağıtılır.
+Unless explicitly stated otherwise, any work you submit as a contribution is also
+distributed under this dual license, as defined by Apache-2.0.

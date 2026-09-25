@@ -5,18 +5,19 @@ members = [
     "crates/headshell-cli",
     "crates/headshell",
 ]
-# `parked/`: D-069 — torrent eklentisi JSON-RPC alt süreç protokolüne
-# yazılmıştı ve o protokol QuickJS motoruna geçerken kalktı. Kod silinmedi,
-# derlenmiyor; yeni motora ne zaman ve nasıl döneceği ayrıca kararlaştırılacak.
+# `parked/`: D-069 — the torrent plugin was written against the JSON-RPC subprocess
+# protocol, and that protocol went away when plugins moved to the QuickJS engine. The code
+# was not deleted, it is not compiled; when and how it returns to the new engine will be
+# decided separately.
 exclude = ["spike", "parked"]
 
 [workspace.package]
-# D-005: lisans MIT OR Apache-2.0 olarak karara bağlandı.
+# D-005: the license was settled as MIT OR Apache-2.0.
 version = "0.0.2-beta"
 edition = "2024"
-# D-069: 1.85 → 1.87. `rquickjs` 0.14 (eklenti motoru) 1.87 istiyor. 1.85'e
-# uyan son sürüm 0.11'di; üç sürüm geriden QuickJS-NG düzeltmelerini kaçırmak
-# yerine taban yükseltildi — CI zaten `stable` ile koşuyor.
+# D-069: 1.85 → 1.87. `rquickjs` 0.14 (the plugin engine) needs 1.87. The last version
+# that fits 1.85 was 0.11; rather than missing three versions of QuickJS-NG fixes, the
+# floor was raised — CI runs on `stable` anyway.
 rust-version = "1.87"
 license = "MIT OR Apache-2.0"
 publish = false
@@ -28,7 +29,7 @@ headshell-core = { path = "crates/headshell-core" }
 unsafe_code = "forbid"
 
 [workspace.lints.clippy]
-# Altın Kural ve tanılama kültürünün derleyici tarafından zorlanan kısmı.
+# The part of the Golden Rule and the diagnostics culture that the compiler enforces.
 unwrap_used = "warn"
 expect_used = "warn"
 panic = "warn"

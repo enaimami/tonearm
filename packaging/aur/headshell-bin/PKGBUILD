@@ -1,29 +1,30 @@
 # Maintainer: enaimami <1terabyterma@gmail.com>
 #
-# `headshell` masaüstü uygulamasının derlenmiş hâli. Kaynaktan derleyen paket
-# `packaging/aur/headshell/`, CLI'nin derlenmiş hâli `headshell-cli-bin/`.
+# The prebuilt form of the `headshell` desktop app. The package that builds from
+# source is `packaging/aur/headshell/`; the prebuilt CLI is `headshell-cli-bin/`.
 #
-# Neden ikili paket: kaynak paket Tauri kabuğunu ve ~500 crate'i derliyor.
-# Yapılacak iş doğru ama bedeli dakikalarla ölçülüyor.
+# Why a binary package: the source package compiles the Tauri shell and ~500 crates.
+# That is the right job to do, but its price is measured in minutes.
 #
-# Neden CLI ile **aynı PKGBUILD'de değil**: split package'in varlık sebebi
-# paylaşılan bir derlemedir — kaynak paketin iki ikiliyi tek `cargo build`'den
-# çıkarması gibi. Burada derleme yok, iki paket hiçbir iş paylaşmıyor. Split
-# olsalardı yalnızca CLI kuran kullanıcı 10 MB'lık `.deb`i de indirirdi, ve
-# namcap haklı olarak `splitpkgmakedeps` hatası veriyordu.
+# Why it is **not in the same PKGBUILD** as the CLI: a split package exists because
+# of a shared build — like the source package getting two binaries out of a single
+# `cargo build`. There is no build here; the two packages share no work. Had they
+# been split, a user installing only the CLI would download the 10 MB `.deb` too,
+# and namcap rightly gave a `splitpkgmakedeps` error.
 #
-# İkili `.deb`in içinden çıkıyor; `.AppImage` kullanılmıyor — 85 MB ve kendi
-# kütüphanelerini taşıyor, Arch paketi sistem kütüphanelerine bağlanmalı.
+# The binary comes out of the `.deb`; the `.AppImage` is not used — it is 85 MB and
+# carries its own libraries, and an Arch package should link against the system's.
 #
-# `.desktop`, ikonlar ve lisans dosyaları **kaynak arşivinden** alınıyor
-# (1,2 MB). Sebebi: kaynak paketle bit bit aynı dosyaları kurmak. İkinci bir
-# elle yazılmış masaüstü girdisi olsaydı ikisi zamanla ayrışırdı.
+# The `.desktop`, the icons and the license files are taken **from the source
+# archive** (1.2 MB). The reason: installing files bit-for-bit identical to the
+# source package's. With a second, hand-written desktop entry the two would drift
+# apart over time.
 #
-# Uyumluluk: ikili ubuntu-24.04 üzerinde derleniyor, yani GLIBC_2.39 istiyor.
-# Arch her zaman daha yenisini taşır, bu yön güvenli olan yön.
+# Compatibility: the binary is built on ubuntu-24.04, so it wants GLIBC_2.39. Arch
+# always carries something newer; this direction is the safe one.
 
 pkgname=headshell-bin
-# Sürüm tek satırda — komşu PKGBUILD'lerdeki gerekçenin aynısı (D-063).
+# The version on a single line — the same reasoning as in the sibling PKGBUILDs (D-063).
 pkgver=0.0.1_beta
 _pkgver=${pkgver//_/-}
 pkgrel=1
@@ -35,9 +36,9 @@ depends=('webkit2gtk-4.1' 'gtk3' 'alsa-lib' 'hicolor-icon-theme')
 optdepends=('headshell-cli-bin: command line interface')
 provides=("headshell=$pkgver")
 conflicts=('headshell')
-# İkili yukarı akıştan geliyor; `makepkg` onu yeniden `strip`'lemesin.
-# `!debug` olmadan içi anlamsız bir `headshell-bin-debug` paketi de üretiliyor
-# — semboller burada değil, derlendikleri yerde anlamlı.
+# The binary comes from upstream; `makepkg` must not `strip` it again. Without
+# `!debug` a meaningless `headshell-bin-debug` package is produced too — the symbols
+# mean something where they were built, not here.
 options=('!strip' '!debug')
 
 _deb="headshell_${_pkgver}_amd64.deb"
@@ -46,12 +47,13 @@ _srcdir="headshell-$_pkgver"
 
 source=("headshell-$pkgver.tar.gz::$url/archive/refs/tags/v$_pkgver.tar.gz")
 source_x86_64=("$_deb::$_rel/$_deb")
-# `.deb` bir `ar` arşivi; makepkg açsa elde `data.tar.gz` kalırdı, onu yine
-# elle açmak gerekirdi. Bir adımda `prepare()` yapıyor.
+# A `.deb` is an `ar` archive; if makepkg extracted it we would be left with
+# `data.tar.gz` and would have to extract that by hand anyway. `prepare()` does it in
+# one step.
 noextract=("$_deb")
-# Sağlama toplamları **şu anki** `v0.0.1-beta` etiketine ait. Etiket
-# taşınırsa (yeniden kesilirse) arşivin toplamı da değişir — `updpkgsums`
-# koş, elle düzeltme. Sıra `packaging/aur/README.md`'de.
+# The checksums belong to the **current** `v0.0.1-beta` tag. If the tag moves
+# (is cut again), the archive's checksum changes too — run `updpkgsums`, do not
+# fix it by hand. The order is in `packaging/aur/README.md`.
 sha256sums=('252d8c3d4ee72e93e4c8c525973a17a423ee9c004dadc52c88ca8f7339b519eb')
 sha256sums_x86_64=('7087a1feb17ad4b19018be5a1b6635e2ac5f56b0cd3ce039e004c306fd8784e2')
 
@@ -63,13 +65,13 @@ prepare() {
 package() {
   install -Dm755 "deb/usr/bin/headshell-desktop" "$pkgdir/usr/bin/headshell-desktop"
 
-  # `.deb`in kendi `.desktop` girdisi **kullanılmıyor**: onu Tauri üretiyor ve
-  # metni `tauri.conf.json`dan geliyor. Kaynak paketle aynı dosyayı kurmak
-  # için depodaki kanonik girdi kuruluyor.
+  # The `.deb`'s own `.desktop` entry is **not used**: Tauri generates it and its text
+  # comes from `tauri.conf.json`. To install the same file as the source package, the
+  # canonical entry from the repository is installed.
   install -Dm644 "$_srcdir/packaging/headshell.desktop" \
     "$pkgdir/usr/share/applications/headshell.desktop"
 
-  # İkon adı `.desktop`'taki `Icon=` ile aynı olmak zorunda.
+  # The icon name must be the same as `Icon=` in the `.desktop`.
   local _icons="$_srcdir/crates/headshell/icons"
   install -Dm644 "$_icons/32x32.png" \
     "$pkgdir/usr/share/icons/hicolor/32x32/apps/headshell-desktop.png"
