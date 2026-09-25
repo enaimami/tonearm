@@ -818,7 +818,8 @@ ortam değişkeni değil, çünkü `set_var` Rust 2024'te `unsafe` ve workspace
 ### 2.2 Referans eklenti — SoundCloud (D-027)
 Rust olmayan bir dilde yazılmış bir sağlayıcı — sözleşmenin çekirdeğin dışında
 yazılabildiğinin kanıtı. İlk yazımı Python'du; D-069'da JS'e taşındı
-(`plugins/soundcloud/main.js`) ve canlı testleri yeniden geçti.
+(`plugins/soundcloud/main.js`) ve canlı testleri yeniden geçti. D-071'den beri
+bu depoda değil: `headshell/plugins` kataloğunda, `soundcloud/` (§2.10).
 
 Platform seçimi katalog kalitesine göre değil **sınanabilirliğe** göre yapıldı:
 SoundCloud abonelik gerektirmeyen tek aday, yani CI'da ve başkasının makinesinde
@@ -1020,7 +1021,7 @@ eklenti düşmeli.
 | 2.2 Referans eklenti (SoundCloud) | TAMAM — canlı SoundCloud'da arıyor ve çalıyor (D-043) |
 | 2.3 AcoustID | TAMAM — parmak izi + AcoustID + `resolve --file` (D-046), gerçek anahtarla canlı sınandı; tek borç: `EMBEDDED_API_KEY` hâlâ boş |
 | 2.4 Torrent sağlayıcı | PARK EDİLDİ (D-069) — çalışan alt süreç eklentisiydi (D-047); api 2'ye taşınmadı, `parked/`'da |
-| 2.5 Yayın platformu eklentileri | TAMAM — `plugins/ytmusic` (D-048): InnerTube araması, yt-dlp ile m4a akışı, kısıtlamayı kaldıran `Range` başlığı; canlı serviste baştan sona çaldı |
+| 2.5 Yayın platformu eklentileri | TAMAM — `plugins/ytmusic` (D-048; D-071'den beri `headshell/plugins` kataloğunda): InnerTube araması, yt-dlp ile m4a akışı, kısıtlamayı kaldıran `Range` başlığı; canlı serviste baştan sona çaldı |
 
 **Faz 1'den taşınan borçlar:**
 - `keyring` (D-021) — **kapandı**: D-042 tek sır kavramını tanımladı,
@@ -1211,6 +1212,53 @@ Windows/macOS test işini ekledi; elle deneme hâlâ yapılmadı (§3.7).
 > yazıyor (ölçüldü). O yol kapandığında motor bir JS çalışma zamanını da
 > (deno ya da `qjs`) aynı `requires` mekanizmasıyla indirmek zorunda kalacak.
 > Bugün bir iş değil — **sor**, kapandığında.
+
+### 2.10 Eklenti kataloğu — TAMAM (D-071)
+
+**Sorun:** eklentiler ana depodaki `plugins/`'te duruyordu ve kullanıcı onları
+veri dizinine `cp` ile kopyalıyordu. Bir eklentiyi güncellemek (YouTube
+yt-dlp'yi bozduğunda sabitlenmiş sürümü artırmak gibi) bir uygulama sürümü
+ya da elle kopyalama demekti. Kullanıcının isteği: *"obsidian gibi bir
+repoda tutalım ve eklentiler listesi bu repodaki eklentilerden gelsin."*
+
+**Yapıldı:**
+
+1. **Ayrı depo: [`headshell/plugins`](https://github.com/headshell/plugins).**
+   Eklentiler orada dizin olarak yaşıyor; geçmişleri `git subtree split` ile
+   taşındı. Kökteki `index.json` her eklentinin manifestini ve dosyalarının
+   adresi + sha256'sını taşıyor. Dosya adresleri `<ad>-<sürüm>` etiketine
+   sabitli: GitHub'ın ham içerik önbelleği 5 dakika tutuyor (ölçüldü,
+   `max-age=300`) ve `main`'e sabitli bir adres yeni bir sürüm yayımlanırken
+   yeni indeksi eski dosyayla eşleştirirdi.
+2. **Çekirdek: `plugin/catalog.rs`.** İndeksi okur (bozuk girdi ötekileri
+   gizlemez, her biri sebebini taşır), eklentiyi kurar (her dosyanın karması
+   doğrulanır, inen `plugin.json` indeksin gösterdiğiyle karşılaştırılır,
+   geçici bir dizinde hazırlanıp tek adımda yerine konur), günceller ve
+   kaldırır. İndeksi de o üretir (`build_index`): kurulumdaki doğrulamanın
+   aynısıyla — katalog kendi kuralını yazmıyor.
+3. **Köken kaydı (`origin.json`):** katalogdan kurulan eklenti hangi sürümle
+   hangi dosyaları getirdiğini kaydeder. Güncelleme **yalnızca** kaydı olan
+   ve dosyaları kayıtla aynı olan eklentiye dokunur: elle konmuş ya da elle
+   değiştirilmiş bir eklentinin üstüne yazılmaz.
+4. **Onay değişmedi (kullanıcının kararı):** kurulan eklenti onay bekler;
+   güncelleme izinleri büyütürse yeniden onay ister (D-040). Araç (yt-dlp)
+   değişikliği onay **istemez** ama `update` çıktısı onu ayrıca yazar.
+5. **Ağ:** katalog yalnızca açık bir komutla okunur (`plugin catalog`,
+   `install` eklenti diskte yoksa, `update`). Adres
+   `HEADSHELL_PLUGIN_INDEX` ile değişir; `https://` şart, düz `http`
+   yalnızca bu makineye.
+6. **Yüzey:** CLI `plugin catalog | install | update [<ad>] | remove <ad> |
+   index <dizin>`; masaüstünde eklenti panelinin altında bir katalog bölümü.
+   Yeni aşama: `PLUGIN_CATALOG`.
+
+**Sınama:** çekirdekte 27 birim testi (sahte ağ, gerçek disk: karma tutmazsa
+hiçbir şey yazılmıyor, manifest indeksle çelişirse kurulmuyor, güncelleme
+`state/`'i koruyor, yarıda kalmış güncelleme yerel değişiklik sayılmıyor,
+bağlantıyla konmuş eklentinin yalnızca bağlantısı kaldırılıyor). CLI'de
+`127.0.0.1`'de açılan bir sunucuya karşı uçtan uca: indeks üretimi →
+katalog → kurulum → onay → motor → yeni sürüm → güncelleme → kaldırma.
+SoundCloud ve YouTube Music'in canlı testleri eklentiyi artık **canlı
+katalogdan** kuruyor.
 
 ---
 

@@ -50,6 +50,14 @@ pub enum Stage {
     /// ayakta ama bu çağrıya hayır dedi" farklı tanılardır (K9). Eski adı
     /// `PLUGIN_HANDSHAKE`'ti; el sıkışan bir alt süreç artık yok.
     PluginStart,
+    /// Eklenti kataloğu: indeksi okuma ve doğrulama, eklenti dosyalarını
+    /// indirip karmasıyla yerine koyma, güncelleme ve kaldırma (D-071).
+    ///
+    /// `PluginRuntime`'dan ayrı: orası eklentinin **istediği araçlar**
+    /// (yt-dlp), burası **eklentinin kendisi**. Ağa hiç ulaşılamaması ise
+    /// `NetworkRequest`'te kalır: "katalog bozuk" ile "kataloğa ulaşamadım"
+    /// farklı tanılardır (K9).
+    PluginCatalog,
     /// HTTP taşıma katmanı: bağlanma, zaman aşımı, TLS, durum kodu.
     ///
     /// `ProviderCall`'dan ayrı: "sunucuya ulaşamadım" ile "sunucu isteğimi
@@ -83,6 +91,7 @@ impl Stage {
             Self::PluginLoad => "PLUGIN_LOAD",
             Self::PluginRuntime => "PLUGIN_RUNTIME",
             Self::PluginStart => "PLUGIN_START",
+            Self::PluginCatalog => "PLUGIN_CATALOG",
             Self::NetworkRequest => "NETWORK_REQUEST",
             Self::SleeveRender => "SLEEVE_RENDER",
             Self::PlaybackResolve => "PLAYBACK_RESOLVE",

@@ -22,9 +22,15 @@ use crate::library::{
     WriteSummary,
 };
 use crate::model::{Listen, PlayRule, TrackRef};
+use crate::net::HttpClient;
 use crate::playback::QueueItem;
+use crate::plugin::artifact::{ArtifactStore, InstallOutcome};
+use crate::plugin::catalog::{
+    self, CatalogFetch, CatalogPlugin, CatalogSummary, IndexedPlugin, Removed, UpdateOutcome,
+    UpdateSummary,
+};
 use crate::plugin::consent::{ConsentStatus, ConsentStore};
-use crate::plugin::manifest::Permissions;
+use crate::plugin::manifest::{Permissions, PluginManifest};
 use crate::plugin::{PluginEntry, PluginSummary};
 use crate::provider::remote::{self, NewServer, RemoteServer, ServerKind, StoredAuth};
 use crate::provider::{ProviderHealth, ProviderInfo, ProviderRegistry, ScanSummary};
@@ -137,7 +143,7 @@ pub struct PluginConsentReport {
     pub diag: DiagReport,
 }
 
-/// `headshell plugin install` çıktısı (D-055, D-069).
+/// `headshell plugin install` çıktısı (D-055, D-069, D-071).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PluginInstallReport {
     /// Eklenti artık çalışabilir mi: beyan edilen eserlerin **hepsi** hazır mı.
@@ -149,7 +155,87 @@ pub struct PluginInstallReport {
     /// motorun bulduğu Python yazıyordu; api 2'de yorumlayıcı gömülü ve
     /// seçilecek tek şey platformun ikilisi.
     pub platform: String,
+    /// Eklenti bu komutta katalogdan indirildiyse ne indirildiği (D-071).
+    /// `None`: eklenti zaten diskteydi ve katalog **okunmadı**.
+    #[serde(default)]
+    pub fetched: Option<CatalogFetch>,
+    /// Eklentinin beyan ettiği izinler — onaya sunulacak olan.
+    #[serde(default)]
+    pub permissions: Permissions,
+    /// Kurulumdan sonraki onay durumu. Katalogdan gelmek onay değildir
+    /// (D-040): yeni kurulan eklenti `not_asked` der.
+    pub consent: ConsentStatus,
     pub report: crate::plugin::artifact::InstallReport,
+    pub diag: DiagReport,
+}
+
+/// `headshell plugin catalog` çıktısı (D-071).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginCatalogReport {
+    /// Okunan katalog.
+    pub index: String,
+    /// Araç durumunun ölçüldüğü platform.
+    pub platform: String,
+    pub plugins: Vec<CatalogPlugin>,
+    /// **Bu katalogdan** kurulmuş ama artık listede olmayan eklentiler.
+    pub delisted: Vec<String>,
+    pub summary: CatalogSummary,
+    pub diag: DiagReport,
+}
+
+/// Bir eklentinin güncelleme sonucu.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginUpdate {
+    pub name: String,
+    pub outcome: UpdateOutcome,
+    /// Güncellenen sürümün araçlarının kurulumu (D-055). Yalnızca
+    /// `updated`'da dolu.
+    #[serde(default)]
+    pub tools: Vec<(String, InstallOutcome)>,
+    /// Araçlar kurulamadıysa sebebi. Eklentinin dosyaları yine de güncellendi
+    /// ve bu ayrı söyleniyor: "güncellendi" ile "çalışır" aynı şey değil.
+    pub tools_error: Option<String>,
+    /// Güncellemeden sonraki onay durumu; izinler büyüdüyse
+    /// `needs_approval` (D-040).
+    pub consent: Option<ConsentStatus>,
+}
+
+/// `headshell plugin update` çıktısı (D-071).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginUpdateReport {
+    pub index: String,
+    pub platform: String,
+    pub plugins: Vec<PluginUpdate>,
+    pub summary: UpdateSummary,
+    pub diag: DiagReport,
+}
+
+/// `headshell plugin remove` çıktısı (D-071).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginRemoveReport {
+    pub name: String,
+    pub removed: Removed,
+    /// Onay kaydı vardı ve unutuldu: aynı adla yeniden kurulan bir eklenti
+    /// baştan sorulur — başka bir eklenti eskisinin onayını devralmasın.
+    pub consent_forgotten: bool,
+    /// Eklentinin ad alanında **kalan** sırların anahtar adları (D-042).
+    /// Silinmedi: kullanıcının girdiği bir değer (çerez, anahtar) sessizce
+    /// gitmemeli. Değerler bu listede yok.
+    pub kept_secrets: Vec<String>,
+    pub diag: DiagReport,
+}
+
+/// `headshell plugin index` çıktısı — katalog deposunun bakımı (D-071).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginIndexReport {
+    /// İndeks dosyası.
+    pub path: std::path::PathBuf,
+    pub url_template: String,
+    pub plugins: Vec<IndexedPlugin>,
+    /// Diskteki indeks üretilenle zaten aynı mıydı.
+    pub up_to_date: bool,
+    /// Bu komut dosyayı yazdı mı (`--check` hiç yazmaz).
+    pub written: bool,
     pub diag: DiagReport,
 }
 
@@ -1269,61 +1355,430 @@ impl Session {
         })
     }
 
-    /// Bir eklentinin beyan ettiği eserleri motorla kurar (D-055, D-069).
+    /// Bir eklentiyi kurar (D-055, D-069, D-071).
+    ///
+    /// Eklenti diskte **yoksa** önce katalogdan indirilir
+    /// ([`crate::plugin::catalog`]): dosyalar sha256 ile doğrulanır, inen
+    /// manifest indeksin gösterdiğiyle karşılaştırılır ve köken kaydıyla
+    /// birlikte yerine konur. Ardından — eklenti zaten diskteyse yalnızca
+    /// bu — beyan ettiği araçlar motorla kurulur.
     ///
     /// **Ağa çıkar ve bunu `--online` beklemeden yapar.** Bayrak örtük ağ
     /// erişimini engellemek için var ("bir export'u içe aktarmak kimseyi
     /// sessizce ağa bağlamaz"); burada indirme komutun kendisidir, yan
     /// etkisi değil. Kullanıcı `install` yazdıysa indirilmesini istemiştir.
     ///
-    /// Zaten kurulu eserler için ağa hiç çıkılmaz.
+    /// Diskte zaten olan eklenti için katalog **okunmaz** — bu komut
+    /// güncellemez ([`Self::update_plugins`]) — ve kurulu eserler için ağa
+    /// hiç çıkılmaz. Kurulan eklenti onay bekler: katalogdan gelmek onay
+    /// değildir (D-040).
     ///
     /// # Errors
-    /// Eklenti bulunamazsa, manifesti bozuksa, HTTP istemcisi bu derlemede
-    /// yoksa ya da eser diske yazılamazsa. Ağa **ulaşamamak** hata değil:
-    /// [`crate::plugin::runtime::InstallOutcome`] içinde raporlanır, çünkü
+    /// Ad geçersizse, eklenti ne diskte ne katalogda varsa, katalog
+    /// okunamazsa, bir dosyanın karması tutmazsa, manifest bozuksa, HTTP
+    /// istemcisi bu derlemede yoksa ya da dosyalar yazılamazsa. Bir **esere**
+    /// ulaşamamak hata değil: [`InstallOutcome`] içinde raporlanır, çünkü
     /// "ulaşılamadı", "yetim" ve "karma tutmadı" ayrı tanılardır (K9).
-    pub fn install_plugin(&self, name: &str) -> Result<PluginInstallReport> {
+    pub async fn install_plugin(
+        &self,
+        name: &str,
+        http: Arc<dyn HttpClient>,
+    ) -> Result<PluginInstallReport> {
         let mut rec = Recorder::start(
             format!("plugin install {name}"),
             Some(self.config.data_dir().to_path_buf()),
         );
 
-        let store = crate::plugin::artifact::ArtifactStore::new(&self.config);
-        let result = (|| {
+        let store = ArtifactStore::new(&self.config);
+        let result = async {
+            crate::plugin::manifest::validate_local_name(name).map_err(|detail| {
+                Error::new(Stage::PluginLoad, ErrorKind::InvalidInput { detail })
+            })?;
             let dir = self.config.plugins_dir().join(name);
-            let manifest = crate::plugin::manifest::PluginManifest::load(&dir)?;
+            let missing = matches!(
+                std::fs::symlink_metadata(&dir),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound
+            );
+            let fetched = if missing {
+                let index = self.config.plugin_index_url();
+                let catalog = catalog::fetch(http.as_ref(), &index).await?;
+                Some(catalog::install(&self.config, http.as_ref(), &catalog, name).await?)
+            } else {
+                None
+            };
 
-            let mut outcomes = Vec::new();
-            if !manifest.requires.is_empty() {
-                let source = crate::plugin::artifact::default_artifact_source()?;
-                for requirement in &manifest.requires {
-                    let outcome = store.install(source.as_ref(), requirement)?;
-                    outcomes.push((requirement.name.clone(), outcome));
-                }
-            }
-            Ok((manifest, outcomes))
-        })();
+            let manifest = PluginManifest::load(&dir)?;
+            let outcomes = install_artifacts(&store, &manifest)?;
+            let consent = ConsentStore::load(&self.config.plugin_consent_path())?
+                .status(name, &manifest.permissions);
+            Ok((manifest, outcomes, fetched, consent))
+        }
+        .await;
 
         rec.note(format!("platform: {}", store.platform()));
-        if let Ok((_, outcomes)) = &result {
+        if let Ok((_, outcomes, fetched, consent)) = &result {
+            match fetched {
+                Some(fetched) => rec.note(format!(
+                    "katalogdan indirildi: {name} {} ← {}",
+                    fetched.version, fetched.index
+                )),
+                None => rec.note("eklenti zaten diskteydi; katalog okunmadı".to_owned()),
+            }
             for (name, outcome) in outcomes {
                 rec.note(format!("{name}: {}", outcome.describe()));
             }
+            rec.note(format!("onay: {}", consent.describe()));
         }
 
         let plugin = name.to_owned();
         let platform = store.platform().to_owned();
-        self.finish(rec, result, move |(manifest, outcomes), diag| {
-            let report = crate::plugin::artifact::InstallReport { plugin, outcomes };
-            PluginInstallReport {
-                ready: report.is_ready(),
-                declared: manifest.requires.len(),
-                platform,
-                report,
-                diag,
+        self.finish(
+            rec,
+            result,
+            move |(manifest, outcomes, fetched, consent), diag| {
+                let report = crate::plugin::artifact::InstallReport { plugin, outcomes };
+                PluginInstallReport {
+                    ready: report.is_ready(),
+                    declared: manifest.requires.len(),
+                    platform,
+                    fetched,
+                    permissions: manifest.permissions,
+                    consent,
+                    report,
+                    diag,
+                }
+            },
+        )
+    }
+
+    /// Eklenti kataloğunu okur ve bu makineye karşı gösterir (D-071): her
+    /// eklenti kurulu mu, güncellemesi var mı, neden kurulamıyor.
+    ///
+    /// Ağa **yalnızca** kataloğu okumak için çıkar; hiçbir şey kurmaz. Adres
+    /// [`Config::plugin_index_url`].
+    ///
+    /// # Errors
+    /// Kataloğa ulaşılamazsa (`NETWORK_REQUEST`), indeks yoksa ya da
+    /// okunamıyorsa (`PLUGIN_CATALOG`). Bozuk bir **girdi** hata değil:
+    /// o girdinin `problem`'inde yazar.
+    pub async fn plugin_catalog(&self, http: Arc<dyn HttpClient>) -> Result<PluginCatalogReport> {
+        let mut rec = Recorder::start(
+            "plugin catalog".to_owned(),
+            Some(self.config.data_dir().to_path_buf()),
+        );
+        let index = self.config.plugin_index_url();
+        rec.note(format!("katalog: {index}"));
+
+        let result = match catalog::fetch(http.as_ref(), &index).await {
+            Ok(catalog) => catalog.survey(&self.config),
+            Err(err) => Err(err),
+        };
+        if let Ok(survey) = &result {
+            survey.summary.record_into(&mut rec);
+            for plugin in &survey.plugins {
+                if let Some(problem) = &plugin.problem {
+                    rec.note(format!("{}: {problem}", plugin.name));
+                }
             }
+            for name in &survey.delisted {
+                rec.note(format!(
+                    "{name}: bu katalogdan kurulmuş ama artık listede yok"
+                ));
+            }
+        }
+
+        let platform = crate::plugin::artifact::current_platform();
+        self.finish(rec, result, move |survey, diag| PluginCatalogReport {
+            index,
+            platform,
+            plugins: survey.plugins,
+            delisted: survey.delisted,
+            summary: survey.summary,
+            diag,
         })
+    }
+
+    /// Katalogdan kurulmuş eklentileri katalogdaki sürüme getirir (D-071).
+    ///
+    /// `name` verilirse yalnızca o eklenti, ve yapılamıyorsa (elle kurulmuş,
+    /// yerelde değiştirilmiş, katalogda yok) **hata** — kullanıcı açıkça
+    /// istedi. Verilmezse katalogdaki adlardan kurulu olanların hepsi; tek
+    /// birinin düşmesi ötekileri durdurmaz, sonuçlar tek tek yazar (K9).
+    ///
+    /// Güncelleme **yalnızca** köken kaydı olan ve dosyaları kayıtla aynı
+    /// olan eklentiye dokunur. Yeni sürümün araçları kurulur; araç
+    /// değişikliği onay istemez ama raporda yazar. İzinler büyüdüyse eklenti
+    /// yeniden onay bekler (D-040).
+    ///
+    /// # Errors
+    /// Katalog okunamazsa; `name` verildiyse o eklenti güncellenemezse.
+    pub async fn update_plugins(
+        &self,
+        name: Option<&str>,
+        http: Arc<dyn HttpClient>,
+    ) -> Result<PluginUpdateReport> {
+        let command = match name {
+            Some(name) => format!("plugin update {name}"),
+            None => "plugin update".to_owned(),
+        };
+        let mut rec = Recorder::start(command, Some(self.config.data_dir().to_path_buf()));
+        let index = self.config.plugin_index_url();
+        let platform = crate::plugin::artifact::current_platform();
+        let store = ArtifactStore::new(&self.config);
+        rec.note(format!("katalog: {index}"));
+
+        let result = async {
+            let catalog = catalog::fetch(http.as_ref(), &index).await?;
+            let names = match name {
+                Some(name) => vec![name.to_owned()],
+                None => catalog.update_candidates(&self.config)?,
+            };
+            let mut plugins = Vec::new();
+            for plugin in names {
+                let outcome =
+                    catalog::update(&self.config, http.as_ref(), &catalog, &plugin, &platform)
+                        .await;
+                let outcome = match (outcome, name.is_some()) {
+                    (Ok(UpdateOutcome::Skipped { reason }), true) => {
+                        return Err(Error::new(
+                            Stage::PluginCatalog,
+                            ErrorKind::PluginCatalog {
+                                index: index.clone(),
+                                detail: format!("{plugin} güncellenmedi: {reason}"),
+                            },
+                        ));
+                    }
+                    (Err(err), true) => return Err(err),
+                    (Err(err), false) => UpdateOutcome::Failed {
+                        error: err.chain_text().replace('\n', " "),
+                    },
+                    (Ok(outcome), _) => outcome,
+                };
+                let mut update = PluginUpdate {
+                    name: plugin.clone(),
+                    outcome,
+                    tools: Vec::new(),
+                    tools_error: None,
+                    consent: None,
+                };
+                if matches!(update.outcome, UpdateOutcome::Updated { .. }) {
+                    let manifest = PluginManifest::load(&self.config.plugins_dir().join(&plugin))?;
+                    match install_artifacts(&store, &manifest) {
+                        Ok(tools) => update.tools = tools,
+                        Err(err) if name.is_some() => return Err(err),
+                        Err(err) => update.tools_error = Some(err.chain_text().replace('\n', " ")),
+                    }
+                    update.consent = Some(
+                        ConsentStore::load(&self.config.plugin_consent_path())?
+                            .status(&plugin, &manifest.permissions),
+                    );
+                }
+                plugins.push(update);
+            }
+            Ok(plugins)
+        }
+        .await;
+
+        if let Ok(plugins) = &result {
+            UpdateSummary::of(plugins.iter().map(|plugin| &plugin.outcome)).record_into(&mut rec);
+            for plugin in plugins {
+                rec.note(format!("{}: {}", plugin.name, plugin.outcome.describe()));
+                if let UpdateOutcome::Updated { tools_changed, .. } = &plugin.outcome {
+                    for change in tools_changed {
+                        rec.note(format!(
+                            "{}: araç değişti — {} (onay istenmez, D-071)",
+                            plugin.name,
+                            change.describe()
+                        ));
+                    }
+                }
+            }
+        }
+
+        self.finish(rec, result, move |plugins, diag| PluginUpdateReport {
+            index,
+            platform,
+            summary: UpdateSummary::of(plugins.iter().map(|plugin| &plugin.outcome)),
+            plugins,
+            diag,
+        })
+    }
+
+    /// Bir eklentiyi kaldırır: dizinini (içindeki `state/` ile) siler ve
+    /// onayını unutur (D-071).
+    ///
+    /// Onay **önce** unutulur: dizin silinemezse eklenti onaysız kalır — ters
+    /// sıra, onaylı ama yarım silinmiş bir eklenti bırakabilirdi. Sırlar ve
+    /// motorun kurduğu araçlar silinmez; kalan sırların adları raporda.
+    /// Dizin bir sembolik bağlantıysa yalnızca bağlantı kaldırılır.
+    ///
+    /// # Errors
+    /// Ad geçersizse, eklenti kurulu değilse, onay defteri ya da sır dosyası
+    /// bozuksa, dizin silinemezse.
+    pub fn remove_plugin(&self, name: &str) -> Result<PluginRemoveReport> {
+        let mut rec = Recorder::start(
+            format!("plugin remove {name}"),
+            Some(self.config.data_dir().to_path_buf()),
+        );
+        let result = (|| {
+            catalog::installed_dir(&self.config, name)?;
+            let path = self.config.plugin_consent_path();
+            let mut consents = ConsentStore::load(&path)?;
+            let consent_forgotten = consents.forget(name);
+            if consent_forgotten {
+                consents.save(&path)?;
+            }
+            let removed = catalog::remove(&self.config, name)?;
+            let kept_secrets: Vec<String> = Secrets::load(&self.config.secrets_path())?
+                .namespace(&crate::secrets::plugin_namespace(name))
+                .into_keys()
+                .collect();
+            Ok((removed, consent_forgotten, kept_secrets))
+        })();
+
+        if let Ok((removed, consent_forgotten, kept_secrets)) = &result {
+            rec.note(format!("kaldırıldı: {}", removed.path.display()));
+            if let Some(target) = &removed.link_target {
+                rec.note(format!(
+                    "bir bağlantıydı; hedefine dokunulmadı: {}",
+                    target.display()
+                ));
+            }
+            rec.note(format!(
+                "onay: {}",
+                if *consent_forgotten {
+                    "unutuldu"
+                } else {
+                    "kaydı yoktu"
+                }
+            ));
+            if !kept_secrets.is_empty() {
+                rec.note(format!("kalan sırlar: {}", kept_secrets.join(", ")));
+            }
+        }
+
+        let name = name.to_owned();
+        self.finish(
+            rec,
+            result,
+            move |(removed, consent_forgotten, kept_secrets), diag| PluginRemoveReport {
+                name,
+                removed,
+                consent_forgotten,
+                kept_secrets,
+                diag,
+            },
+        )
+    }
+
+    /// Katalog deposunun indeksini üretir ya da denetler (D-071).
+    ///
+    /// Katalog **bakımı** için: `dir` bir `headshell/plugins` kopyası. Her
+    /// eklenti çekirdeğin kendi manifest doğrulamasından geçer — kurulumda
+    /// uygulanacak kuralın aynısı — ve dosyaların karması hesaplanır.
+    /// `url_template` verilmezse var olan `index.json`'daki kullanılır, ki
+    /// her üretim aynı adresleri yazsın.
+    ///
+    /// `check` açıkken hiçbir şey yazılmaz; indeks güncel değilse **neyin**
+    /// farklı olduğunu söyleyen bir hata döner (katalog deposunun CI'ı).
+    ///
+    /// # Errors
+    /// Şablon yoksa ya da geçersizse, bir eklenti geçersizse, `check`
+    /// açıkken indeks güncel değilse, dosya okunamaz ya da yazılamazsa.
+    pub fn build_plugin_index(
+        &self,
+        dir: &Path,
+        url_template: Option<&str>,
+        check: bool,
+    ) -> Result<PluginIndexReport> {
+        let mut rec = Recorder::start(
+            format!(
+                "plugin index {}{}",
+                dir.display(),
+                if check { " --check" } else { "" }
+            ),
+            Some(self.config.data_dir().to_path_buf()),
+        );
+        let index_path = dir.join(catalog::INDEX_FILE);
+        let origin = index_path.display().to_string();
+        let result = (|| {
+            let template = match url_template {
+                Some(template) => template.to_owned(),
+                None => catalog::read_url_template(&index_path)?.ok_or_else(|| {
+                    Error::new(
+                        Stage::PluginCatalog,
+                        ErrorKind::PluginCatalog {
+                            index: origin.clone(),
+                            detail: "adres şablonu yok: ilk üretimde `--url-template` verin; \
+                                     sonrakiler index.json'daki şablonu kullanır"
+                                .to_owned(),
+                        },
+                    )
+                })?,
+            };
+            let built = catalog::build_index(dir, &template)?;
+            let existing = match std::fs::read_to_string(&index_path) {
+                Ok(text) => Some(text),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+                Err(err) => {
+                    return Err(crate::error::io_err(Stage::PluginCatalog, &index_path, err));
+                }
+            };
+            let up_to_date = existing.as_deref() == Some(built.json.as_str());
+            if check && !up_to_date {
+                let differences = match &existing {
+                    Some(old) => catalog::index_differences(old, &built.json),
+                    None => vec!["index.json yok".to_owned()],
+                };
+                return Err(Error::new(
+                    Stage::PluginCatalog,
+                    ErrorKind::PluginCatalog {
+                        index: origin.clone(),
+                        detail: format!(
+                            "index.json güncel değil — `headshell plugin index {}` ile yeniden \
+                             üretin: {}",
+                            dir.display(),
+                            differences.join("; ")
+                        ),
+                    },
+                ));
+            }
+            let written = !check && !up_to_date;
+            if written {
+                catalog::write_index(dir, &built.json)?;
+            }
+            Ok((template, built.plugins, up_to_date, written))
+        })();
+
+        if let Ok((_, plugins, up_to_date, written)) = &result {
+            rec.set(
+                "index.plugins",
+                i64::try_from(plugins.len()).unwrap_or(i64::MAX),
+            );
+            for plugin in plugins {
+                rec.note(format!("{} {}", plugin.name, plugin.version));
+            }
+            rec.note(if *written {
+                "index.json yazıldı".to_owned()
+            } else if *up_to_date {
+                "index.json zaten güncel".to_owned()
+            } else {
+                "index.json yazılmadı".to_owned()
+            });
+        }
+
+        self.finish(
+            rec,
+            result,
+            move |(url_template, plugins, up_to_date, written), diag| PluginIndexReport {
+                path: index_path,
+                url_template,
+                plugins,
+                up_to_date,
+                written,
+                diag,
+            },
+        )
     }
 
     /// Bir eklentinin **beyan ettiği** izinleri onaylar (D-040).
@@ -1562,6 +2017,23 @@ fn missing_consent(found: bool, name: &str) -> Result<()> {
             },
         ))
     }
+}
+
+/// Bir eklentinin beyan ettiği araçları motorla kurar (D-055). Hiç araç
+/// istemiyorsa ağa çıkılmaz ve boş liste döner.
+fn install_artifacts(
+    store: &ArtifactStore,
+    manifest: &PluginManifest,
+) -> Result<Vec<(String, InstallOutcome)>> {
+    let mut outcomes = Vec::new();
+    if !manifest.requires.is_empty() {
+        let source = crate::plugin::artifact::default_artifact_source()?;
+        for requirement in &manifest.requires {
+            let outcome = store.install(source.as_ref(), requirement)?;
+            outcomes.push((requirement.name.clone(), outcome));
+        }
+    }
+    Ok(outcomes)
 }
 
 /// Yola göre zip mi dizin mi olduğuna karar verir.

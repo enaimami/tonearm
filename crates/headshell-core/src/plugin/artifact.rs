@@ -562,8 +562,9 @@ fn stream_to_file(
     Ok(hex(&hasher.finalize()))
 }
 
-/// Bir dosyanın sha256'sı — belleğe tamamen almadan.
-fn hash_file(path: &Path) -> std::io::Result<String> {
+/// Bir dosyanın sha256'sı — belleğe tamamen almadan. Katalog da yerel
+/// değişikliği bununla yakalıyor (D-071).
+pub(crate) fn hash_file(path: &Path) -> std::io::Result<String> {
     let mut file = std::fs::File::open(path)?;
     let mut hasher = Sha256::new();
     let mut buffer = vec![0_u8; 64 * 1024];
@@ -614,7 +615,7 @@ fn hex(digest: &[u8]) -> String {
 }
 
 /// Karmanın ilk 12 hanesi — mesajda 64 hane okunmaz.
-fn short_hash(hash: &str) -> &str {
+pub(crate) fn short_hash(hash: &str) -> &str {
     let end = hash.len().min(12);
     hash.get(..end).unwrap_or(hash)
 }

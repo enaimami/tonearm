@@ -216,10 +216,11 @@ sistemin glibc'sinden eskisinde açılmaz. Kendin derlersen ikili, derlediğin
 makineden eski sistemlerde açılmayabilir.
 
 Eklentiler için **hiçbir şey kurman gerekmez.** Eklenti motoru (QuickJS)
-`headshell`'un içinde geliyor; eklentilerin ihtiyaç duyduğu araçları
-(YouTube Music için yt-dlp) motor indirir — `headshell plugin install <ad>`,
-senin platformunun kendi kendine yeten ikilisini, sabitlenmiş sürümden ve
-sha256 doğrulayarak, senin veri dizinine. Python, `pip`, root gerekmez.
+`headshell`'un içinde geliyor. `headshell plugin install <ad>` eklentiyi
+[katalogdan](https://github.com/headshell/plugins) indirir ve ihtiyaç duyduğu
+araçları (YouTube Music için yt-dlp) motor kurar — senin platformunun kendi
+kendine yeten ikilisini, sabitlenmiş sürümden ve sha256 doğrulayarak, senin
+veri dizinine. Python, `pip`, root gerekmez.
 
 </details>
 
@@ -285,7 +286,8 @@ headshell diag     # son çalıştırmanın ortamı, aşaması, hata zinciri —
 | `headshell library search <sorgu>` | Kütüphanede tam metin arama |
 | `headshell play <sorgu> [--all] [--shuffle] [--tui]` | Çalar |
 | `headshell provider list \| test \| scan \| add \| remove \| servers` | Sağlayıcı yönetimi |
-| `headshell plugin list \| approve \| install \| disable \| enable \| forget` | Eklenti yönetimi |
+| `headshell plugin catalog \| install \| update \| remove` | Eklenti kataloğu: listele, kur, güncelle, kaldır |
+| `headshell plugin list \| approve \| disable \| enable \| forget` | Kurulu eklentiler ve onayları |
 | `headshell secret list \| set \| remove` | Sır deposu (değerler asla gösterilmez) |
 | `headshell diag` | Tanı raporu |
 
@@ -317,6 +319,19 @@ motorunda koşar: kullanıcının makinesinde Python, Node ya da başka bir
 ister — ve beyan **zorlanır**: eklenti yalnızca beyan ettiği adreslere
 bağlanabilir, dosya sistemine erişemez. Takılan ya da hata veren bir eklenti
 uygulamayı düşürmez.
+
+Eklentiler ayrı bir depoda, [**`headshell/plugins`**](https://github.com/headshell/plugins)
+kataloğunda yaşar; uygulama listeyi oradan okur:
+
+```bash
+headshell plugin catalog              # ne var, ne kurulu, ne güncellenebilir
+headshell plugin install soundcloud   # indirir, her dosyanın sha256'sını doğrular
+headshell plugin approve soundcloud   # kurulan eklenti onay bekler
+headshell plugin update               # katalogdan kurulanları güncelle
+```
+
+Katalog yalnızca sen isteyince okunur. Elle kurduğun ya da elle
+değiştirdiğin bir eklentinin üstüne güncelleme yazmaz.
 → [eklenti yazma rehberi](docs/eklenti-yazma.md)
 
 ---
@@ -326,6 +341,8 @@ uygulamayı düşürmez.
 * **Telemetri yok.** Kodda böyle bir şey yok; arayabilirsin.
 * **Ağ varsayılan kapalı.** `--online` demedikçe kimlik çözümlemesi hiçbir
   servise sormaz. Bir export'u içe aktarmak seni sessizce ağa bağlamaz.
+  Eklenti kataloğu da yalnızca `plugin catalog`, `install` ya da `update`
+  dediğinde okunur — açılışta, arka planda "güncelleme var mı" diye sorulmaz.
 * **Parolan diske yazılmaz.** Komut satırına da yazılmaz (kabuk geçmişine ve
   `ps` çıktısına sızardı). Subsonic'te ondan bir token türetilir, Jellyfin'de
   bir erişim anahtarı alınır; saklanan bunlardır.
@@ -371,8 +388,8 @@ ve istatistiklerin yerinde kalır.
 <summary><b>İnternetsiz çalışır mı?</b></summary>
 <br>
 Evet. İçe aktarma, yerel çalma, istatistik ve sleeve üretimi tamamen
-çevrimdışı çalışır. Ağ yalnızca uzak sunucular, eklentiler ve
-<code>--online</code> ile açılan kimlik halkaları için gerekir.
+çevrimdışı çalışır. Ağ yalnızca uzak sunucular, eklentiler, eklenti kataloğu
+ve <code>--online</code> ile açılan kimlik halkaları için gerekir.
 </details>
 
 <details>

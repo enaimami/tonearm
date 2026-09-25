@@ -261,9 +261,25 @@
           </p>
           <ul id="pluginList" class="plugins"></ul>
           <p id="pluginEmpty" class="empty" hidden>
-            Kurulu eklenti yok. Eklentiler veri dizinindeki <code>plugins/</code> klasörüne
-            konur; yolu <b>tanı</b> bölümündeki ortam bloğu yazar.
+            Kurulu eklenti yok. Aşağıdaki <b>katalog</b>dan kurabilirsiniz. Elle kurulan bir
+            eklenti veri dizinindeki <code>plugins/</code> klasörüne konur; yolu <b>tanı</b>
+            bölümündeki ortam bloğu yazar.
           </p>
+
+          <h2>katalog</h2>
+          <p class="hint">
+            Eklentiler <code>headshell/plugins</code> deposundan gelir. Katalog yalnızca siz
+            isteyince okunur; her dosya sha256'sıyla doğrulanır ve kurulan eklenti
+            <b>onay bekler</b>. Elle kurulmuş ya da elle değiştirilmiş bir eklentinin üstüne
+            güncelleme yazmaz.
+          </p>
+          <div class="row">
+            <button id="btnCatalogLoad">kataloğu getir</button>
+            <button id="btnCatalogUpdateAll">hepsini güncelle</button>
+            <span id="catalogSummary" class="hint"></span>
+          </div>
+          <p id="catalogDelisted" class="warn-note" hidden></p>
+          <ul id="catalogList" class="plugins"></ul>
 
           <h2>sırlar</h2>
           <p class="hint">

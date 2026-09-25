@@ -126,7 +126,7 @@ enum Command {
         #[command(subcommand)]
         command: ProviderCommand,
     },
-    /// Eklenti işlemleri (alt süreç + JSON-RPC sağlayıcılar).
+    /// Eklenti işlemleri: katalog, kurulum, onay, güncelleme, kaldırma.
     Plugin {
         #[command(subcommand)]
         command: PluginCommand,
@@ -211,6 +211,13 @@ enum ProviderCommand {
 enum PluginCommand {
     /// Kurulu eklentileri ve durumlarını listele (eklentileri çalıştırmaz).
     List,
+    /// Eklenti kataloğunu göster: ne kurulabilir, ne kurulu, ne güncellenebilir.
+    ///
+    /// Katalog `headshell/plugins` deposundaki `index.json`'dur;
+    /// `HEADSHELL_PLUGIN_INDEX` başka bir adres verir (bir ayna, bir çatal).
+    /// Yalnızca okur, hiçbir şey kurmaz. `--online` beklemez: listeyi istemek
+    /// ağa çıkmaktır.
+    Catalog,
     /// Bir eklentinin beyan ettiği izinleri onayla.
     ///
     /// Onaylanan izinler zorlanır (D-069): eklenti yalnızca beyan ettiği
@@ -221,18 +228,59 @@ enum PluginCommand {
         /// Eklenti adı (dizin adı).
         name: String,
     },
-    /// Eklentinin beyan ettiği araçları (yt-dlp gibi) bu platform için kur.
+    /// Bir eklentiyi kur: diskte yoksa katalogdan indir, sonra araçlarını kur.
     ///
-    /// İndirmeyi motor yapar, eklenti değil; her eser sabitlenmiş bir
-    /// sürümle ve platform başına ayrı bir ikiliyle gelir, sha256'sı
-    /// doğrulanmadan yerine konmaz. Sisteme hiçbir şey yazılmaz, root
-    /// istenmez, Python gerekmez (D-055, D-069).
+    /// Katalogdan gelen her dosya sha256'sıyla doğrulanır ve inen manifest
+    /// katalogda gösterilenle karşılaştırılır; tutmazsa hiçbir şey yazılmaz.
+    /// Kurulan eklenti **onay bekler**: `headshell plugin approve <ad>`.
+    /// Diskte zaten olan eklenti için katalog okunmaz, yalnızca araçları
+    /// kurulur — güncellemek `update`'in işi (D-071).
     ///
-    /// Bu komut `--online` beklemez: indirme komutun kendisidir, yan
-    /// etkisi değil. Zaten kurulu eserler için ağa çıkılmaz.
+    /// Araçları (yt-dlp gibi) motor indirir, eklenti değil; her biri
+    /// sabitlenmiş bir sürümle ve platform başına ayrı bir ikiliyle gelir,
+    /// sha256'sı doğrulanmadan yerine konmaz. Root istenmez, Python gerekmez
+    /// (D-055, D-069).
+    ///
+    /// `--online` beklemez: indirme komutun kendisidir, yan etkisi değil.
     Install {
         /// Eklenti adı.
         name: String,
+    },
+    /// Katalogdan kurulmuş eklentileri katalogdaki sürüme getir.
+    ///
+    /// Ad verilmezse katalogdan kurulmuş hepsi. Elle konmuş ya da yerelde
+    /// değiştirilmiş bir eklentinin üstüne yazılmaz. Yeni sürüm fazladan
+    /// izin istiyorsa eklenti yeniden onay bekler; araç (yt-dlp) değiştiyse
+    /// çıktı bunu yazar (D-071).
+    Update {
+        /// Eklenti adı; verilmezse hepsi.
+        name: Option<String>,
+    },
+    /// Bir eklentiyi kaldır: dizinini siler, onayını unutur.
+    ///
+    /// Sırlar ve motorun kurduğu araçlar silinmez; kalan sırların adları
+    /// yazılır. Dizin bir bağlantıysa yalnızca bağlantı kaldırılır.
+    Remove {
+        /// Eklenti adı.
+        name: String,
+    },
+    /// Katalog deposunun indeksini üret ya da denetle (katalog bakımı).
+    ///
+    /// `DİZİN` bir `headshell/plugins` kopyası: her eklenti `<ad>/plugin.json`
+    /// ve betiği. Her manifest kurulumdaki doğrulamanın aynısından geçer,
+    /// dosyaların sha256'sı hesaplanır ve `<DİZİN>/index.json` yazılır.
+    Index {
+        /// Katalog deposunun kökü.
+        #[arg(value_name = "DİZİN")]
+        dir: PathBuf,
+        /// Dosya adresi şablonu: `{name}`, `{version}` ve `{path}` zorunlu.
+        /// Verilmezse var olan `index.json`'daki şablon kullanılır.
+        #[arg(long, value_name = "ŞABLON")]
+        url_template: Option<String>,
+        /// Hiçbir şey yazma; indeks güncel değilse neyin farklı olduğunu
+        /// söyleyip başarısız ol (katalog deposunun CI'ı için).
+        #[arg(long)]
+        check: bool,
     },
     /// Bir eklentiyi kapat (onay kaydı korunur).
     Disable {
@@ -291,10 +339,17 @@ async fn main() -> ExitCode {
     let cli = Cli::parse();
     init_tracing(cli.verbose);
 
-    match run(&cli).await {
+    // Kısmi başarı üreten bir komut (bütün eklentileri güncellemek) raporunu
+    // yine basar ama sıfır dönmez: betik "bir şey olmadı"yı görebilmeli.
+    let mut succeeded = true;
+    match run(&cli, &mut succeeded).await {
         Ok(text) => {
             print!("{text}");
-            ExitCode::SUCCESS
+            if succeeded {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(EXIT_FAILURE)
+            }
         }
         Err(err) => {
             eprintln!("{}", err.chain_text());
@@ -304,8 +359,9 @@ async fn main() -> ExitCode {
     }
 }
 
-/// Komutu çalıştırır ve basılacak metni döndürür.
-async fn run(cli: &Cli) -> headshell_core::Result<String> {
+/// Komutu çalıştırır ve basılacak metni döndürür. Komut kısmen
+/// başarısızsa `succeeded`'ı indirir; metin yine basılır.
+async fn run(cli: &Cli, succeeded: &mut bool) -> headshell_core::Result<String> {
     let config = match &cli.data_dir {
         Some(dir) => Config::with_data_dir(dir),
         None => Config::discover()?,
@@ -456,9 +512,33 @@ async fn run(cli: &Cli) -> headshell_core::Result<String> {
                 let report = session.approve_plugin(name)?;
                 render(cli.json, &report, || output::plugin_consent(&report))
             }
+            PluginCommand::Catalog => {
+                let http = headshell_core::net::default_http_client()?;
+                let report = session.plugin_catalog(http).await?;
+                render(cli.json, &report, || output::plugin_catalog(&report))
+            }
             PluginCommand::Install { name } => {
-                let report = session.install_plugin(name)?;
+                let http = headshell_core::net::default_http_client()?;
+                let report = session.install_plugin(name, http).await?;
                 render(cli.json, &report, || output::plugin_install(&report))
+            }
+            PluginCommand::Update { name } => {
+                let http = headshell_core::net::default_http_client()?;
+                let report = session.update_plugins(name.as_deref(), http).await?;
+                *succeeded = report.summary.failed == 0;
+                render(cli.json, &report, || output::plugin_update(&report))
+            }
+            PluginCommand::Remove { name } => {
+                let report = session.remove_plugin(name)?;
+                render(cli.json, &report, || output::plugin_remove(&report))
+            }
+            PluginCommand::Index {
+                dir,
+                url_template,
+                check,
+            } => {
+                let report = session.build_plugin_index(dir, url_template.as_deref(), *check)?;
+                render(cli.json, &report, || output::plugin_index(&report))
             }
             PluginCommand::Disable { name } => {
                 let report = session.disable_plugin(name)?;

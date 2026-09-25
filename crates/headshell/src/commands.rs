@@ -27,10 +27,11 @@ use headshell_core::model::PlayRule;
 use headshell_core::playback::{PlaybackAnchor, QueueView, RepeatMode};
 use headshell_core::provider::remote::{self, NewServer, ServerKind};
 use headshell_core::session::{
-    self, ImportReport, PlayOptions, PluginConsentReport, PluginInstallReport, PluginListReport,
-    ProviderListReport, ProviderTestReport, ResolveReport, ScanReport, SearchReport,
-    SecretListReport, SecretWriteReport, ServerAddReport, ServerListReport, ServerRemoveReport,
-    SleeveResponse, StatsResponse,
+    self, ImportReport, PlayOptions, PluginCatalogReport, PluginConsentReport, PluginInstallReport,
+    PluginListReport, PluginRemoveReport, PluginUpdateReport, ProviderListReport,
+    ProviderTestReport, ResolveReport, ScanReport, SearchReport, SecretListReport,
+    SecretWriteReport, ServerAddReport, ServerListReport, ServerRemoveReport, SleeveResponse,
+    StatsResponse,
 };
 use headshell_core::sleeve::CardPreset;
 use headshell_core::stats::StatsQuery;
@@ -506,9 +507,18 @@ pub async fn theme_select(
 // Komutlar CLI'nin `headshell plugin ...` alt komutlarıyla birebir aynı çekirdek
 // çağrılarını yapıyor — ikisi de aynı çekirdeğin kabuğu.
 //
-// **İzinler zorlanmıyor** (D-040) ve bu her listede `permissions_enforced`
-// alanıyla yazıyor. Arayüz bunu gizlemez: olmayan bir korumaya güven
-// verilmez.
+// İzinlerin ne kadarının zorlandığı her listede `permissions_enforced`
+// alanıyla yazıyor (D-040 → D-069). Arayüz bunu gizlemez: olmayan bir
+// korumaya güven verilmez, var olanın sınırı da söylenir.
+//
+// Katalog (D-071) yalnızca kullanıcı isteyince okunur: panel açılınca değil,
+// "kataloğu getir"e basınca. Ağa çıkan her komut meşguliyet olayı gönderir.
+//
+// Eklentinin durumunu değiştiren her komut sağlayıcı kaydını **yeniler**.
+// Kayıt açılışta kuruluyor ve bunu yapan yalnızca sunucu komutlarıydı:
+// onaylanan bir eklenti uygulama yeniden açılana kadar çalınamıyor,
+// kaldırılan bir eklenti aramada görünmeye devam ediyordu (D-071'de
+// bulundu). Çalan parça etkilenmez — oynatıcı kendi kopyasını tutuyor.
 
 #[tauri::command]
 pub async fn plugins(state: State<'_, AppState>) -> CommandResult<PluginListReport> {
@@ -524,7 +534,13 @@ pub async fn plugin_approve(
     name: String,
 ) -> CommandResult<PluginConsentReport> {
     state
-        .run_on_core(move |core| Box::pin(async move { core.live.session().approve_plugin(&name) }))
+        .run_on_core(move |core| {
+            Box::pin(async move {
+                let report = core.live.session().approve_plugin(&name)?;
+                core.refresh_registry()?;
+                Ok(report)
+            })
+        })
         .await
 }
 
@@ -534,7 +550,13 @@ pub async fn plugin_disable(
     name: String,
 ) -> CommandResult<PluginConsentReport> {
     state
-        .run_on_core(move |core| Box::pin(async move { core.live.session().disable_plugin(&name) }))
+        .run_on_core(move |core| {
+            Box::pin(async move {
+                let report = core.live.session().disable_plugin(&name)?;
+                core.refresh_registry()?;
+                Ok(report)
+            })
+        })
         .await
 }
 
@@ -544,7 +566,13 @@ pub async fn plugin_enable(
     name: String,
 ) -> CommandResult<PluginConsentReport> {
     state
-        .run_on_core(move |core| Box::pin(async move { core.live.session().enable_plugin(&name) }))
+        .run_on_core(move |core| {
+            Box::pin(async move {
+                let report = core.live.session().enable_plugin(&name)?;
+                core.refresh_registry()?;
+                Ok(report)
+            })
+        })
         .await
 }
 
@@ -554,12 +582,39 @@ pub async fn plugin_forget(
     name: String,
 ) -> CommandResult<PluginConsentReport> {
     state
-        .run_on_core(move |core| Box::pin(async move { core.live.session().forget_plugin(&name) }))
+        .run_on_core(move |core| {
+            Box::pin(async move {
+                let report = core.live.session().forget_plugin(&name)?;
+                core.refresh_registry()?;
+                Ok(report)
+            })
+        })
         .await
 }
 
-/// Eklentinin çalışma zamanı eserlerini indirir (D-055). **Ağa çıkar** —
-/// bu yüzden meşguliyet olayı gönderiyor.
+/// Kataloğu okur ve bu makineye karşı gösterir (D-071). **Ağa çıkar.**
+#[tauri::command]
+pub async fn plugin_catalog(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> CommandResult<PluginCatalogReport> {
+    state
+        .run_on_core(move |core| {
+            Box::pin(async move {
+                let http = headshell_core::net::default_http_client()?;
+                busy(
+                    &app,
+                    "katalog okunuyor",
+                    core.live.session().plugin_catalog(http),
+                )
+                .await
+            })
+        })
+        .await
+}
+
+/// Eklentiyi kurar: diskte yoksa katalogdan indirir, sonra araçlarını
+/// (D-055, D-071). **Ağa çıkar** — bu yüzden meşguliyet olayı gönderiyor.
 #[tauri::command]
 pub async fn plugin_install(
     app: AppHandle,
@@ -569,10 +624,60 @@ pub async fn plugin_install(
     state
         .run_on_core(move |core| {
             Box::pin(async move {
-                busy(&app, format!("{name} kuruluyor").as_str(), async {
-                    core.live.session().install_plugin(&name)
-                })
-                .await
+                let http = headshell_core::net::default_http_client()?;
+                let report = busy(
+                    &app,
+                    format!("{name} kuruluyor").as_str(),
+                    core.live.session().install_plugin(&name, http),
+                )
+                .await?;
+                core.refresh_registry()?;
+                Ok(report)
+            })
+        })
+        .await
+}
+
+/// Katalogdan kurulmuş eklentileri günceller; `name` yoksa hepsini (D-071).
+#[tauri::command]
+pub async fn plugin_update(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: Option<String>,
+) -> CommandResult<PluginUpdateReport> {
+    state
+        .run_on_core(move |core| {
+            Box::pin(async move {
+                let http = headshell_core::net::default_http_client()?;
+                let what = match &name {
+                    Some(name) => format!("{name} güncelleniyor"),
+                    None => "eklentiler güncelleniyor".to_owned(),
+                };
+                let report = busy(
+                    &app,
+                    &what,
+                    core.live.session().update_plugins(name.as_deref(), http),
+                )
+                .await?;
+                core.refresh_registry()?;
+                Ok(report)
+            })
+        })
+        .await
+}
+
+/// Eklentiyi kaldırır ve onayını unutur (D-071).
+#[tauri::command]
+pub async fn plugin_remove(
+    state: State<'_, AppState>,
+    name: String,
+) -> CommandResult<PluginRemoveReport> {
+    state
+        .run_on_core(move |core| {
+            Box::pin(async move {
+                let report = core.live.session().remove_plugin(&name)?;
+                core.refresh_registry()?;
+                Ok(report)
             })
         })
         .await

@@ -3944,3 +3944,176 @@ CI ve paketleme işlerine süre sınırı kondu (`timeout-minutes`): bir sonraki
 takılma 6 saat beklemeden düşer ve günlüğü açılır. Takılan koşum
 (36041064570) yerel belirteçle iptal edilemiyor; GitHub'ın 6 saatlik
 sınırıyla ya da arayüzden iptal edilerek kapanacak.
+
+## D-071 — Eklenti kataloğu: eklentiler `headshell/plugins`'te, uygulama listeyi oradan okuyor
+
+**Tarih:** 2026-09-25 · **Durum:** UYGULANDI (2026-09-25)
+
+**Soru:** Kullanıcı: *"eklentiler embeded olarak duruyor ya şuan. onun yerine
+obsidian gibi bir repoda tutalım ve eklentiler listesi bu repodaki
+eklentilerden gelsin."* Eklentiler ikiliye gömülü değildi ama ana depodaki
+`plugins/`'te duruyordu ve kullanıcı onları veri dizinine `cp` ile
+kopyalıyordu. Bir eklentiyi güncellemek — YouTube yt-dlp'yi bozduğunda
+sabitlenmiş sürümü artırmak gibi (D-048) — bir uygulama sürümü ya da elle
+kopyalama demekti. Üç alt soru soruldu: deponun yapısı, onayın araçları
+kapsayıp kapsamayacağı, canlı testlerin yeri.
+
+**Karar (kullanıcı):**
+
+1. **Tek depo: `headshell/plugins`.** Eklentiler orada dizin olarak yaşıyor,
+   `index.json` onlardan üretiliyor. Obsidian'ın birebir modeli (liste bir
+   depoda, her eklenti kendi deposunda) seçilmedi. Kullanıcı önce "bu kadar
+   fazla repo açmamızda github tarafında bir sorun var mı?" diye sordu. Cevap:
+   GitHub'da bir engel yok (ücretsiz organizasyonda public depo sayısı
+   sınırsız, public depolarda Actions ücretsiz, indirme trafiği depo
+   sayısına bağlı değil), bedel bakımda (her depoda ayrı CI, ayrı sır,
+   ince taneli belirteçte depo başına erişim). Obsidian'da ayrı depoların
+   sebebi eklentilerin başka yazarlara ait olması; bizde ikisinin de sahibi
+   aynı. İndeks biçimi dosya adresini serbest bıraktığı için bu seçim **geri
+   alınabilir**: bir eklenti ileride kendi deposuna taşınırsa istemci
+   değişmez.
+2. **Onay yalnızca ağ izinlerini kapsamaya devam eder.** Önerim araç
+   değişikliğinin (yt-dlp'nin adresi ya da karması) de yeniden onay
+   istemesiydi — katalogdan gelen bir güncelleme hapsedilmeyen bir ikiliyi
+   sessizce değiştirebilir. Kullanıcı bugünkü hâli seçti. Karşılığı: `update`
+   çıktısı her araç değişikliğini **ayrıca yazıyor** ("araç değişti: yt-dlp
+   2026.08.19 → …, onay istenmez"), sessiz değil.
+3. **Canlı testler ana depoda kalır, eklentiyi canlı katalogdan kurar.**
+   Katalogdaki bozuk bir sürüm ana deponun CI'ını kırmızı yakar — D-043'ün
+   "eklentinin bozulduğu gün o gün öğreniliyor" ilkesi.
+
+**Kullanıcıya bildirilen, itiraz gelmeyen kararlar:** katalog yalnızca açık
+bir komutla okunur; her dosya indeksteki sha256 ile doğrulanır; dosya
+adresleri sürüm etiketine sabitlenir; `plugin install <ad>` eklenti diskte
+yoksa katalogdan indirir (bugünkü davranışın üst kümesi) ve yanına
+`catalog`, `update`, `remove`, `index` gelir; elle kurulmuş ya da yerelde
+değiştirilmiş bir eklentinin üstüne yazılmaz; yeni bağımlılık yok.
+
+### İndeks (şema 1)
+
+```json
+{ "schema": 1, "url_template": "…/refs/tags/{name}-{version}/{name}/{path}",
+  "plugins": [ { "manifest": { …plugin.json… },
+                 "files": [ { "path": "main.js", "url": "…", "sha256": "…" } ] } ] }
+```
+
+Girdi manifestin **kendisini** taşıyor, özetini değil: katalogda gösterilen
+izinler ile kurulanın izinleri aynı kaynaktan geliyor ve inen `plugin.json`
+bununla karşılaştırılıyor. Dosya listesi tam olarak `plugin.json` + betik;
+`origin.json` ve `state/` motorun adları, katalogdaki bir dosya onlara
+yazılamaz. Şema kuralı `api`'ninki: eklemek artırmaz, bilinmeyen şema
+okunmaz ve "headshell'i güncelleyin" der.
+
+İndeks **elle yazılmaz**: `headshell plugin index <katalog-deposu>` her
+manifesti kurulumdaki doğrulamanın aynısından geçirir (`PluginManifest::parse`
+— `load` onun üstüne kuruldu, katalog kendi kuralını yazmıyor; D-057'nin
+"kopyalanan mantık kayar"ı) ve karmaları hesaplar. `--check` hiçbir şey
+yazmaz, indeks güncel değilse **hangi eklentinin** farklı olduğunu söyler.
+
+### Neden etiket, neden `main` değil
+
+İndeks `main`'de durur, dosyalar `<ad>-<sürüm>` etiketinde. Ölçüldü:
+`raw.githubusercontent.com` `Cache-Control: max-age=300` döndürüyor. `main`'e
+sabitli dosya adresleriyle, yeni bir sürüm yayımlandıktan sonraki beş dakika
+içinde bir istemci yeni indeksi eski dosyayla (ya da tersini) alabilirdi ve
+kurulum "karma tutmuyor" derdi — korkutucu, geçici ve kullanıcının
+düzeltemeyeceği bir hata. Etiketli adres hiç değişmediği için önbellek onu
+bozamıyor. `refs/tags/<etiket>/…` ve `refs/heads/<dal>/…` biçimlerinin ikisi
+de ölçüldü (200); olmayan etiket 404. Bu yüzden şablonda `{version}`
+zorunlu.
+
+Bir sürümün etiketi taşınmaz: kurulu kopyalar o sürümün karmasını kaydetti.
+Katalog deposunun CI'ı her gönderimde etiketin var olduğunu ve dosyaların
+etiketle aynı olduğunu denetliyor, sonra her eklentiyi yayımlanan katalogdan
+gerçekten kuruyor.
+
+### Kimin dosyasına dokunulur
+
+Katalogdan kurulan eklentinin dizininde bir köken kaydı durur (`origin.json`:
+katalog, sürüm, dosya → sha256). Güncelleme yalnızca kaydı olan ve dosyaları
+kayıtla aynı olan eklentiye dokunur; ötekiler sebebi yazan bir "atlandı"
+alır. Elle konmuş bir dizin (bir geliştiricinin çalışma kopyası, belki bir
+bağlantı) güncellemeyle silinmemeli. Yarıda kalmış bir güncellemenin
+bıraktığı dosya — katalogdaki **yeni** karmayı taşıyan — yerel değişiklik
+sayılmıyor, ki bir sonraki `update` onu tamamlayabilsin.
+
+Kurulum veri dizininde, eklenti dizininin **dışında** hazırlanıp tek bir
+`rename` ile yerine konuyor: yarıda kalan bir kurulum yarım bir eklenti
+bırakmıyor, keşif hazırlanan dizini eklenti sanmıyor. Güncelleme dosya dosya
+atomik (betik, manifest, en son köken kaydı) ve `state/`'e (eklentinin
+`host.storage`'ı) dokunmuyor. Kaldırma önce onayı unutuyor, sonra dizini
+siliyor — ters sıra onaylı ama yarım silinmiş bir eklenti bırakabilirdi — ve
+bir bağlantıysa yalnızca bağlantıyı kaldırıyor. Sırlar silinmiyor; kalanların
+adları raporda.
+
+### Ağ
+
+Katalog yalnızca açık bir komutla okunuyor: `plugin catalog`, `plugin
+install` (eklenti diskte yoksa) ve `plugin update`. Masaüstünde "kataloğu
+getir" düğmesi; panel açılınca istek yok. Arka planda güncelleme denetimi de
+yok. `--online` beklenmiyor: indirme komutun kendisi (D-055'in gerekçesi).
+`HEADSHELL_PLUGIN_INDEX` başka bir katalog verir; adres `https://` olmalı,
+düz `http` yalnızca `127.0.0.1`/`localhost` için — indeks karmaları taşıdığı
+için güvenin kökü, düz HTTP'den geleni yoldaki herkes değiştirebilir.
+
+"Kataloğa ulaşamadım" (`NETWORK_REQUEST`) ile "katalog bozuk / dosya yok /
+karma tutmuyor" (yeni aşama `PLUGIN_CATALOG`) ayrı tanılar (K9); bir dosyanın
+404'ü ağ sorunu değil, katalog bakımcısının kusuru olarak raporlanıyor.
+
+### Bulunan kusur: masaüstünde onaylanan eklenti çalınamıyordu
+
+Masaüstü kabuğu sağlayıcı kaydını açılışta kuruyor ve yalnızca sunucu
+komutları onu yeniliyordu. `plugin_approve` / `enable` / `disable` /
+`forget` yenilemiyordu: arayüzden onaylanan bir eklenti uygulama yeniden
+açılana kadar çalınamıyordu. Katalogdaki kur → onayla → çal akışı tam bu
+yoldan geçtiği için düzeltildi: eklentinin durumunu değiştiren her komut
+(yeni `install`, `update`, `remove` dahil) kaydı yeniliyor. Çalan parça
+etkilenmiyor; oynatıcı kaydın kendi kopyasını tutuyor.
+
+### Dışa açılan API
+
+- `Session::install_plugin(name)` → `install_plugin(name, http)` ve `async`:
+  katalogdan indirme HTTP istemcisini çağırandan alıyor (`add_server`'ın
+  kalıbı, K7'ye uygun `Arc<dyn HttpClient>`). CLI ve masaüstü güncellendi;
+  mobil henüz yok.
+- `PluginInstallReport` üç alan kazandı: `fetched` (katalogdan ne indi;
+  `null` = katalog okunmadı), `permissions`, `consent`.
+- Yeni: `plugin_catalog`, `update_plugins`, `remove_plugin`,
+  `build_plugin_index` ve raporları.
+
+### Taşınanlar
+
+- `plugins/soundcloud` ve `plugins/ytmusic` → `headshell/plugins`, geçmişleri
+  `git subtree split` ile korundu. Katalog deposuna `.gitattributes` (LF)
+  kondu: Windows'ta CRLF'ye çevrilen bir dosya başka bir karma üretirdi.
+- `docs/eklenti-yazma.md` §9–10 (SoundCloud ve YouTube Music'in kullanım
+  notları) → eklentilerin kendi README'lerine; rehberde yerlerini katalog
+  bölümü aldı. Her olgu tek yerde (D-051).
+
+### Sınama
+
+- `plugin::catalog`: 27 birim testi, sahte ağ ve gerçek disk — karma tutmazsa
+  hiçbir şey yazılmıyor ve geçici dizin kalmıyor; manifest indeksle
+  çelişirse kurulmuyor; bozuk girdiler (api 3, dizin dışına çıkan yol, düz
+  http, `state/`'e yazan dosya, aynı ad iki kez) ötekileri gizlemeden
+  sebepleriyle raporlanıyor; güncelleme `state/`'i koruyor; elle konmuş ve
+  elle değiştirilmiş eklenti atlanıyor; yarım güncelleme tamamlanıyor;
+  katalogdan çekilen eklenti söyleniyor; bağlantının yalnızca kendisi
+  kaldırılıyor; `../` taşıyan ad dizin dışını silemiyor.
+- CLI: `127.0.0.1`'de açılan bir sunucuya karşı gerçek ikiliyle uçtan uca —
+  `plugin index` → `--check` → `catalog` (snapshot) → `install` → `approve` →
+  motor cevap veriyor → yeni sürüm (`--check` neyin eskidiğini söylüyor) →
+  `update` → `remove`.
+- Gerçek eklentiler yayından önce yerel bir aynadan kuruldu: SoundCloud onay
+  sonrası canlı serviste "kullanılabilir" (client_id keşifle), YouTube Music
+  kuruldu ve motor yt-dlp'yi indirip doğruladı.
+
+### Açık kalanlar
+
+- Katalog deposunun CI'ı headshell'i kaynaktan derliyor; `plugin index` bir
+  sürüme girince yayın ikilisine geçilmeli.
+- Katalogdan **kötü amaçlı olduğu için** çekilen bir eklentiyi kullanıcıya
+  bildiren bir kanal yok (Obsidian'ın `community-plugins-removed.json`'u).
+  Bugün yalnızca "bu katalogdan kurulmuş ama artık listede yok" deniyor.
+- Üçüncü taraf eklenti inceleme süreci yazılmadı; katalog deposunun
+  README'sinde yalnızca kurallar var.

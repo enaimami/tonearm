@@ -115,6 +115,16 @@ impl Config {
         self.data_dir.join("plugins.json")
     }
 
+    /// Eklenti kataloğunun adresi (D-071).
+    ///
+    /// `HEADSHELL_PLUGIN_INDEX` verilmişse o — bir çatal, bir ayna ya da
+    /// sınama için yerel bir sunucu — yoksa `headshell/plugins` deposunun
+    /// indeksi. Her çağrıda ortamdan okunur, `music_dirs` gibi.
+    #[must_use]
+    pub fn plugin_index_url(&self) -> String {
+        crate::plugin::catalog::resolve_index_url(&non_empty_env)
+    }
+
     /// Bir eklentinin durum dizini: `host.storage`'ın dosyası ve motorun
     /// kurduğu araçların çalışma dizini (D-069). Eklentinin kendisi dosya
     /// sistemine dokunamaz; bu dizini onun adına motor kullanır.

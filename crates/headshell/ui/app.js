@@ -710,14 +710,48 @@ function pluginRow(entry) {
   actions.className = "actions";
   actions.append(
     pluginButton("onayla", "plugin_approve", entry.name),
-    pluginButton("kur", "plugin_install", entry.name),
+    pluginButton("araçları kur", "plugin_install", entry.name),
     state === "disabled"
       ? pluginButton("aç", "plugin_enable", entry.name)
       : pluginButton("kapat", "plugin_disable", entry.name),
     pluginButton("onayı unut", "plugin_forget", entry.name),
+    removeButton(entry.name),
   );
   row.append(actions);
   return row;
+}
+
+/// Kaldırma geri alınamaz (dizin `state/` ile birlikte gider): ilk tıklama
+/// yalnızca soruyor, ikincisi kaldırıyor. Tarayıcının `confirm`'ü yerine
+/// düğmenin kendisi — webview'ler onu tutarlı göstermiyor ve diyalog izni
+/// yalnızca dosya seçimine açık.
+function removeButton(name) {
+  const button = document.createElement("button");
+  button.textContent = "kaldır";
+  let armed = null;
+  button.addEventListener("click", async () => {
+    if (!armed) {
+      button.textContent = "emin misiniz? kaldır";
+      armed = setTimeout(() => {
+        armed = null;
+        button.textContent = "kaldır";
+      }, 4000);
+      return;
+    }
+    clearTimeout(armed);
+    armed = null;
+    const report = await call("plugin_remove", { name });
+    if (!report) return;
+    const kept = report.kept_secrets.length
+      ? ` · kalan sırlar: ${report.kept_secrets.join(", ")}`
+      : "";
+    toast(
+      `${report.name} kaldırıldı · onay ${report.consent_forgotten ? "unutuldu" : "kaydı yoktu"}${kept}`,
+      true,
+    );
+    refreshPlugins();
+  });
+  return button;
 }
 
 function isEmptyPermissions(permissions) {
@@ -762,16 +796,201 @@ function pluginButton(label, command, name) {
     if (!report) return;
     // Kurulum raporunun şekli onay raporundan farklı: ikisi de kendi
     // alanlarıyla özetleniyor, ortak bir "sonuç" tipi uydurulmuyor.
-    toast(
-      report.action
-        ? `${report.name}: ${report.action} · durum ${report.status?.state ?? "—"}`
-        : `${name}: ${report.ready ? "hazır" : "eksik kaldı"} · beyan edilen ${report.declared} eser`,
-      true,
-    );
+    toast(report.action ? consentText(report) : installText(name, report), true);
     refreshPlugins();
   });
   return button;
 }
+
+function consentText(report) {
+  return `${report.name}: ${report.action} · durum ${report.status?.state ?? "—"}`;
+}
+
+function installText(name, report) {
+  const origin = report.fetched ? `katalogdan ${report.fetched.version} indirildi` : "araçlar";
+  const tools = report.ready ? "hazır" : "eksik kaldı";
+  const consent = CONSENT_LABELS[report.consent?.state] ?? report.consent?.state ?? "—";
+  return `${name}: ${origin} · ${report.declared} eser, ${tools} · onay: ${consent}`;
+}
+
+// ————————————————————————————————————— katalog (D-071)
+//
+// Katalog **yalnızca düğmeyle** okunur: panel açılınca ağa çıkılmaz ("bir
+// export'u içe aktarmak kimseyi sessizce ağa bağlamaz"ın arayüzdeki hâli).
+// Durum ve sebep çekirdekten geliyor; burada yalnızca yazılıyor.
+
+const INSTALL_LABELS = {
+  not_installed: "kurulu değil",
+  current: "kurulu · güncel",
+  update_available: "güncelleme var",
+  manual: "elle kurulmuş",
+  modified: "yerelde değiştirilmiş",
+  unreadable: "köken kaydı okunamadı",
+};
+
+async function refreshCatalog() {
+  const report = await call("plugin_catalog");
+  if (!report) return;
+  const box = $("catalogList");
+  box.replaceChildren();
+  for (const plugin of report.plugins) box.append(catalogRow(plugin, report.platform));
+  const s = report.summary;
+  $("catalogSummary").textContent =
+    `${s.listed} eklenti · ${s.installable} kurulabilir · ${s.installed} kurulu · ` +
+    `${s.updates} güncelleme · ${s.problems} kurulamaz`;
+  const delisted = $("catalogDelisted");
+  delisted.hidden = report.delisted.length === 0;
+  delisted.textContent = report.delisted.length
+    ? `Katalogdan çekilmiş ama bu makinede kurulu: ${report.delisted.join(", ")}. ` +
+      "Kaldırmak için yukarıdaki listede \"kaldır\"."
+    : "";
+}
+
+function catalogRow(plugin, platform) {
+  const row = document.createElement("li");
+  row.className = "plugin";
+
+  const head = document.createElement("div");
+  head.className = "plugin-head";
+  const name = document.createElement("span");
+  name.className = "name";
+  name.textContent = plugin.display_name ?? plugin.name;
+  const id = document.createElement("span");
+  id.className = "author";
+  id.textContent = ` ${plugin.name}${plugin.version ? ` ${plugin.version}` : ""}`;
+  head.append(name, id);
+  const state = plugin.installed?.state;
+  if (plugin.problem) {
+    head.append(tag("kurulamaz", true));
+  } else if (state) {
+    const calm = state === "not_installed" || state === "current";
+    head.append(tag(INSTALL_LABELS[state] ?? state, !calm));
+  }
+  row.append(head);
+
+  if (plugin.description) {
+    const description = document.createElement("p");
+    description.className = "hint";
+    description.textContent = plugin.description;
+    row.append(description);
+  }
+  // Kurulamayan girdi gizlenmiyor: kullanıcı aradığını neden kuramadığını görsün (K9).
+  if (plugin.problem) {
+    const problem = document.createElement("p");
+    problem.className = "plugin-problem";
+    problem.textContent = plugin.problem;
+    row.append(problem);
+  }
+  const detail = installDetail(plugin.installed);
+  if (detail) {
+    const line = document.createElement("p");
+    line.className = "plugin-need";
+    line.textContent = detail;
+    row.append(line);
+  }
+  if (!plugin.problem) {
+    row.append(permissionLine("istediği ağ", plugin.permissions?.net));
+    for (const requirement of plugin.requires ?? []) {
+      const line = document.createElement("p");
+      line.className = "plugin-need";
+      const here = requirement.assets?.[platform];
+      line.textContent = here
+        ? `motor: ${requirement.name} ${requirement.version} (${platform})`
+        : `motor: ${requirement.name} ${requirement.version} — bu platform (${platform}) için yayın yok`;
+      row.append(line);
+    }
+  }
+
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  if (!plugin.problem && state === "not_installed") {
+    actions.append(catalogButton("kur", "plugin_install", { name: plugin.name }));
+  }
+  if (!plugin.problem && state === "update_available") {
+    actions.append(catalogButton("güncelle", "plugin_update", { name: plugin.name }));
+  }
+  if (actions.childElementCount) row.append(actions);
+  return row;
+}
+
+function installDetail(installed) {
+  switch (installed?.state) {
+    case "update_available":
+      return `kurulu ${installed.installed} → katalogda ${installed.available}`;
+    case "modified":
+      return `kurulu ${installed.version}; elle değiştirilen dosyalar: ${installed.files.join(", ")} — güncelleme üstüne yazmaz`;
+    case "manual":
+      return "elle kurulmuş (köken kaydı yok) — katalog ona dokunmaz";
+    case "unreadable":
+      return `köken kaydı okunamadı: ${installed.detail}`;
+    default:
+      return null;
+  }
+}
+
+function catalogButton(label, command, args) {
+  const button = document.createElement("button");
+  button.textContent = label;
+  button.addEventListener("click", async () => {
+    const report = await call(command, args);
+    if (!report) return;
+    toast(command === "plugin_update" ? updateText(report) : installText(args.name, report), true);
+    refreshPlugins();
+    refreshCatalog();
+  });
+  return button;
+}
+
+function updateText(report) {
+  const s = report.summary;
+  const lines = report.plugins.map((plugin) => {
+    const outcome = plugin.outcome;
+    let text;
+    switch (outcome.state) {
+      case "updated":
+        text = `güncellendi ${outcome.from} → ${outcome.to}`;
+        // Araç değişikliği onay istemez (D-071) ama söylenir.
+        for (const change of outcome.tools_changed) {
+          text += ` · araç değişti: ${change.name} ${change.from ?? "—"} → ${change.to ?? "—"}`;
+        }
+        if (outcome.permissions_added.net.length) {
+          text += ` · yeni izin istiyor: ${outcome.permissions_added.net.join(", ")}`;
+        }
+        break;
+      case "current":
+        text = `güncel (${outcome.version})`;
+        break;
+      case "skipped":
+        text = `atlandı — ${outcome.reason}`;
+        break;
+      default:
+        text = `GÜNCELLENEMEDİ — ${outcome.error ?? JSON.stringify(outcome)}`;
+    }
+    return `${plugin.name}: ${text}`;
+  });
+  const total =
+    `${s.checked} eklenti: ${s.updated} güncellendi, ${s.current} güncel, ` +
+    `${s.skipped} atlandı, ${s.failed} başarısız`;
+  return lines.length ? `${lines.join(" · ")} (${total})` : "katalogdan kurulmuş eklenti yok";
+}
+
+$("btnCatalogLoad").addEventListener("click", refreshCatalog);
+$("btnCatalogUpdateAll").addEventListener("click", async () => {
+  const report = await call("plugin_update", { name: null });
+  if (!report) return;
+  const text = updateText(report);
+  if (report.summary.failed === 0) {
+    toast(text, true);
+  } else {
+    // Düşen bir güncelleme hata olarak kalır; aşama düşenin kendi
+    // zincirinden okunuyor (K9), uydurulmuyor.
+    const failed = report.plugins.find((plugin) => plugin.outcome.state === "failed");
+    const stage = failed?.outcome.error?.match(/ADIM: (\S+)/)?.[1];
+    toast({ stage, chain: text });
+  }
+  refreshPlugins();
+  refreshCatalog();
+});
 
 // ————————————————————————————————————— sırlar (D-042)
 

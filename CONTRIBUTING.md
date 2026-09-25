@@ -77,7 +77,7 @@ Derleme ve testler aynı `cargo` komutlarıyla koşar. Farklar:
 
 Ağa bağlı testler (D-043) ulaşamadıklarında **düşmez, kendilerini atlar ve
 sebebini `stderr`'e yazar.** Atlanan test geçmiş sayılmaz — rapor ederken
-"atlandı" de. Bugün Linux'ta 414 test koşuyor ve 3'ü kendini atlıyor
+"atlandı" de. Bugün Linux'ta 447 test koşuyor ve 3'ü kendini atlıyor
 (AcoustID anahtarı yok); torrent'in 56 testi eklentiyle birlikte park edildi
 (D-069). Testleri bir terminalden koşarsan iki CLI testi daha atlanır: "terminal
 yokken ne olur" sorusu, çocuk süreç terminale ulaşabildiği sürece sınanamaz
@@ -90,11 +90,13 @@ Atlananları gerçekten koşturmak için gereken ortam değişkenleri:
 |---|---|
 | `HEADSHELL_ACOUSTID_KEY` | AcoustID canlı sınamaları (3 test). Anahtarsız derlemede `EMBEDDED_API_KEY` boş olduğu için atlanırlar. |
 | `HEADSHELL_TEST_YTMUSIC_COOKIES` | YouTube'un bot duvarını aşmak için çerez (D-061). Yalnızca veri merkezi adreslerinde gerekiyor; ev bağlantısında testler çerezsiz de koşuyor. |
+| `HEADSHELL_PLUGIN_INDEX` | SoundCloud ve YouTube Music canlı testlerinin eklentiyi kurduğu katalog (D-071). Varsayılan `headshell/plugins`'in yayımlanmış indeksi; yayımlanmamış bir eklenti değişikliğini sınamak için `headshell plugin index` ile üretilmiş yerel bir aynayı gösterebilir (düz `http` yalnızca `127.0.0.1`'e). |
 
 `HEADSHELL_PYTHON` ve `HEADSHELL_YTDLP` **kaldırıldı** (D-055, D-069): motor
 Python aramıyor, yt-dlp'yi eklenti değil motor kuruyor. `ytmusic` testleri
 onu manifestteki sabitlenmiş sürümden, bu platformun ikilisi olarak
-indiriyor. Torznab değişkenleri torrent eklentisiyle birlikte park edildi
+indiriyor. Eklentilerin kendisi bu depoda değil (D-071): canlı testler onları
+kataloğa ulaşamazsa kendini atlıyor, ulaşıp kuramazsa düşüyor. Torznab değişkenleri torrent eklentisiyle birlikte park edildi
 (`parked/`, D-069).
 
 Depo kökündeki `.env` **hiçbir kod tarafından okunmaz** — `dotenv` benzeri bir

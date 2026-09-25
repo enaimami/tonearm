@@ -10,13 +10,17 @@ Bir eklenti dış dünyaya yalnızca motorun verdiği `host` nesnesinden çıkab
 Dosya sistemine, sürece, sokete doğrudan erişimi yoktur. Beyan ettiği izinler
 bu yüzden **zorlanır**.
 
+Eklentiler bu depoda durmaz: [`headshell/plugins`](https://github.com/headshell/plugins)
+kataloğunda yaşarlar ve kullanıcılar onları oradan kurar (D-071, §9).
+
 Üç çalışan örnek:
 
-- [`plugins/soundcloud/main.js`](../plugins/soundcloud/main.js) — **gerçek
-  eklenti.** Canlı bir servise bağlanır, anahtarını keşfedip `host.storage`'ta
-  önbellekler. Yazacağınız şeye en yakın örnek budur.
-- [`plugins/ytmusic/main.js`](../plugins/ytmusic/main.js) — üstverisini bir
-  servisten, sesini **motorun kurduğu bir araçtan** (yt-dlp) alan eklenti.
+- [`soundcloud/main.js`](https://github.com/headshell/plugins/blob/main/soundcloud/main.js)
+  — **gerçek eklenti.** Canlı bir servise bağlanır, anahtarını keşfedip
+  `host.storage`'ta önbellekler. Yazacağınız şeye en yakın örnek budur.
+- [`ytmusic/main.js`](https://github.com/headshell/plugins/blob/main/ytmusic/main.js)
+  — üstverisini bir servisten, sesini **motorun kurduğu bir araçtan** (yt-dlp)
+  alan eklenti.
 - [`fixtures/plugins/echo/main.js`](../fixtures/plugins/echo/main.js) — sabit
   kataloglu sınama eklentisi (~60 satır). Sözleşmeyi çıplak görmek için.
 
@@ -77,7 +81,7 @@ olmak zorunda; uyuşmazsa eklenti reddedilir.
 |---|---|---|
 | `name` | evet | Dizin adıyla aynı. Sağlayıcı kimliği. |
 | `display_name` | evet | Kullanıcıya gösterilen ad. |
-| `version` | hayır | Eklentinin kendi sürümü. |
+| `version` | katalogda evet | Eklentinin kendi sürümü. Katalogdaki her eklenti sürümlüdür: güncellemeyi o yakalar ve dosya adresleri ona sabitlenir (§9). |
 | `api` | evet | Konuştuğu sözleşme sürümü: bugün `2`. |
 | `main` | evet | Eklenti dizinine göre betiğin yolu. `.js` olmalı, dizinin dışına çıkamaz (`..` ve mutlak yol reddedilir). |
 | `capabilities` | hayır | `search`, `stream`. Motor, beyan edilen her yeteneğin fonksiyonunun dışa aktarıldığını denetler. |
@@ -344,27 +348,32 @@ eklentinin nerede koştuğu değişti.
 
 ---
 
-## 8. Kurulum ve sınama
+## 8. Geliştirirken kurmak ve sınamak
+
+Geliştirdiğiniz eklentiyi dizin olarak elle koyun. Katalog **elle konmuş bir
+eklentiye dokunmaz** — güncelleme onun üstüne yazmaz — o yüzden çalışma
+kopyanızı bir bağlantıyla da koyabilirsiniz; `headshell plugin remove`
+yalnızca bağlantıyı kaldırır, kopyanıza dokunmaz.
 
 ```bash
 # Eklentiyi yerine koyun (Linux; macOS ve Windows yolu için §1'deki tablo)
-mkdir -p ~/.local/share/headshell/plugins/soundcloud
-cp plugin.json main.js ~/.local/share/headshell/plugins/soundcloud/
+mkdir -p ~/.local/share/headshell/plugins/benim
+cp plugin.json main.js ~/.local/share/headshell/plugins/benim/
 
 # Görünüyor mu, ne istiyor?
 headshell plugin list
 
 # İzinleri onaylayın
-headshell plugin approve soundcloud
+headshell plugin approve benim
 
 # Araç istiyorsa
-headshell plugin install soundcloud
+headshell plugin install benim
 
 # Sır gerekiyorsa (değer komut satırına yazılmaz)
-headshell secret set plugin:soundcloud client_id
+headshell secret set plugin:benim client_id
 
 # Ayakta mı?
-headshell provider test soundcloud
+headshell provider test benim
 
 # Bir şey ters giderse: hangi aşamada bozulduğunu söyler
 headshell diag
@@ -373,100 +382,56 @@ headshell diag
 Windows'ta (PowerShell) yerleştirme adımı:
 
 ```powershell
-$hedef = "$env:LOCALAPPDATA\headshell\plugins\soundcloud"
+$hedef = "$env:LOCALAPPDATA\headshell\plugins\benim"
 New-Item -ItemType Directory -Force -Path $hedef | Out-Null
 Copy-Item plugin.json, main.js $hedef
 ```
 
 `headshell plugin disable <ad>` kapatır (onay korunur), `enable` geri açar,
-`forget` onayı tamamen unutur.
+`forget` onayı tamamen unutur, `remove` eklentiyi kaldırır ve onayını unutur.
 
 Hata mesajları aşamayı taşır: `PLUGIN_LOAD` (manifest/onay),
+`PLUGIN_CATALOG` (katalog: indeks, indirme, karma, güncelleme, kaldırma),
 `PLUGIN_RUNTIME` (araç kurulumu), `PLUGIN_START` (betiği yükleme, dışa
 aktarım denetimi), `PROVIDER_CALL` (çağrı).
 
 ---
 
-## 9. SoundCloud eklentisini kurmak
+## 9. Katalog: `headshell/plugins` (D-071)
+
+Kullanıcılar eklentileri [`headshell/plugins`](https://github.com/headshell/plugins)
+kataloğundan kurar:
 
 ```bash
-mkdir -p ~/.local/share/headshell/plugins/soundcloud
-cp plugins/soundcloud/{main.js,plugin.json} ~/.local/share/headshell/plugins/soundcloud/
-
-headshell plugin approve soundcloud
-headshell provider test soundcloud     # "kullanılabilir" demeli
-headshell play "nujabes aruarian dance"
+headshell plugin catalog              # ne var, ne kurulu, ne güncellenebilir
+headshell plugin install soundcloud   # indirir, her dosyanın sha256'sını doğrular
+headshell plugin approve soundcloud   # kurulan eklenti onay bekler
+headshell plugin update               # katalogdan kurulanları güncelle
 ```
 
-`client_id` **istenmez**: eklenti SoundCloud'un web istemcisinden kendisi
-keşfeder ve `host.storage`'ta önbellekler. Kendi anahtarınız varsa o
-kullanılır ve keşfe hiç gidilmez:
+Katalog deposunun kökündeki `index.json` her eklentinin manifestini ve
+dosyalarının adresini + sha256'sını taşır. İstemci her dosyayı karmasıyla
+doğrular ve inen `plugin.json`'u indeksin gösterdiğiyle karşılaştırır; biri
+tutmazsa diske hiçbir şey yazmaz. İndeks elle yazılmaz, çekirdeğin kendi
+doğrulamasıyla üretilir:
 
 ```bash
-headshell secret set plugin:soundcloud client_id
+headshell plugin index <katalog-deposu>           # index.json'u yaz
+headshell plugin index <katalog-deposu> --check   # güncel mi (CI)
 ```
 
-`headshell provider test soundcloud` hangi kaynağın kullanıldığını yazar
-(`sır` / `önbellek` / `keşif`) — yanlış anahtarla çalışan bir kurulum sessizce
-doğru görünmesin diye (D-043).
+**Yayımlamak:** katalog deposuna bir PR — `<ad>/plugin.json`, betik ve
+yeniden üretilmiş `index.json`. Ad küçük harf ASCII (harf, rakam, `-`, `_`,
+`.`), `version` zorunlu. Dosya adresleri `<ad>-<sürüm>` etiketine sabitlidir;
+bir sürümün dosyaları yayımlandıktan sonra değişmez, düzeltme yeni bir
+sürümdür. Ayrıntılar ve yayım adımları katalog deposunun README'sinde.
 
-**Bilinen sınırlar**, ikisi de kasıtlı:
+Katalog yalnızca bu komutlarla okunur; uygulama açılırken ya da arka planda
+ağa çıkmaz. Başka bir katalog için `HEADSHELL_PLUGIN_INDEX=<adres>`: adres
+`https://` olmalı (düz `http` yalnızca `127.0.0.1`/`localhost` için).
 
-- **Yalnızca `progressive` (düz HTTP MP3).** Ölçüldü: parçaların %99'unda var.
-  Kalan %1 yalnızca HLS sunuyor ve açık bir hata alır.
-- **`[önizleme]` etiketli parçalar 30 saniyedir.** SoundCloud'un `SNIP`
-  politikası; tam parça abonelik istiyor.
-
-Keşif belgelenmemiş bir yola dayanıyor ve **haber vermeden bozulabilir**.
-Bozulursa eklenti size kendi `client_id`'nizi vermenizi söyler.
-
----
-
-## 10. YouTube Music eklentisini kurmak
-
-**yt-dlp'yi siz kurmazsınız, Python da gerekmez** — eklenti yt-dlp'yi
-manifestinde platform başına beyan eder, motor sizin platformunuzun kendi
-kendine yeten ikilisini indirir (~40 MB, D-069).
-
-```bash
-mkdir -p ~/.local/share/headshell/plugins/ytmusic
-cp plugins/ytmusic/{main.js,plugin.json} ~/.local/share/headshell/plugins/ytmusic/
-
-headshell plugin approve ytmusic    # izinleri ve motorun indireceğini gösterir
-headshell plugin install ytmusic    # yt-dlp'yi indirir, sha256'sını doğrular
-headshell provider test ytmusic     # "kullanılabilir" + yt-dlp sürümünü yazmalı
-headshell play "nujabes aruarian dance"
-```
-
-Beyan edilen platformlar: Linux x86_64/aarch64 (glibc ve musl), macOS
-(evrensel ikili, Intel + Apple Silicon), Windows x86_64/x86/ARM64. **32 bit
-ARM Linux (`linux-arm`) ve 32 bit x86 Linux için yt-dlp tek dosyalık yayın
-yapmıyor**; BSD'ler için hiç yayın yok. Oralarda eklenti **yüklenmez** ve
-`headshell plugin list` "bu platform için yayın yok" der; kurulum komutu
-önerilmez, çünkü kurulum bunu düzeltmez.
-
-Veri merkezi adreslerinde YouTube bot duvarı çıkarabiliyor (D-061). Çerez
-verirseniz yt-dlp'ye dosya olarak geçirilir, motor kapanınca silinir:
-
-```bash
-headshell secret set plugin:ytmusic cookies    # Netscape biçimli çerez dosyasının içeriği
-```
-
-**Sürümü biz sabitliyoruz** (D-055) ve bunun bir bedeli var: YouTube yt-dlp'yi
-bozduğunda kullanıcı kendi paket yöneticisiyle güncelleyip kurtulamaz,
-manifestte yeni bir sürüm yayımlanmasını bekler. Güncellerken **her
-platformun** karmasını yt-dlp'nin yayımladığı `SHA2-256SUMS` dosyasından
-alın.
-
-**Bilinen sınırlar**, üçü de ölçülmüş:
-
-- **Ses m4a (AAC-LC, ~130 kbps).** Çekirdeğin symphonia'sında ne opus
-  çözücüsü ne webm kabı var; çalınamayan yüksek kalite yerine çalınabilen
-  düşük kalite seçildi.
-- **Akış `Range: bytes=0-` başlığıyla çekiliyor.** Bu başlık olmadan aynı
-  adres 32 KB/s veriyor, onunla 8 MB/s.
-- **yt-dlp JS çalışma zamanı istemeye başladı.** 2026.08.19 sürümü "JS
-  runtimes: none" deyip YouTube çözümünü JS çalışma zamanı olmadan
-  sürdürüyor ama bunun **kullanımdan kaldırıldığını** uyarıyor (ölçüldü,
-  D-069). O yol kapandığında motorun bir JS çalışma zamanını da (deno ya da
-  `qjs`) aynı `requires` mekanizmasıyla indirmesi gerekecek.
+Eklenti başına kullanım notları — SoundCloud'un `client_id` keşfi, YouTube
+Music'in çerezi, yt-dlp'nin platform listesi ve sürüm sabitleme — kendi
+dizinlerinin README'sinde:
+[`soundcloud/`](https://github.com/headshell/plugins/tree/main/soundcloud),
+[`ytmusic/`](https://github.com/headshell/plugins/tree/main/ytmusic).

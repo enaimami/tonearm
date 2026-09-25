@@ -472,6 +472,23 @@ impl PluginManifest {
         let path = dir.join(MANIFEST_FILE);
         let raw =
             std::fs::read_to_string(&path).map_err(|err| io_err(Stage::PluginLoad, &path, err))?;
+        Self::parse(&raw, &dir_name(dir), &path)
+    }
+
+    /// Diskte olmayan bir manifesti okur ve doğrular — katalogdan inen
+    /// `plugin.json` gibi (D-071).
+    ///
+    /// `expected_name` dizin adının yerini tutar: manifest onun adına
+    /// kurulacak ve kimlik dizin adıdır. `origin` yalnızca hata mesajında
+    /// görünür (indeks adresi ya da dosya yolu).
+    ///
+    /// [`Self::load`] ile **aynı** doğrulamadan geçer; katalog kendi kuralını
+    /// yazmıyor. Kopyalanan kural kayar (D-057).
+    ///
+    /// # Errors
+    /// [`Self::load`]'un dosya okuma dışındaki bütün sebepleri.
+    pub fn parse(raw: &str, expected_name: &str, origin: &Path) -> Result<Self> {
+        let path = origin;
         let json_err = |source| {
             Error::new(
                 Stage::PluginLoad,
@@ -482,29 +499,44 @@ impl PluginManifest {
             )
         };
 
-        let probe: ManifestProbe = serde_json::from_str(&raw).map_err(json_err)?;
+        let probe: ManifestProbe = serde_json::from_str(raw).map_err(json_err)?;
         if let Some(api) = probe.api
             && api != PLUGIN_API
         {
             return Err(Error::new(
                 Stage::PluginLoad,
                 ErrorKind::PluginIncompatible {
-                    plugin: dir_name(dir),
+                    plugin: expected_name.to_owned(),
                     plugin_api: api,
                     host_api: PLUGIN_API,
                 },
             ));
         }
 
-        let value: serde_json::Value = serde_json::from_str(&raw).map_err(json_err)?;
-        reject_api1_leftovers(&value, &path)?;
+        let value: serde_json::Value = serde_json::from_str(raw).map_err(json_err)?;
+        reject_api1_leftovers(&value, path)?;
 
         let manifest: Self = serde_json::from_value(value).map_err(json_err)?;
-        manifest.validate(dir, &path)?;
+        manifest.validate(expected_name, path)?;
         Ok(manifest)
     }
 
-    fn validate(&self, dir: &Path, path: &Path) -> Result<()> {
+    /// Betiğin eklenti dizinindeki yolu, baştaki `./` atılmış ve `/`
+    /// ayırıcılı: `./src/main.js` → `src/main.js`. Katalog dosya listesi bu
+    /// biçimi kullanır (D-071).
+    #[must_use]
+    pub fn main_file(&self) -> String {
+        Path::new(&self.main)
+            .components()
+            .filter_map(|component| match component {
+                Component::Normal(part) => Some(part.to_string_lossy().into_owned()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("/")
+    }
+
+    fn validate(&self, expected_name: &str, path: &Path) -> Result<()> {
         let invalid = |detail: String| {
             Err(Error::new(
                 Stage::PluginLoad,
@@ -515,13 +547,12 @@ impl PluginManifest {
             ))
         };
 
-        let dir_name = dir_name(dir);
         if self.name.trim().is_empty() {
             return invalid("`name` boş".to_owned());
         }
-        if self.name != dir_name {
+        if self.name != expected_name {
             return invalid(format!(
-                "`name` ({}) dizin adıyla ({dir_name}) uyuşmuyor — kimlik dizin adıdır",
+                "`name` ({}) dizin adıyla ({expected_name}) uyuşmuyor — kimlik dizin adıdır",
                 self.name
             ));
         }
@@ -569,6 +600,77 @@ fn dir_name(dir: &Path) -> String {
     dir.file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default()
+}
+
+/// Bir eklenti adı **tek bir dizin adı** mı: ayırıcı yok, `.`/`..` değil,
+/// boş değil.
+///
+/// Adı yola ekleyen her yerel işlem (kurulum, kaldırma) önce bunu sorar:
+/// `../` taşıyan bir ad veri dizininin dışına uzanırdı ve kaldırma
+/// komutunda bu, kullanıcının başka bir dizinini silmek demekti.
+///
+/// Elle kurulmuş bir eklentinin adı bundan fazlasına uymak zorunda değil;
+/// dar kural katalog için ([`validate_catalog_name`]).
+///
+/// # Errors
+/// Ad tek bir dizin adı değilse, nedeniyle.
+pub fn validate_local_name(name: &str) -> std::result::Result<(), String> {
+    let mut components = Path::new(name).components();
+    let single = matches!(
+        (components.next(), components.next()),
+        (Some(Component::Normal(_)), None)
+    );
+    if !single || name.contains(['/', '\\']) {
+        return Err(format!(
+            "`{name}` bir eklenti adı değil: ad tek bir dizin adıdır — ayırıcı, `.` ya da `..` \
+             içeremez"
+        ));
+    }
+    Ok(())
+}
+
+/// Katalogdaki bir eklentinin adı (D-071): küçük harf ASCII harf, rakam,
+/// `-`, `_`, `.`; harf ya da rakamla başlar, en çok 64 karakter.
+///
+/// Yerel addan dar, çünkü bu ad **başkasının diskinde** bir dizin olacak ve
+/// bir adrese girecek: büyük/küçük harf Windows'ta ve macOS'ta aynı dizindir
+/// (`SoundCloud` ile `soundcloud` çakışır), sondaki nokta Windows'ta atılır,
+/// `con` ya da `nul` Windows'ta bir aygıttır, ve `{name}` indeks adresinin
+/// içinde yüzde kodlaması gerektirmemeli.
+///
+/// # Errors
+/// Ad bu kurallara uymuyorsa, hangisine uymadığıyla.
+pub fn validate_catalog_name(name: &str) -> std::result::Result<(), String> {
+    const RESERVED: &[&str] = &[
+        "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8",
+        "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+    ];
+    if name.is_empty() || name.len() > 64 {
+        return Err(format!(
+            "katalog adı `{name}` 1–64 karakter olmalı (bulunan: {})",
+            name.len()
+        ));
+    }
+    if let Some(bad) = name
+        .chars()
+        .find(|c| !(c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_' | '.')))
+    {
+        return Err(format!(
+            "katalog adı `{name}`: `{bad}` kullanılamaz — küçük harf ASCII, rakam, `-`, `_`, `.`"
+        ));
+    }
+    if !name.starts_with(|c: char| c.is_ascii_alphanumeric()) || name.ends_with('.') {
+        return Err(format!(
+            "katalog adı `{name}` harf ya da rakamla başlamalı ve noktayla bitmemeli"
+        ));
+    }
+    let stem = name.split('.').next().unwrap_or(name);
+    if RESERVED.contains(&stem) {
+        return Err(format!(
+            "katalog adı `{name}` Windows'ta bir aygıt adı (`{stem}`); dizin olarak açılamaz"
+        ));
+    }
+    Ok(())
 }
 
 /// `main` eklenti dizininde duran bir `.js` dosyası mı.
@@ -972,6 +1074,72 @@ mod tests {
     fn reordering_or_recasing_permissions_does_not_ask_the_user_again() {
         let granted = net(&["b.example", "a.example"]);
         assert!(net(&["A.example", "b.example.", " "]).is_covered_by(&granted));
+    }
+
+    /// Kaldırma komutu adı yola ekliyor: `../` bir başka dizini silmek olurdu.
+    #[test]
+    fn a_local_name_is_a_single_directory_name() {
+        for bad in ["", ".", "..", "../x", "a/b", "a\\b", "/etc"] {
+            assert!(validate_local_name(bad).is_err(), "{bad:?} kabul edildi");
+        }
+        for good in ["soundcloud", "My Plugin", "ytmusic.dev"] {
+            assert!(validate_local_name(good).is_ok(), "{good:?} reddedildi");
+        }
+    }
+
+    #[test]
+    fn a_catalog_name_is_narrow_enough_to_be_a_directory_everywhere() {
+        for (bad, why) in [
+            ("", "1–64"),
+            ("SoundCloud", "`S` kullanılamaz"),
+            ("-x", "harf ya da rakamla"),
+            ("x.", "noktayla bitmemeli"),
+            ("con", "aygıt adı"),
+            ("nul.js", "aygıt adı"),
+            ("a/b", "`/` kullanılamaz"),
+            ("ş", "`ş` kullanılamaz"),
+        ] {
+            let err = validate_catalog_name(bad).unwrap_err();
+            assert!(err.contains(why), "{bad:?}: {err}");
+        }
+        for good in ["soundcloud", "ytmusic", "echo", "my-plugin_2.1", "console"] {
+            assert!(validate_catalog_name(good).is_ok(), "{good:?} reddedildi");
+        }
+    }
+
+    /// Katalogdan inen manifest dizinden okunanla **aynı** kurallardan geçer.
+    #[test]
+    fn parse_applies_the_same_rules_as_load() {
+        let origin = Path::new("https://katalog.ornek/index.json");
+        let raw = r#"{"name":"echo","display_name":"E","api":2,"main":"main.js"}"#;
+        assert!(PluginManifest::parse(raw, "echo", origin).is_ok());
+
+        let err = PluginManifest::parse(raw, "baska", origin).unwrap_err();
+        assert!(
+            err.chain_text().contains("dizin adıyla"),
+            "{}",
+            err.chain_text()
+        );
+
+        let newer = r#"{"name":"echo","display_name":"E","api":3,"main":"main.js"}"#;
+        let err = PluginManifest::parse(newer, "echo", origin).unwrap_err();
+        assert!(
+            matches!(
+                err.kind(),
+                ErrorKind::PluginIncompatible { plugin_api: 3, .. }
+            ),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn main_file_drops_the_leading_dot_and_uses_slashes() {
+        let origin = Path::new("plugin.json");
+        for (main, expected) in [("main.js", "main.js"), ("./src/main.js", "src/main.js")] {
+            let raw = format!(r#"{{"name":"p","display_name":"P","api":2,"main":"{main}"}}"#);
+            let manifest = PluginManifest::parse(&raw, "p", origin).unwrap();
+            assert_eq!(manifest.main_file(), expected);
+        }
     }
 
     #[test]

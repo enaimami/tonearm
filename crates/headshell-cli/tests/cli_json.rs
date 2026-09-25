@@ -24,6 +24,8 @@ const VOLATILE_KEYS: &[&str] = &[
     "path",
     // Eklenti dizini de öyle.
     "dir",
+    // Araç durumunun ölçüldüğü platform: koşan makineye bağlı (D-071).
+    "platform",
 ];
 
 fn fixtures() -> PathBuf {
@@ -969,6 +971,253 @@ fn a_plugin_runs_with_nothing_on_the_path() {
         "{stdout}"
     );
     assert_eq!(report["health"]["track_count"], 2, "{stdout}");
+}
+
+/// Katalog: indeks üretimi, kurulum, onay, güncelleme ve kaldırma — gerçek
+/// ikiliyle, bu makinede açılan bir sunucuya karşı (D-071).
+///
+/// Sınanan şey kabuğun **aynı veriyi** aldığı: indeksi bakımcının komutu
+/// üretiyor, katalog `HEADSHELL_PLUGIN_INDEX` ile o sunucuyu gösteriyor ve
+/// kurulan eklentiyi motor çalıştırıyor. Kuralların kendisi çekirdeğin birim
+/// testlerinde (`plugin::catalog`).
+#[test]
+fn a_plugin_goes_from_the_catalog_through_approval_and_update_to_removal() {
+    let dir = temp_dir("katalog");
+    let repo = temp_dir("katalog-depo");
+    let source = fixtures().join("plugins/echo");
+    std::fs::create_dir_all(repo.join("echo")).unwrap();
+    for file in ["plugin.json", "main.js"] {
+        std::fs::copy(source.join(file), repo.join("echo").join(file)).unwrap();
+    }
+    let repo_arg = repo.to_str().unwrap();
+    let server = FileServer::serve(repo.to_path_buf());
+    let index = server.url("index.json");
+    // Sunucu çalışma ağacını sunuyor; sürüm yine adrese giriyor çünkü
+    // şablonda `{version}` zorunlu.
+    let template = format!("http://{}/{{name}}/{{path}}?surum={{version}}", server.addr);
+
+    // 1. Bakımcının yolu: indeksi çekirdeğin doğrulaması üretiyor.
+    let (stdout, stderr, ok) = run(
+        &dir,
+        &[
+            "--json",
+            "plugin",
+            "index",
+            repo_arg,
+            "--url-template",
+            &template,
+        ],
+    );
+    assert!(ok, "plugin index başarısız: {stderr}");
+    let report = json(&stdout);
+    assert_eq!(report["written"], true, "{stdout}");
+    assert_eq!(report["plugins"][0]["name"], "echo", "{stdout}");
+    let (_, stderr, ok) = run(&dir, &["plugin", "index", repo_arg, "--check"]);
+    assert!(ok, "yeni üretilen indeks güncel sayılmalı: {stderr}");
+
+    // 2. Katalog: listede, kurulu değil.
+    let (stdout, stderr, ok) = run_with_index(&dir, &index, &["--json", "plugin", "catalog"]);
+    assert!(ok, "plugin catalog başarısız: {stderr}");
+    assert_snapshot(
+        "plugin_catalog",
+        &stdout.replace(&server.addr.to_string(), "127.0.0.1:<port>"),
+    );
+
+    // 3. Kurulum: katalogdan iniyor ve onay bekliyor (D-040).
+    let (stdout, stderr, ok) = run_with_index(&dir, &index, &["plugin", "install", "echo"]);
+    assert!(ok, "plugin install başarısız: {stderr}");
+    assert!(stdout.contains("katalog : 0.2.0 indirildi"), "{stdout}");
+    assert!(
+        stdout.contains("onay bekliyor"),
+        "katalogdan gelmek onay değildir:\n{stdout}"
+    );
+    assert!(dir.join("plugins/echo/origin.json").exists());
+
+    // 4. Onaylanınca motor onu çalıştırıyor.
+    let (_, stderr, ok) = run(&dir, &["plugin", "approve", "echo"]);
+    assert!(ok, "{stderr}");
+    let (stdout, stderr, ok) = run(&dir, &["--json", "provider", "test", "echo"]);
+    assert!(ok, "{stderr}");
+    assert_eq!(json(&stdout)["health"]["reachable"], true, "{stdout}");
+
+    // 5. Yeni sürüm: eskiyen indeks `--check`'ten geçmiyor ve neyin
+    // eskidiğini söylüyor; şablon verilmeden yeniden üretiliyor.
+    let manifest = std::fs::read_to_string(repo.join("echo/plugin.json"))
+        .unwrap()
+        .replace("\"0.2.0\"", "\"0.3.0\"");
+    std::fs::write(repo.join("echo/plugin.json"), manifest).unwrap();
+    let (_, stderr, ok) = run(&dir, &["plugin", "index", repo_arg, "--check"]);
+    assert!(!ok, "eskiyen indeks --check'ten geçmemeli");
+    assert!(stderr.contains("echo: girdisi değişti"), "{stderr}");
+    let (_, stderr, ok) = run(&dir, &["plugin", "index", repo_arg]);
+    assert!(ok, "şablon index.json'dan okunmalı: {stderr}");
+
+    let (stdout, _, ok) = run_with_index(&dir, &index, &["--json", "plugin", "catalog"]);
+    assert!(ok);
+    assert_eq!(
+        json(&stdout)["plugins"][0]["installed"]["state"],
+        "update_available",
+        "{stdout}"
+    );
+
+    // 6. Güncelleme; izinler aynı kaldığı için onay yerinde duruyor.
+    let (stdout, stderr, ok) = run_with_index(&dir, &index, &["plugin", "update"]);
+    assert!(ok, "plugin update başarısız: {stderr}");
+    assert!(stdout.contains("güncellendi: 0.2.0 → 0.3.0"), "{stdout}");
+    let (stdout, _, ok) = run(&dir, &["plugin", "list"]);
+    assert!(ok);
+    assert!(stdout.contains("onaylı"), "{stdout}");
+
+    // 7. Kaldırma: dizin gidiyor, onay unutuluyor.
+    let (stdout, stderr, ok) = run(&dir, &["plugin", "remove", "echo"]);
+    assert!(ok, "plugin remove başarısız: {stderr}");
+    assert!(stdout.contains("unutuldu"), "{stdout}");
+    assert!(!dir.join("plugins/echo").exists());
+    let (stdout, _, ok) = run(&dir, &["plugin", "list"]);
+    assert!(ok);
+    assert!(stdout.contains("kurulu eklenti yok"), "{stdout}");
+}
+
+/// Katalogda olmayan bir ad: ne olduğu ve katalogda ne olduğu söyleniyor.
+#[test]
+fn installing_a_name_the_catalog_does_not_have_lists_what_it_has() {
+    let dir = temp_dir("katalog-yok");
+    let repo = temp_dir("katalog-yok-depo");
+    let source = fixtures().join("plugins/echo");
+    std::fs::create_dir_all(repo.join("echo")).unwrap();
+    for file in ["plugin.json", "main.js"] {
+        std::fs::copy(source.join(file), repo.join("echo").join(file)).unwrap();
+    }
+    let server = FileServer::serve(repo.to_path_buf());
+    let template = format!("http://{}/{{name}}/{{path}}?surum={{version}}", server.addr);
+    let (_, stderr, ok) = run(
+        &dir,
+        &[
+            "plugin",
+            "index",
+            repo.to_str().unwrap(),
+            "--url-template",
+            &template,
+        ],
+    );
+    assert!(ok, "{stderr}");
+
+    let (_, stderr, ok) = run_with_index(
+        &dir,
+        &server.url("index.json"),
+        &["plugin", "install", "Echo"],
+    );
+    assert!(!ok, "olmayan ad kurulmamalı");
+    assert!(stderr.contains("ADIM: PLUGIN_CATALOG"), "{stderr}");
+    assert!(
+        stderr.contains("bunu mu demek istediniz: `echo`"),
+        "{stderr}"
+    );
+}
+
+fn json(stdout: &str) -> serde_json::Value {
+    serde_json::from_str(stdout).unwrap_or_else(|err| panic!("JSON değil ({err}):\n{stdout}"))
+}
+
+/// Kataloğu `index` adresinden okuyarak çalıştırır (D-071).
+fn run_with_index(data_dir: &Path, index: &str, args: &[&str]) -> (String, String, bool) {
+    let mut command = cli_command();
+    command
+        .arg("--data-dir")
+        .arg(data_dir)
+        .args(args)
+        .env("HEADSHELL_PLUGIN_INDEX", index)
+        .env("HEADSHELL_MUSIC_DIRS", "/olmayan/dizin/headshell-test");
+    let output = command.output().expect("headshell ikilisi çalışmalı");
+    (
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+        output.status.success(),
+    )
+}
+
+/// Bir dizini `127.0.0.1`'de düz HTTP ile sunan küçük sunucu — katalog
+/// komutlarını ağa çıkmadan sınamak için. Çekirdek düz HTTP'yi yalnızca bu
+/// makinenin kendisine kabul ediyor (D-071); sunucu tam orada.
+///
+/// Değer düşünce durur: bayrak kalkar ve bekleyen `accept` bir bağlantıyla
+/// uyandırılır.
+struct FileServer {
+    addr: std::net::SocketAddr,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl FileServer {
+    fn serve(root: PathBuf) -> Self {
+        use std::io::{BufRead as _, Write as _};
+        use std::sync::atomic::Ordering;
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("dinleyici açılmalı");
+        let addr = listener.local_addr().expect("adres");
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = std::sync::Arc::clone(&stop);
+        let thread = std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                if flag.load(Ordering::SeqCst) {
+                    break;
+                }
+                let Ok(mut stream) = stream else { continue };
+                let Ok(clone) = stream.try_clone() else {
+                    continue;
+                };
+                let mut reader = std::io::BufReader::new(clone);
+                let mut request = String::new();
+                if reader.read_line(&mut request).is_err() {
+                    continue;
+                }
+                // Başlıklar boş satıra kadar okunup atılıyor.
+                loop {
+                    let mut line = String::new();
+                    match reader.read_line(&mut line) {
+                        Ok(0) | Err(_) => break,
+                        Ok(_) if line.trim().is_empty() => break,
+                        Ok(_) => {}
+                    }
+                }
+                let target = request.split_whitespace().nth(1).unwrap_or("/");
+                let target = target.split('?').next().unwrap_or(target);
+                let file = target
+                    .trim_start_matches('/')
+                    .split('/')
+                    .fold(root.clone(), |path, part| path.join(part));
+                let (status, body) = match std::fs::read(&file) {
+                    Ok(body) => ("200 OK", body),
+                    Err(_) => ("404 Not Found", b"yok".to_vec()),
+                };
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(&body);
+            }
+        });
+        Self {
+            addr,
+            stop,
+            thread: Some(thread),
+        }
+    }
+
+    fn url(&self, path: &str) -> String {
+        format!("http://{}/{path}", self.addr)
+    }
+}
+
+impl Drop for FileServer {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        let _ = std::net::TcpStream::connect(self.addr);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
 }
 
 /// Fixture eklentisini veri dizinine kurar — kullanıcının yapacağı gibi,

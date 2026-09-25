@@ -1,9 +1,10 @@
 //! SoundCloud referans eklentisi, **gerçek SoundCloud'a karşı** (Faz 2 §2.2).
 //!
 //! `plugin_script.rs` sözleşmeyi sabit kataloglu bir fixture'la sınıyor; burada
-//! sınanan şey başka: `plugins/soundcloud` gerçek bir servise bağlanıyor ve
-//! zincirin tamamı — client_id keşfi, arama, akış adresi çözümü — canlı olarak
-//! yürüyor. D-069'dan beri eklenti gömülü QuickJS'te koşuyor: ağa yalnızca
+//! sınanan şey başka: katalogdaki `soundcloud` gerçek bir servise bağlanıyor
+//! ve zincirin tamamı — client_id keşfi, arama, akış adresi çözümü — canlı
+//! olarak yürüyor. Eklenti bu depoda değil: `headshell/plugins`'ten, canlı
+//! katalogdan kuruluyor (D-071). D-069'dan beri eklenti gömülü QuickJS'te koşuyor: ağa yalnızca
 //! manifestin izin verdiği ana bilgisayarlardan çıkabiliyor, ve bu testler o
 //! iznin gerçek servis için **yeterli** olduğunun da kanıtı.
 //!
@@ -26,19 +27,12 @@
 
 mod support;
 
-use std::path::{Path, PathBuf};
-
 use headshell_core::config::Config;
 use headshell_core::ids::{ProviderId, ProviderTrackId};
 use headshell_core::plugin::PluginProvider;
 use headshell_core::plugin::manifest::PluginManifest;
 use headshell_core::provider::{AudioSource, Capabilities, Provider};
 use headshell_core::secrets::Secrets;
-
-/// Eklentinin repodaki kaynağı (fixture değil — kullanıcıya dağıtılan dosya).
-fn plugin_source_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/soundcloud")
-}
 
 /// SoundCloud'a TCP ile ulaşılabiliyor mu.
 ///
@@ -68,17 +62,20 @@ fn temp_config(name: &str) -> support::TestConfig {
     support::TestConfig::new(&format!("soundcloud-{name}"))
 }
 
-/// Eklentiyi repodan veri dizinine kurar — kullanıcının yaptığı şeyin aynısı.
-fn install(config: &Config) -> PluginProvider {
-    let dir = config.plugins_dir().join("soundcloud");
-    std::fs::create_dir_all(&dir).unwrap();
-    for file in ["main.js", "plugin.json"] {
-        std::fs::copy(plugin_source_dir().join(file), dir.join(file)).unwrap();
-    }
+/// Eklentiyi canlı katalogdan kurar — kullanıcının yaptığı şeyin aynısı
+/// (D-071). Kataloğa ulaşılamıyorsa `None`: test atlanır ve sebebi yazılır.
+async fn install(config: &Config, test: &str) -> Option<PluginProvider> {
+    let dir = match support::install_from_catalog(config, "soundcloud").await {
+        Ok(dir) => dir,
+        Err(reason) => {
+            eprintln!("{test}: {reason} — atlanıyor (ağ yok sayılıyor)");
+            return None;
+        }
+    };
 
     let manifest = PluginManifest::load(&dir).unwrap();
     let secrets = Secrets::load(&config.secrets_path()).unwrap();
-    PluginProvider::from_manifest(config, &manifest, &dir, &secrets).unwrap()
+    Some(PluginProvider::from_manifest(config, &manifest, &dir, &secrets).unwrap())
 }
 
 /// Sırsız kurulumda eklenti client_id'yi kendisi keşfedip arama yapabilmeli.
@@ -91,7 +88,9 @@ async fn a_plugin_with_no_secret_discovers_a_client_id_and_searches() {
         return;
     }
     let config = temp_config("kesif");
-    let provider = install(&config);
+    let Some(provider) = install(&config, "keşif+arama").await else {
+        return;
+    };
 
     assert!(
         provider
@@ -133,7 +132,9 @@ async fn health_reports_which_client_id_source_was_used() {
         return;
     }
     let config = temp_config("saglik");
-    let provider = install(&config);
+    let Some(provider) = install(&config, "sağlık").await else {
+        return;
+    };
 
     let health = provider.health().await.unwrap();
     assert!(
@@ -159,7 +160,9 @@ async fn a_search_hit_resolves_to_a_playable_http_stream() {
         return;
     }
     let config = temp_config("cozum");
-    let provider = install(&config);
+    let Some(provider) = install(&config, "kaynak çözümü").await else {
+        return;
+    };
 
     let hits = provider.search("lofi", 10).await.unwrap();
     assert!(!hits.is_empty(), "canlı arama boş döndü");
@@ -208,7 +211,9 @@ async fn a_missing_track_is_an_answer_not_an_error() {
         return;
     }
     let config = temp_config("yok");
-    let provider = install(&config);
+    let Some(provider) = install(&config, "olmayan parça").await else {
+        return;
+    };
 
     let id = ProviderTrackId::new(ProviderId::new("soundcloud"), "999999999999");
     let source = provider
@@ -228,7 +233,9 @@ async fn a_soundcloud_track_actually_plays() {
         return;
     }
     let config = temp_config("calma");
-    let provider = install(&config);
+    let Some(provider) = install(&config, "çalma").await else {
+        return;
+    };
 
     let mut registry = headshell_core::provider::ProviderRegistry::new();
     registry.register(std::sync::Arc::new(provider));

@@ -85,7 +85,7 @@ headshell/
 │   │   │   ├── sleeve/         # paylaşılabilir kart (svg + png)
 │   │   │   ├── library/        # SQLite + FTS
 │   │   │   ├── provider/       # sağlayıcı trait'leri + local + remote/{subsonic,jellyfin}
-│   │   │   ├── plugin/         # QuickJS motoru (script) + host kapıları + eserler (artifact)
+│   │   │   ├── plugin/         # QuickJS motoru (script) + host kapıları + eserler (artifact) + katalog
 │   │   │   ├── playback/       # symphonia + cpal
 │   │   │   ├── net/            # HTTP trait'i + ureq istemcisi + fake
 │   │   │   ├── diag/           # tanılama, aşağıya bak
@@ -99,7 +99,6 @@ headshell/
 │       ├── ui/                 # düz statik webview — bundler yok, npm yok
 │       ├── icons/              # icon.svg kaynak, ötekiler üretilir (icons/README.md)
 │       └── themes/             # iki referans tema (contrast, daylight)
-├── plugins/                    # kurulabilir eklentiler (JS, api 2): soundcloud, ytmusic
 ├── parked/                     # DERLENMEYEN, silinmemiş kod — torrent (D-069)
 ├── packaging/                  # dağıtım: copyright, .desktop girdisi, aur/ (D-066)
 ├── docs/                       # eklenti yazma rehberi, tanıtım sayfası
@@ -109,6 +108,12 @@ headshell/
 
 `spike/` derlenmez, test edilmez, CI'ya girmez. Eşleştirme sezgilerini önce burada
 dene; doğruluk tatmin edici olunca `identity/`'ye porta.
+
+**Eklentiler bu depoda değil** (D-071): [`headshell/plugins`](https://github.com/headshell/plugins)
+deposunda dizin olarak yaşarlar ve uygulama onları o deponun `index.json`'undan
+kurar. İndeksi `headshell plugin index <katalog-deposu>` üretir; elle yazılmaz.
+SoundCloud/YouTube Music'in canlı testleri bu depoda kalır ve eklentiyi canlı
+katalogdan kurar — katalogdaki bozuk bir sürüm burada kırmızı yanar.
 
 `parked/` workspace'in `exclude`'unda: derlenmez, test edilmez, CI'a girmez.
 `spike/`'tan farkı, oradaki kodun atılabilir değil **geri dönmesi beklenen**
@@ -160,6 +165,8 @@ headshell provider list | test <ad> | scan [--if-stale]
 headshell provider add <tür> --url U --user K [--name AD] [--api-key A] [--verify]
 headshell provider remove <ad> | servers
 headshell plugin list | approve <ad> | install <ad> | disable <ad> | enable <ad> | forget <ad>
+headshell plugin catalog | update [<ad>] | remove <ad>
+headshell plugin index <katalog-deposu> [--url-template T] [--check]
 headshell secret list | set <ad-alanı> <anahtar> | remove <ad-alanı> <anahtar>
 headshell play <parça> [--all] [--shuffle] [--dry-run] [--tui]
 headshell diag                                   # son çalıştırmanın tanı raporu
@@ -175,6 +182,9 @@ olmasını gerektirir. İnsan okunur çıktı ayrı bir biçimlendirme katmanıd
 
 `--online` varsayılan **kapalı**: bir export'u içe aktarmak kimseyi sessizce
 ağa bağlamaz. Bayrak yokken kimlik zinciri yalnızca yerel halkaları koşar.
+İndirmenin **komutun kendisi** olduğu yerler (`plugin catalog`, `install`,
+`update`) bayrağı beklemez; katalog adresi `HEADSHELL_PLUGIN_INDEX` ile
+değişir (D-071).
 
 ---
 
@@ -252,6 +262,7 @@ kaç kayıt geldi, kaçı ISRC ile, kaçı bulanık, kaçı eşleşmedi.
 | Terimler (canonical id, anchor, listen…) | PLAN.md — SÖZLÜK |
 | Hangi platform hukuken hangi tarafta | PLAN.md — EK: Yayın platformları |
 | Eklenti nasıl yazılır (JS, `host` API'si) | docs/eklenti-yazma.md |
+| Eklenti kataloğu, yeni sürüm yayımlamak | `headshell/plugins` deposunun README'si |
 | Park edilmiş kod neden orada | parked/README.md |
 | Tema nasıl yazılır | crates/headshell/themes/README.md |
 | Masaüstü paketleri nasıl üretilir | .github/workflows/release.yml, crates/headshell/icons/README.md |

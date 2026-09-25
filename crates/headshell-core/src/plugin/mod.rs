@@ -7,6 +7,10 @@
 //! göndersem bir sorun çıktı"nın sebebi buydu: Windows'ta Python yok,
 //! Debian'da `venv` ayrı paket, sürümler tutmuyor.
 //!
+//! Eklentiler ana depoda durmaz: `headshell/plugins` deposunda yaşarlar ve
+//! uygulama onları o deponun indeksinden kurar ve günceller ([`catalog`],
+//! D-071). Elle konmuş bir dizin de eklentidir; katalog ona dokunmaz.
+//!
 //! ## Yaşam döngüsü
 //!
 //! 1. **Keşif** ([`discover`]) — motoru açmadan: manifest okunur, izin onayı
@@ -31,6 +35,7 @@
 //! yetkisiyle çalışır ve bu `headshell plugin list`'te yazar ([`host`]).
 
 pub mod artifact;
+pub mod catalog;
 pub mod consent;
 #[cfg(feature = "plugin-engine")]
 mod host;

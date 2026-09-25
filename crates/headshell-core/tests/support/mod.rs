@@ -102,3 +102,39 @@ impl std::ops::Deref for TestConfig {
         &self.config
     }
 }
+
+/// Bir eklentiyi **canlı katalogdan** veri dizinine kurar (D-071) —
+/// kullanıcının `headshell plugin install <ad>` ile yaptığının aynısı.
+///
+/// Eklentiler bu depoda durmuyor, `headshell/plugins`'te yaşıyor; canlı
+/// testler onları kullanıcının aldığı yoldan alıyor ve böylece katalog da
+/// uçtan uca sınanıyor: indeks, sha256, manifest karşılaştırması, kurulum.
+/// Adres `HEADSHELL_PLUGIN_INDEX`'ten ya da varsayılandan.
+///
+/// İki başarısızlık ayrı (K9, D-043):
+/// - Kataloğa **ulaşılamadıysa** `Err(sebep)` döner; çağıran testi atlar.
+/// - Ulaşılıp eklenti **kurulamadıysa** panikler: indeks bozuk, dosya yok ya
+///   da karma tutmuyor. Bu kırmızı yanmalı — kullanıcı da kuramaz.
+pub async fn install_from_catalog(config: &Config, name: &str) -> Result<PathBuf, String> {
+    use headshell_core::diag::Stage;
+    use headshell_core::plugin::catalog;
+
+    let http = headshell_core::net::default_http_client().map_err(|err| err.chain_text())?;
+    let index = config.plugin_index_url();
+    let result = async {
+        let catalog = catalog::fetch(http.as_ref(), &index).await?;
+        catalog::install(config, http.as_ref(), &catalog, name).await
+    }
+    .await;
+    match result {
+        Ok(_) => Ok(config.plugins_dir().join(name)),
+        Err(err) if err.stage() == Stage::NetworkRequest => Err(format!(
+            "katalog ({index}) okunamadı: {}",
+            err.chain_text().replace('\n', " ")
+        )),
+        Err(err) => panic!(
+            "{name} katalogdan kurulamadı ({index}):\n{}",
+            err.chain_text()
+        ),
+    }
+}

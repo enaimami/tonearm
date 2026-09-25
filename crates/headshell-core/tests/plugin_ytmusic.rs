@@ -1,7 +1,8 @@
 //! YouTube Music eklentisi, **gerçek YouTube Music'e karşı** (Faz 2 §2.5, D-048).
 //!
-//! `plugin_soundcloud.rs`'in kardeşi ve aynı yordamı izliyor: repodaki eklenti
-//! veri dizinine kurulup canlı serviste yürütülüyor. Sınanan şey protokol
+//! `plugin_soundcloud.rs`'in kardeşi ve aynı yordamı izliyor: eklenti canlı
+//! katalogdan (`headshell/plugins`, D-071) veri dizinine kurulup canlı
+//! serviste yürütülüyor. Sınanan şey protokol
 //! değil (onu `plugin_process.rs` sabit kataloglu bir fixture'la sınıyor),
 //! **eklentinin kendisi**: InnerTube araması, yt-dlp'nin çözdüğü adres ve
 //! sesin gerçekten çalması.
@@ -28,7 +29,7 @@
 
 mod support;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use headshell_core::config::Config;
 use headshell_core::ids::{ProviderId, ProviderTrackId};
@@ -37,11 +38,6 @@ use headshell_core::plugin::artifact::{ArtifactStore, default_artifact_source};
 use headshell_core::plugin::manifest::{PluginManifest, Requirement};
 use headshell_core::provider::{AudioSource, Capabilities, Provider};
 use headshell_core::secrets::{Secrets, plugin_namespace};
-
-/// Eklentinin repodaki kaynağı (fixture değil — kullanıcıya dağıtılan dosya).
-fn plugin_source_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/ytmusic")
-}
 
 /// yt-dlp'nin bu platform ikilisi: koşum başına en çok bir kez iner.
 ///
@@ -154,13 +150,16 @@ fn store_cookies(config: &Config) -> bool {
     true
 }
 
-/// Eklentiyi repodan veri dizinine kurar — kullanıcının yaptığı şeyin aynısı.
-fn install(config: &Config) -> PluginProvider {
-    let dir = config.plugins_dir().join("ytmusic");
-    std::fs::create_dir_all(&dir).unwrap();
-    for file in ["main.js", "plugin.json"] {
-        std::fs::copy(plugin_source_dir().join(file), dir.join(file)).unwrap();
-    }
+/// Eklentiyi canlı katalogdan kurar — kullanıcının yaptığı şeyin aynısı
+/// (D-071). Kataloğa ulaşılamıyorsa `None`: test atlanır ve sebebi yazılır.
+async fn install(config: &Config, test: &str) -> Option<PluginProvider> {
+    let dir = match support::install_from_catalog(config, "ytmusic").await {
+        Ok(dir) => dir,
+        Err(reason) => {
+            eprintln!("{test}: {reason} — atlanıyor (ağ yok sayılıyor)");
+            return None;
+        }
+    };
 
     let manifest = PluginManifest::load(&dir).unwrap();
 
@@ -184,7 +183,7 @@ fn install(config: &Config) -> PluginProvider {
     }
 
     let secrets = Secrets::load(&config.secrets_path()).unwrap();
-    PluginProvider::from_manifest(config, &manifest, &dir, &secrets).unwrap()
+    Some(PluginProvider::from_manifest(config, &manifest, &dir, &secrets).unwrap())
 }
 
 /// Arama, K6'nın bulanık eşleşme halkasının istediği alanları vermeli.
@@ -198,7 +197,9 @@ async fn a_search_carries_artist_and_duration_not_just_a_title() {
         return;
     }
     let config = temp_config("arama");
-    let provider = install(&config);
+    let Some(provider) = install(&config, "arama").await else {
+        return;
+    };
 
     assert!(
         provider
@@ -258,7 +259,9 @@ async fn the_best_match_comes_first_not_somewhere_in_the_list() {
         return;
     }
     let config = temp_config("sira");
-    let provider = install(&config);
+    let Some(provider) = install(&config, "sıra").await else {
+        return;
+    };
 
     let hits = provider.search("nujabes aruarian dance", 5).await.unwrap();
     assert!(!hits.is_empty(), "canlı arama boş döndü");
@@ -289,7 +292,9 @@ async fn a_search_hit_resolves_to_a_stream_with_the_unthrottling_range_header() 
     }
     let config = temp_config("cozum");
     let cookies_given = store_cookies(&config);
-    let provider = install(&config);
+    let Some(provider) = install(&config, "kaynak çözümü").await else {
+        return;
+    };
 
     let hits = provider.search("nujabes aruarian dance", 5).await.unwrap();
     assert!(!hits.is_empty(), "canlı arama boş döndü");
@@ -362,7 +367,9 @@ async fn a_missing_track_fails_with_the_tools_own_words() {
         return;
     }
     let config = temp_config("yok");
-    let provider = install(&config);
+    let Some(provider) = install(&config, "olmayan parça").await else {
+        return;
+    };
 
     let id = ProviderTrackId::new(ProviderId::new("ytmusic"), "zzzzzzzzzzz");
     let err = provider
@@ -394,7 +401,9 @@ async fn a_ytmusic_track_actually_plays() {
         return;
     }
     let config = temp_config("calma");
-    let provider = install(&config);
+    let Some(provider) = install(&config, "çalma").await else {
+        return;
+    };
 
     let mut registry = headshell_core::provider::ProviderRegistry::new();
     registry.register(std::sync::Arc::new(provider));

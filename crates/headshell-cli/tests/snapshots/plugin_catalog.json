@@ -1,0 +1,70 @@
+{
+  "delisted": [],
+  "diag": {
+    "command": "<değişken>",
+    "counters": {
+      "catalog.installable": 1,
+      "catalog.installed": 0,
+      "catalog.listed": 1,
+      "catalog.problems": 0,
+      "catalog.updates": 0
+    },
+    "env": {
+      "arch": "<değişken>",
+      "data_dir": "<değişken>",
+      "headshell_version": "<değişken>",
+      "os": "<değişken>"
+    },
+    "error_chain": [],
+    "failed_at": null,
+    "finished_at": "<değişken>",
+    "notes": [
+      "katalog: http://127.0.0.1:<port>/index.json"
+    ],
+    "started_at": "<değişken>"
+  },
+  "index": "http://127.0.0.1:<port>/index.json",
+  "platform": "<değişken>",
+  "plugins": [
+    {
+      "api": 2,
+      "capabilities": [
+        "search",
+        "stream"
+      ],
+      "description": "Eklenti sözleşmesini sınayan sabit kataloglu eklenti. Ağa çıkmaz.",
+      "display_name": "Echo (sınama)",
+      "files": [
+        {
+          "path": "<değişken>",
+          "sha256": "8fa484771dcd97698fce883a3e346f6017fdcf82ec708fc1f273cb506edb14d0",
+          "url": "http://127.0.0.1:<port>/echo/plugin.json?surum=0.2.0"
+        },
+        {
+          "path": "<değişken>",
+          "sha256": "8fba213a139bd4ae896bfa0d43a6b25b4f1263e43552a7c8a2c3c5c872c26843",
+          "url": "http://127.0.0.1:<port>/echo/main.js?surum=0.2.0"
+        }
+      ],
+      "installed": {
+        "state": "not_installed"
+      },
+      "name": "echo",
+      "permissions": {
+        "net": [
+          "ornek.gecersiz"
+        ]
+      },
+      "problem": null,
+      "requires": [],
+      "version": "0.2.0"
+    }
+  ],
+  "summary": {
+    "installable": 1,
+    "installed": 0,
+    "listed": 1,
+    "problems": 0,
+    "updates": 0
+  }
+}

@@ -4,8 +4,10 @@
 //! terminale yazmak. Her sayı çekirdekten geldiği gibi basılır.
 
 use headshell_core::library::SearchHit;
+use headshell_core::plugin::catalog::UpdateOutcome;
 use headshell_core::session::{
-    ImportReport, PlayReport, PluginConsentReport, PluginInstallReport, PluginListReport,
+    ImportReport, PlayReport, PluginCatalogReport, PluginConsentReport, PluginIndexReport,
+    PluginInstallReport, PluginListReport, PluginRemoveReport, PluginUpdateReport,
     ProviderListReport, ProviderTestReport, ResolveReport, ScanReport, SearchReport,
     SecretListReport, SecretWriteReport, ServerAddReport, ServerListReport, ServerRemoveReport,
     SleeveResponse, StatsResponse,
@@ -363,32 +365,276 @@ pub fn plugin_consent(report: &PluginConsentReport) -> String {
     out
 }
 
-/// Kurulum komutu sonucu (D-055).
+/// Kurulum komutu sonucu (D-055, D-071).
 pub fn plugin_install(report: &PluginInstallReport) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
-    let _ = writeln!(out, "eklenti : {}", report.report.plugin);
+    let name = &report.report.plugin;
+    let _ = writeln!(out, "eklenti : {name}");
+    match &report.fetched {
+        Some(fetched) => {
+            let _ = writeln!(
+                out,
+                "katalog : {} indirildi ← {}",
+                fetched.version, fetched.index
+            );
+            for file in &fetched.files {
+                let _ = writeln!(
+                    out,
+                    "{:<8}  {:<12} sha256 {} doğrulandı",
+                    "",
+                    file.path,
+                    short(&file.sha256)
+                );
+            }
+        }
+        // "Katalog okunmadı" ile "katalogda yoktu" ayrı cevaplar (K9).
+        None => {
+            let _ = writeln!(out, "katalog : okunmadı — eklenti zaten diskteydi");
+        }
+    }
     let _ = writeln!(out, "platform: {}", report.platform);
 
     if report.declared == 0 {
         // "Hiçbir şey istemiyor" ile "bakmadım" ayrı cevaplar (K9).
         let _ = writeln!(out, "eser    : yok — bu eklenti hiçbir şey istemiyor");
-        return out;
     }
-
     for (name, outcome) in &report.report.outcomes {
         let _ = writeln!(out, "eser    : {name} — {}", outcome.describe());
     }
+    let _ = writeln!(out, "izinler : {}", report.permissions.describe());
+    let _ = writeln!(
+        out,
+        "onay    : {}",
+        report.consent.describe().replace("<ad>", name)
+    );
     let _ = writeln!(
         out,
         "\ndurum   : {}",
-        if report.ready {
+        if !report.ready {
+            "eksik — eklenti bu hâliyle yüklenmez"
+        } else if report.consent.is_approved() {
             "hazır — eklenti çalıştırılabilir"
         } else {
-            "eksik — eklenti bu hâliyle yüklenmez"
+            "kuruldu — onaylanınca çalışır"
         }
     );
     out
+}
+
+/// Katalog: ne kurulabilir, ne kurulu, ne güncellenebilir (D-071).
+pub fn plugin_catalog(report: &PluginCatalogReport) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(out, "katalog : {}\n", report.index);
+    if report.plugins.is_empty() {
+        let _ = writeln!(out, "katalog boş");
+    }
+    for plugin in &report.plugins {
+        let state = match &plugin.problem {
+            Some(problem) => format!("KURULAMAZ — {problem}"),
+            None => plugin.installed.describe(),
+        };
+        let _ = writeln!(
+            out,
+            "{:<14} {:<20} {:<9} {}",
+            plugin.name,
+            truncate(plugin.display_name.as_deref().unwrap_or("—"), 20),
+            plugin.version.as_deref().unwrap_or("—"),
+            state
+        );
+        if let Some(description) = &plugin.description {
+            let _ = writeln!(out, "{:<14} {}", "", truncate(description, 100));
+        }
+        if plugin.problem.is_none() {
+            let _ = writeln!(
+                out,
+                "{:<14} istediği: {}",
+                "",
+                plugin.permissions.describe()
+            );
+            // Motorun kuracağı araçlar ağ izninden ayrı satırda (D-055).
+            for requirement in &plugin.requires {
+                let line = if requirement.asset_for(&report.platform).is_some() {
+                    format!(
+                        "{} {} ({})",
+                        requirement.name, requirement.version, report.platform
+                    )
+                } else {
+                    format!(
+                        "{} {} — bu platform ({}) için yayın yok",
+                        requirement.name, requirement.version, report.platform
+                    )
+                };
+                let _ = writeln!(out, "{:<14} motor   : {line}", "");
+            }
+        }
+    }
+    for name in &report.delisted {
+        let _ = writeln!(
+            out,
+            "\n{name}: katalogdan çekilmiş ama bu makinede kurulu — kaldırmak için \
+             `headshell plugin remove {name}`"
+        );
+    }
+    let s = &report.summary;
+    let _ = writeln!(
+        out,
+        "\n{} eklenti: {} kurulabilir, {} kurulu, {} güncelleme var, {} kurulamaz",
+        s.listed, s.installable, s.installed, s.updates, s.problems
+    );
+    let _ = writeln!(
+        out,
+        "kurmak için `headshell plugin install <ad>` · güncellemek için `headshell plugin update`"
+    );
+    out
+}
+
+/// Güncelleme sonucu (D-071).
+pub fn plugin_update(report: &PluginUpdateReport) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(out, "katalog : {}\n", report.index);
+    if report.plugins.is_empty() {
+        let _ = writeln!(
+            out,
+            "katalogdan kurulmuş eklenti yok — neler var: `headshell plugin catalog`"
+        );
+        return out;
+    }
+    for plugin in &report.plugins {
+        let _ = writeln!(out, "{:<14} {}", plugin.name, plugin.outcome.describe());
+        if let UpdateOutcome::Updated {
+            permissions_added,
+            tools_changed,
+            ..
+        } = &plugin.outcome
+        {
+            if !permissions_added.is_empty() {
+                let _ = writeln!(
+                    out,
+                    "{:<14} yeni izin istiyor: {} — `headshell plugin approve {}`",
+                    "",
+                    permissions_added.describe(),
+                    plugin.name
+                );
+            }
+            // Araç değişikliği onay istemez (D-071) ama söylenir: ayrı bir
+            // program sessizce değişmemeli.
+            for change in tools_changed {
+                let _ = writeln!(
+                    out,
+                    "{:<14} araç değişti: {} (onay istenmez)",
+                    "",
+                    change.describe()
+                );
+            }
+        }
+        for (name, outcome) in &plugin.tools {
+            let _ = writeln!(out, "{:<14} eser: {name} — {}", "", outcome.describe());
+        }
+        if let Some(error) = &plugin.tools_error {
+            let _ = writeln!(out, "{:<14} ARAÇLAR KURULAMADI — {error}", "");
+        }
+        if let Some(consent) = &plugin.consent
+            && !consent.is_approved()
+        {
+            let _ = writeln!(
+                out,
+                "{:<14} onay: {}",
+                "",
+                consent.describe().replace("<ad>", &plugin.name)
+            );
+        }
+    }
+    let s = &report.summary;
+    let _ = writeln!(
+        out,
+        "\n{} eklenti: {} güncellendi, {} güncel, {} atlandı, {} başarısız",
+        s.checked, s.updated, s.current, s.skipped, s.failed
+    );
+    out
+}
+
+/// Kaldırma sonucu (D-071).
+pub fn plugin_remove(report: &PluginRemoveReport) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "kaldırıldı: {} ({})",
+        report.name,
+        report.removed.path.display()
+    );
+    if let Some(target) = &report.removed.link_target {
+        let _ = writeln!(
+            out,
+            "            bir bağlantıydı; hedefine dokunulmadı: {}",
+            target.display()
+        );
+    }
+    let _ = writeln!(
+        out,
+        "onay      : {}",
+        if report.consent_forgotten {
+            "unutuldu — yeniden kurulursa baştan sorulur"
+        } else {
+            "kaydı yoktu"
+        }
+    );
+    if !report.kept_secrets.is_empty() {
+        let _ = writeln!(
+            out,
+            "sırlar    : plugin:{} içinde kaldı: {} — silmek için `headshell secret remove \
+             plugin:{} <anahtar>`",
+            report.name,
+            report.kept_secrets.join(", "),
+            report.name
+        );
+    }
+    let _ = writeln!(
+        out,
+        "not       : motorun kurduğu araçlar eklentiler arasında paylaşılır, silinmedi"
+    );
+    out
+}
+
+/// İndeks üretimi (katalog bakımı, D-071).
+pub fn plugin_index(report: &PluginIndexReport) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "indeks : {} — {}",
+        report.path.display(),
+        if report.written {
+            "yazıldı"
+        } else if report.up_to_date {
+            "zaten güncel"
+        } else {
+            "yazılmadı"
+        }
+    );
+    let _ = writeln!(out, "şablon : {}", report.url_template);
+    for plugin in &report.plugins {
+        let _ = writeln!(out, "\n{} {}", plugin.name, plugin.version);
+        for file in &plugin.files {
+            let _ = writeln!(
+                out,
+                "  {:<12} sha256 {}  {}",
+                file.path,
+                short(&file.sha256),
+                file.url
+            );
+        }
+    }
+    let _ = writeln!(out, "\n{} eklenti", report.plugins.len());
+    out
+}
+
+/// Karmanın ilk 12 hanesi — terminalde 64 hane okunmaz.
+fn short(hash: &str) -> &str {
+    hash.get(..12).unwrap_or(hash)
 }
 
 /// İzinlerin ne kadarının zorlandığını söyleyen not (D-040 → D-069).

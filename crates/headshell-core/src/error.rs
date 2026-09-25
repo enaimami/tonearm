@@ -142,6 +142,16 @@ pub enum ErrorKind {
     #[error("eklenti motoru — {step}: {detail}")]
     PluginRuntime { step: String, detail: String },
 
+    /// Eklenti kataloğu bir şeyi reddetti (D-071): indeks bozuk, girdi
+    /// geçersiz, inen dosyanın karması tutmuyor, ya da istenen işlem bu
+    /// eklentiye yapılamıyor (elle kurulmuş, yerelde değiştirilmiş).
+    ///
+    /// `index` hangi katalogdan söz edildiğini söyler: kullanıcı
+    /// `HEADSHELL_PLUGIN_INDEX` ile başka bir katalog seçmiş olabilir ve
+    /// hatanın hangisinden geldiği tahmin edilmemeli (K9).
+    #[error("eklenti kataloğu ({index}): {detail}")]
+    PluginCatalog { index: String, detail: String },
+
     /// Eklentinin protokol sürümü çekirdeğinkiyle uyuşmuyor.
     ///
     /// Faz 2'nin "bitti sayılır" ölçütünün yarısı bu hata: uyumsuz eklenti
