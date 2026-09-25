@@ -1,44 +1,47 @@
-//! Torrent sağlayıcı eklentisi (protokol api 1) — Faz 2 §2.4, D-047.
+//! The torrent provider plugin (protocol api 1) — Phase 2 §2.4, D-047.
 //!
-//! Çekirdeğin içinde değil, **alt süreç** olarak çalışır (K5). Sebep ölçüldü:
-//! `librqbit` `headshell-core`'un bağımlılık ağacına 179 crate ekliyordu (77 → 256)
-//! ve o ağaç `uniffi` ile mobile de gidecekti. Buradan gitmiyor.
+//! It runs not inside the core but **as a subprocess** (K5). The reason was
+//! measured: `librqbit` added 179 crates to `headshell-core`'s dependency tree
+//! (77 → 256), and that tree would go to mobile with `uniffi`. From here it
+//! does not.
 //!
-//! ## İki adımlı arama
+//! ## A two-step search
 //!
-//! Torznab bir **yayım** (release) döndürür, bir parça değil — genelde bir
-//! albüm. `WireTrack` ise bir parça. api 1'i büyütmeden çözümü iki adım:
+//! Torznab returns a **release**, not a track — usually an album. `WireTrack`,
+//! on the other hand, is a track. Without growing api 1, the solution is two
+//! steps:
 //!
-//! 1. `search "<sorgu>"` → yayımlar; her birinin kimliği `<infohash>`.
-//! 2. `search "<infohash>"` → o torrent'in ses dosyaları; kimlikler
-//!    `<infohash>/<dosya sırası>`.
+//! 1. `search "<query>"` → releases; each one's id is `<infohash>`.
+//! 2. `search "<infohash>"` → that torrent's audio files; the ids are
+//!    `<infohash>/<file index>`.
 //!
-//! `resolve_source` ikisini de kabul eder. Tek ses dosyası olan bir yayımda
-//! çıplak infohash doğrudan çalar; birden çok dosya varsa **tahmin etmez**,
-//! ne yapılacağını söyleyen bir hata döner (K9).
+//! `resolve_source` accepts both. For a release with a single audio file a
+//! bare infohash plays directly; if there are several files it **does not
+//! guess**, it returns an error that says what to do (K9).
 //!
-//! ## Ses nasıl teslim edilir
+//! ## How the audio is delivered
 //!
-//! `resolve_source`, `127.0.0.1`'de dinleyen kendi HTTP sunucumuzun adresini
-//! `HttpStream` olarak döndürür (bkz. [`stream`]). İndirmenin bitmesini
-//! beklemez: `librqbit` parça önceliğini okuma konumuna göre ayarlıyor.
+//! `resolve_source` returns the address of our own HTTP server listening on
+//! `127.0.0.1` as an `HttpStream` (see [`stream`]). It does not wait for the
+//! download to finish: `librqbit` sets piece priority by the read position.
 //!
-//! ## TODO: AFTER FIRST RELEASE — dağıtım D-049'u ihlal ediyor
+//! ## TODO: AFTER FIRST RELEASE — distribution breaks D-049
 //!
-//! Bu eklenti kullanıcıya `cargo build --release -p headshell-plugin-torrent`
-//! yaptırıyor, yani **bir Rust araç zinciri kurduruyor.** D-049 hiçbir
-//! eklentinin sistem çapında kurulum istememesini şart koşuyor ve depodaki
-//! dört eklentiden D-055'ten sonra bunu ihlal eden **tek** şey burası:
-//! ötekiler betik, motorun Python'undan geçiyorlar; bu bir ikili, geçemiyor.
+//! This plugin makes the user run `cargo build --release -p
+//! headshell-plugin-torrent`, that is, **it makes them install a Rust
+//! toolchain.** D-049 requires that no plugin asks for a system-wide install,
+//! and of the four plugins in the repository, after D-055 this is the **only**
+//! one that breaks it: the others are scripts and go through the engine's
+//! Python; this one is a binary and cannot.
 //!
-//! Bir zamanlar çözüm "çekirdeğe feature'lı sağlayıcı olarak taşı" idi
-//! (D-050 S3). **D-056 o kararı iptal etti**: taşınacak şey 2.335 satır
-//! kaynak + 647 satır test, çalışan bir eklenti — ilk sürümden önce sökmenin
-//! karşılığı yok.
+//! At one point the solution was "move it into the core as a provider behind a
+//! feature" (D-050 S3). **D-056 cancelled that decision**: what would move is
+//! 2,335 lines of source + 647 lines of tests, a working plugin — ripping it
+//! out before the first release is not worth it.
 //!
-//! Açık kalan soru **dağıtım**, mimari değil: platform başına önceden
-//! derlenmiş yayın çıktısı mı, yoksa "kaynaktan derle" mi kalacak. İlk
-//! sürümden sonra karara bağlanacak — PLAN §2.8 madde 5.
+//! The open question is **distribution**, not architecture: will there be
+//! prebuilt release artifacts per platform, or will it stay "build from
+//! source". It will be decided after the first release — PLAN §2.8 item 5.
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
@@ -68,18 +71,19 @@ pub const PLUGIN_NAME: &str = "torrent";
 const DISPLAY_NAME: &str = "Torrent";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Sır ad alanındaki anahtarlar (D-042). Değerleri hiçbir yerde basılmıyor.
+/// The keys in the secret namespace (D-042). Their values are printed nowhere.
 const SECRET_TORZNAB_URL: &str = "torznab_url";
 const SECRET_TORZNAB_KEY: &str = "torznab_api_key";
 
-/// Torznab yapılandırılmamışken `search`in verdiği cevap.
+/// The answer `search` gives while Torznab is not configured.
 ///
-/// Boş küme **değil**: "bakmadım" ile "bulamadım" ayrı tanılardır (K9).
+/// **Not** an empty set: "I did not look" and "I did not find" are separate
+/// diagnoses (K9).
 const TORZNAB_MISSING: &str = concat!(
-    "Torznab yapılandırılmamış — arama yapılamaz (indirme ve çalma çalışır). ",
-    "Prowlarr ya da Jackett kurup şunları verin: ",
+    "Torznab is not configured — search cannot be done (downloading and playback work). ",
+    "Install Prowlarr or Jackett and give these: ",
     "`headshell secret set plugin:torrent torznab_url` ",
-    "(ör. http://127.0.0.1:9696/1/api) ve ",
+    "(e.g. http://127.0.0.1:9696/1/api) and ",
     "`headshell secret set plugin:torrent torznab_api_key`."
 );
 
@@ -120,11 +124,11 @@ impl App {
         )
     }
 
-    /// Motor ilk ihtiyaç duyulduğunda kuruluyor — el sıkışmada değil.
+    /// The engine is set up the first time it is needed — not in the handshake.
     ///
-    /// El sıkışmanın zaman aşımı 5 sn ve bir torrent oturumu açmak (port
-    /// bağlama, DHT ön yükleme) bundan uzun sürebilir. Orada kurmak,
-    /// eklentiyi ağ yavaşken **yüklenemez** hâle getirirdi.
+    /// The handshake's timeout is 5 s, and opening a torrent session (binding a
+    /// port, DHT bootstrap) can take longer. Setting it up there would make the
+    /// plugin **unloadable** while the network is slow.
     pub async fn engine(&self) -> Result<Arc<Engine>> {
         self.engine
             .get_or_try_init(|| async { Engine::new(self.data_dir.clone()).await.map(Arc::new) })
@@ -158,10 +162,10 @@ pub async fn dispatch(
 
 pub fn handshake(app: &mut App, params: serde_json::Value) -> Result<serde_json::Value> {
     let params: HandshakeParams = serde_json::from_value(params)
-        .map_err(|error| rpc::PluginError::new(format!("el sıkışma gövdesi okunamadı: {error}")))?;
+        .map_err(|error| rpc::PluginError::new(format!("could not read the handshake body: {error}")))?;
     if params.api != PLUGIN_API {
         return err(format!(
-            "protokol sürümü uyuşmuyor: çekirdek {}, eklenti {PLUGIN_API}",
+            "protocol version mismatch: core {}, plugin {PLUGIN_API}",
             params.api
         ));
     }
@@ -177,44 +181,44 @@ pub fn handshake(app: &mut App, params: serde_json::Value) -> Result<serde_json:
     }))
 }
 
-/// Sağlık: **iki ayrı** şey ölçülüyor ve ayrı ayrı raporlanıyor.
+/// Health: **two separate** things are measured and reported separately.
 ///
-/// Torznab'a ulaşamamak aramanın çalışmadığı anlamına gelir; torrent motoru
-/// yine ayakta olabilir ve elde infohash olan bir parça yine çalar. İkisini
-/// tek bir `reachable` bayrağına indirmek, kullanıcıya yanlış şeyi tamir
-/// ettirir (K9).
+/// Not reaching Torznab means search does not work; the torrent engine may
+/// still be up, and a track whose infohash is at hand still plays. Reducing
+/// the two to a single `reachable` flag makes the user fix the wrong thing
+/// (K9).
 pub async fn health(app: &App) -> Result<serde_json::Value> {
     let mut notes = Vec::new();
     let mut reachable = true;
 
     match app.torznab() {
         Ok(client) => match client.caps().await {
-            Ok(detail) => notes.push(format!("arama: {detail}")),
+            Ok(detail) => notes.push(format!("search: {detail}")),
             Err(error) => {
                 reachable = false;
-                notes.push(format!("arama çalışmıyor: {error}"));
+                notes.push(format!("search does not work: {error}"));
             }
         },
         Err(error) => {
             reachable = false;
-            notes.push(format!("arama yapılandırılmamış: {error}"));
+            notes.push(format!("search is not configured: {error}"));
         }
     }
 
     match app.engine().await {
         Ok(engine) => notes.push(format!(
-            "torrent motoru hazır, indirme dizini {}",
+            "the torrent engine is ready, download directory {}",
             engine.download_dir().display()
         )),
         Err(error) => {
             reachable = false;
-            notes.push(format!("torrent motoru açılamadı: {error}"));
+            notes.push(format!("could not open the torrent engine: {error}"));
         }
     }
 
     let result = HealthResult {
         reachable,
-        // Torrent'in bir kataloğu yok: bir sayı vermek uydurmak olurdu.
+        // A torrent has no catalog: giving a number would be making it up.
         track_count: None,
         detail: Some(notes.join(" | ")),
     };
@@ -223,19 +227,20 @@ pub async fn health(app: &App) -> Result<serde_json::Value> {
 
 pub async fn search(app: &App, params: serde_json::Value) -> Result<serde_json::Value> {
     let params: SearchParams = serde_json::from_value(params)
-        .map_err(|error| rpc::PluginError::new(format!("arama gövdesi okunamadı: {error}")))?;
+        .map_err(|error| rpc::PluginError::new(format!("could not read the search body: {error}")))?;
     let query = params.query.trim();
     if query.is_empty() {
         return to_value(&SearchResult { tracks: Vec::new() });
     }
 
-    // İkinci adım: sorgu bir infohash ise, o torrent'in içindeki dosyalar.
+    // The second step: if the query is an infohash, the files inside that
+    // torrent.
     let candidate = query.to_ascii_lowercase();
     if torznab::is_infohash(&candidate) {
         return search_inside(app, &candidate).await;
     }
     if let Some(hash) = torznab::infohash_from_magnet(query) {
-        // Magnet yapıştıran kullanıcı: kataloğa yazıp içine bakıyoruz.
+        // A user pasting a magnet: we write it to the catalog and look inside.
         let engine = app.engine().await?;
         engine
             .remember(vec![(
@@ -253,7 +258,7 @@ pub async fn search(app: &App, params: serde_json::Value) -> Result<serde_json::
     search_releases(app, query, params.limit).await
 }
 
-/// Birinci adım: Torznab'da yayım ara.
+/// The first step: search Torznab for releases.
 pub async fn search_releases(app: &App, query: &str, limit: usize) -> Result<serde_json::Value> {
     let client = app.torznab()?;
     let outcome = client.search(query, limit).await?;
@@ -262,7 +267,7 @@ pub async fn search_releases(app: &App, query: &str, limit: usize) -> Result<ser
         rpc::log(
             "warn",
             format!(
-                "{} sonuç infohash taşımadığı için düşürüldü (çalınamazlardı)",
+                "{} results were dropped because they carry no infohash (they could not be played)",
                 outcome.dropped_unidentifiable
             ),
         );
@@ -287,13 +292,13 @@ pub async fn search_releases(app: &App, query: &str, limit: usize) -> Result<ser
         tracks.push(WireTrack {
             id: found.infohash.clone(),
             artist: parsed.artist,
-            // Yayım adı albüm; başlık alanına da onu koyuyoruz çünkü bu
-            // satır bir parça değil, bir yayım. İçine `search "<infohash>"`
-            // ile inilir.
+            // The release name is the album; we put it into the title field too,
+            // because this row is not a track but a release. It is opened with
+            // `search "<infohash>"`.
             title: parsed.title.clone(),
             album: Some(parsed.title),
-            // Bir yayımın süresi yok. Uydurmak, kimlik zincirinin süre
-            // eşitlik-bozucusunu (D-046 ek 2) yanlış yönlendirirdi.
+            // A release has no duration. Making one up would misdirect the
+            // identity chain's duration tie-breaker (D-046 addendum 2).
             duration_ms: None,
             isrc: None,
         });
@@ -303,21 +308,21 @@ pub async fn search_releases(app: &App, query: &str, limit: usize) -> Result<ser
     to_value(&SearchResult { tracks })
 }
 
-/// İkinci adım: bir torrent'in içindeki ses dosyaları.
+/// The second step: the audio files inside a torrent.
 pub async fn search_inside(app: &App, infohash: &str) -> Result<serde_json::Value> {
     let engine = app.engine().await?;
     let (source_url, from_catalog) = engine.source_for(infohash).await;
     if !from_catalog {
         rpc::log(
             "info",
-            format!("{infohash} katalogda yok; tracker listesi olmadan yalnızca DHT ile aranacak"),
+            format!("{infohash} is not in the catalog; without a tracker list it will be looked for through the DHT only"),
         );
     }
     let handle = engine.handle(infohash, &source_url).await?;
     let files = Engine::audio_files(&handle)?;
     if files.is_empty() {
         return err(format!(
-            "torrent'te ses dosyası yok ({infohash}); durum: {}",
+            "no audio files in the torrent ({infohash}); state: {}",
             Engine::progress(&handle)
         ));
     }
@@ -338,8 +343,9 @@ pub async fn search_inside(app: &App, infohash: &str) -> Result<serde_json::Valu
                 artist: parsed.artist.clone(),
                 title,
                 album: (!parsed.title.is_empty()).then(|| parsed.title.clone()),
-                // Süre torrent üstverisinde yok — dosyayı çözmeden bilinemez.
-                // Kimlik zinciri onu dosyadan (parmak izi yolu) öğrenir.
+                // The duration is not in the torrent metadata — it cannot be known
+                // without decoding the file. The identity chain learns it from the file
+                // (the fingerprint route).
                 duration_ms: None,
                 isrc: None,
             }
@@ -351,23 +357,23 @@ pub async fn search_inside(app: &App, infohash: &str) -> Result<serde_json::Valu
 
 pub async fn resolve_source(app: &App, params: serde_json::Value) -> Result<serde_json::Value> {
     let params: ResolveSourceParams = serde_json::from_value(params)
-        .map_err(|error| rpc::PluginError::new(format!("çözümleme gövdesi okunamadı: {error}")))?;
+        .map_err(|error| rpc::PluginError::new(format!("could not read the resolve body: {error}")))?;
     let raw = params.id.trim();
     if raw.is_empty() {
-        return err("parça kimliği boş");
+        return err("the track id is empty");
     }
 
     let (infohash, wanted_index) = match raw.split_once('/') {
         Some((hash, index)) => {
             let parsed: usize = index
                 .parse()
-                .map_err(|_| rpc::PluginError::new(format!("dosya sırası sayı değil: {index}")))?;
+                .map_err(|_| rpc::PluginError::new(format!("the file index is not a number: {index}")))?;
             (hash.to_ascii_lowercase(), Some(parsed))
         }
         None => (raw.to_ascii_lowercase(), None),
     };
     if !torznab::is_infohash(&infohash) {
-        return err(format!("kimlik bir infohash değil: {infohash}"));
+        return err(format!("the id is not an infohash: {infohash}"));
     }
 
     let engine = app.engine().await?;
@@ -378,7 +384,7 @@ pub async fn resolve_source(app: &App, params: serde_json::Value) -> Result<serd
     let index = match wanted_index {
         Some(index) => {
             if !files.iter().any(|file| file.index == index) {
-                // "Yok" bir cevaptır, hata değil (protokol §resolve_source).
+                // "None" is an answer, not an error (protocol §resolve_source).
                 return to_value(&headshell_core::plugin::protocol::ResolveSourceResult {
                     source: None,
                 });
@@ -388,14 +394,14 @@ pub async fn resolve_source(app: &App, params: serde_json::Value) -> Result<serd
         None => match files.as_slice() {
             [] => {
                 return err(format!(
-                    "torrent'te ses dosyası yok ({infohash}); durum: {}",
+                    "no audio files in the torrent ({infohash}); state: {}",
                     Engine::progress(&handle)
                 ));
             }
             [single] => single.index,
             many => {
-                // Hangisi olduğunu bilmiyoruz ve **tahmin etmiyoruz** (K9):
-                // ilk dosyayı seçmek, kullanıcıya sessizce yanlış parçayı çalar.
+                // We do not know which one it is, and we **do not guess** (K9):
+                // picking the first file would silently play the wrong track.
                 let listing = many
                     .iter()
                     .take(10)
@@ -403,14 +409,14 @@ pub async fn resolve_source(app: &App, params: serde_json::Value) -> Result<serd
                     .collect::<Vec<_>>()
                     .join(", ");
                 let extra = if many.len() > 10 {
-                    format!(" (+{} dosya daha)", many.len() - 10)
+                    format!(" (+{} more files)", many.len() - 10)
                 } else {
                     String::new()
                 };
                 return err(format!(
-                    "bu yayımda {} ses dosyası var, hangisi olduğunu söylemediniz. \
-                     `headshell provider search torrent {infohash}` dosyaları listeler; \
-                     kimlik `{infohash}/<sıra>` olur. Dosyalar — {listing}{extra}",
+                    "this release has {} audio files, and you did not say which one. \
+                     `headshell provider search torrent {infohash}` lists the files; \
+                     the id becomes `{infohash}/<index>`. Files — {listing}{extra}",
                     many.len()
                 ));
             }
@@ -422,7 +428,7 @@ pub async fn resolve_source(app: &App, params: serde_json::Value) -> Result<serd
     rpc::log(
         "info",
         format!(
-            "{infohash}/{index} akışa hazırlanıyor: {}",
+            "{infohash}/{index} is getting ready to stream: {}",
             Engine::progress(&handle)
         ),
     );
@@ -437,7 +443,7 @@ pub async fn resolve_source(app: &App, params: serde_json::Value) -> Result<serd
 
 fn to_value<T: serde::Serialize>(value: &T) -> Result<serde_json::Value> {
     serde_json::to_value(value)
-        .map_err(|error| rpc::PluginError::new(format!("cevap serileştirilemedi: {error}")))
+        .map_err(|error| rpc::PluginError::new(format!("could not serialise the answer: {error}")))
 }
 
 #[cfg(test)]
@@ -448,15 +454,15 @@ mod tests {
     fn the_missing_torznab_message_tells_the_user_exactly_what_to_type() {
         assert!(TORZNAB_MISSING.contains("headshell secret set plugin:torrent torznab_url"));
         assert!(TORZNAB_MISSING.contains("torznab_api_key"));
-        // "Arama yok" ile "hiçbir şey çalışmıyor" karıştırılmamalı.
-        assert!(TORZNAB_MISSING.contains("çalma çalışır"));
+        // "No search" must not be confused with "nothing works".
+        assert!(TORZNAB_MISSING.contains("playback work"));
     }
 
     #[test]
     fn an_unconfigured_search_is_an_error_not_an_empty_result() {
         let app = App::new();
         let error = app.torznab().unwrap_err();
-        assert!(error.to_string().contains("yapılandırılmamış"), "{error}");
+        assert!(error.to_string().contains("not configured"), "{error}");
     }
 
     #[test]
@@ -480,7 +486,7 @@ mod tests {
             serde_json::json!(["search", "stream"])
         );
         assert_eq!(app.data_dir, PathBuf::from("/tmp/x"));
-        assert!(app.torznab().is_ok(), "sır el sıkışmadan alınmalı");
+        assert!(app.torznab().is_ok(), "the secret must be taken from the handshake");
     }
 
     #[test]
@@ -505,8 +511,8 @@ mod tests {
     #[tokio::test]
     async fn an_empty_query_is_an_empty_result_without_touching_the_network() {
         let app = App::new();
-        // Torznab yapılandırılmamış; yine de hata değil, çünkü boş sorgu
-        // indekse hiç gitmemeli.
+        // Torznab is not configured; still no error, because an empty query must
+        // never go to the index.
         let value = search(&app, serde_json::json!({"query": "  ", "limit": 10}))
             .await
             .unwrap();
@@ -516,10 +522,10 @@ mod tests {
     #[tokio::test]
     async fn an_id_that_is_not_an_infohash_says_so_instead_of_starting_a_download() {
         let app = App::new();
-        let error = resolve_source(&app, serde_json::json!({"id": "merhaba"}))
+        let error = resolve_source(&app, serde_json::json!({"id": "hello"}))
             .await
             .unwrap_err();
-        assert!(error.to_string().contains("infohash değil"), "{error}");
+        assert!(error.to_string().contains("not an infohash"), "{error}");
     }
 
     #[tokio::test]
@@ -529,7 +535,7 @@ mod tests {
         let error = resolve_source(&app, serde_json::json!({"id": format!("{hash}/abc")}))
             .await
             .unwrap_err();
-        assert!(error.to_string().contains("sayı değil"), "{error}");
+        assert!(error.to_string().contains("not a number"), "{error}");
     }
 
     #[tokio::test]

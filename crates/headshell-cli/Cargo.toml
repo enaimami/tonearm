@@ -1,6 +1,6 @@
 [package]
 name = "headshell-cli"
-description = "headshell-core üzerine ince CLI kabuğu. İş mantığı içermez."
+description = "The thin CLI shell on top of headshell-core. Contains no business logic."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -21,14 +21,15 @@ serde_json = "1.0.151"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-# D-011: `--out *.png` için PNG rasterizasyonu.
-# D-016: `headshell play` için ses hattı (symphonia + cpal).
-# D-020: uzak sağlayıcılar için HTTP istemcisi (ureq + rustls).
-# D-069: eklentiler için gömülü JS motoru (QuickJS).
-# D-046: `headshell resolve --file` için ses parmak izi (Chromaprint).
-#   CLI her çekirdek yeteneğinin sınandığı yüzey (CLAUDE.md); parmak izi
-#   feature'ının açık kalması gereken tek derleme burası. Ağacı büyütüyor ve
-#   bedel bilerek ödeniyor — mobil ve sunucu derlemeleri onu taşımaz.
+# D-011: PNG rasterisation for `--out *.png`.
+# D-016: the audio pipeline for `headshell play` (symphonia + cpal).
+# D-020: the HTTP client for remote providers (ureq + rustls).
+# D-069: the embedded JS engine for plugins (QuickJS).
+# D-046: the audio fingerprint for `headshell resolve --file` (Chromaprint).
+#   The CLI is the surface every core capability is tested through (CLAUDE.md);
+#   this is the one build where the fingerprint feature has to stay on. It grows
+#   the tree and the price is paid on purpose — mobile and server builds do not
+#   carry it.
 headshell-core = { workspace = true, features = [
     "render-png",
     "audio",

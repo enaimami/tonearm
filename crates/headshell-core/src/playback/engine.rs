@@ -1,17 +1,18 @@
-//! Ses hattı: symphonia (çözme) + cpal (çıkış). D-016.
+//! The audio pipeline: symphonia (decoding) + cpal (output). D-016.
 //!
-//! Yalnızca `audio` feature'ıyla derlenir.
+//! Compiled only with the `audio` feature.
 //!
-//! ## Nasıl çalışıyor
+//! ## How it works
 //!
-//! Çözme bir arka plan iş parçacığında olur ve örnekleri paylaşılan bir
-//! halka tamponuna yazar; cpal'ın ses geri çağrısı o tampondan okur. İki
-//! taraf arasında kilit **tutulmaz** (ses geri çağrısı bloklanamaz: bloklarsa
-//! kullanıcı cızırtı duyar).
+//! Decoding happens on a background thread, which writes samples into a
+//! shared ring buffer; cpal's audio callback reads from that buffer. **No
+//! lock is held** between the two sides (the audio callback must not block:
+//! if it blocks, the user hears crackling).
 //!
-//! Pozisyon, çıkışa **gerçekten verilmiş** kare sayısından hesaplanır —
-//! çözülmüş kare sayısından değil. Aradaki fark tampon dolusu kadar zamandır;
-//! çözülene bakmak ilerleme çubuğunu sesin önüne düşürürdü.
+//! The position is computed from the number of frames **actually handed** to
+//! the output — not from the number of decoded frames. The difference is a
+//! buffer's worth of time; looking at what was decoded would put the progress
+//! bar ahead of the sound.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
@@ -31,10 +32,12 @@ use crate::provider::AudioSource;
 
 use super::anchor::PlayState;
 
-/// URL'nin yol kısmındaki uzantıyı çıkarır (`.../a.flac?x=1` → `flac`).
+/// Extracts the extension from the path part of a URL (`.../a.flac?x=1` →
+/// `flac`).
 ///
-/// Yalnızca bir **ipucu** üretir: bulunamazsa symphonia kabı içeriğinden
-/// tanır. Uydurma bir uzantı vermek tanımayı yanlış yöne çevirirdi.
+/// It only produces a **hint**: if none is found, symphonia recognises the
+/// container from its contents. Giving a made-up extension would send the
+/// recognition the wrong way.
 #[cfg(feature = "http-client")]
 fn extension_from_url(url: &str) -> Option<String> {
     let path = url.split(['?', '#']).next()?;
@@ -54,11 +57,12 @@ fn audio_err(stage: Stage, detail: impl Into<String>) -> Error {
     )
 }
 
-/// Çözücüden çıkışa örnek taşıyan halka tamponu.
+/// A ring buffer carrying samples from the decoder to the output.
 ///
-/// Tek üretici (çözme iş parçacığı), tek tüketici (ses geri çağrısı).
-/// `Mutex` var ama tutma süresi bir `memcpy` kadar; ses geri çağrısı
-/// bloklanmasın diye kilit alınamazsa **sessizlik yazılır**, beklenmez.
+/// Single producer (the decoding thread), single consumer (the audio
+/// callback). There is a `Mutex`, but it is held for about a `memcpy`; so the
+/// audio callback does not block, if the lock cannot be taken **silence is
+/// written**, it does not wait.
 struct RingBuffer {
     samples: Mutex<std::collections::VecDeque<f32>>,
     capacity: usize,
@@ -72,12 +76,12 @@ impl RingBuffer {
         }
     }
 
-    /// Tampondaki örnek sayısı.
+    /// The number of samples in the buffer.
     fn len(&self) -> usize {
         self.samples.lock().map(|s| s.len()).unwrap_or(0)
     }
 
-    /// Yer varsa yazar; dolu ise yazamadığı sayıyı döndürür.
+    /// Writes if there is room; if full, returns how many it could not write.
     fn push(&self, data: &[f32]) -> usize {
         let Ok(mut samples) = self.samples.lock() else {
             return data.len();
@@ -88,8 +92,8 @@ impl RingBuffer {
         data.len() - take
     }
 
-    /// `out`'u doldurur; yetmezse kalanı sessizlikle doldurur ve kaç örnek
-    /// gerçekten verildiğini döndürür.
+    /// Fills `out`; if there is not enough, fills the rest with silence and
+    /// returns how many samples were really given.
     fn pop_into(&self, out: &mut [f32]) -> usize {
         let Ok(mut samples) = self.samples.lock() else {
             out.fill(0.0);
@@ -110,39 +114,40 @@ impl RingBuffer {
     }
 }
 
-/// Çıkışa yazılmış tek bir parçanın dilimi (D-024).
+/// A slice of a single track written to the output (D-024).
 ///
-/// Gapless'ın muhasebesi bu: halka tamponu artık birden çok parçanın
-/// örneklerini yan yana taşıyabildiği için "pozisyon" tek bir sayaçtan
-/// okunamaz. Her parça çıkış karesi cinsinden nerede başladığını bilir;
-/// çalan parça, `frames_played`'in hangi dilime düştüğüdür.
+/// This is gapless's bookkeeping: since the ring buffer can now carry the
+/// samples of several tracks side by side, the "position" cannot be read from
+/// a single counter. Every track knows where it started in output frames; the
+/// playing track is the slice `frames_played` falls into.
 #[derive(Debug, Clone)]
 struct Span {
-    /// [`AudioEngine::enqueue`]'nun döndürdüğü sıra numarası.
+    /// The sequence number returned by [`AudioEngine::enqueue`].
     seq: u64,
-    /// Bu parçanın ilk karesinin çıkıştaki mutlak indeksi.
+    /// The absolute index in the output of this track's first frame.
     ///
-    /// Sıraya girmiş ama çözülmeye **başlanmamış** parçada `None`: nerede
-    /// başlayacağı, kendinden öncekinin kaç kare yazdığına bağlı ve bu
-    /// ancak o parça bitince belli olur.
+    /// `None` for a track that is queued but has **not started** decoding: where
+    /// it will start depends on how many frames the one before it wrote, and that
+    /// is only known when that track ends.
     start_frame: Option<u64>,
-    /// Kaç kare yazıldı. Çözme sürerken `None`.
+    /// How many frames were written. `None` while decoding is under way.
     frames: Option<u64>,
     duration_ms: Option<u64>,
 }
 
-/// Çözücüye verilecek iş.
+/// A job for the decoder.
 ///
-/// İki biçim var çünkü iki yol var: kullanıcı "çal" dediğinde kaynak
-/// **çağıranın iş parçacığında** açılır (olmayan dosya hemen hata versin,
-/// sessizce arka planda kaybolmasın), önden okumada ise çözücünün kendi
-/// iş parçacığında açılır — açma gecikmesi tampon boşalırken gizlensin diye.
+/// There are two forms because there are two routes: when the user says
+/// "play", the source is opened **on the caller's thread** (a missing file
+/// should fail right away, not vanish silently in the background); with
+/// read-ahead it is opened on the decoder's own thread — so the opening delay
+/// is hidden while the buffer drains.
 enum Job {
     Prepared(Box<PreparedTrack>),
     Lazy { seq: u64, source: AudioSource },
 }
 
-/// Açılmış, çözülmeye hazır parça.
+/// An opened track, ready to decode.
 struct PreparedTrack {
     seq: u64,
     format: Box<dyn FormatReader>,
@@ -153,31 +158,35 @@ struct PreparedTrack {
     duration_ms: Option<u64>,
 }
 
-/// Çözme iş parçacığı ile oynatıcı arasındaki paylaşılan durum.
+/// The state shared between the decoding thread and the player.
 struct Shared {
     ring: RingBuffer,
-    /// Çıkışa verilmiş toplam kare sayısı — **parçalar boyunca artar**,
-    /// parça başında sıfırlanmaz. Parça içi pozisyon dilimden hesaplanır.
+    /// The total number of frames handed to the output — it **grows across
+    /// tracks** and is not reset at the start of a track. The position within a
+    /// track is computed from the slice.
     frames_played: AtomicU64,
-    /// Tampona şimdiye kadar yazılmış toplam kare. Yeni dilimin başlangıcı.
+    /// The total number of frames written to the buffer so far. The start of a
+    /// new slice.
     frames_queued: AtomicU64,
-    /// Çıkışın örnekleme hızı (kare/saniye).
+    /// The output's sample rate (frames/second).
     sample_rate: AtomicU64,
-    /// Kanal sayısı.
+    /// The number of channels.
     channels: AtomicU64,
-    /// `PlayState` — atomik olarak taşınabilsin diye `u8`.
+    /// `PlayState` — a `u8` so it can be carried atomically.
     state: AtomicU8,
-    /// Çözme iş parçacığına "dur" işareti.
+    /// The "stop" signal for the decoding thread.
     stop: AtomicBool,
-    /// Çözecek iş kalmadı: ne elde parça var ne kuyrukta. Tampon da boşalınca
-    /// çalma biter. (Eski `drained`'in gapless'taki karşılığı.)
+    /// No work left to decode: no track at hand and none in the queue. When the
+    /// buffer drains too, playback ends. (The gapless counterpart of the old
+    /// `drained`.)
     idle: AtomicBool,
-    /// Çözülmeyi bekleyen işler. Gapless burada oluyor: çalan parça biterken
-    /// sıradaki zaten sırada, aygıt kapanmıyor.
+    /// Jobs waiting to be decoded. This is where gapless happens: as the playing
+    /// track ends the next one is already queued, and the device does not close.
     pending: Mutex<VecDeque<Job>>,
-    /// Çıkışa yazılmış parça dilimleri, sırayla.
+    /// The slices of tracks written to the output, in order.
     spans: Mutex<Vec<Span>>,
-    /// Çözme sırasında oluşan hata (varsa) — çağıran `take_error` ile alır.
+    /// An error that occurred while decoding (if any) — the caller takes it with
+    /// `take_error`.
     error: Mutex<Option<String>>,
 }
 
@@ -213,7 +222,7 @@ impl Shared {
         self.state.store(state_to_u8(state), Ordering::Release);
     }
 
-    /// Kare sayısını milisaniyeye çevirir.
+    /// Turns a frame count into milliseconds.
     fn frames_to_ms(&self, frames: u64) -> u64 {
         let rate = self.sample_rate.load(Ordering::Acquire);
         if rate == 0 {
@@ -222,11 +231,11 @@ impl Shared {
         frames.saturating_mul(1000) / rate
     }
 
-    /// Çıkışın şu an hangi dilimde olduğunu bulur.
+    /// Finds which slice the output is in right now.
     ///
-    /// Yalnızca **başlamış** dilimler sayılır: sıradaki parça daha çalınmadan
-    /// "çalıyor" görünürse geçiş erken duyurulur, arayüz de scrobble da
-    /// yanlış parçayı gösterir.
+    /// Only slices that have **started** count: if the next track looked like it
+    /// was "playing" before being played, the transition would be announced
+    /// early, and both the interface and the scrobble would show the wrong track.
     fn current_span(&self) -> Option<Span> {
         let played = self.frames_played.load(Ordering::Acquire);
         let spans = self.spans.lock().ok()?;
@@ -237,11 +246,12 @@ impl Shared {
             .cloned()
     }
 
-    /// Gösterilecek süre: çalan parçanınki, henüz başlamadıysa sıradakinin.
+    /// The duration to show: the playing track's, or the next one's if it has
+    /// not started yet.
     ///
-    /// Motor yeni kurulduğunda çözme iş parçacığı daha ilk kareyi yazmamış
-    /// olabilir; "süre bilinmiyor" demek yerine sıradaki parçanınkini
-    /// veriyoruz — kullanıcının duyacağı parça o.
+    /// When the engine has just been set up the decoding thread may not have
+    /// written the first frame yet; rather than saying "duration unknown" we give
+    /// the next track's — that is the track the user will hear.
     fn display_duration_ms(&self) -> Option<u64> {
         if let Some(span) = self.current_span() {
             return span.duration_ms;
@@ -253,13 +263,13 @@ impl Shared {
             .and_then(|span| span.duration_ms)
     }
 
-    /// Bir dilimin içinde çalınmış süre (ms).
+    /// The time played within a slice (ms).
     ///
-    /// Dilim bittiyse ve çıkış onu geçtiyse sonuç parçanın tamamıdır —
-    /// scrobble'ın ihtiyacı olan sayı bu (§1.6).
+    /// If the slice has ended and the output has passed it, the result is the
+    /// whole track — the number the scrobble needs (§1.6).
     fn played_ms_of(&self, span: &Span) -> u64 {
         let Some(start) = span.start_frame else {
-            // Hiç başlamadı: çalınmış süresi sıfırdır.
+            // It never started: its played time is zero.
             return 0;
         };
         let played = self.frames_played.load(Ordering::Acquire);
@@ -271,13 +281,14 @@ impl Shared {
         self.frames_to_ms(clamped)
     }
 
-    /// Çalan parçanın kendi içindeki pozisyonu (ms).
+    /// The position of the playing track within itself (ms).
     fn position_ms(&self) -> u64 {
         self.current_span()
             .map_or(0, |span| self.played_ms_of(&span))
     }
 
-    /// Dilimi kaydeder (henüz başlamadı). Varsa süresini tazeler.
+    /// Records the slice (not started yet). Refreshes its duration if there is
+    /// one.
     fn declare_span(&self, seq: u64, duration_ms: Option<u64>) {
         if let Ok(mut spans) = self.spans.lock() {
             if let Some(span) = spans.iter_mut().find(|span| span.seq == seq) {
@@ -293,7 +304,7 @@ impl Shared {
         }
     }
 
-    /// Dilimi başlatır: ilk karesinin çıkıştaki yeri artık belli.
+    /// Starts the slice: where its first frame falls in the output is now known.
     fn begin_span(&self, seq: u64) {
         let start = self.frames_queued.load(Ordering::Acquire);
         if let Ok(mut spans) = self.spans.lock()
@@ -303,7 +314,7 @@ impl Shared {
         }
     }
 
-    /// Dilimi kapatır: kaç kare yazıldığı kesinleşir.
+    /// Closes the slice: how many frames were written becomes final.
     fn close_span(&self, seq: u64) {
         let queued = self.frames_queued.load(Ordering::Acquire);
         if let Ok(mut spans) = self.spans.lock()
@@ -314,7 +325,7 @@ impl Shared {
         }
     }
 
-    /// Tampona yazılan kareleri sayar (kanal sayısına bölünmüş).
+    /// Counts the frames written to the buffer (divided by the channel count).
     fn add_queued_samples(&self, samples: usize) {
         let channels = self.channels.load(Ordering::Acquire).max(1);
         self.frames_queued
@@ -330,19 +341,21 @@ impl Shared {
     }
 }
 
-/// Ses motoru: **bir** çıkış akışı, sırayla beslenen parçalar (D-024).
+/// The audio engine: **one** output stream, fed tracks in order (D-024).
 ///
-/// Gapless'ın tamamı burada: cpal akışı ve halka tamponu parçalar arasında
-/// **açık kalır**. Çalan parça biterken sıradakinin örnekleri aynı tampona
-/// eklenmiştir, aygıt hiç kapanıp açılmaz. Boşluğun eski kaynağı da buydu:
-/// her parça için yeni bir aygıt + yeni bir çözücü kuruluyordu.
+/// All of gapless is here: the cpal stream and the ring buffer **stay open**
+/// between tracks. As the playing track ends, the next one's samples have
+/// already been appended to the same buffer; the device never closes and
+/// reopens. That was also the old source of the gap: a new device + a new
+/// decoder was set up for every track.
 ///
-/// `Drop` ile akış kapanır ve çözme iş parçacığı durur — sızıntı bırakmaz.
+/// On `Drop` the stream closes and the decoding thread stops — it leaves no
+/// leak.
 pub struct AudioEngine {
     shared: Arc<Shared>,
     stream: Option<cpal::Stream>,
     decoder: Option<std::thread::JoinHandle<()>>,
-    /// Sıradaki işe verilecek numara.
+    /// The number to give the next job.
     next_seq: std::sync::atomic::AtomicU64,
 }
 
@@ -357,15 +370,16 @@ impl std::fmt::Debug for AudioEngine {
 }
 
 impl AudioEngine {
-    /// Bir dosyayı açar, ses aygıtını kurar ve çalmaya başlar.
+    /// Opens a file, sets up the audio device and starts playing.
     ///
     /// # Errors
-    /// Dosya açılamaz/çözülemezse ([`Stage::PlaybackDecode`]) ya da ses aygıtı
-    /// kurulamazsa ([`Stage::PlaybackOutput`]). Hangi aşamada olduğu hatada durur.
+    /// If the file cannot be opened/decoded ([`Stage::PlaybackDecode`]) or the
+    /// audio device cannot be set up ([`Stage::PlaybackOutput`]). Which stage it
+    /// was stays in the error.
     pub fn play_file(path: &std::path::Path) -> Result<Self> {
-        // Kaynak **aygıttan önce** açılıyor: bozuk ya da olmayan dosya, ses
-        // çıkışı hiç bulunmayan bir ortamda (CI) da çözme aşamasında hata
-        // vermeli — "aygıt yok" hatası asıl sebebi gizlerdi.
+        // The source is opened **before the device**: a corrupt or missing file
+        // must fail at the decoding stage even in an environment with no audio
+        // output at all (CI) — a "no device" error would hide the real cause.
         let prepared = open_source(&AudioSource::LocalFile {
             path: path.to_path_buf(),
         })?;
@@ -374,15 +388,16 @@ impl AudioEngine {
         Ok(engine)
     }
 
-    /// Bir HTTP akışını çalar (§1.3: Subsonic / Jellyfin).
+    /// Plays an HTTP stream (§1.3: Subsonic / Jellyfin).
     ///
-    /// Baytlar arka planda inerken çözme başlar; ayrıntı
-    /// [`super::http_source`]. **K3:** akışı istemci kendi çekiyor, hiçbir
-    /// sunucu araya girip röle etmiyor.
+    /// Decoding starts while the bytes download in the background; details in
+    /// [`super::http_source`]. **K3:** the client fetches the stream itself, no
+    /// server steps in to relay it.
     ///
     /// # Errors
-    /// Bağlantı kurulamaz ya da sunucu 2xx dışında dönerse
-    /// ([`Stage::NetworkRequest`]); ses çözülemezse ([`Stage::PlaybackDecode`]).
+    /// If no connection can be made or the server returns something outside 2xx
+    /// ([`Stage::NetworkRequest`]); if the audio cannot be decoded
+    /// ([`Stage::PlaybackDecode`]).
     #[cfg(feature = "http-client")]
     pub fn play_http(url: &str, headers: &[crate::net::HttpHeader]) -> Result<Self> {
         let prepared = open_source(&AudioSource::HttpStream {
@@ -394,38 +409,41 @@ impl AudioEngine {
         Ok(engine)
     }
 
-    /// Bir kaynağı **hemen** sıraya koyar; açma çağıranın iş parçacığında olur.
+    /// Queues a source **right away**; the opening happens on the caller's
+    /// thread.
     ///
-    /// Olmayan dosya ya da erişilemeyen sunucu burada hata döner — arka planda
-    /// sessizce kaybolmaz. Dönen sayı dilim numarasıdır.
+    /// A missing file or an unreachable server returns an error here — it does
+    /// not vanish silently in the background. The number returned is the slice
+    /// number.
     ///
     /// # Errors
-    /// Kaynak açılamaz ya da çözülemezse.
+    /// If the source cannot be opened or decoded.
     pub fn play_source(&self, source: &AudioSource) -> Result<u64> {
         Ok(self.play_prepared(open_source(source)?))
     }
 
-    /// Açılmış bir parçayı sıraya koyar ve dilim numarasını verir.
+    /// Queues an opened track and returns its slice number.
     fn play_prepared(&self, mut prepared: PreparedTrack) -> u64 {
         let seq = self.next_seq.fetch_add(1, Ordering::AcqRel);
         prepared.seq = seq;
-        // Dilimi **şimdi** bildiriyoruz: süre burada biliniyor ve çağıran
-        // motoru kurar kurmaz `duration_ms()` sorabiliyor. Nerede başlayacağı
-        // ise çözme iş parçacığı oraya gelince belli olur.
+        // We announce the slice **now**: the duration is known here, and the
+        // caller can ask for `duration_ms()` as soon as it has set up the engine.
+        // Where it will start becomes known when the decoding thread gets there.
         self.shared.declare_span(seq, prepared.duration_ms);
-        // İş **gönderilir gönderilmez** boşta değiliz. Bunu çözme iş
-        // parçacığına bırakmak, o uyanana kadar geri çağrının "tampon boş +
-        // boşta = bitti" deyip Stopped basmasına yol açıyordu; kullanıcı
-        // henüz başlamamış bir parçayı bitmiş görürdü.
+        // We are not idle **as soon as the job is sent**. Leaving this to the
+        // decoding thread let the callback say "buffer empty + idle = done" and
+        // set Stopped until that thread woke up; the user would see a track
+        // that had not started yet as finished.
         self.shared.idle.store(false, Ordering::Release);
-        // Durumu da **şimdi** düzeltiyoruz, ilk geri çağrıyı bekleyerek değil.
-        // `open()` ile bu an arasında geri çağrı `idle`'ı doğru görüp `Stopped`
-        // basmış olabilir ve o `Stopped` yanlıştır: iş kuyrukta, henüz
-        // çalınmadı. Aradaki pencere yerel dosyada birkaç milisaniye, HTTP
-        // akışında saniyelerdi (`open_source` indiriyor) — `Session::play`'in
-        // döngüsü orada "başlamadan bitti" deyip çıkıyordu, sessizce ve
-        // sıfır dinlemeyle. `Buffering` "hattın beklemesi"dir (D-016) ve
-        // burada anlatılmak istenen tam olarak odur.
+        // We fix the state **now** too, not by waiting for the first callback.
+        // Between `open()` and this moment the callback may have seen `idle`
+        // correctly and set `Stopped`, and that `Stopped` is wrong: the job is
+        // queued and has not been played yet. The window in between was a few
+        // milliseconds for a local file and seconds for an HTTP stream
+        // (`open_source` downloads) — `Session::play`'s loop would say "it ended
+        // before it started" there and exit, silently and with zero listens.
+        // `Buffering` is "the pipeline waiting" (D-016), and that is exactly
+        // what we want to say here.
         self.shared.set_state(PlayState::Buffering);
         if let Ok(mut pending) = self.shared.pending.lock() {
             pending.push_back(Job::Prepared(Box::new(prepared)));
@@ -433,12 +451,13 @@ impl AudioEngine {
         seq
     }
 
-    /// Bir kaynağı **önden okuma** olarak sıraya koyar (gapless).
+    /// Queues a source as **read-ahead** (gapless).
     ///
-    /// Kaynak çözme iş parçacığında açılır: açma gecikmesi çalan parçanın
-    /// tamponu boşalırken gizlenir. Açılamazsa hata `take_error` ile
-    /// toplanır — çağıran o an bekliyor olmadığı için `Result` dönmüyoruz,
-    /// ama hata **yutulmuyor** (K9).
+    /// The source is opened on the decoding thread: the opening delay is hidden
+    /// while the playing track's buffer drains. If it cannot be opened the error
+    /// is collected with `take_error` — we do not return a `Result` because the
+    /// caller is not waiting at that moment, but the error **is not swallowed**
+    /// (K9).
     pub fn enqueue(&self, source: &AudioSource) -> u64 {
         let seq = self.next_seq.fetch_add(1, Ordering::AcqRel);
         self.shared.idle.store(false, Ordering::Release);
@@ -451,7 +470,7 @@ impl AudioEngine {
         seq
     }
 
-    /// Sırada bekleyen (henüz çözülmeye başlanmamış) iş sayısı.
+    /// The number of jobs waiting in the queue (not yet started decoding).
     #[must_use]
     pub fn queued_len(&self) -> usize {
         self.shared
@@ -460,16 +479,16 @@ impl AudioEngine {
             .map_or(0, |pending| pending.len())
     }
 
-    /// Çıkışın şu an çaldığı dilimin numarası.
+    /// The number of the slice the output is playing right now.
     ///
-    /// Bu değer değiştiğinde parça geçişi **duyulmuş** demektir; oynatıcı
-    /// scrobble'ı ve kuyruk imlecini buna göre ilerletir.
+    /// When this value changes the track transition has been **heard**; the
+    /// player advances the scrobble and the queue cursor accordingly.
     #[must_use]
     pub fn current_seq(&self) -> Option<u64> {
         self.shared.current_span().map(|span| span.seq)
     }
 
-    /// Belirli bir dilimin çalınmış süresi (ms). Bilinmiyorsa `None`.
+    /// The played time of a given slice (ms). `None` if unknown.
     #[must_use]
     pub fn played_ms_of(&self, seq: u64) -> Option<u64> {
         let spans = self.shared.spans.lock().ok()?;
@@ -477,36 +496,39 @@ impl AudioEngine {
         Some(self.shared.played_ms_of(span))
     }
 
-    /// Belirli bir dilimin **kaptan okunmuş** toplam süresi.
+    /// The total duration of a given slice **read from the container**.
     ///
-    /// Etikette süre olmayan dosyalarda tek güvenilir kaynak budur; kütüphane
-    /// katalogu etiketten beslendiği için orada `None` olabilir.
+    /// For files with no duration in their tags this is the only reliable
+    /// source; since the library catalog is fed from tags it can be `None`
+    /// there.
     #[must_use]
     pub fn duration_of(&self, seq: u64) -> Option<u64> {
         let spans = self.shared.spans.lock().ok()?;
         spans.iter().rev().find(|span| span.seq == seq)?.duration_ms
     }
 
-    /// Ses aygıtını açar ve çözme iş parçacığını başlatır; henüz parça yok.
+    /// Opens the audio device and starts the decoding thread; no track yet.
     ///
     /// # Errors
-    /// Ses aygıtı bulunamaz ya da akış kurulamazsa ([`Stage::PlaybackOutput`]).
+    /// If no audio device is found or the stream cannot be set up
+    /// ([`Stage::PlaybackOutput`]).
     pub fn open() -> Result<Self> {
-        // — Ses aygıtını aç.
+        // — Open the audio device.
         let host = cpal::default_host();
         let device = host
             .default_output_device()
-            .ok_or_else(|| audio_err(Stage::PlaybackOutput, "varsayılan ses çıkışı bulunamadı"))?;
+            .ok_or_else(|| audio_err(Stage::PlaybackOutput, "no default audio output found"))?;
         let supported = device.default_output_config().map_err(|source| {
             audio_err(
                 Stage::PlaybackOutput,
-                format!("çıkış yapılandırması okunamadı: {source}"),
+                format!("could not read the output configuration: {source}"),
             )
         })?;
         let out_rate = supported.sample_rate();
         let out_channels = supported.channels() as usize;
 
-        // Yaklaşık 2 saniyelik tampon: cızırtıya karşı yeterli, gecikme kabul edilebilir.
+        // A buffer of about 2 seconds: enough against crackling, an acceptable
+        // latency.
         let capacity = out_rate as usize * out_channels * 2;
         let shared = Arc::new(Shared {
             ring: RingBuffer::new(capacity),
@@ -522,9 +544,9 @@ impl AudioEngine {
             error: Mutex::new(None),
         });
 
-        // — Çözme iş parçacığı: ömrü motorun ömrü kadar, parçanın değil.
-        // Bir parça bitince kuyruktaki sıradakini alıp **aynı tampona**
-        // yazmayı sürdürüyor; gapless tam olarak bu.
+        // — The decoding thread: it lives as long as the engine, not the track.
+        // When a track ends it takes the next one from the queue and carries
+        // on writing **into the same buffer**; that is exactly gapless.
         let decode_shared = Arc::clone(&shared);
         let decoder_thread = std::thread::Builder::new()
             .name("headshell-decode".to_owned())
@@ -536,8 +558,8 @@ impl AudioEngine {
                     }
 
                     let Some(job) = take_job(&decode_shared) else {
-                        // İş yok: çalma bitmiş olabilir ama motor ayakta.
-                        // Çağıran yeni parça verirse buradan devam eder.
+                        // No work: playback may have ended, but the engine is up.
+                        // If the caller hands over a new track, it carries on from here.
                         decode_shared.idle.store(true, Ordering::Release);
                         std::thread::sleep(std::time::Duration::from_millis(5));
                         continue;
@@ -551,8 +573,8 @@ impl AudioEngine {
                                 track
                             }
                             Err(err) => {
-                                // Önden okunan parça açılamadı: yutma, kaydet
-                                // ve sıradakine geç (K9).
+                                // The read-ahead track could not be opened: do not swallow it,
+                                // record it and move on to the next (K9).
                                 decode_shared
                                     .record_error(err.chain_text().replace('\n', " ").to_string());
                                 continue;
@@ -574,11 +596,11 @@ impl AudioEngine {
             .map_err(|source| {
                 audio_err(
                     Stage::PlaybackOutput,
-                    format!("çözme iş parçacığı başlatılamadı: {source}"),
+                    format!("could not start the decoding thread: {source}"),
                 )
             })?;
 
-        // — Ses geri çağrısı.
+        // — The audio callback.
         let cb_shared = Arc::clone(&shared);
         let err_shared = Arc::clone(&shared);
         let config: cpal::StreamConfig = supported.config();
@@ -586,7 +608,7 @@ impl AudioEngine {
             .build_output_stream(
                 config,
                 move |out: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                    // Duraklatıldıysa sessizlik yaz; tampon korunur.
+                    // If paused, write silence; the buffer is kept.
                     if cb_shared.state() == PlayState::Paused {
                         out.fill(0.0);
                         return;
@@ -600,29 +622,29 @@ impl AudioEngine {
                     if given > 0 {
                         cb_shared.set_state(PlayState::Playing);
                     } else if cb_shared.idle.load(Ordering::Acquire) {
-                        // Tampon boş ve çözecek iş de yok: gerçekten bitti.
+                        // The buffer is empty and there is no work to decode: it really ended.
                         cb_shared.set_state(PlayState::Stopped);
                     } else {
-                        // Veri bitti ama çözülecek parça var: bekliyoruz.
+                        // The data ran out but there is a track to decode: we wait.
                         cb_shared.set_state(PlayState::Buffering);
                     }
                 },
                 move |err| {
-                    err_shared.record_error(format!("ses akışı hatası: {err}"));
+                    err_shared.record_error(format!("audio stream error: {err}"));
                 },
                 None,
             )
             .map_err(|source| {
                 audio_err(
                     Stage::PlaybackOutput,
-                    format!("ses akışı kurulamadı: {source}"),
+                    format!("could not set up the audio stream: {source}"),
                 )
             })?;
 
         stream.play().map_err(|source| {
             audio_err(
                 Stage::PlaybackOutput,
-                format!("ses akışı başlatılamadı: {source}"),
+                format!("could not start the audio stream: {source}"),
             )
         })?;
 
@@ -634,28 +656,29 @@ impl AudioEngine {
         })
     }
 
-    /// Şu anki durum.
+    /// The current state.
     #[must_use]
     pub fn state(&self) -> PlayState {
         self.shared.state()
     }
 
-    /// Çalan parçanın **kendi içindeki** pozisyonu.
+    /// The position of the playing track **within itself**.
     #[must_use]
     pub fn position_ms(&self) -> u64 {
         self.shared.position_ms()
     }
 
-    /// Çalan parçanın süresi (kaptan okunduysa).
+    /// The duration of the playing track (if read from the container).
     #[must_use]
     pub fn duration_ms(&self) -> Option<u64> {
         self.shared.display_duration_ms()
     }
 
-    /// Çalacak bir şey kalmadı mı (kuyruk boş, çözme bitti, tampon boşaldı).
+    /// Is there nothing left to play (the queue empty, decoding done, the buffer
+    /// drained).
     ///
-    /// Gapless'ta bu **parça bitti** demek değil: sıradaki parça varken motor
-    /// bitmiş sayılmaz, yalnızca dilim değişir.
+    /// With gapless this does **not** mean the track ended: while there is a next
+    /// track the engine does not count as finished; only the slice changes.
     #[must_use]
     pub fn finished(&self) -> bool {
         self.shared.idle.load(Ordering::Acquire)
@@ -663,21 +686,22 @@ impl AudioEngine {
             && self.queued_len() == 0
     }
 
-    /// Duraklatır. Tampon korunur, pozisyon donar.
+    /// Pauses. The buffer is kept, the position freezes.
     pub fn pause(&self) {
         self.shared.set_state(PlayState::Paused);
     }
 
-    /// Duraklatılmışsa sürdürür.
+    /// Resumes if paused.
     pub fn resume(&self) {
         if self.shared.state() == PlayState::Paused {
             self.shared.set_state(PlayState::Playing);
         }
     }
 
-    /// Çözme sırasında oluşan hatayı alır (varsa) ve temizler.
+    /// Takes the error that occurred while decoding (if any) and clears it.
     ///
-    /// Sessizce yutulmasın diye: çağıran bunu okuyup tanı kaydına yazmalı (K9).
+    /// So it is not swallowed silently: the caller should read it and write it to
+    /// the diagnostics record (K9).
     pub fn take_error(&self) -> Option<String> {
         self.shared.error.lock().ok().and_then(|mut e| e.take())
     }
@@ -687,7 +711,8 @@ impl Drop for AudioEngine {
     fn drop(&mut self) {
         self.shared.stop.store(true, Ordering::Release);
         self.shared.ring.clear();
-        // Akışı önce kapat: geri çağrı artık paylaşılan duruma dokunmasın.
+        // Close the stream first: the callback must no longer touch the shared
+        // state.
         drop(self.stream.take());
         if let Some(handle) = self.decoder.take() {
             let _ = handle.join();
@@ -695,15 +720,15 @@ impl Drop for AudioEngine {
     }
 }
 
-/// Kuyruktan bir iş alır (varsa).
+/// Takes a job from the queue (if any).
 fn take_job(shared: &Arc<Shared>) -> Option<Job> {
     shared.pending.lock().ok()?.pop_front()
 }
 
-/// Bir [`AudioSource`]'u açıp çözülmeye hazır hâle getirir.
+/// Opens an [`AudioSource`] and gets it ready to decode.
 ///
-/// `play_source` bunu çağıranın iş parçacığında, önden okuma ise çözme
-/// iş parçacığında çağırır — gövde ikisinde de aynı.
+/// `play_source` calls this on the caller's thread, read-ahead on the
+/// decoding thread — the body is the same in both.
 fn open_source(source: &AudioSource) -> Result<PreparedTrack> {
     match source {
         AudioSource::LocalFile { path } => {
@@ -719,8 +744,9 @@ fn open_source(source: &AudioSource) -> Result<PreparedTrack> {
         AudioSource::HttpStream { url, headers } => {
             let stream = super::http_source::HttpMediaSource::open(url, headers)?;
             let mut hint = Hint::new();
-            // Uzantı yalnızca bir **ipucu**: sunucu `?id=...` gibi uzantısız
-            // adresler veriyor, o zaman symphonia kabı içeriğinden tanıyor.
+            // The extension is only a **hint**: servers give extension-less
+            // addresses like `?id=...`, and then symphonia recognises the container
+            // from its contents.
             if let Some(ext) = extension_from_url(url) {
                 hint.with_extension(&ext);
             }
@@ -731,14 +757,14 @@ fn open_source(source: &AudioSource) -> Result<PreparedTrack> {
             Stage::PlaybackResolve,
             ErrorKind::Unsupported {
                 provider: "net".to_owned(),
-                what: "HTTP akışı (`http-client` feature'ı kapalı derleme)".to_owned(),
+                what: "HTTP stream (a build with the `http-client` feature off)".to_owned(),
                 capabilities: "STREAM".to_owned(),
             },
         )),
     }
 }
 
-/// Açılmış bir kaynağı tanır, çözücüsünü kurar ve süresini okur.
+/// Recognises an opened source, sets up its decoder and reads its duration.
 fn prepare(source: Box<dyn MediaSource>, hint: Hint, label: &str) -> Result<PreparedTrack> {
     let mss = MediaSourceStream::new(source, Default::default());
 
@@ -749,11 +775,16 @@ fn prepare(source: Box<dyn MediaSource>, hint: Hint, label: &str) -> Result<Prep
             FormatOptions::default(),
             MetadataOptions::default(),
         )
-        .map_err(|err| audio_err(Stage::PlaybackDecode, format!("{label} açılamadı: {err}")))?;
+        .map_err(|err| {
+            audio_err(
+                Stage::PlaybackDecode,
+                format!("could not open {label}: {err}"),
+            )
+        })?;
 
     let track = format
         .default_track(TrackType::Audio)
-        .ok_or_else(|| audio_err(Stage::PlaybackDecode, format!("{label} içinde ses izi yok")))?;
+        .ok_or_else(|| audio_err(Stage::PlaybackDecode, format!("no audio track in {label}")))?;
     let track_id = track.id;
 
     let duration_ms = track
@@ -768,7 +799,7 @@ fn prepare(source: Box<dyn MediaSource>, hint: Hint, label: &str) -> Result<Prep
         .ok_or_else(|| {
             audio_err(
                 Stage::PlaybackDecode,
-                format!("{label} için kod çözücü parametreleri okunamadı"),
+                format!("could not read the decoder parameters for {label}"),
             )
         })?
         .clone();
@@ -784,12 +815,12 @@ fn prepare(source: Box<dyn MediaSource>, hint: Hint, label: &str) -> Result<Prep
         .map_err(|err| {
             audio_err(
                 Stage::PlaybackDecode,
-                format!("kod çözücü kurulamadı: {err}"),
+                format!("could not set up the decoder: {err}"),
             )
         })?;
 
     Ok(PreparedTrack {
-        // Numara sıraya konurken atanır; açma anında henüz belli değil.
+        // The number is assigned when queued; it is not known yet at open time.
         seq: 0,
         format,
         decoder,
@@ -800,11 +831,11 @@ fn prepare(source: Box<dyn MediaSource>, hint: Hint, label: &str) -> Result<Prep
     })
 }
 
-/// Tek bir parçayı sonuna kadar çözüp tampona yazar.
+/// Decodes a single track to the end and writes it into the buffer.
 ///
-/// Dönerken parçanın dilimi kapanmıştır; çağıran döngü sıradaki işe geçer.
-/// **Tampon boşaltılmaz** — gapless'ın çalışma biçimi bu: sıradaki parçanın
-/// örnekleri bitenin arkasına eklenir.
+/// When it returns, the track's slice is closed; the calling loop moves on to
+/// the next job. **The buffer is not emptied** — that is how gapless works:
+/// the next track's samples are appended behind the finished one.
 fn decode_track(
     shared: &Arc<Shared>,
     prepared: PreparedTrack,
@@ -823,7 +854,8 @@ fn decode_track(
         duration_ms,
     } = prepared;
 
-    // Kaptan okunamadıysa çıkışın değerlerine düş: dönüştürme yapılmaz.
+    // If it could not be read from the container, fall back to the output's
+    // values: no conversion is done.
     let source_rate = if source_rate == 0 {
         out_rate
     } else {
@@ -842,7 +874,7 @@ fn decode_track(
         if shared.stop.load(Ordering::Acquire) {
             break;
         }
-        // Tampon doluysa bekle: çözme, çalmanın önüne geçmesin.
+        // If the buffer is full, wait: decoding must not run ahead of playback.
         if shared.ring.len() >= capacity.saturating_sub(capacity / 8) {
             std::thread::sleep(std::time::Duration::from_millis(5));
             continue;
@@ -852,7 +884,7 @@ fn decode_track(
             Ok(Some(packet)) => packet,
             Ok(None) => break,
             Err(err) => {
-                shared.record_error(format!("paket okunamadı: {err}"));
+                shared.record_error(format!("could not read a packet: {err}"));
                 break;
             }
         };
@@ -874,11 +906,11 @@ fn decode_track(
                 );
             }
             Err(symphonia::core::errors::Error::DecodeError(msg)) => {
-                // Tek bozuk paket parçayı düşürmemeli; say ve devam et.
-                tracing::warn!(hata = %msg, "paket çözülemedi, atlanıyor");
+                // A single corrupt packet must not drop the track; count it and carry on.
+                tracing::warn!(error = %msg, "could not decode a packet, skipping it");
             }
             Err(err) => {
-                shared.record_error(format!("çözme durdu: {err}"));
+                shared.record_error(format!("decoding stopped: {err}"));
                 break;
             }
         }
@@ -887,20 +919,22 @@ fn decode_track(
     shared.close_span(seq);
 }
 
-/// Symphonia tamponunu araya geçmiş `f32` örneklere çevirir.
+/// Turns a symphonia buffer into interleaved `f32` samples.
 fn interleave_f32(buffer: &GenericAudioBufferRef<'_>, out: &mut Vec<f32>) {
     out.clear();
     let frames = buffer.frames();
     let channels = buffer.spec().channels().count();
     out.reserve(frames * channels);
-    // `copy_to_vec_interleaved` tip dönüşümünü de yapar.
+    // `copy_to_vec_interleaved` does the type conversion too.
     buffer.copy_to_vec_interleaved(out);
 }
 
-/// Kaynak örnekleri çıkış hızına/kanal sayısına uydurup tampona yazar.
+/// Fits the source samples to the output rate/channel count and writes them
+/// into the buffer.
 ///
-/// En yakın komşu örnekleme: basit ve ucuz. Faz 1'in hedefi doğru ses
-/// üretmek; kaliteli yeniden örnekleme (sinc) gerekirse ayrıca ölçülür.
+/// Nearest-neighbour sampling: simple and cheap. Phase 1's goal is producing
+/// correct sound; if high-quality resampling (sinc) is needed, it is measured
+/// separately.
 fn resample_into(
     input: &[f32],
     source_rate: u32,
@@ -918,7 +952,7 @@ fn resample_into(
         return;
     }
 
-    // Aynı hız ve kanal sayısı: dönüştürme yok.
+    // The same rate and channel count: no conversion.
     if source_rate == out_rate && source_channels == out_channels {
         write_all(shared, input, capacity);
         return;
@@ -928,7 +962,7 @@ fn resample_into(
         clippy::cast_precision_loss,
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss,
-        reason = "örnek indeksleri; ses ölçeğinde kayıp duyulmaz"
+        reason = "sample indices; the loss is inaudible at audio scale"
     )]
     let out_frames = ((in_frames as f64) * f64::from(out_rate) / f64::from(source_rate)) as usize;
     let mut converted = Vec::with_capacity(out_frames * out_channels);
@@ -938,15 +972,15 @@ fn resample_into(
             clippy::cast_precision_loss,
             clippy::cast_possible_truncation,
             clippy::cast_sign_loss,
-            reason = "en yakın komşu örnekleme"
+            reason = "nearest-neighbour sampling"
         )]
         let src_frame = ((frame as f64) * f64::from(source_rate) / f64::from(out_rate)) as usize;
         let src_frame = src_frame.min(in_frames - 1);
         let base = src_frame * source_channels;
 
         for channel in 0..out_channels {
-            // Mono → çok kanal: aynı örnek kopyalanır.
-            // Çok kanal → az kanal: fazlası düşer.
+            // Mono → multi-channel: the same sample is copied.
+            // Multi-channel → fewer channels: the extra ones drop.
             let src_channel = if source_channels == 1 {
                 0
             } else {
@@ -958,10 +992,10 @@ fn resample_into(
     write_all(shared, &converted, capacity);
 }
 
-/// Tampona yazar; dolu ise yer açılana kadar bekler.
+/// Writes into the buffer; if full, waits until there is room.
 ///
-/// Yazılan her örnek `frames_queued`'a da işlenir: dilim sınırlarının
-/// (dolayısıyla pozisyonun) dayandığı sayaç bu.
+/// Every sample written is also added to `frames_queued`: the counter the
+/// slice boundaries (and so the position) rest on.
 fn write_all(shared: &Arc<Shared>, mut data: &[f32], capacity: usize) {
     let _ = capacity;
     while !data.is_empty() {
@@ -988,8 +1022,12 @@ mod tests {
     #[test]
     fn ring_buffer_reports_what_it_could_not_take() {
         let ring = RingBuffer::new(4);
-        assert_eq!(ring.push(&[1.0, 2.0]), 0, "yer varken hepsi alınmalı");
-        assert_eq!(ring.push(&[3.0, 4.0, 5.0]), 1, "1 örnek sığmamalı");
+        assert_eq!(
+            ring.push(&[1.0, 2.0]),
+            0,
+            "all must be taken while there is room"
+        );
+        assert_eq!(ring.push(&[3.0, 4.0, 5.0]), 1, "1 sample must not fit");
         assert_eq!(ring.len(), 4);
     }
 
@@ -999,8 +1037,8 @@ mod tests {
         ring.push(&[1.0, 2.0]);
         let mut out = [9.0; 4];
         let given = ring.pop_into(&mut out);
-        assert_eq!(given, 2, "yalnızca 2 örnek verilebilir");
-        assert_eq!(out, [1.0, 2.0, 0.0, 0.0], "kalanı sessizlik olmalı");
+        assert_eq!(given, 2, "only 2 samples can be given");
+        assert_eq!(out, [1.0, 2.0, 0.0, 0.0], "the rest must be silence");
     }
 
     #[test]
@@ -1015,51 +1053,51 @@ mod tests {
         }
     }
 
-    /// Yeni gönderilen iş, motoru **anında** "bitmemiş" saymalı.
+    /// A newly sent job must count the engine as "not finished" **at once**.
     ///
-    /// Regresyon: `open()` ses akışını hemen başlatıyor ve geri çağrı boş
-    /// tampon + `idle` görüp `Stopped` basıyordu. `play_source` bu durumu
-    /// düzeltmeyip ilk geri çağrıya bıraktığı için arada bir pencere kalıyordu;
-    /// `Session::play`'in döngüsü oraya denk gelince "başlamadan bitti" deyip
-    /// sessizce çıkıyordu. Pencere yerel dosyada milisaniyeydi, HTTP akışında
-    /// saniyeler (`open_source` indiriyor) — yani kusur yalnızca uzak
-    /// kaynakta görünüyordu.
+    /// Regression: `open()` started the audio stream right away, and the callback
+    /// saw an empty buffer + `idle` and set `Stopped`. Since `play_source` did not
+    /// fix this state and left it to the first callback, a window remained in
+    /// between; when `Session::play`'s loop landed there, it said "it ended
+    /// before it started" and exited silently. The window was milliseconds for a
+    /// local file and seconds for an HTTP stream (`open_source` downloads) — so
+    /// the flaw only showed on remote sources.
     ///
-    /// Ses aygıtı yoksa test kendini atlar, sebebini yazarak.
+    /// If there is no audio device the test skips itself, writing why.
     #[test]
     fn a_freshly_queued_track_is_never_reported_as_stopped() {
         let Ok(engine) = AudioEngine::open() else {
-            eprintln!("ses aygıtı yok — atlanıyor (bu bir başarısızlık değil)");
+            eprintln!("no audio device — skipping (this is not a failure)");
             return;
         };
 
-        // Geri çağrının en az bir kez çalışıp `Stopped` basmasını bekle:
-        // testin ön koşulu, kusurun oluştuğu başlangıç durumu.
+        // Wait for the callback to run at least once and set `Stopped`: the
+        // test's precondition, the starting state in which the flaw occurred.
         std::thread::sleep(std::time::Duration::from_millis(80));
         assert_eq!(
             engine.state(),
             PlayState::Stopped,
-            "ön koşul: boş motor durmuş görünmeli"
+            "precondition: an empty engine must look stopped"
         );
 
         let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../fixtures/audio/tagged.flac");
         let source = AudioSource::LocalFile { path: fixture };
         let Ok(_seq) = engine.play_source(&source) else {
-            eprintln!("fixture çözülemedi — atlanıyor");
+            eprintln!("could not decode the fixture — skipping");
             return;
         };
 
-        // Uyku **yok**: düzeltmenin bütün mesele ettiği şey, durumun geri
-        // çağrıyı beklemeden doğru olması.
+        // **No** sleep: the whole point of the fix is that the state is right
+        // without waiting for the callback.
         assert_ne!(
             engine.state(),
             PlayState::Stopped,
-            "iş kuyruktayken motor bitmiş görünemez"
+            "the engine cannot look finished while a job is queued"
         );
     }
 
-    /// Test için çıplak paylaşılan durum (aygıt açmadan).
+    /// A bare shared state for tests (without opening a device).
     fn shared_for_test(capacity: usize, rate: u64, channels: u64) -> Arc<Shared> {
         Arc::new(Shared {
             ring: RingBuffer::new(capacity),
@@ -1079,50 +1117,53 @@ mod tests {
     #[test]
     fn position_is_zero_before_any_frame_is_played() {
         let shared = shared_for_test(16, 48_000, 2);
-        // Dilim yokken pozisyon sıfır: hangi parçanın içinde olduğumuz bilinmiyor.
+        // With no slice the position is zero: which track we are in is unknown.
         assert_eq!(shared.position_ms(), 0);
 
         shared.declare_span(0, Some(5_000));
         shared.begin_span(0);
         assert_eq!(shared.position_ms(), 0);
         shared.frames_played.store(48_000, Ordering::Release);
-        assert_eq!(shared.position_ms(), 1000, "48k kare = 1 saniye");
+        assert_eq!(shared.position_ms(), 1000, "48k frames = 1 second");
     }
 
-    /// D-024'ün muhasebesi: tampon iki parçayı yan yana taşırken pozisyon
-    /// **parçanın kendi içindeki** konumu vermeli, çıkışın toplamını değil.
+    /// D-024's bookkeeping: while the buffer carries two tracks side by side,
+    /// the position must give the location **within the track itself**, not the
+    /// output's total.
     #[test]
     fn position_restarts_at_each_track_boundary() {
         let shared = shared_for_test(16, 48_000, 2);
 
-        // Birinci parça: 2 saniye (96k kare) yazıldı.
+        // The first track: 2 seconds (96k frames) written.
         shared.declare_span(0, Some(2_000));
         shared.begin_span(0);
         shared.frames_queued.store(96_000, Ordering::Release);
         shared.close_span(0);
 
-        // İkinci parça hemen arkasına ekleniyor.
+        // The second track is appended right behind it.
         shared.declare_span(1, Some(3_000));
         shared.begin_span(1);
 
-        // Çıkış birinci parçanın ortasında.
+        // The output is in the middle of the first track.
         shared.frames_played.store(48_000, Ordering::Release);
         assert_eq!(shared.current_span().map(|s| s.seq), Some(0));
         assert_eq!(shared.position_ms(), 1000);
 
-        // Sınırı geçti: artık ikinci parça çalıyor ve pozisyonu **baştan**.
+        // It crossed the boundary: now the second track is playing and its position
+        // starts **from the beginning**.
         shared
             .frames_played
             .store(96_000 + 24_000, Ordering::Release);
         assert_eq!(shared.current_span().map(|s| s.seq), Some(1));
-        assert_eq!(shared.position_ms(), 500, "yeni parçanın kendi pozisyonu");
+        assert_eq!(shared.position_ms(), 500, "the new track's own position");
         assert_eq!(
             shared.current_span().and_then(|s| s.duration_ms),
             Some(3_000),
-            "süre de yeni parçanın süresi olmalı"
+            "the duration must be the new track's too"
         );
 
-        // Biten parçanın scrobble'ı tam uzunluğunu görmeli, çıkışın toplamını değil.
+        // The finished track's scrobble must see its full length, not the output's
+        // total.
         let spans = shared.spans.lock().unwrap();
         let first = spans.iter().find(|s| s.seq == 0).unwrap();
         assert_eq!(shared.played_ms_of(first), 2_000);
@@ -1131,7 +1172,7 @@ mod tests {
     #[test]
     fn resampling_mono_to_stereo_duplicates_the_channel() {
         let shared = shared_for_test(64, 8000, 2);
-        // 2 kare mono, aynı hız → 2 kare stereo.
+        // 2 frames of mono, same rate → 2 frames of stereo.
         resample_into(&[0.5, -0.5], 8000, 1, 8000, 2, &shared, 64);
 
         let mut out = [0.0; 4];
@@ -1140,19 +1181,19 @@ mod tests {
         assert_eq!(
             out,
             [0.5, 0.5, -0.5, -0.5],
-            "mono örnek iki kanala kopyalanmalı"
+            "a mono sample must be copied to both channels"
         );
         assert_eq!(
             shared.frames_queued.load(Ordering::Acquire),
             2,
-            "yazılan kareler dilim muhasebesine işlenmeli"
+            "the frames written must go into the slice bookkeeping"
         );
     }
 
     #[test]
     fn resampling_doubles_the_frames_when_the_rate_doubles() {
         let shared = shared_for_test(1024, 16_000, 1);
-        // 4 kare @8kHz → 16kHz'de 8 kare.
+        // 4 frames @8kHz → 8 frames at 16kHz.
         resample_into(&[1.0, 2.0, 3.0, 4.0], 8000, 1, 16_000, 1, &shared, 1024);
         assert_eq!(shared.ring.len(), 8);
     }

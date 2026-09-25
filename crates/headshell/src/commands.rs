@@ -1,21 +1,21 @@
-//! IPC komutları (D-033).
+//! IPC commands (D-033).
 //!
-//! **Sözleşme = çekirdeğin yüzeyi + serde.** Buradaki hiçbir komut yeni bir
-//! veri şekli uydurmuyor; her biri var olan bir çekirdek tipini döndürüyor ve
-//! `serde` ile geçiyor. CLI'nin `--json` çıktısıyla **aynı** veri.
+//! **The contract = the core's surface + serde.** No command here makes up a
+//! new data shape; each returns an existing core type and crosses with
+//! `serde`. The **same** data as the CLI's `--json` output.
 //!
-//! Komut listesi CLI'nin alt komutlarıyla birebir örtüşüyor, çünkü ikisi de
-//! aynı çekirdeğin kabuğu. Burada yapılan tek şey: argümanı çekirdeğe
-//! iletmek, sonucu geri vermek.
+//! The command list matches the CLI's subcommands one to one, because both
+//! are shells of the same core. The only thing done here: pass the argument
+//! to the core, give the result back.
 //!
-//! Her komut gövdesi çekirdek iş parçacığında koşuyor ([`crate::state`]),
-//! o yüzden hepsi `state.run_on_core(...)` ile sarılı. Bu bir katman değil, bir
-//! adres: işin nerede yapılacağını söylüyor.
+//! Every command body runs on the core thread ([`crate::state`]), which is
+//! why all of them are wrapped in `state.run_on_core(...)`. This is not a
+//! layer but an address: it says where the work is done.
 //!
-//! **Uzun komutlar** (`import`, `resolve`, `provider_scan`, `provider_test`,
-//! `server_add`, `play`) sırayı tutar ve o sırada oynatma kumandaları bekler.
-//! Bu görünmez kalmasın diye [`BUSY_EVENT`] gönderiyorlar: arayüz hangi işin
-//! sürdüğünü yazar (K9).
+//! **Long commands** (`import`, `resolve`, `provider_scan`, `provider_test`,
+//! `server_add`, `play`) hold the queue, and the playback controls wait
+//! meanwhile. So this does not stay invisible, they send [`BUSY_EVENT`]: the
+//! interface writes which job is running (K9).
 
 use std::future::Future;
 
@@ -39,25 +39,27 @@ use headshell_core::stats::StatsQuery;
 use crate::state::{AppState, CommandError, CommandResult};
 use crate::theme::{ActiveTheme, ThemeList};
 
-/// Uzun bir işin başladığını/bittiğini webview'e bildirir.
+/// Tells the webview that a long job started/ended.
 ///
-/// Olay adı `headshell://busy`, yükü işin adı (bitişte `null`). Zamanlayıcıyla
-/// değil durum değişiminde gidiyor — D-033'ün kuralı burada da geçerli.
+/// The event name is `headshell://busy`, its payload the job's name (`null`
+/// at the end). It goes out on a state change, not on a timer — D-033's rule
+/// holds here too.
 pub const BUSY_EVENT: &str = "headshell://busy";
 
-/// Uzun süren bir çekirdek çağrısını meşguliyet olayıyla sarar.
+/// Wraps a long-running core call with the busy event.
 async fn busy<T, F>(app: &AppHandle, what: &str, task: F) -> headshell_core::Result<T>
 where
     F: Future<Output = headshell_core::Result<T>>,
 {
     let _ = app.emit(BUSY_EVENT, Some(what));
     let result = task.await;
-    // Hata yolunda da kapanmalı: yoksa arayüz sonsuza kadar meşgul görünürdü.
+    // It must close on the error path too: otherwise the interface would look
+    // busy forever.
     let _ = app.emit(BUSY_EVENT, None::<&str>);
     result
 }
 
-// ————————————————————————————————————— Kütüphane
+// ————————————————————————————————————— Library
 
 #[tauri::command]
 pub async fn search(
@@ -97,7 +99,8 @@ pub async fn stats(
         .await
 }
 
-/// Sleeve kartı. `out` verilirse dosyaya da yazılır (uzantı biçimi belirler).
+/// The Sleeve card. If `out` is given it is written to a file too (the
+/// extension decides the format).
 #[tauri::command]
 pub async fn sleeve(
     state: State<'_, AppState>,
@@ -125,11 +128,11 @@ pub async fn sleeve(
         .await
 }
 
-/// Sleeve kartının **önizlemesi** — dosya yazmaz.
+/// A **preview** of the Sleeve card — writes no file.
 ///
-/// `sleeve` ile aynı hesabı çalıştırıp çekirdeğin kendi çizicisini
-/// (`sleeve::render_svg`) döndürüyor. Kartı burada çizmek K1 ihlali olurdu:
-/// aynı kartın ikinci bir çizimi JS'te yaşar ve sessizce kayardı.
+/// It runs the same calculation as `sleeve` and returns the core's own
+/// renderer (`sleeve::render_svg`). Drawing the card here would break K1: a
+/// second drawing of the same card would live in JS and drift silently.
 #[tauri::command]
 pub async fn sleeve_svg(
     app: AppHandle,
@@ -150,7 +153,7 @@ pub async fn sleeve_svg(
                 } else {
                     CardPreset::Square.size()
                 };
-                busy(&app, "kart hazırlanıyor", async {
+                busy(&app, "preparing the card", async {
                     let response = core.live.session().sleeve(query, size, None)?;
                     Ok(headshell_core::sleeve::render_svg(
                         &response.data,
@@ -163,7 +166,7 @@ pub async fn sleeve_svg(
         .await
 }
 
-// ————————————————————————————————————— İçe aktarma ve kimlik
+// ————————————————————————————————————— Import and identity
 
 #[tauri::command]
 pub async fn import(
@@ -177,7 +180,7 @@ pub async fn import(
                 let path = std::path::PathBuf::from(path);
                 busy(
                     &app,
-                    "içe aktarılıyor",
+                    "importing",
                     core.live
                         .session_mut()
                         .import_archive(&path, session::default_lookup()),
@@ -199,7 +202,7 @@ pub async fn resolve(
             Box::pin(async move {
                 busy(
                     &app,
-                    "kimlik çözümleniyor",
+                    "resolving the identity",
                     core.live
                         .session_mut()
                         .resolve_track(&query, session::default_lookup()),
@@ -210,7 +213,7 @@ pub async fn resolve(
         .await
 }
 
-// ————————————————————————————————————— Sağlayıcılar
+// ————————————————————————————————————— Providers
 
 #[tauri::command]
 pub async fn providers(state: State<'_, AppState>) -> CommandResult<ProviderListReport> {
@@ -233,7 +236,7 @@ pub async fn provider_test(
                 let id = ProviderId::new(name);
                 busy(
                     &app,
-                    "sağlayıcı sınanıyor",
+                    "testing the provider",
                     core.live.session().test_provider(&core.registry, &id),
                 )
                 .await
@@ -251,9 +254,9 @@ pub async fn provider_scan(
     state
         .run_on_core(move |core| {
             Box::pin(async move {
-                // Kayıt `Arc` taşıyor; klon ucuz ve `core`'u ikiye bölmekten
-                // (bir yanı `&mut Session`, öbürü `&ProviderRegistry`)
-                // okunaklı.
+                // The registry carries an `Arc`; the clone is cheap, and more readable
+                // than splitting `core` in two (one side `&mut Session`, the other
+                // `&ProviderRegistry`).
                 let registry = core.registry.clone();
                 let session = core.live.session_mut();
                 let task = async {
@@ -263,7 +266,7 @@ pub async fn provider_scan(
                         session.scan_providers(&registry).await
                     }
                 };
-                busy(&app, "kütüphane taranıyor", task).await
+                busy(&app, "scanning the library", task).await
             })
         })
         .await
@@ -276,16 +279,16 @@ pub async fn servers_list(state: State<'_, AppState>) -> CommandResult<ServerLis
         .await
 }
 
-/// Uzak sunucu ekler.
+/// Adds a remote server.
 ///
-/// Parola IPC'den geliyor — CLI'de olduğu gibi komut satırına yazılmıyor,
-/// `ps` çıktısına ya da kabuk geçmişine düşmüyor. Kalıcı saklama yine
-/// çekirdeğin işi (`0600` izinli `servers.json`); keyring borcu Faz 2'de
-/// (D-021).
+/// The password comes over IPC — as in the CLI it is not written on a
+/// command line, and does not end up in `ps` output or the shell history.
+/// Persistent storage is still the core's job (`servers.json` with `0600`
+/// permissions); the keyring debt is in Phase 2 (D-021).
 #[tauri::command]
 #[expect(
     clippy::too_many_arguments,
-    reason = "CLI'nin `provider add` argümanlarıyla birebir; bir 'istek' tipi uydurmak D-033'ün reddettiği çevirmen katmanı olurdu"
+    reason = "one to one with the CLI's `provider add` arguments; making up a 'request' type would be the translating layer D-033 rejected"
 )]
 pub async fn server_add(
     app: AppHandle,
@@ -302,7 +305,7 @@ pub async fn server_add(
         .run_on_core(move |core| {
             Box::pin(async move {
                 let kind = ServerKind::parse(&kind)?;
-                // Ad önerisi çekirdekten: CLI de aynısını gösteriyor.
+                // The name suggestion comes from the core: the CLI shows the same one.
                 let id = name.map_or_else(|| remote::suggest_id(&url, kind), ProviderId::new);
                 let spec = NewServer {
                     id,
@@ -317,9 +320,9 @@ pub async fn server_add(
                     let http = headshell_core::net::default_http_client()?;
                     core.live.session_mut().add_server(spec, http).await
                 };
-                let report = busy(&app, "sunucu doğrulanıyor", task).await?;
-                // Yeni sunucu hemen çalınabilir olsun: kayıt yenilenmezse
-                // uygulama kapanana kadar görünmezdi.
+                let report = busy(&app, "verifying the server", task).await?;
+                // The new server should be playable right away: without refreshing
+                // the registry it would stay invisible until the app closed.
                 core.refresh_registry()?;
                 Ok(report)
             })
@@ -343,12 +346,12 @@ pub async fn server_remove(
         .await
 }
 
-// ————————————————————————————————————— Oynatma
+// ————————————————————————————————————— Playback
 
-/// Arar, kuyruğa alır ve çalmaya başlar. **Beklemez.**
+/// Searches, queues and starts playing. **Does not wait.**
 ///
-/// `Session::play` bloklayan yol (CLI'nin `headshell play`'i); GUI onu değil
-/// `player_from_search`'ü kullanıyor ve döngüyü çekirdek iş parçacığı sürüyor.
+/// `Session::play` is the blocking route (the CLI's `headshell play`); the GUI
+/// uses `player_from_search` instead, and the core thread drives the loop.
 #[tauri::command]
 pub async fn play(
     app: AppHandle,
@@ -369,8 +372,8 @@ pub async fn play(
                     .live
                     .session()
                     .player_from_search(&core.registry, options);
-                let player = busy(&app, "parça aranıyor", task).await?;
-                // Eski oynatıcının biriken dinlemeleri **alınıyor**, atılmıyor.
+                let player = busy(&app, "searching for the track", task).await?;
+                // The old player's accumulated listens are **taken**, not thrown away.
                 core.live.replace_player(player);
                 Ok(core.live.player().queue().view())
             })
@@ -383,7 +386,7 @@ pub async fn toggle_pause(state: State<'_, AppState>) -> CommandResult<PlaybackA
     state
         .run_on_core(move |core| {
             Box::pin(async move {
-                // "Duraklat mı sürdür mü" kararı `Player::toggle_pause` içinde.
+                // The "pause or resume" decision is inside `Player::toggle_pause`.
                 core.live.player().toggle_pause();
                 Ok(core.live.anchor())
             })
@@ -451,8 +454,8 @@ pub async fn set_shuffle(state: State<'_, AppState>, on: bool) -> CommandResult<
         .await
 }
 
-/// Tekrar kipini ayarlar. Kip adı çekirdeğin kendi yazımıyla gelir
-/// (`off` | `all` | `one`) — kabukta ikinci bir eşleme tablosu tutulmuyor.
+/// Sets the repeat mode. The mode name comes in the core's own spelling
+/// (`off` | `all` | `one`) — no second mapping table is kept in the shell.
 #[tauri::command]
 pub async fn set_repeat(state: State<'_, AppState>, mode: RepeatMode) -> CommandResult<QueueView> {
     state
@@ -465,33 +468,34 @@ pub async fn set_repeat(state: State<'_, AppState>, mode: RepeatMode) -> Command
         .await
 }
 
-// ————————————————————————————————————— Tema (§3.3)
+// ————————————————————————————————————— Themes (§3.3)
 //
-// Bu üç komut çekirdek iş parçacığına **girmiyor**: tema bir CSS mekanizması,
-// çekirdeğin taşıdığı bir kavram değil (bkz. `crate::theme`). Bu yüzden uzun
-// bir `import` sürerken de cevap veriyorlar.
+// These three commands **do not enter** the core thread: a theme is a CSS
+// mechanism, not a concept the core carries (see `crate::theme`). That is why
+// they answer even while a long `import` runs.
 //
-// Aşama `CONFIG_LOAD`: veri dizininden bir yapılandırma okumak bu — çekirdeğe
-// yalnızca GUI'nin ihtiyacı olan bir `THEME_LOAD` aşaması eklemek, kabuğa ait
-// bir kavramı çekirdeğin tanı sözlüğüne sızdırmak olurdu.
+// The stage is `CONFIG_LOAD`: this is reading a configuration from the data
+// directory — adding a `THEME_LOAD` stage to the core that only the GUI needs
+// would leak a shell concept into the core's diagnostic vocabulary.
 
 fn theme_error(text: String) -> CommandError {
     CommandError::new(headshell_core::diag::Stage::ConfigLoad, &text)
 }
 
-/// Yüklenebilir temalar + **reddedilenler ve sebepleri** (K9).
+/// The loadable themes + **the rejected ones and their reasons** (K9).
 #[tauri::command]
 pub async fn themes_list(state: State<'_, AppState>) -> CommandResult<ThemeList> {
     state.themes().list().map_err(theme_error)
 }
 
-/// Kayıtlı seçimi yükler. Açılışta bir kez çağrılıyor.
+/// Loads the saved choice. Called once at startup.
 #[tauri::command]
 pub async fn theme_active(state: State<'_, AppState>) -> CommandResult<ActiveTheme> {
     state.themes().active().map_err(theme_error)
 }
 
-/// Temayı seçer ve kalıcı yazar. `id` yoksa varsayılana döner.
+/// Picks a theme and writes it persistently. Without an `id` it goes back to
+/// the default.
 #[tauri::command]
 pub async fn theme_select(
     state: State<'_, AppState>,
@@ -500,25 +504,28 @@ pub async fn theme_select(
     state.themes().select(id).map_err(theme_error)
 }
 
-// ————————————————————————————————————— Eklentiler (Faz 2)
+// ————————————————————————————————————— Plugins (Phase 2)
 //
-// Eklenti yüzeyi GUI'ye Faz 3'ten **sonra** açıldı: arayüz yazıldığında Faz 2
-// henüz ertelenmişti (D-027) ve kabuk onun yeteneklerinden habersiz kaldı.
-// Komutlar CLI'nin `headshell plugin ...` alt komutlarıyla birebir aynı çekirdek
-// çağrılarını yapıyor — ikisi de aynı çekirdeğin kabuğu.
+// The plugin surface was opened to the GUI **after** Phase 3: when the
+// interface was written Phase 2 had been postponed (D-027), and the shell
+// knew nothing of its capabilities. The commands make exactly the same core
+// calls as the CLI's `headshell plugin ...` subcommands — both are shells of
+// the same core.
 //
-// İzinlerin ne kadarının zorlandığı her listede `permissions_enforced`
-// alanıyla yazıyor (D-040 → D-069). Arayüz bunu gizlemez: olmayan bir
-// korumaya güven verilmez, var olanın sınırı da söylenir.
+// How much of the permissions is enforced is written in every list with the
+// `permissions_enforced` field (D-040 → D-069). The interface does not hide
+// it: no trust is given to a protection that does not exist, and the limit
+// of the one that does is said.
 //
-// Katalog (D-071) yalnızca kullanıcı isteyince okunur: panel açılınca değil,
-// "kataloğu getir"e basınca. Ağa çıkan her komut meşguliyet olayı gönderir.
+// The catalog (D-071) is only read when the user asks: not when the panel
+// opens, but on "fetch the catalog". Every command that goes online sends
+// the busy event.
 //
-// Eklentinin durumunu değiştiren her komut sağlayıcı kaydını **yeniler**.
-// Kayıt açılışta kuruluyor ve bunu yapan yalnızca sunucu komutlarıydı:
-// onaylanan bir eklenti uygulama yeniden açılana kadar çalınamıyor,
-// kaldırılan bir eklenti aramada görünmeye devam ediyordu (D-071'de
-// bulundu). Çalan parça etkilenmez — oynatıcı kendi kopyasını tutuyor.
+// Every command that changes a plugin's state **refreshes** the provider
+// registry. The registry is built at startup and only the server commands
+// used to do this: an approved plugin could not be played until the app was
+// reopened, and a removed plugin kept showing up in search (found in D-071).
+// The playing track is not affected — the player keeps its own copy.
 
 #[tauri::command]
 pub async fn plugins(state: State<'_, AppState>) -> CommandResult<PluginListReport> {
@@ -527,7 +534,7 @@ pub async fn plugins(state: State<'_, AppState>) -> CommandResult<PluginListRepo
         .await
 }
 
-/// Eklentinin beyan ettiği izinleri onaylar (D-040).
+/// Approves the permissions a plugin declares (D-040).
 #[tauri::command]
 pub async fn plugin_approve(
     state: State<'_, AppState>,
@@ -592,7 +599,8 @@ pub async fn plugin_forget(
         .await
 }
 
-/// Kataloğu okur ve bu makineye karşı gösterir (D-071). **Ağa çıkar.**
+/// Reads the catalog and shows it against this machine (D-071). **Goes
+/// online.**
 #[tauri::command]
 pub async fn plugin_catalog(
     app: AppHandle,
@@ -604,7 +612,7 @@ pub async fn plugin_catalog(
                 let http = headshell_core::net::default_http_client()?;
                 busy(
                     &app,
-                    "katalog okunuyor",
+                    "reading the catalog",
                     core.live.session().plugin_catalog(http),
                 )
                 .await
@@ -613,8 +621,9 @@ pub async fn plugin_catalog(
         .await
 }
 
-/// Eklentiyi kurar: diskte yoksa katalogdan indirir, sonra araçlarını
-/// (D-055, D-071). **Ağa çıkar** — bu yüzden meşguliyet olayı gönderiyor.
+/// Installs a plugin: downloads it from the catalog if it is not on disk,
+/// then its tools (D-055, D-071). **Goes online** — which is why it sends the
+/// busy event.
 #[tauri::command]
 pub async fn plugin_install(
     app: AppHandle,
@@ -627,7 +636,7 @@ pub async fn plugin_install(
                 let http = headshell_core::net::default_http_client()?;
                 let report = busy(
                     &app,
-                    format!("{name} kuruluyor").as_str(),
+                    format!("installing {name}").as_str(),
                     core.live.session().install_plugin(&name, http),
                 )
                 .await?;
@@ -638,7 +647,8 @@ pub async fn plugin_install(
         .await
 }
 
-/// Katalogdan kurulmuş eklentileri günceller; `name` yoksa hepsini (D-071).
+/// Updates the plugins installed from the catalog; all of them without a
+/// `name` (D-071).
 #[tauri::command]
 pub async fn plugin_update(
     app: AppHandle,
@@ -650,8 +660,8 @@ pub async fn plugin_update(
             Box::pin(async move {
                 let http = headshell_core::net::default_http_client()?;
                 let what = match &name {
-                    Some(name) => format!("{name} güncelleniyor"),
-                    None => "eklentiler güncelleniyor".to_owned(),
+                    Some(name) => format!("updating {name}"),
+                    None => "updating the plugins".to_owned(),
                 };
                 let report = busy(
                     &app,
@@ -666,7 +676,7 @@ pub async fn plugin_update(
         .await
 }
 
-/// Eklentiyi kaldırır ve onayını unutur (D-071).
+/// Removes a plugin and forgets its consent (D-071).
 #[tauri::command]
 pub async fn plugin_remove(
     state: State<'_, AppState>,
@@ -683,10 +693,10 @@ pub async fn plugin_remove(
         .await
 }
 
-// ————————————————————————————————————— Sırlar (D-042)
+// ————————————————————————————————————— Secrets (D-042)
 //
-// Liste **anahtar adlarını** taşır, değerleri değil. Bir sırrı okuyan tek
-// taraf onu kullanan eklentidir; arayüz yalnızca yazar ve siler.
+// The list carries **key names**, not values. The only side that reads a
+// secret is the plugin that uses it; the interface only writes and deletes.
 
 #[tauri::command]
 pub async fn secrets(state: State<'_, AppState>) -> CommandResult<SecretListReport> {
@@ -722,9 +732,10 @@ pub async fn secret_remove(
         .await
 }
 
-// ————————————————————————————————————— Durum ve tanılama
+// ————————————————————————————————————— State and diagnostics
 
-/// Şu anki çapa. Webview pozisyonu **bundan tahmin eder**, sormaz (D-015).
+/// The current anchor. The webview **estimates** the position from this; it
+/// does not ask (D-015).
 #[tauri::command]
 pub async fn anchor(state: State<'_, AppState>) -> CommandResult<PlaybackAnchor> {
     state
@@ -748,13 +759,13 @@ pub async fn diag(
         .await
 }
 
-/// `diag`'ın okunur hâli: çekirdeğin kendi `DiagReport::render()` metni —
-/// `headshell diag`'ın `--json`'suz çıktısının aynısı (D-072).
+/// The readable form of `diag`: the core's own `DiagReport::render()` text —
+/// the same as `headshell diag`'s output without `--json` (D-072).
 ///
-/// Arayüz bir zamanlar raporu ham JSON olarak basıyordu; oysa `render()`'ın
-/// belgesi "GUI de aynı metni gösterecek" diyor. Biçimlemek burada ya da JS'te
-/// yapılsaydı, hata bildirirken yapıştırılan blok CLI'ninkinden ayrışırdı —
-/// `sleeve_svg` ile aynı gerekçe (K1).
+/// The interface once printed the report as raw JSON, while `render()`'s
+/// documentation says "the GUI will show the same text". Had the formatting
+/// been done here or in JS, the block pasted when reporting a bug would have
+/// drifted from the CLI's — the same reasoning as `sleeve_svg` (K1).
 #[tauri::command]
 pub async fn diag_text(state: State<'_, AppState>) -> CommandResult<Option<String>> {
     state
@@ -770,10 +781,10 @@ pub async fn diag_text(state: State<'_, AppState>) -> CommandResult<Option<Strin
         .await
 }
 
-/// Pencere açılırken bir kez sorulan sabitler.
+/// Constants asked once when the window opens.
 ///
-/// Yeni bir "durum" tipi değil, tanı bilgisi: hata mesajının yanında "hangi
-/// kütüphaneye baktım" sorusu cevapsız kalmasın diye (K9).
+/// Not a new "state" type but diagnostic information: so "which library did I
+/// look at" does not go unanswered next to an error message (K9).
 #[derive(Debug, Clone, Serialize)]
 pub struct Environment {
     pub data_dir: std::path::PathBuf,

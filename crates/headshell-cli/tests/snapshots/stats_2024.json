@@ -1,6 +1,6 @@
 {
   "diag": {
-    "command": "<değişken>",
+    "command": "<variable>",
     "counters": {
       "stats.listens_in_scope": 20,
       "stats.out_of_scope": 40,
@@ -11,16 +11,16 @@
       "stats.without_canonical_id": 0
     },
     "env": {
-      "arch": "<değişken>",
-      "data_dir": "<değişken>",
-      "headshell_version": "<değişken>",
-      "os": "<değişken>"
+      "arch": "<variable>",
+      "data_dir": "<variable>",
+      "headshell_version": "<variable>",
+      "os": "<variable>"
     },
     "error_chain": [],
     "failed_at": null,
-    "finished_at": "<değişken>",
+    "finished_at": "<variable>",
     "notes": [],
-    "started_at": "<değişken>"
+    "started_at": "<variable>"
   },
   "report": {
     "by_year": [

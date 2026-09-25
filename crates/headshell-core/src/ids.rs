@@ -1,52 +1,55 @@
-//! Tip güvenli kimlikler.
+//! Type-safe identifiers.
 //!
-//! Kural: kimlikler `String` değil. Bir `ProviderTrackId`'yi `CanonicalId`
-//! bekleyen yere geçiremezsin — derleyici durdurur.
+//! The rule: identifiers are not `String`s. You cannot pass a
+//! `ProviderTrackId` where a `CanonicalId` is expected — the compiler stops
+//! you.
 
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-/// Sağlayıcıdan bağımsız parça kimliği.
+/// A provider-independent track identity.
 ///
-/// Tercih sırası: MusicBrainz Recording ID → ISRC türevi → yerel türetilmiş.
-/// Hangisi olduğu [`CanonicalId::kind`] ile okunur.
+/// Order of preference: MusicBrainz Recording ID → derived from the ISRC →
+/// derived locally. Which one it is can be read with [`CanonicalId::kind`].
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct CanonicalId(String);
 
-/// Bir [`CanonicalId`]'nin hangi otoriteden geldiği.
+/// Which authority a [`CanonicalId`] comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CanonicalKind {
-    /// MusicBrainz Recording MBID — altın standart.
+    /// MusicBrainz Recording MBID — the gold standard.
     Mbid,
-    /// ISRC'den türetilmiş; MBID bulunana kadar geçerli.
+    /// Derived from the ISRC; valid until an MBID is found.
     Isrc,
-    /// Yerel olarak türetilmiş (normalize sanatçı+başlık hash'i). En zayıf hâli.
+    /// Derived locally (a hash of the normalised artist+title). Its weakest form.
     Local,
 }
 
 impl CanonicalId {
-    /// MusicBrainz Recording MBID'sinden kanonik kimlik.
+    /// A canonical identity from a MusicBrainz Recording MBID.
     #[must_use]
     pub fn from_mbid(mbid: &Mbid) -> Self {
         Self(format!("mb:{}", mbid.as_str()))
     }
 
-    /// ISRC'den kanonik kimlik. MBID bulunana kadarki ara durum.
+    /// A canonical identity from an ISRC. The interim state until an MBID is
+    /// found.
     #[must_use]
     pub fn from_isrc(isrc: &Isrc) -> Self {
         Self(format!("isrc:{}", isrc.as_str()))
     }
 
-    /// Yerel türetilmiş kimlik. `key` normalize edilmiş "sanatçı\u{1}başlık" olmalı.
+    /// A locally derived identity. `key` must be the normalised
+    /// "artist\u{1}title".
     #[must_use]
     pub fn from_local_key(key: &str) -> Self {
         Self(format!("local:{}", fnv1a64_hex(key)))
     }
 
-    /// Kimliğin hangi otoriteden geldiği.
+    /// Which authority the identity comes from.
     #[must_use]
     pub fn kind(&self) -> CanonicalKind {
         match self.0.split_once(':') {
@@ -56,16 +59,16 @@ impl CanonicalId {
         }
     }
 
-    /// Depolama/serileştirme için ham gösterim.
+    /// The raw form for storage/serialisation.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
-    /// Depodan okunan ham gösterimi geri sarar.
+    /// Wraps the raw form read from storage back up.
     ///
-    /// Yalnızca `headshell`'un kendi yazdığı veriyi geri okurken kullanılmalı;
-    /// dış girdi için `from_*` yapıcılarını kullan.
+    /// Only to be used when reading back data `headshell` itself wrote; for
+    /// outside input use the `from_*` constructors.
     #[must_use]
     pub fn from_stored(raw: String) -> Self {
         Self(raw)
@@ -78,7 +81,7 @@ impl fmt::Display for CanonicalId {
     }
 }
 
-/// Bir sağlayıcının kendi parça kimliği. Sağlayıcı adı olmadan anlamsızdır.
+/// A provider's own track id. Meaningless without the provider's name.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ProviderTrackId {
     pub provider: ProviderId,
@@ -101,7 +104,7 @@ impl fmt::Display for ProviderTrackId {
     }
 }
 
-/// Bir sağlayıcının adı (`local`, `subsonic`, `soundcloud`, ...).
+/// A provider's name (`local`, `subsonic`, `soundcloud`, ...).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ProviderId(String);
@@ -124,16 +127,16 @@ impl fmt::Display for ProviderId {
     }
 }
 
-/// ISRC — 12 karakter: 2 ülke + 3 kayıt sahibi + 2 yıl + 5 tekil.
+/// ISRC — 12 characters: 2 country + 3 registrant + 2 year + 5 designation.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Isrc(String);
 
 impl Isrc {
-    /// Girdiyi normalize eder (tire/boşluk atılır, büyük harfe çevrilir) ve doğrular.
+    /// Normalises the input (dashes/spaces dropped, upper-cased) and validates it.
     ///
-    /// Biçim tutmuyorsa `None` — sessizce kabul etmek kimlik zincirinin ilk
-    /// halkasını çürütür.
+    /// `None` if the format does not fit — silently accepting it would corrupt
+    /// the first link of the identity chain.
     #[must_use]
     pub fn parse(raw: &str) -> Option<Self> {
         let cleaned: String = raw
@@ -163,13 +166,13 @@ impl fmt::Display for Isrc {
     }
 }
 
-/// MusicBrainz kimliği (UUID biçimi).
+/// A MusicBrainz identifier (UUID format).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Mbid(String);
 
 impl Mbid {
-    /// UUID biçimini doğrular (8-4-4-4-12 onaltılık).
+    /// Validates the UUID format (8-4-4-4-12 hexadecimal).
     #[must_use]
     pub fn parse(raw: &str) -> Option<Self> {
         let lower = raw.trim().to_ascii_lowercase();
@@ -197,7 +200,8 @@ impl fmt::Display for Mbid {
     }
 }
 
-/// FNV-1a 64 bit. Yerel kimlik türetmek için; kriptografik değil, sadece stabil.
+/// FNV-1a 64 bit. For deriving local identities; not cryptographic, just
+/// stable.
 fn fnv1a64_hex(input: &str) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in input.as_bytes() {
@@ -223,15 +227,15 @@ mod tests {
         );
         assert!(
             Isrc::parse("USRC1170000").is_none(),
-            "11 karakter reddedilmeli"
+            "11 characters must be rejected"
         );
         assert!(
             Isrc::parse("12RC11700001").is_none(),
-            "ülke kodu harf olmalı"
+            "the country code must be letters"
         );
         assert!(
             Isrc::parse("USRC1170000X").is_none(),
-            "son 7 hane rakam olmalı"
+            "the last 7 characters must be digits"
         );
     }
 

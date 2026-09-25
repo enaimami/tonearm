@@ -1,18 +1,19 @@
-//! HTTP akışını symphonia'nın okuyabileceği bir kaynağa çevirir (§1.3).
+//! Turns an HTTP stream into a source symphonia can read (§1.3).
 //!
-//! Neden [`crate::net::HttpClient`] değil: o trait gövdeyi **tamamen** belleğe
-//! alır ve üstveri çağrıları için tasarlandı. Ses için "hepsi inince başla"
-//! kabul edilebilir değil — 40 MB'lık bir FLAC'ta saniyelerce sessizlik
-//! demek. Buradaki kaynak indirmeyi arka planda sürdürürken çözücü ilk
-//! baytları okumaya başlayabiliyor.
+//! Why not [`crate::net::HttpClient`]: that trait takes the body into memory
+//! **whole** and was designed for metadata calls. For audio, "start when it
+//! has all arrived" is not acceptable — on a 40 MB FLAC it means seconds of
+//! silence. The source here keeps downloading in the background while the
+//! decoder can start reading the first bytes.
 //!
-//! ## Neden tamponu tümüyle bellekte tutuyoruz
+//! ## Why we keep the whole buffer in memory
 //!
-//! symphonia kabı tanırken **geriye doğru** arama yapıyor (FLAC/MP4 başlıkları).
-//! İnen baytları atmak, her aramada yeni bir HTTP isteği (Range) açmak
-//! demekti; bu, karmaşıklığı sunucu uyumluluğuna bağlar (her sunucu Range
-//! desteklemiyor). Tipik bir parça birkaç on MB; tavan [`MAX_BUFFER_BYTES`]
-//! ile açıkça sınırlı ve aşılırsa **hata** veriyor, sessizce kesmiyor.
+//! While recognising the container, symphonia seeks **backwards** (FLAC/MP4
+//! headers). Throwing away the downloaded bytes would mean opening a new HTTP
+//! request (Range) for every seek; that ties the complexity to server
+//! compatibility (not every server supports Range). A typical track is a few
+//! tens of MB; the cap is explicitly limited with [`MAX_BUFFER_BYTES`], and
+//! exceeding it gives an **error**, it does not cut off silently.
 
 use std::io::{self, Read, Seek, SeekFrom};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,29 +25,29 @@ use crate::diag::Stage;
 use crate::error::{Error, ErrorKind, Result};
 use crate::net::{HttpHeader, UreqClient};
 
-/// Tek bir parça için bellek tavanı. Aşılırsa okuma hata verir.
+/// The memory cap for a single track. Exceeding it makes reading fail.
 const MAX_BUFFER_BYTES: usize = 256 * 1024 * 1024;
 
-/// İndirme iş parçacığının bir seferde okuduğu blok.
+/// The block the download thread reads at a time.
 const CHUNK: usize = 64 * 1024;
 
-/// Okuyucunun veri beklerken uyanma aralığı.
+/// How often the reader wakes up while waiting for data.
 const WAIT: std::time::Duration = std::time::Duration::from_millis(50);
 
-/// Arka planda inen, önden okunabilen HTTP kaynağı.
+/// An HTTP source that downloads in the background and can be read ahead.
 pub struct HttpMediaSource {
     shared: Arc<Shared>,
     pos: u64,
-    /// `Content-Length` biliniyorsa toplam uzunluk. Bilinmiyorsa kaynak
-    /// "aranamaz" sayılır — symphonia o zaman akış kipinde çalışır.
+    /// The total length, if `Content-Length` is known. If not, the source
+    /// counts as "not seekable" — symphonia then works in streaming mode.
     total: Option<u64>,
 }
 
 struct Shared {
     data: Mutex<Vec<u8>>,
-    /// İndirme bitti mi (başarıyla ya da hatayla).
+    /// Has the download finished (successfully or with an error).
     done: AtomicBool,
-    /// İndirme hatası; okuyucu bunu `io::Error`'a çevirir.
+    /// The download error; the reader turns it into an `io::Error`.
     error: Mutex<Option<String>>,
     ready: Condvar,
 }
@@ -61,12 +62,12 @@ impl std::fmt::Debug for HttpMediaSource {
 }
 
 impl HttpMediaSource {
-    /// Akışı açar ve indirmeyi arka planda başlatır.
+    /// Opens the stream and starts the download in the background.
     ///
     /// # Errors
-    /// Bağlantı kurulamazsa ya da sunucu 2xx dışında bir kod dönerse
-    /// ([`Stage::NetworkRequest`]) — yani "çalmaya başladım ama ses yok"
-    /// durumu oluşmadan önce.
+    /// If no connection can be made or the server returns a code outside 2xx
+    /// ([`Stage::NetworkRequest`]) — that is, before a "started playing but no
+    /// sound" situation can arise.
     pub fn open(url: &str, headers: &[HttpHeader]) -> Result<Self> {
         let client = UreqClient::for_streams();
         let (total, mut reader) = client.open_stream(url, headers)?;
@@ -78,7 +79,7 @@ impl HttpMediaSource {
                 Stage::PlaybackDecode,
                 ErrorKind::Audio {
                     detail: format!(
-                        "{url} {len} bayt; tek parça için tavan {MAX_BUFFER_BYTES} bayt"
+                        "{url} is {len} bytes; the cap for a single track is {MAX_BUFFER_BYTES} bytes"
                     ),
                 },
             ));
@@ -106,13 +107,13 @@ impl HttpMediaSource {
                         Ok(0) => break,
                         Ok(n) => {
                             let Ok(mut data) = writer.data.lock() else {
-                                writer.fail("indirme tamponu kilitlenemedi".to_owned());
+                                writer.fail("could not lock the download buffer".to_owned());
                                 break;
                             };
                             if data.len() + n > MAX_BUFFER_BYTES {
                                 drop(data);
                                 writer.fail(format!(
-                                    "{label} bellek tavanını aştı ({MAX_BUFFER_BYTES} bayt)"
+                                    "{label} exceeded the memory cap ({MAX_BUFFER_BYTES} bytes)"
                                 ));
                                 break;
                             }
@@ -122,7 +123,7 @@ impl HttpMediaSource {
                         }
                         Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
                         Err(err) => {
-                            writer.fail(format!("{label} akışı kesildi: {err}"));
+                            writer.fail(format!("the {label} stream broke off: {err}"));
                             break;
                         }
                     }
@@ -134,7 +135,7 @@ impl HttpMediaSource {
                 Error::new(
                     Stage::PlaybackDecode,
                     ErrorKind::Audio {
-                        detail: format!("indirme iş parçacığı başlatılamadı: {source}"),
+                        detail: format!("could not start the download thread: {source}"),
                     },
                 )
             })?;
@@ -170,21 +171,22 @@ impl Read for HttpMediaSource {
             .shared
             .data
             .lock()
-            .map_err(|_| io::Error::other("indirme tamponu kilitlenemedi"))?;
+            .map_err(|_| io::Error::other("could not lock the download buffer"))?;
 
         loop {
             let available = data.len() as u64;
             if self.pos < available {
-                let start = usize::try_from(self.pos)
-                    .map_err(|_| io::Error::other("konum makine sözcüğüne sığmıyor"))?;
+                let start = usize::try_from(self.pos).map_err(|_| {
+                    io::Error::other("the position does not fit into a machine word")
+                })?;
                 let take = out.len().min(data.len() - start);
                 out[..take].copy_from_slice(&data[start..start + take]);
                 self.pos += take as u64;
                 return Ok(take);
             }
             if self.shared.done.load(Ordering::Acquire) {
-                // Hata varsa dosya sonu gibi davranmıyoruz: sessizce kırpılmış
-                // bir parça, hata veren bir parçadan daha kötüdür.
+                // If there is an error we do not act as if it were the end of the
+                // file: a silently truncated track is worse than one that fails.
                 return match self.shared.take_error() {
                     Some(detail) => Err(io::Error::other(detail)),
                     None => Ok(0),
@@ -194,7 +196,7 @@ impl Read for HttpMediaSource {
                 .shared
                 .ready
                 .wait_timeout(data, WAIT)
-                .map_err(|_| io::Error::other("indirme tamponu kilitlenemedi"))?;
+                .map_err(|_| io::Error::other("could not lock the download buffer"))?;
             data = guard;
         }
     }
@@ -209,14 +211,14 @@ impl Seek for HttpMediaSource {
                 let total = self.total.ok_or_else(|| {
                     io::Error::new(
                         io::ErrorKind::Unsupported,
-                        "sunucu uzunluk bildirmedi; sondan arama yapılamıyor",
+                        "the server reported no length; cannot seek from the end",
                     )
                 })?;
                 add_offset(total, delta)?
             }
         };
-        // İnmemiş bir noktaya atlamak yasak değil: okuma o baytlar gelene
-        // kadar bekler.
+        // Jumping to a point not yet downloaded is not forbidden: reading
+        // waits until those bytes arrive.
         self.pos = target;
         Ok(self.pos)
     }
@@ -227,10 +229,10 @@ fn add_offset(base: u64, delta: i64) -> io::Result<u64> {
     if result < 0 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "dosya başından öncesine arama",
+            "seek before the start of the file",
         ));
     }
-    u64::try_from(result).map_err(|_| io::Error::other("arama konumu taşıyor"))
+    u64::try_from(result).map_err(|_| io::Error::other("the seek position overflows"))
 }
 
 impl MediaSource for HttpMediaSource {

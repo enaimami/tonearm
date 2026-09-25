@@ -1,34 +1,39 @@
-//! AcoustID — K6 zincirinin **4. ve son halkası**.
+//! AcoustID — the **4th and last link** of the K6 chain.
 //!
-//! İlk üç halka metne bakar ve üçü de etiketin doğru olduğunu varsayar.
-//! `track01.mp3` adlı, etiketsiz bir dosyada üçü de çaresizdir: ISRC yok,
-//! arayacak sanatçı/başlık yok, bulanık eşleştirilecek metin yok. Bu halka
-//! **sesin kendisine** bakar — [`fingerprint`](super::fingerprint) dosyadan
-//! bir Chromaprint parmak izi çıkarır, burası onu AcoustID'ye sorar ve
-//! karşılığında MusicBrainz kayıt kimlikleri alır.
+//! The first three links look at text, and all three assume the tags are
+//! right. On an untagged file named `track01.mp3` all three are helpless: no
+//! ISRC, no artist/title to search for, no text to fuzzy-match. This link
+//! looks at **the audio itself** — [`fingerprint`](super::fingerprint)
+//! extracts a Chromaprint fingerprint from the file, this module asks
+//! AcoustID about it and gets MusicBrainz recording ids in return.
 //!
-//! Sıra tesadüf değil: parmak izi en pahalı halka (dosyanın tamamı çözülür)
-//! ve **dosya elde yokken hiç çalışamaz**. İçe aktarılan bir dinleme
-//! geçmişinin dosyası olmadığı için o kayıtlar bu halkaya hiç ulaşmaz —
-//! zincirin buraya kadar gelmesi bir istisnadır, kural değil.
+//! The order is no accident: the fingerprint is the most expensive link (the
+//! whole file is decoded) and **cannot work at all without the file at
+//! hand**. Since an imported listening history has no files, those records
+//! never reach this link — the chain getting this far is the exception, not
+//! the rule.
 //!
-//! ## İstemci anahtarı (D-046)
+//! ## The client key (D-046)
 //!
-//! AcoustID her sorguda bir uygulama anahtarı ister. İki kaynağı var ve sıra
-//! şu: önce sır deposu (`identity:acoustid` / `api_key`), yoksa derlemeye
-//! gömülü varsayılan. Kullanıcının koyduğu anahtar **her zaman** kazanır —
-//! gömülü anahtar iptal edilirse ya da kotası dolarsa kimse kilitlenmesin.
+//! AcoustID asks for an application key with every query. It has two
+//! sources, in this order: first the secret store (`identity:acoustid` /
+//! `api_key`), otherwise the default embedded in the build. The key the user
+//! set **always** wins — so nobody is locked out if the embedded key is
+//! revoked or its quota runs out.
 //!
-//! İkisi de yoksa halka çalışmaz ve bu **söylenir**: "AcoustID anahtarı yok"
-//! ile "AcoustID eşleşme bulamadı" bambaşka iki tanıdır ve ikincisi gibi
-//! görünen bir birincisi, kusuru dosyada arattırır (K9).
+//! If neither exists the link does not run, and this **is said**: "no
+//! AcoustID key" and "AcoustID found no match" are two entirely different
+//! diagnoses, and the first looking like the second sends people hunting for
+//! the fault in the file (K9).
 //!
-//! ## Sınırlar
+//! ## Limits
 //!
-//! - **Saniyede üç istek.** AcoustID'nin açıkladığı ortalama; aşan istemci
-//!   `429` alır. [`crate::net::RateLimiter`] çağrılar arasında uyur.
-//! - **POST, GET değil.** Base64'lenmiş parmak izi binlerce karakter tutar;
-//!   URL'ye koymak onu aracıların kesme sınırına teslim ederdi.
+//! - **Three requests per second.** AcoustID's published average; a client
+//!   that exceeds it gets a `429`. [`crate::net::RateLimiter`] sleeps between
+//!   calls.
+//! - **POST, not GET.** A base64-encoded fingerprint takes thousands of
+//!   characters; putting it in the URL would hand it over to the cutting
+//!   limits of proxies.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -42,47 +47,49 @@ use crate::error::{Error, ErrorKind, Result};
 use crate::ids::Mbid;
 use crate::net::{HttpClient, HttpHeader, HttpRequest, RateLimiter, encode_query, parse_json};
 
-/// Genel AcoustID sunucusu.
+/// The public AcoustID server.
 pub const DEFAULT_BASE_URL: &str = "https://api.acoustid.org/v2";
 
-/// Anahtarın arandığı sır ad alanı (D-042 deposu).
+/// The secret namespace the key is looked up in (the D-042 store).
 pub const SECRET_NAMESPACE: &str = "identity:acoustid";
 
-/// Sır deposundaki anahtarın adı.
+/// The name of the key in the secret store.
 pub const SECRET_KEY: &str = "api_key";
 
-/// Derlemeye gömülü varsayılan istemci anahtarı.
+/// The default client key embedded in the build.
 ///
-/// **Boş bırakılmıştır ve bu kasıtlı.** Anahtar `acoustid.org/new-application`
-/// adresinden bu proje adına kaydedilmeli ve buraya yazılmalıdır; uydurulmuş
-/// bir dize koymak, ilk canlı çağrıda "geçersiz anahtar" olarak dönerdi ve
-/// kusuru anahtarın kendisinde değil parmak izinde arattırırdı.
+/// **It is left empty, and on purpose.** The key has to be registered for this
+/// project at `acoustid.org/new-application` and written here; putting in a
+/// made-up string would come back as "invalid key" on the first live call
+/// and send people hunting for the fault in the fingerprint instead of the
+/// key.
 ///
-/// Boş kaldığı sürece 4. halka yalnızca kullanıcının kendi anahtarıyla
-/// çalışır ve anahtarsız çağrı [`missing_key_err`] ile reddedilir.
+/// As long as it stays empty the 4th link only works with the user's own key,
+/// and a call without a key is refused with [`missing_key_err`].
 const EMBEDDED_API_KEY: &str = "";
 
-/// İki istek arasındaki en kısa süre.
+/// The shortest time between two requests.
 ///
-/// AcoustID ortalama saniyede üç isteğe izin veriyor. 340 ms, saat farkı için
-/// pay bırakıyor — sınırı yalayan bir istemci `429` yiyip yeniden denemeye
-/// başlar, bu da toplamda daha yavaştır (MusicBrainz'de öğrenildi).
+/// AcoustID allows three requests per second on average. 340 ms leaves room
+/// for clock skew — a client that grazes the limit eats a `429` and starts
+/// retrying, which is slower overall (learned at MusicBrainz).
 const MIN_INTERVAL: Duration = Duration::from_millis(340);
 
-/// `429` (hız sınırı) sonrası kaç kez yeniden denenir.
+/// How many times to retry after a `429` (rate limit).
 const RATE_LIMIT_RETRIES: u32 = 2;
 
-/// Bu skorun altındaki AcoustID eşleşmeleri hiç aday sayılmaz.
+/// AcoustID matches below this score do not count as candidates at all.
 ///
-/// AcoustID kendi güvenini 0–1 arasında veriyor ve zayıf eşleşmeleri de
-/// listeliyor. 0.5'in altı pratikte "aynı parça olabilir de olmayabilir de"
-/// demek; onu zincire aday olarak sokmak, kimliği bir tahmine bağlamak olur.
+/// AcoustID gives its own confidence between 0 and 1 and lists weak matches
+/// too. Below 0.5 in practice means "might be the same track, might not";
+/// putting it into the chain as a candidate would tie the identity to a
+/// guess.
 const MIN_ACOUSTID_SCORE: f64 = 0.5;
 
-/// AcoustID'ye bağlanan parmak izi kaynağı.
+/// A fingerprint source that connects to AcoustID.
 ///
-/// HTTP'ye doğrudan değil [`HttpClient`] üstünden gidiyor (D-020): testler
-/// sahte istemci verir, mobil kendi yığınını verir.
+/// It goes through [`HttpClient`], not straight to HTTP (D-020): tests supply
+/// a fake client, mobile supplies its own stack.
 pub struct AcoustIdLookup {
     http: Arc<dyn HttpClient>,
     base_url: String,
@@ -93,8 +100,8 @@ pub struct AcoustIdLookup {
 
 impl std::fmt::Debug for AcoustIdLookup {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Anahtar **yazılmıyor**: `Debug` çıktısı log'a ve tanı raporuna
-        // düşebilir, sırlar oraya girmez (D-042).
+        // The key **is not printed**: `Debug` output can end up in the log
+        // and the diagnostics report, and secrets do not go there (D-042).
         f.debug_struct("AcoustIdLookup")
             .field("base_url", &self.base_url)
             .field("api_key_set", &!self.api_key.is_empty())
@@ -103,10 +110,10 @@ impl std::fmt::Debug for AcoustIdLookup {
 }
 
 impl AcoustIdLookup {
-    /// Gömülü varsayılan anahtarla genel sunucuya bağlanan kaynak.
+    /// A source connecting to the public server with the embedded default key.
     ///
-    /// Gömülü anahtar boşsa çağrılar [`missing_key_err`] döndürür — nesne
-    /// yine de kurulur, çünkü [`Self::with_api_key`] onu düzeltebilir.
+    /// If the embedded key is empty, calls return [`missing_key_err`] — the
+    /// object is still built, because [`Self::with_api_key`] can fix it.
     #[must_use]
     pub fn new(http: Arc<dyn HttpClient>) -> Self {
         Self {
@@ -118,11 +125,11 @@ impl AcoustIdLookup {
         }
     }
 
-    /// Kullanıcının kendi anahtarı. Boş dize **yok sayılır**.
+    /// The user's own key. An empty string **is ignored**.
     ///
-    /// Boşu yok saymak, "anahtar ayarlamayı denedim ama boş bıraktım"
-    /// durumunda gömülü anahtara düşmeyi sağlıyor; boşu geçerli saymak
-    /// çağrıyı sunucuya kadar götürüp orada reddettirirdi.
+    /// Ignoring empty means that "I tried to set a key but left it empty" falls
+    /// back to the embedded key; accepting empty as valid would carry the call
+    /// all the way to the server and get it refused there.
     #[must_use]
     pub fn with_api_key(mut self, api_key: impl Into<String>) -> Self {
         let key = api_key.into();
@@ -132,37 +139,37 @@ impl AcoustIdLookup {
         self
     }
 
-    /// Başka bir sunucu (test sunucusu ya da kendi kopyanız).
+    /// Another server (a test server or your own copy).
     #[must_use]
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = base_url.into().trim_end_matches('/').to_owned();
         self
     }
 
-    /// Kendi `User-Agent`'ınız.
+    /// Your own `User-Agent`.
     #[must_use]
     pub fn with_user_agent(mut self, user_agent: impl Into<String>) -> Self {
         self.user_agent = user_agent.into();
         self
     }
 
-    /// İstekler arasındaki en kısa süre. Yalnızca testler için.
+    /// The shortest time between requests. For tests only.
     #[must_use]
     pub fn with_min_interval(mut self, interval: Duration) -> Self {
         self.limiter = RateLimiter::new(interval);
         self
     }
 
-    /// Bir parmak izini sorgular.
+    /// Looks up a fingerprint.
     async fn lookup(&self, fingerprint: &Fingerprint) -> Result<Vec<FingerprintCandidate>> {
         if self.api_key.is_empty() {
             return Err(missing_key_err());
         }
 
         let url = format!("{}/lookup", self.base_url);
-        // `meta=recordings`: kimlik zinciri kayıt (recording) düzeyinde
-        // çalışıyor. Yayın (release) bilgisi istemiyoruz — istemek yanıtı
-        // katlar ve zincirin kullanmadığı veriyi taşır.
+        // `meta=recordings`: the identity chain works at the recording
+        // level. We do not ask for release information — asking multiplies
+        // the response and carries data the chain does not use.
         let body = format!(
             "client={}&duration={}&fingerprint={}&meta=recordings",
             encode_query(&self.api_key),
@@ -179,46 +186,42 @@ impl AcoustIdLookup {
             self.limiter.acquire();
             let response = self.http.send(&request).await?;
 
-            // `429` = kota aşıldı. Sunucu "yavaşla" diyor, "hayır" demiyor.
+            // `429` = quota exceeded. The server says "slow down", not "no".
             if response.status == 429 && attempt < RATE_LIMIT_RETRIES {
                 attempt += 1;
-                tracing::warn!(
-                    url,
-                    deneme = attempt,
-                    "AcoustID hız sınırı: bekleyip yeniden denenecek"
-                );
+                tracing::warn!(url, attempt, "AcoustID rate limit: waiting and retrying");
                 std::thread::sleep(MIN_INTERVAL);
                 continue;
             }
-            // Gövde **durum kodundan önce** okunuyor ve bu, canlı koşumun
-            // öğrettiği şey (D-046): AcoustID geçersiz anahtara `400` dönüyor
-            // ve asıl tanı (`invalid API key`) gövdede. Önce
-            // `error_for_status` çağırmak onu `NETWORK_REQUEST` diye
-            // raporluyordu — oysa sunucuya ulaşıldı, sunucu okudu ve **hayır
-            // dedi**. D-023'ün `401`/`403` için kurduğu ayrımın aynısı: "ağa
-            // çıkamadım" kullanıcıyı bağlantısını kontrol etmeye gönderir,
-            // oysa yapması gereken şey anahtarını düzeltmek.
+            // The body is read **before the status code**, and that is what the
+            // live run taught (D-046): AcoustID returns `400` for an invalid key,
+            // and the real diagnosis (`invalid API key`) is in the body. Calling
+            // `error_for_status` first reported it as `NETWORK_REQUEST` — when
+            // the server was reached, read the request and **said no**. The same
+            // distinction D-023 made for `401`/`403`: "I could not go online"
+            // sends the user off to check their connection, when what they need
+            // to do is fix their key.
             if let Ok(payload) = serde_json::from_slice::<LookupResponse>(&response.body) {
                 break payload;
             }
-            // Ayrıştırılamayan gövde: durum kodu ne diyorsa o. Proxy hata
-            // sayfası, kesilmiş yanıt, bakım ekranı — hiçbiri AcoustID'nin
-            // kendi cevabı değil.
+            // A body that cannot be parsed: whatever the status code says. A
+            // proxy error page, a truncated response, a maintenance screen —
+            // none of them is AcoustID's own answer.
             response.error_for_status(&url)?;
             break parse_json::<LookupResponse>(&response, "acoustid lookup")?;
         };
 
-        // AcoustID uygulama hatasını gövdede `status: error` ile söylüyor.
-        // Bunu görmezden gelmek, geçersiz anahtarı "eşleşme yok" diye
-        // raporlardı — K9'un tam olarak yasakladığı karışım.
+        // AcoustID reports an application error in the body with
+        // `status: error`. Ignoring it would report an invalid key as "no
+        // match" — exactly the mix-up K9 forbids.
         if payload.status != "ok" {
             let detail = payload
                 .error
-                .map_or_else(|| "sebep bildirilmedi".to_owned(), |err| err.message);
+                .map_or_else(|| "no reason given".to_owned(), |err| err.message);
             return Err(Error::new(
                 Stage::IdentityResolve,
                 ErrorKind::InvalidInput {
-                    detail: format!("AcoustID reddetti ({url}): {detail}"),
+                    detail: format!("AcoustID refused ({url}): {detail}"),
                 },
             ));
         }
@@ -230,18 +233,18 @@ impl AcoustIdLookup {
             }
             for recording in result.recordings {
                 let Some(mbid) = Mbid::parse(&recording.id) else {
-                    // Tanınmayan bir kimlik sessizce atılmaz: sayılabilir bir
-                    // uyarı bırakır. Sessiz `unwrap_or_default` yasak.
+                    // An unrecognised id is not silently thrown away: it leaves a
+                    // countable warning. A silent `unwrap_or_default` is forbidden.
                     tracing::warn!(
                         id = recording.id,
-                        "AcoustID geçersiz bir MBID döndürdü, aday atlanıyor"
+                        "AcoustID returned an invalid MBID; skipping the candidate"
                     );
                     continue;
                 };
                 let Some(title) = recording.title else {
-                    // Başlıksız kayıt skorlanamaz: bulanık karşılaştırmanın
-                    // iki alanından biri eksik.
-                    tracing::debug!(id = %mbid, "başlıksız AcoustID kaydı atlanıyor");
+                    // A recording without a title cannot be scored: one of the two
+                    // fields of the fuzzy comparison is missing.
+                    tracing::debug!(id = %mbid, "skipping an AcoustID recording without a title");
                     continue;
                 };
                 let artist = recording
@@ -264,9 +267,9 @@ impl AcoustIdLookup {
             }
         }
 
-        // En güçlü eşleşme başta. Beraberlikte MBID sırası: keyfi ama
-        // **sabit** — aynı dosya yarın başka bir kanonik kimlik alamaz
-        // (D-045'in ikinci dersi).
+        // The strongest match first. On a tie, MBID order: arbitrary but
+        // **stable** — the same file cannot get a different canonical
+        // identity tomorrow (D-045's second lesson).
         out.sort_by(|left, right| {
             right.score.total_cmp(&left.score).then_with(|| {
                 left.candidate
@@ -288,37 +291,38 @@ impl FingerprintLookup for AcoustIdLookup {
     }
 }
 
-/// Anahtarsız çağrının hatası.
+/// The error for a call without a key.
 ///
-/// Ayrı bir fonksiyon çünkü metni tam olarak bu: kullanıcı ne yapacağını
-/// buradan öğreniyor.
+/// A separate function because its text is exactly this: it is where the
+/// user learns what to do.
 fn missing_key_err() -> Error {
     Error::new(
         Stage::IdentityResolve,
         ErrorKind::InvalidInput {
             detail: format!(
-                "AcoustID istemci anahtarı yok — bu derlemede gömülü anahtar boş. \
-                 `headshell secret set {SECRET_NAMESPACE} {SECRET_KEY} <anahtar>` ile \
-                 kendi anahtarınızı koyun (acoustid.org/new-application)."
+                "no AcoustID client key — the key embedded in this build is empty. \
+                 Set your own key with `headshell secret set {SECRET_NAMESPACE} {SECRET_KEY} <key>` \
+                 (acoustid.org/new-application)."
             ),
         },
     )
 }
 
-/// Bu derlemenin varsayılan `User-Agent`'ı.
+/// This build's default `User-Agent`.
 fn default_user_agent() -> String {
     format!("headshell/{}", env!("CARGO_PKG_VERSION"))
 }
 
-/// AcoustID'nin ondalık saniyesini milisaniyeye çevirir.
+/// Turns AcoustID's decimal seconds into milliseconds.
 ///
-/// Anlamsız değerler (negatif, `NaN`, sonsuz, akıl almaz uzunluk) `None`
-/// döner — uydurma bir süre bulanık eşleşmeyi yanlış yöne çeker ve süre artık
-/// eşitlik bozucu olduğu için (D-046) kimliği de yanlış kayda bağlayabilir.
-/// Yok saymak, tahmin etmekten iyidir.
+/// Meaningless values (negative, `NaN`, infinite, an absurd length) return
+/// `None` — a made-up duration pulls fuzzy matching the wrong way, and since
+/// the duration is now a tie-breaker (D-046) it could tie the identity to the
+/// wrong recording too. Ignoring is better than guessing.
 fn duration_secs_to_ms(secs: f64) -> Option<u64> {
-    // 24 saat: bundan uzun bir "kayıt" ya veri hatasıdır ya da bizim işimiz
-    // değildir. Üst sınır ayrıca `as` dönüşümünü taşmadan korur.
+    // 24 hours: a "recording" longer than this is either a data error or none
+    // of our business. The upper bound also protects the `as` conversion from
+    // overflowing.
     const MAX_SECS: f64 = 86_400.0;
     if !secs.is_finite() || secs <= 0.0 || secs > MAX_SECS {
         return None;
@@ -326,12 +330,12 @@ fn duration_secs_to_ms(secs: f64) -> Option<u64> {
     #[expect(
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss,
-        reason = "üstteki koşul sonlu, pozitif ve 24 saatin altında olduğunu garanti ediyor"
+        reason = "the condition above guarantees it is finite, positive and under 24 hours"
     )]
     Some((secs * 1000.0).round() as u64)
 }
 
-/// `POST /v2/lookup` yanıtı.
+/// The response of `POST /v2/lookup`.
 #[derive(Debug, Deserialize)]
 struct LookupResponse {
     status: String,
@@ -348,7 +352,7 @@ struct ApiError {
 
 #[derive(Debug, Deserialize)]
 struct LookupResult {
-    /// AcoustID'nin kendi eşleşme güveni, 0–1.
+    /// AcoustID's own match confidence, 0–1.
     score: f64,
     #[serde(default)]
     recordings: Vec<RecordingRef>,
@@ -359,12 +363,13 @@ struct RecordingRef {
     id: String,
     #[serde(default)]
     title: Option<String>,
-    /// Saniye — ve **ondalık olarak** geliyor (`309.0`).
+    /// Seconds — and it arrives **as a decimal** (`309.0`).
     ///
-    /// `u32` yazılmıştı ve sahte testler tam sayı (`238`) kullandığı için
-    /// yeşildi. Gerçek servis `"duration": 309.0` döndürüyor ve `serde_json`
-    /// ondalık bir değeri `u32`'ye çözemez: ilk gerçek eşleşme, eşleşmeyi
-    /// ayrıştıramadan bir JSON hatasıyla düşerdi (D-046 eki, canlı ölçüm).
+    /// It was written as `u32`, and the fake tests were green because they used
+    /// an integer (`238`). The real service returns `"duration": 309.0`, and
+    /// `serde_json` cannot decode a decimal into a `u32`: the first real match
+    /// would have fallen over with a JSON error before it could be parsed (D-046
+    /// addendum, a live measurement).
     #[serde(default)]
     duration: Option<f64>,
     #[serde(default)]
@@ -376,10 +381,10 @@ struct ArtistRef {
     name: String,
 }
 
-/// Bu derlemenin varsayılan AcoustID kaynağı.
+/// This build's default AcoustID source.
 ///
 /// # Errors
-/// `http-client` feature'ı kapalıysa.
+/// If the `http-client` feature is off.
 #[cfg(feature = "http-client")]
 pub fn default_acoustid_lookup() -> Result<Arc<dyn FingerprintLookup>> {
     Ok(Arc::new(AcoustIdLookup::new(
@@ -387,17 +392,17 @@ pub fn default_acoustid_lookup() -> Result<Arc<dyn FingerprintLookup>> {
     )))
 }
 
-/// Bu derlemenin varsayılan AcoustID kaynağı.
+/// This build's default AcoustID source.
 ///
 /// # Errors
-/// Bu derlemede `http-client` kapalı olduğu için **her zaman** hata döner.
+/// In this build `http-client` is off, so it **always** returns an error.
 #[cfg(not(feature = "http-client"))]
 pub fn default_acoustid_lookup() -> Result<Arc<dyn FingerprintLookup>> {
     Err(Error::new(
         Stage::IdentityResolve,
         ErrorKind::Unsupported {
             provider: "acoustid".to_owned(),
-            what: "parmak izi sorgusu (`http-client` feature'ı kapalı derleme)".to_owned(),
+            what: "fingerprint lookup (a build with the `http-client` feature off)".to_owned(),
             capabilities: "NONE".to_owned(),
         },
     ))
@@ -408,19 +413,20 @@ mod tests {
     use super::*;
     use crate::net::fake::FakeHttp;
 
-    /// **Gerçek** AcoustID yanıtı — elle yazılmış değil, ölçülmüş.
+    /// A **real** AcoustID response — not written by hand, but measured.
     ///
-    /// `fixtures/identity/acoustid_lookup.json`, canlı servisten alındı
+    /// `fixtures/identity/acoustid_lookup.json` was taken from the live service
     /// (2026-09-02, `GET /v2/lookup?trackid=5e45e8ba-…&meta=recordings`).
     ///
-    /// Önceki sürüm gövdeyi burada elle yazıyordu ve `"duration"` alanına tam
-    /// sayı koymuştu. Servis ondalık gönderiyor (`309.0`); alan `Option<u32>`
-    /// olduğu için **ilk gerçek eşleşme bir JSON hatasıyla düşerdi** ve bütün
-    /// birim testleri yeşil kalırdı. Şema uydurulmaz, ölçülür (D-046 eki).
+    /// The previous version wrote the body here by hand and put an integer into
+    /// the `"duration"` field. The service sends a decimal (`309.0`); since the
+    /// field was `Option<u32>`, **the first real match would have fallen over
+    /// with a JSON error** while every unit test stayed green. A schema is not
+    /// made up, it is measured (D-046 addendum).
     ///
-    /// Fixture'ın hâlâ gerçeği anlattığını `tests/identity_acoustid.rs`
-    /// içindeki canlı test doğruluyor — dosya donar, servis değişirse orası
-    /// haber verir.
+    /// The live test in `tests/identity_acoustid.rs` verifies that the fixture
+    /// still tells the truth — the file is frozen; if the service changes, that
+    /// test says so.
     const REAL_MATCH: &str = include_str!("../../../../fixtures/identity/acoustid_lookup.json");
 
     fn sample() -> Fingerprint {
@@ -430,7 +436,7 @@ mod tests {
         }
     }
 
-    /// `pattern` yerine sabit bir yol: tek uç nokta var.
+    /// A fixed path instead of a `pattern`: there is a single endpoint.
     fn fake(body: &str) -> Arc<FakeHttp> {
         Arc::new(FakeHttp::new().route("/v2/lookup", body))
     }
@@ -445,12 +451,12 @@ mod tests {
     #[tokio::test]
     async fn a_match_becomes_a_scored_candidate() {
         let http = fake(REAL_MATCH);
-        let found = lookup(http).lookup(&sample()).await.expect("sorgu");
+        let found = lookup(http).lookup(&sample()).await.expect("lookup");
 
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].candidate.title, "Sil Baştan");
         assert_eq!(found[0].candidate.artist, "Şebnem Ferah");
-        // `309.0` ondalık geliyor; milisaniyeye tam çevrilmeli.
+        // `309.0` comes as a decimal; it must convert exactly into milliseconds.
         assert_eq!(found[0].candidate.duration_ms, Some(309_000));
         assert!((found[0].score - 1.0).abs() < f64::EPSILON);
         assert_eq!(
@@ -459,20 +465,22 @@ mod tests {
         );
     }
 
-    /// Süre alanı **ondalık** ve bu bir varsayım değil ölçüm.
+    /// The duration field is a **decimal**, and that is a measurement, not an
+    /// assumption.
     ///
-    /// Ayrı bir test çünkü kaybı sessiz: alan `Option<u32>` iken bütün gövde
-    /// ayrıştırılamıyordu ve hata "eşleşme yok" gibi değil, JSON hatası gibi
-    /// düşüyordu — yani zincir hiç cevap vermiyordu.
+    /// A separate test because the loss is silent: while the field was
+    /// `Option<u32>` the whole body could not be parsed, and the failure did not
+    /// look like "no match" but like a JSON error — that is, the chain did not
+    /// answer at all.
     #[tokio::test]
     async fn a_fractional_duration_is_parsed_not_rejected() {
         let fractional = REAL_MATCH.replace("\"duration\": 309.0", "\"duration\": 238.44");
         let http = fake(&fractional);
-        let found = lookup(http).lookup(&sample()).await.expect("sorgu");
+        let found = lookup(http).lookup(&sample()).await.expect("lookup");
         assert_eq!(found[0].candidate.duration_ms, Some(238_440));
     }
 
-    /// Anlamsız süre uydurulmaz, düşürülür.
+    /// A meaningless duration is not made up, it is dropped.
     #[test]
     fn a_nonsensical_duration_becomes_unknown_rather_than_a_wrong_number() {
         assert_eq!(duration_secs_to_ms(309.0), Some(309_000));
@@ -483,19 +491,19 @@ mod tests {
         assert_eq!(duration_secs_to_ms(1e12), None);
     }
 
-    /// Parmak izi gövdede gitmeli — URL'de değil.
+    /// The fingerprint must go in the body — not in the URL.
     ///
-    /// Kesilen bir URL "eşleşme yok" gibi görünür; bunu testle sabitliyoruz
-    /// çünkü hata anında ayırt edilemez.
+    /// A truncated URL looks like "no match"; we pin this with a test because
+    /// at the moment of failure it cannot be told apart.
     #[tokio::test]
     async fn the_fingerprint_travels_in_the_body_not_the_url() {
         let http = fake(REAL_MATCH);
         lookup(Arc::clone(&http))
             .lookup(&sample())
             .await
-            .expect("sorgu");
+            .expect("lookup");
 
-        let request = http.last_request().expect("istek gitmeli");
+        let request = http.last_request().expect("a request must go out");
         assert_eq!(request.method, crate::net::HttpMethod::Post);
         assert!(!request.url.contains("fingerprint"), "{}", request.url);
         let body = String::from_utf8_lossy(request.body.as_deref().unwrap_or_default()).to_string();
@@ -503,66 +511,69 @@ mod tests {
         assert!(body.contains("duration=309"), "{body}");
     }
 
-    /// Anahtar sorgu dizesine sızmamalı: URL'ler log'lanır.
+    /// The key must not leak into the query string: URLs get logged.
     #[tokio::test]
     async fn the_api_key_never_appears_in_the_url() {
         let http = fake(REAL_MATCH);
         lookup(Arc::clone(&http))
             .lookup(&sample())
             .await
-            .expect("sorgu");
+            .expect("lookup");
 
-        let request = http.last_request().expect("istek");
+        let request = http.last_request().expect("request");
         assert!(!request.url.contains("test-key"), "{}", request.url);
     }
 
-    /// Kullanıcının anahtarı gömülü olanı geçersiz kılar.
+    /// The user's key overrides the embedded one.
     #[test]
     fn a_user_key_overrides_the_embedded_one_but_an_empty_one_does_not() {
         let http = fake(REAL_MATCH);
         let set =
-            AcoustIdLookup::new(Arc::clone(&http) as Arc<dyn HttpClient>).with_api_key("kullanici");
-        assert_eq!(set.api_key, "kullanici");
+            AcoustIdLookup::new(Arc::clone(&http) as Arc<dyn HttpClient>).with_api_key("user");
+        assert_eq!(set.api_key, "user");
 
         let blank = AcoustIdLookup::new(http as Arc<dyn HttpClient>).with_api_key("   ");
         assert_eq!(blank.api_key, EMBEDDED_API_KEY);
     }
 
-    /// Anahtarsız çağrı ağa çıkmadan, ne yapılacağını söyleyerek durmalı.
+    /// A call without a key must stop without going online, saying what to do.
     #[tokio::test]
     async fn a_missing_key_is_reported_before_any_request_goes_out() {
         let http = fake(REAL_MATCH);
         let bare = AcoustIdLookup::new(Arc::clone(&http) as Arc<dyn HttpClient>);
-        // Gömülü anahtar dolu bir dağıtımda bu test anlamsız olurdu; o zaman
-        // atlanır ve sebebi yazılır.
+        // In a distribution with a filled-in embedded key this test would be
+        // meaningless; then it is skipped and the reason is written.
         if !bare.api_key.is_empty() {
-            eprintln!("atlanıyor: bu derlemede gömülü AcoustID anahtarı var");
+            eprintln!("skipped: this build has an embedded AcoustID key");
             return;
         }
 
         let err = bare.lookup(&sample()).await.unwrap_err();
         let text = err.chain_text();
-        assert!(text.contains("anahtar"), "{text}");
+        assert!(text.contains("client key"), "{text}");
         assert!(text.contains("secret set"), "{text}");
-        assert!(http.last_request().is_none(), "ağa çıkılmamalıydı");
+        assert!(
+            http.last_request().is_none(),
+            "it should not have gone online"
+        );
     }
 
-    /// Gövdede gelen uygulama hatası "eşleşme yok" sayılmamalı.
+    /// An application error arriving in the body must not count as "no match".
     #[tokio::test]
     async fn an_application_error_in_the_body_is_not_an_empty_result() {
         let http = fake(r#"{"status":"error","error":{"code":4,"message":"invalid API key"}}"#);
         let err = lookup(http).lookup(&sample()).await.unwrap_err();
         let text = err.chain_text();
-        assert!(text.starts_with("ADIM: IDENTITY_RESOLVE"), "{text}");
+        assert!(text.starts_with("STEP: IDENTITY_RESOLVE"), "{text}");
         assert!(text.contains("invalid API key"), "{text}");
     }
 
-    /// Geçersiz anahtar `400` ile geliyor — ve bu bir **ağ** hatası değil.
+    /// An invalid key comes with `400` — and that is not a **network** error.
     ///
-    /// Canlı koşumun bulduğu kusur (D-046): gövdeyi durum kodundan sonra
-    /// okuyan ilk sürüm bunu `NETWORK_REQUEST` diye raporluyordu ve
-    /// kullanıcıyı bağlantısını kontrol etmeye gönderiyordu. Sunucuya
-    /// ulaşıldı; sunucu okudu ve hayır dedi (D-023 ayrımı).
+    /// The flaw the live run found (D-046): the first version, reading the body
+    /// after the status code, reported this as `NETWORK_REQUEST` and sent the
+    /// user off to check their connection. The server was reached; it read the
+    /// request and said no (the D-023 distinction).
     #[tokio::test]
     async fn a_rejected_key_arrives_as_400_and_is_still_an_identity_stage_error() {
         let http = Arc::new(FakeHttp::new().route_status(
@@ -572,15 +583,16 @@ mod tests {
         ));
         let err = lookup(http).lookup(&sample()).await.unwrap_err();
         let text = err.chain_text();
-        assert!(text.starts_with("ADIM: IDENTITY_RESOLVE"), "{text}");
+        assert!(text.starts_with("STEP: IDENTITY_RESOLVE"), "{text}");
         assert!(!text.contains("NETWORK_REQUEST"), "{text}");
         assert!(text.contains("invalid API key"), "{text}");
     }
 
-    /// AcoustID'nin cevabı olmayan bir gövde durum koduna teslim edilir.
+    /// A body that is not AcoustID's answer is handed over to the status code.
     ///
-    /// Proxy hata sayfası, bakım ekranı, kesilmiş yanıt — hiçbiri servisin
-    /// kendi reddi değil ve kimlik aşamasına yazılmamalı.
+    /// A proxy error page, a maintenance screen, a truncated response — none of
+    /// them is the service's own refusal, and none must be written to the
+    /// identity stage.
     #[tokio::test]
     async fn a_body_that_is_not_acoustids_answer_falls_back_to_the_status_code() {
         let http = Arc::new(FakeHttp::new().route_status(
@@ -594,34 +606,34 @@ mod tests {
         assert!(text.contains("502"), "{text}");
     }
 
-    /// Gerçekten eşleşme yoksa bu hata değil, boş listedir.
+    /// If there really is no match, that is not an error but an empty list.
     #[tokio::test]
     async fn no_match_is_an_empty_list_not_an_error() {
         let http = fake(r#"{"status":"ok","results":[]}"#);
-        let found = lookup(http).lookup(&sample()).await.expect("sorgu");
+        let found = lookup(http).lookup(&sample()).await.expect("lookup");
         assert!(found.is_empty());
     }
 
-    /// Zayıf eşleşmeler aday sayılmaz.
+    /// Weak matches do not count as candidates.
     #[tokio::test]
     async fn a_weak_match_is_not_offered_as_a_candidate() {
         let weak = REAL_MATCH.replace("\"score\": 1.0", "\"score\": 0.31");
         let http = fake(&weak);
-        let found = lookup(http).lookup(&sample()).await.expect("sorgu");
+        let found = lookup(http).lookup(&sample()).await.expect("lookup");
         assert!(found.is_empty(), "{found:?}");
     }
 
-    /// Geçersiz MBID taşıyan aday atlanır ama sorgu düşmez.
+    /// A candidate with an invalid MBID is skipped, but the lookup does not fail.
     #[tokio::test]
     async fn a_malformed_mbid_is_skipped_without_failing_the_lookup() {
-        let broken = REAL_MATCH.replace("e0a22727-1fcf-4e3a-81a3-b65623b2c53e", "mbid-degil");
+        let broken = REAL_MATCH.replace("e0a22727-1fcf-4e3a-81a3-b65623b2c53e", "not-an-mbid");
         let http = fake(&broken);
-        let found = lookup(http).lookup(&sample()).await.expect("sorgu");
+        let found = lookup(http).lookup(&sample()).await.expect("lookup");
         assert!(found.is_empty());
     }
 
-    /// `Debug` çıktısı anahtarı taşımamalı — tanı raporu kopyalanıp
-    /// yapıştırılan bir metin (D-042).
+    /// `Debug` output must not carry the key — the diagnostics report is text
+    /// that gets copied and pasted (D-042).
     #[test]
     fn debug_output_does_not_leak_the_key() {
         let http = fake(REAL_MATCH);

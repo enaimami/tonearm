@@ -1,24 +1,25 @@
-// headshell — masaüstü arayüzü (PLAN §3.2, D-072).
+// headshell — the desktop interface (PLAN §3.2, D-072).
 //
-// **Altın Kural burada da geçerli.** Bu dosya karar vermez: tuşu komuta
-// çevirir, çekirdeğin döndürdüğü veriyi çizer. "Duraklat mı sürdür mü",
-// "sırada ne var", "hangi çalma sayılır", "eklenti çalışabilir mi" soruların
-// cevabı çekirdekte.
+// **The Golden Rule holds here too.** This file makes no decisions: it turns
+// a key into a command and draws the data the core returns. The answers to
+// "pause or resume", "what's next", "which play counts", "can the plugin
+// run" are in the core.
 //
-// Tek istisna bilerek konmuş: **pozisyon tahmini** (`anchor.js`). Formülün
-// ikinci kopyası olduğu biliniyor ve doğruluk kümesiyle kilitli (D-033).
+// The one exception is deliberate: **the position estimate** (`anchor.js`).
+// It is known to be a second copy of the formula, and it is locked down by
+// the accuracy set (D-033).
 //
-// Çekirdeğin metin üreten yardımcıları (`status_text`, `describe`) burada
-// **tekrarlanmıyor**. CLI tek satıra sığdırmak için aralarında öncelik
-// seçiyor; arayüzün böyle bir sıkışıklığı yok, hepsini yan yana gösteriyor.
-// Seçim yapmayan kopya kaymaz (D-057).
+// The core's text-producing helpers (`status_text`, `describe`) are **not
+// repeated** here. The CLI picks priorities among them to fit a single line;
+// the interface has no such squeeze and shows them all side by side. A copy
+// that makes no choices does not drift (D-057).
 //
-// Hareket `motion.js`'te (yaylar, izdüşüm, sürükleme); burada yalnızca neyin
-// nereye gittiği yazıyor. Metin her zaman `textContent` ile: çekirdekten ya
-// da katalogdan gelen hiçbir veri işaretleme olarak yorumlanmaz
-// (`ui_contract.rs` `innerHTML`'i yasaklıyor).
+// Motion lives in `motion.js` (springs, projection, dragging); only what goes
+// where is written here. Text always goes through `textContent`: no data from
+// the core or the catalog is interpreted as markup (`ui_contract.rs` forbids
+// `innerHTML`).
 //
-// Tanımlayıcılar İngilizce (D-036); kullanıcıya görünen metin Türkçe.
+// Identifiers and user-facing text are both in English (D-036, D-073).
 
 import { positionAt, clock } from "./anchor.js";
 import {
@@ -38,9 +39,9 @@ const { listen } = window.__TAURI__.event;
 
 const $ = (id) => document.getElementById(id);
 
-// ————————————————————————————————————— öğe kurma
+// ————————————————————————————————————— building elements
 
-/// Küçük bir öğe kurucu. `text` her zaman `textContent`'e gider.
+/// A small element builder. `text` always goes to `textContent`.
 function h(tag, props = {}, ...children) {
   const el = document.createElement(tag);
   for (const [key, value] of Object.entries(props)) {
@@ -60,9 +61,9 @@ function h(tag, props = {}, ...children) {
 
 const SVG = "http://www.w3.org/2000/svg";
 
-/// `index.html`'deki simge setinden bir simge. Ad bir dize sabiti olarak
-/// yazılmalı: `ui_contract.rs` `icon` ve `iconRef` çağrılarına verilen her
-/// adın sette tanımlı olduğunu denetliyor.
+/// An icon from the icon set in `index.html`. The name must be written as a
+/// string constant: `ui_contract.rs` checks that every name given to `icon`
+/// and `iconRef` calls is defined in the set.
 function icon(name) {
   const svg = document.createElementNS(SVG, "svg");
   svg.setAttribute("class", "icon");
@@ -77,45 +78,51 @@ function iconRef(name) {
   return `#i-${name}`;
 }
 
-// ————————————————————————————————————— biçim
+// ————————————————————————————————————— formatting
 
-const numbers = new Intl.NumberFormat("tr-TR");
-const percent = new Intl.NumberFormat("tr-TR", { style: "percent", maximumFractionDigits: 1 });
+const numbers = new Intl.NumberFormat("en-US");
+const percent = new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 1 });
 
 function fmt(n) {
   return numbers.format(n);
 }
 
-/// CLI'nin `duration()` biçimi: `3sa 12dk` ya da `12dk`.
+/// A count with its noun: `1 track`, `2 tracks` (D-073).
+function countOf(n, noun) {
+  return `${fmt(n)} ${n === 1 ? noun : `${noun}s`}`;
+}
+
+/// The CLI's `duration()` format: `3h 12m` or `12m`.
 function durationText(ms) {
   const minutes = Math.floor(ms / 60000);
   const hours = Math.floor(minutes / 60);
-  return hours > 0 ? `${fmt(hours)}sa ${minutes % 60}dk` : `${minutes}dk`;
+  return hours > 0 ? `${fmt(hours)}h ${minutes % 60}m` : `${minutes}m`;
 }
 
 function hoursText(ms) {
-  return `${new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 1 }).format(ms / 3600000)} sa`;
+  return `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(ms / 3600000)} h`;
 }
 
-/// Zincirin ilk sebebi: `ADIM:` satırı ve `→` öneki atılmış hâli.
+/// The chain's first cause: with the `STEP:` line and the `→` prefix dropped.
 function firstLine(chain) {
-  if (!chain) return "bilinmeyen hata";
+  if (!chain) return "unknown error";
   const lines = chain
     .split("\n")
     .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith("ADIM:"));
+    .filter((line) => line && !line.startsWith("STEP:"));
   return (lines[0] ?? chain).replace(/^→\s*/, "");
 }
 
-// ————————————————————————————————————— uyarılar
+// ————————————————————————————————————— notices
 //
-// Bir hata aşamasıyla görünür (K9): "nerede kırıldı" ilk bakışta
-// cevaplanmalı. Tam zincir katlı durur ve tek tuşla kopyalanır — `diag`'ın
-// son çalıştırması o arada başka bir komutla değişmiş olabilir, ama bu blok
-// değişmez.
+// An error shows up with its stage (K9): "where did it break" should be
+// answered at first glance. The full chain stays folded and is copied with a
+// single click — `diag`'s last run may have been replaced by another command
+// in the meantime, but this block does not change.
 //
-// Uyarı aşağıdan (oynatıcının yanından) gelir ve sağa gider: kapatma düğmesi,
-// süre dolması ve sağa sürükleme aynı yoldan çıkar.
+// A notice comes from below (next to the player) and leaves to the right:
+// the close button, running out of time and dragging to the right all exit
+// the same way.
 
 const TOAST_LIFETIME = { info: 6000, error: 20000 };
 const toastTimers = new Map();
@@ -126,12 +133,12 @@ function toast(err, info = false) {
   if (info) {
     box.append(h("div", { text: err }));
   } else {
-    const stage = err?.stage ?? "BİLİNMİYOR";
+    const stage = err?.stage ?? "UNKNOWN";
     const chain = err?.chain ?? String(err);
     box.append(
-      h("span", { class: "stage", text: `ADIM: ${stage}` }),
+      h("span", { class: "stage", text: `STEP: ${stage}` }),
       h("div", { text: firstLine(err?.chain) }),
-      h("details", {}, h("summary", { text: "tam zincir" }), h("pre", { text: chain })),
+      h("details", {}, h("summary", { text: "full chain" }), h("pre", { text: chain })),
       h(
         "div",
         { class: "toast-actions" },
@@ -140,10 +147,10 @@ function toast(err, info = false) {
           {
             type: "button",
             onclick: () =>
-              copyText(chain.startsWith("ADIM:") ? chain : `ADIM: ${stage}\n  ${chain}`, "hata zinciri panoya kopyalandı"),
+              copyText(chain.startsWith("STEP:") ? chain : `STEP: ${stage}\n  ${chain}`, "error chain copied to the clipboard"),
           },
           icon("copy"),
-          "kopyala",
+          "copy",
         ),
       ),
     );
@@ -155,8 +162,8 @@ function toast(err, info = false) {
       {
         class: "close",
         type: "button",
-        title: "kapat",
-        "aria-label": "uyarıyı kapat",
+        title: "close",
+        "aria-label": "close the notice",
         onclick: () => dismissToast(box),
       },
       icon("close"),
@@ -169,7 +176,8 @@ function toast(err, info = false) {
 
   const lifetime = info ? TOAST_LIFETIME.info : TOAST_LIFETIME.error;
   armToast(box, lifetime);
-  // Okunurken gitmesin: imleç üstündeyken sayaç durur.
+  // It must not go while being read: the timer stops while the pointer is on
+  // it.
   box.addEventListener("pointerenter", () => clearTimeout(toastTimers.get(box)));
   box.addEventListener("pointerleave", () => armToast(box, Math.min(lifetime, 4000)));
 
@@ -179,14 +187,15 @@ function toast(err, info = false) {
       clearTimeout(toastTimers.get(box));
       return presentation(box, "x");
     },
-    // Sola çekmek kapatmaz: direnç artar, bırakınca geri gelir.
+    // Pulling left does not close it: the resistance grows and it comes back on
+    // release.
     onMove: (x) =>
       place(box, {
         x: x < 0 ? rubberband(x, box.offsetWidth) : x,
         opacity: 1 - Math.max(0, x) / (box.offsetWidth * 1.4),
       }),
-    // Karar bırakılan noktadan değil, hızın taşıyacağı yerden: kısa bir
-    // fiske de kapatır.
+    // The decision is made from where the velocity carries it, not from the
+    // release point: a short flick closes it too.
     onEnd: (velocity) => {
       const x = presentation(box, "x");
       if (x + project(velocity) > box.offsetWidth * 0.5) {
@@ -231,10 +240,11 @@ function dismissAllToasts() {
   for (const box of [...$("toasts").children]) dismissToast(box);
 }
 
-/// Komutu çağırır; hata olursa gösterir ve `undefined` döner.
+/// Calls a command; on an error it shows it and returns `undefined`.
 ///
-/// Yutmuyor: her başarısızlık ekranda aşamasıyla görünüyor. `undefined`
-/// dönmesi çağıranın çizimi atlaması için — sessiz boş sonuç değil.
+/// It does not swallow: every failure appears on screen with its stage.
+/// Returning `undefined` is so the caller skips drawing — not a silent empty
+/// result.
 async function call(command, args = {}) {
   try {
     return await invoke(command, args);
@@ -249,18 +259,18 @@ async function copyText(text, done) {
     await navigator.clipboard.writeText(text);
     toast(done, true);
   } catch (err) {
-    // Pano reddedilirse sessiz kalmıyoruz: kullanıcı kopyalandığını sanıp
-    // boş bir hata raporu gönderirdi.
-    toast({ stage: "CONFIG_LOAD", chain: `ADIM: CONFIG_LOAD\n  → pano yazılamadı: ${err}` });
+    // If the clipboard refuses we do not stay silent: the user would think it was
+    // copied and send an empty bug report.
+    toast({ stage: "CONFIG_LOAD", chain: `STEP: CONFIG_LOAD\n  → could not write to the clipboard: ${err}` });
   }
 }
 
-// ————————————————————————————————————— dosya diyaloğu
+// ————————————————————————————————————— file dialog
 //
-// Eklentinin JS sarmalayıcısı npm'den gelir; bu arayüzde bundler yok, o
-// yüzden komut doğrudan çağrılıyor. İzin `capabilities/default.json`'da
-// `open`/`save` ile sınırlı: diyalog bir **yol** döndürür, o yolu okuyup
-// yazan taraf çekirdektir.
+// The plugin's JS wrapper comes from npm; this interface has no bundler, so
+// the command is called directly. The permission in `capabilities/default.json`
+// is limited to `open`/`save`: the dialog returns a **path**, and the side that
+// reads and writes that path is the core.
 
 async function pickFile(options) {
   return filePath(await call("plugin:dialog|open", { options }));
@@ -270,24 +280,24 @@ async function pickSavePath(options) {
   return filePath(await call("plugin:dialog|save", { options }));
 }
 
-/// Diyalog masaüstünde düz yol döndürür; mobil `content://` biçimini
-/// nesne olarak verir. İkisini de kabul etmek bir varsayımı kaldırıyor.
+/// On the desktop the dialog returns a plain path; mobile gives the
+/// `content://` form as an object. Accepting both removes an assumption.
 function filePath(picked) {
   if (!picked) return null;
   if (typeof picked === "string") return picked;
   return picked.path ?? null;
 }
 
-// ————————————————————————————————————— bölümler
+// ————————————————————————————————————— sections
 //
-// Sıra kenar çubuğunun sırası ve `Ctrl`+sayı kısayolu bu sıradan gelir
-// (`ui_contract.rs` ikisinin aynı kümeyi adlandırdığını denetliyor). Yeni bir
-// bölüm buraya, kenar çubuğunda bir gruba ve `ON_OPEN`'a eklenir.
+// The order is the sidebar's order, and the `Ctrl`+number shortcut comes from
+// this order (`ui_contract.rs` checks that the two name the same set). A new
+// section is added here, to a group in the sidebar and to `ON_OPEN`.
 
 const PANELS = ["now", "library", "stats", "sleeve", "import", "providers", "plugins", "theme", "diag"];
 
-// Bölüm açılınca yapılan iş. Hepsi yerel okuma: ağa çıkan hiçbir şey burada
-// yok — katalog yalnızca düğmeyle okunur (D-071).
+// The work done when a section opens. All of it is local reading: nothing
+// here goes online — the catalog is only read with the button (D-071).
 const ON_OPEN = {
   stats: () => {
     if (!stats.loaded) runStats(null);
@@ -326,8 +336,8 @@ function openPanel(name, { instant = false } = {}) {
     }
     content.scrollTop = scrollByPanel.get(name) ?? 0;
     updateScrollEdge();
-    // Listede aşağıdaki bölüm aşağıdan gelir: hareket nereye gidildiğini
-    // söylesin.
+    // A section lower in the list comes from below: the motion should say where
+    // we are going.
     const section = document.getElementById(`panel-${name}`);
     const direction = PANELS.indexOf(name) > PANELS.indexOf(previous) ? 1 : -1;
     if (!instant) {
@@ -337,8 +347,8 @@ function openPanel(name, { instant = false } = {}) {
   ON_OPEN[name]?.();
 }
 
-/// Seçim göstergesini seçili sekmenin altına götürür. Hızlı art arda
-/// seçimlerde yay devralınır: gösterge yolun ortasından döner.
+/// Moves the selection indicator under the selected tab. On quick successive
+/// selections the spring is taken over: the indicator turns around halfway.
 function movePill(instant) {
   const pill = $("navPill");
   const active = document.querySelector(`.nav[data-panel="${currentPanel}"]`);
@@ -353,15 +363,16 @@ function movePill(instant) {
 }
 
 for (const button of document.querySelectorAll(".nav")) {
-  // Seçim fare indiği an: bırakmayı beklemek tepkiyi geciktirir (masaüstü
-  // kenar çubukları da böyle). `click` klavye ve dokunma için.
+  // Selection happens the moment the mouse goes down: waiting for the release
+  // delays the response (desktop sidebars behave like this too). `click` is
+  // for the keyboard and touch.
   button.addEventListener("pointerdown", (event) => {
     if (event.button === 0 && event.pointerType !== "touch") openPanel(button.dataset.panel);
   });
   button.addEventListener("click", () => openPanel(button.dataset.panel));
 }
 
-// "başlarken" kartındaki kısayollar.
+// The shortcuts on the "getting started" card.
 for (const button of document.querySelectorAll(".go")) {
   button.addEventListener("click", () => {
     const target = button.dataset.go;
@@ -376,7 +387,7 @@ for (const button of document.querySelectorAll(".go")) {
   });
 }
 
-// Kaydırma kenarı: içerik üst çubuğun altına girince gölge belirir.
+// The scroll edge: a shadow appears when content slides under the top bar.
 function updateScrollEdge() {
   $("mainColumn").classList.toggle("scrolled", content.scrollTop > 2);
 }
@@ -388,10 +399,11 @@ window.addEventListener("resize", () => {
   pluginTabs.placeThumb(true);
 });
 
-// ————————————————————————————————————— parçalı denetim
+// ————————————————————————————————————— segmented control
 
-/// Parçalı denetim: başparmak seçilen parçanın altına yayla kayar. Aynı
-/// yapı hem seçenek (`radiogroup`) hem sekme (`tablist`) için.
+/// A segmented control: the thumb slides under the selected segment on a
+/// spring. The same structure for both options (`radiogroup`) and tabs
+/// (`tablist`).
 function segmented(container, onSelect) {
   const thumb = container.querySelector(".segmented-thumb");
   const segments = [...container.querySelectorAll(".segment")];
@@ -400,7 +412,7 @@ function segmented(container, onSelect) {
 
   function placeThumb(instant = false) {
     const current = selected();
-    if (!current.offsetWidth) return; // gizli bölümde ölçü yok; açılınca yerleşir
+    if (!current.offsetWidth) return; // no size in a hidden section; it settles when opened
     thumb.style.width = `${current.offsetWidth}px`;
     const x = current.offsetLeft - 2;
     if (instant) place(thumb, { x });
@@ -435,23 +447,23 @@ function segmented(container, onSelect) {
   return { select, placeThumb, selected };
 }
 
-// ————————————————————————————————————— oynatıcı
+// ————————————————————————————————————— player
 //
-// Burada tutulan **her şey çekirdekten geldi**. Kendi başına bir doğruluk
-// kaynağı değil, son cevabın kopyası: kuyruk, çapa.
+// **Everything** kept here came from the core. It is not a source of truth of
+// its own but a copy of the last answer: the queue, the anchor.
 
 let anchor = null;
 let queue = { items: [], position: 0, repeat: "off", shuffle: false };
 
-// Tekrar kipinin kullanıcıya gösterilen adı (D-036). Anahtarlar tel
-// değerleridir; bilinmeyen bir kip gelirse ham değer gösterilir — sessizce
-// "kapalı" demek, yanlış durumu doğru gibi göstermek olurdu (K9).
-const REPEAT_LABELS = { off: "kapalı", all: "tümü", one: "tek parça" };
+// The user-facing name of the repeat mode (D-036). The keys are wire values;
+// if an unknown mode arrives, the raw value is shown — silently saying "off"
+// would show a wrong state as right (K9).
+const REPEAT_LABELS = { off: "off", all: "all", one: "one track" };
 const STATE_TEXT = {
-  playing: "çalıyor",
-  paused: "duraklatıldı",
-  buffering: "arabelleğe alınıyor",
-  stopped: "durdu",
+  playing: "playing",
+  paused: "paused",
+  buffering: "buffering",
+  stopped: "stopped",
 };
 
 function renderQueue(view) {
@@ -461,10 +473,10 @@ function renderQueue(view) {
   $("queue").replaceChildren(...view.items.map((item, index) => queueRow(item, index, index === view.position)));
   const empty = view.items.length === 0;
   $("queueBlock").hidden = empty;
-  // Kuyruk boşken yerini "başlarken" kartı alıyor: boş bir liste kullanıcıya
-  // ne yapacağını söylemez.
+  // While the queue is empty the "getting started" card takes its place: an
+  // empty list does not tell the user what to do.
   $("onboarding").hidden = !empty;
-  $("queueCount").textContent = empty ? "" : `· ${fmt(view.items.length)} parça`;
+  $("queueCount").textContent = empty ? "" : `· ${countOf(view.items.length, "track")}`;
 
   const shuffle = $("btnShuffle");
   shuffle.classList.toggle("on", view.shuffle);
@@ -473,9 +485,9 @@ function renderQueue(view) {
   repeat.classList.toggle("on", view.repeat !== "off");
   repeat.setAttribute("aria-pressed", String(view.repeat !== "off"));
   $("repeatIcon").setAttribute("href", view.repeat === "one" ? iconRef("repeat-one") : iconRef("repeat"));
-  // Tel değeri (`off`/`all`/`one`) İngilizce kalır — JSON anahtarıdır.
-  // Kullanıcının okuduğu metin Türkçedir (D-036).
-  repeat.title = `tekrar: ${REPEAT_LABELS[view.repeat] ?? view.repeat}`;
+  // The wire value (`off`/`all`/`one`) stays as it is — it is a JSON key.
+  // The text the user reads is separate (D-036).
+  repeat.title = `repeat: ${REPEAT_LABELS[view.repeat] ?? view.repeat}`;
 
   renderNow();
 }
@@ -490,8 +502,9 @@ function queueRow(item, index, current) {
       {
         class: "q-row",
         type: "button",
-        title: current ? "çalan parça" : "bu parçaya geç",
-        // Kuyrukta atlama kararı çekirdekte: burada yalnızca indeks iletiliyor.
+        title: current ? "now playing" : "skip to this track",
+        // The decision to jump in the queue is in the core: only the index is passed
+        // on here.
         onclick: async () => {
           renderQueue(await call("jump_to", { index }));
           renderAnchor(await call("anchor"));
@@ -504,14 +517,14 @@ function queueRow(item, index, current) {
         h("span", { class: "q-title", text: track.title }),
         h("span", { class: "q-artist", text: track.artist }),
       ),
-      h("span", { class: "chip", text: item.id.provider, title: "sağlayıcı" }),
+      h("span", { class: "chip", text: item.id.provider, title: "provider" }),
       h("span", { class: "q-time", text: track.duration_ms ? clock(track.duration_ms) : "" }),
     ),
   );
 }
 
-/// Çalan parça: oynatıcı çubuğu ve "çalan" bölümünün kartı. Parça kuyruktan,
-/// durum çapadan geliyor.
+/// The playing track: the player bar and the "now playing" section's card.
+/// The track comes from the queue, the state from the anchor.
 function renderNow() {
   const current = queue.items[queue.position];
   const track = current?.track;
@@ -538,16 +551,17 @@ function renderAnchor(next) {
   $("nowState").className = `state ${state}`;
   const running = state === "playing" || state === "buffering";
   $("playPauseIcon").setAttribute("href", running ? iconRef("pause") : iconRef("play"));
-  $("btnPlayPause").setAttribute("aria-label", running ? "duraklat" : "çal");
+  $("btnPlayPause").setAttribute("aria-label", running ? "pause" : "play");
   $("player").classList.toggle("buffering", state === "buffering");
   renderNow();
   startDrawing();
 }
 
-// Çizim döngüsü: pozisyon **çekirdeğe sorulmuyor**, çapadan tahmin ediliyor
-// (D-015). IPC duraksarsa çubuk yürümeye devam eder. Döngü yalnızca çalarken
-// koşar ve DOM'a yalnızca görünen bir şey değişince yazar: duraklamış bir
-// parça her karede aynı metni yeniden yazdırmasın.
+// The drawing loop: the position **is not asked of the core**, it is
+// estimated from the anchor (D-015). If IPC stalls, the bar keeps moving. The
+// loop only runs while playing and only writes to the DOM when something
+// visible changes: a paused track must not rewrite the same text every
+// frame.
 const barFill = $("barFill");
 const timeLabel = $("timeLabel");
 let drawing = 0;
@@ -581,7 +595,7 @@ function startDrawing() {
 }
 
 async function togglePause() {
-  // Kuyruk boşsa çalınacak bir şey yok: düğme ne yapılacağını gösteriyor.
+  // With an empty queue there is nothing to play: the button shows what to do.
   if (queue.items.length === 0) {
     $("playQuery").focus();
     return;
@@ -614,7 +628,7 @@ $("btnRepeat").addEventListener("click", async () => {
   renderQueue(await call("set_repeat", { mode: nextMode }));
 });
 
-// ————————————————————————————————————— çal
+// ————————————————————————————————————— play
 
 function playQuery() {
   return $("playQuery").value.trim();
@@ -634,8 +648,8 @@ $("playForm").addEventListener("submit", (event) => {
   if (query) startPlay(query, false);
 });
 
-// Shift+Enter: eşleşen her parçayı kuyruğa al. Kuyruğu **çekirdek** kuruyor;
-// burada sonuçlar toplanıp gönderilmiyor.
+// Shift+Enter: queue every matching track. The **core** builds the queue;
+// the results are not collected and sent from here.
 $("playQuery").addEventListener("keydown", (event) => {
   if (event.key !== "Enter" || !event.shiftKey) return;
   event.preventDefault();
@@ -649,10 +663,10 @@ $("btnPlayAll").addEventListener("click", () => {
   else $("playQuery").focus();
 });
 
-// ————————————————————————————————————— klavye
+// ————————————————————————————————————— keyboard
 //
-// Kısayol bir yazı kutusundayken çalışmaz: boşluk tuşu arama kutusuna
-// boşluk yazmalı, oynatmayı durdurmamalı.
+// Shortcuts do not work while in a text box: the space key must type a space
+// in the search box, not stop playback.
 
 function isTyping(target) {
   if (!target) return false;
@@ -664,7 +678,8 @@ document.addEventListener("keydown", (event) => {
   if (event.defaultPrevented) return;
   if (helpOpen) {
     if (event.key === "Escape") closeHelp();
-    // Pencere açıkken odak onun içinde kalır; arkadaki kısayollar susar.
+    // While the sheet is open, focus stays inside it; the shortcuts behind it go
+    // quiet.
     if (event.key === "Tab") {
       event.preventDefault();
       $("btnHelpClose").focus();
@@ -675,8 +690,8 @@ document.addEventListener("keydown", (event) => {
     dismissAllToasts();
     return;
   }
-  // Ctrl+1…9: bölümler. Yazı kutusundayken de çalışır — bir sayı tuşuna
-  // Ctrl ile basmak yazmak değildir.
+  // Ctrl+1…9: sections. It works in a text box too — pressing a number key
+  // with Ctrl is not typing.
   if ((event.ctrlKey || event.metaKey) && !event.altKey) {
     const slot = Number(event.key);
     if (Number.isInteger(slot) && slot >= 1 && slot <= PANELS.length) {
@@ -705,10 +720,11 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-// ————————————————————————————————————— kısayol penceresi
+// ————————————————————————————————————— shortcut sheet
 //
-// Açan düğmeden büyür, kapanırken ona döner (uzamsal süreklilik). Kapanırken
-// yeniden açılırsa yarıda döner; bitmesini beklemez.
+// It grows out of the button that opens it and goes back to it when closing
+// (spatial continuity). If reopened while closing, it turns around halfway;
+// it does not wait to finish.
 
 let helpOpen = false;
 let helpReturnFocus = null;
@@ -743,11 +759,11 @@ function closeHelp() {
 $("btnHelp").addEventListener("click", openHelp);
 $("btnHelpClose").addEventListener("click", closeHelp);
 $("helpSheet").addEventListener("pointerdown", (event) => {
-  // Kutunun dışına basmak kapatır; içine basmak kapatmaz.
+  // Clicking outside the box closes it; clicking inside does not.
   if (event.target === $("helpSheet")) closeHelp();
 });
 
-// ————————————————————————————————————— kütüphane araması
+// ————————————————————————————————————— library search
 
 const SEARCH_LIMIT = 100;
 let lastSearchQuery = null;
@@ -758,7 +774,8 @@ $("searchForm").addEventListener("submit", async (event) => {
   if (!query) return;
   const report = await call("search", { query, limit: SEARCH_LIMIT, minMs: null });
   if (!report) return;
-  // Son sorgunun kopyası — "hepsini kuyruğa al" sorguyu tekrar yazdırmasın.
+  // A copy of the last query — so "queue them all" does not make the user type
+  // the query again.
   lastSearchQuery = report.query;
 
   const hits = report.hits;
@@ -781,7 +798,7 @@ $("searchForm").addEventListener("submit", async (event) => {
               "button",
               { type: "button", onclick: () => startPlay(`${hit.artist} ${hit.title}`, false) },
               icon("play"),
-              "çal",
+              "play",
             ),
           ),
         ),
@@ -793,24 +810,24 @@ $("searchForm").addEventListener("submit", async (event) => {
   $("btnSearchPlayAll").hidden = !found;
   $("searchCount").hidden = !found;
   $("searchCount").textContent =
-    hits.length >= SEARCH_LIMIT ? `ilk ${fmt(SEARCH_LIMIT)} sonuç` : `${fmt(hits.length)} sonuç`;
+    hits.length >= SEARCH_LIMIT ? `first ${fmt(SEARCH_LIMIT)} results` : `${countOf(hits.length, "result")}`;
   $("searchEmpty").hidden = found;
-  $("searchEmpty").textContent = `"${report.query}" için kayıt bulunamadı.`;
+  $("searchEmpty").textContent = `no records found for "${report.query}".`;
 });
 
-// Kuyruğu **çekirdek** kuruyor: burada sonuç satırları toplanıp gönderilmiyor,
-// aynı sorgu `all` bayrağıyla tekrar veriliyor. Eşleştirmenin ikinci bir
-// kopyası arayüzde yaşamasın.
+// The **core** builds the queue: the result rows are not collected and sent
+// from here; the same query is given again with the `all` flag. A second
+// copy of the matching must not live in the interface.
 $("btnSearchPlayAll").addEventListener("click", () => {
   if (lastSearchQuery) startPlay(lastSearchQuery, true);
 });
 
-// ————————————————————————————————————— istatistik
+// ————————————————————————————————————— statistics
 //
-// Yıl çubukları hem grafik hem seçici: bir çubuğa basmak o yıla daraltır,
-// seçili çubuğa yeniden basmak tüm zamanlara döner. Çubukların kendisi tüm
-// zamanlar raporunun `by_year`'ından; yıl seçilince değişmezler, yalnızca
-// hangisinin seçili olduğu değişir.
+// The year bars are both a chart and a selector: clicking a bar narrows to
+// that year, clicking the selected bar again goes back to all time. The bars
+// themselves come from the all-time report's `by_year`; they do not change
+// when a year is selected, only which one is selected does.
 
 const stats = { loaded: false, year: null, years: [] };
 
@@ -842,28 +859,29 @@ function figure(big, label, muted = false) {
 }
 
 function renderStats(r) {
-  const scope = r.query.year ?? "tüm zamanlar";
-  $("statsScope").textContent = `${scope} · kapsamda ${fmt(r.listens_in_scope)} kayıt`;
+  const scope = r.query.year ?? "all time";
+  $("statsScope").textContent = `${scope} · ${countOf(r.listens_in_scope, "record")} in scope`;
   $("statsSummary").replaceChildren(
-    figure(fmt(r.plays), "sayılan dinleme"),
-    figure(hoursText(r.total_ms_played), "toplam süre"),
-    figure(fmt(r.unique_artists), "sanatçı"),
-    figure(fmt(r.unique_tracks), "parça"),
+    figure(fmt(r.plays), "counted listens"),
+    figure(hoursText(r.total_ms_played), "total time"),
+    figure(fmt(r.unique_artists), "artists"),
+    figure(fmt(r.unique_tracks), "tracks"),
   );
-  // Kısmi başarı **her zaman** raporlanır: kaç kayıt eşiğin altında kaldı,
-  // kaçı kanonik kimliksiz, kaçı yıl dışında. Sessizce yutulmuyor (K9).
+  // Partial success is **always** reported: how many records fell below the
+  // threshold, how many have no canonical identity, how many are outside the
+  // year. Nothing is swallowed silently (K9).
   const notes = [
-    `${fmt(r.skipped_short)} kısa çalma eşiğin altında`,
-    `${fmt(r.without_canonical_id)} kayıt kanonik kimliksiz`,
+    `${countOf(r.skipped_short, "short play")} below the threshold`,
+    `${countOf(r.without_canonical_id, "record")} without a canonical identity`,
   ];
-  if (r.query.year !== null) notes.push(`${fmt(r.out_of_scope)} kayıt yıl dışında`);
+  if (r.query.year !== null) notes.push(`${countOf(r.out_of_scope, "record")} outside the year`);
   $("statsNotes").textContent = notes.join(" · ");
-  // Sıfır dinleme bir hata değil ama boş bir tablo da cevap değil: ne
-  // yapılacağı yazıyor.
+  // Zero listens is not an error, but an empty table is not an answer either:
+  // it says what to do.
   $("statsEmpty").hidden = r.plays > 0;
   $("statsLists").hidden = r.plays === 0;
 
-  renderRanking($("statsArtists"), r.top_artists, (a) => [a.artist, `${fmt(a.unique_tracks)} parça`, a.plays]);
+  renderRanking($("statsArtists"), r.top_artists, (a) => [a.artist, `${countOf(a.unique_tracks, "track")}`, a.plays]);
   renderRanking($("statsTracks"), r.top_tracks, (t) => [t.title, t.artist, t.plays]);
   renderRanking($("statsAlbums"), r.top_albums, (a) => [a.album, a.artist, a.plays]);
 }
@@ -905,7 +923,7 @@ function renderYears() {
           class: "year",
           type: "button",
           dataset: { year: String(entry.year) },
-          title: `${entry.year}: ${fmt(entry.plays)} dinleme · ${durationText(entry.ms_played)}`,
+          title: `${entry.year}: ${countOf(entry.plays, "listen")} · ${durationText(entry.ms_played)}`,
           "aria-pressed": "false",
           onclick: () => runStats(stats.year === entry.year ? null : entry.year),
         },
@@ -928,11 +946,12 @@ function updateYearSelection() {
 $("btnStatsRefresh").addEventListener("click", () => runStats(stats.year));
 $("statsTop").addEventListener("change", () => runStats(stats.year));
 
-// ————————————————————————————————————— sleeve kartı (Faz 0.5)
+// ————————————————————————————————————— sleeve card (Phase 0.5)
 //
-// Kartı **çekirdek** çiziyor (`sleeve::render_svg`); burada yapılan tek şey
-// gelen SVG'yi göstermek. İkinci bir çizici arayüzde yaşasaydı kaydedilen
-// dosya ile ekrandaki kart zamanla ayrışırdı.
+// The **core** draws the card (`sleeve::render_svg`); the only thing done here
+// is showing the SVG that arrives. If a second renderer lived in the
+// interface, the saved file and the card on screen would drift apart over
+// time.
 
 const sleeve = { previewed: false, format: "square" };
 
@@ -953,9 +972,9 @@ async function previewSleeve() {
   const svg = await call("sleeve_svg", sleeveArgs());
   if (svg === undefined) return;
   sleeve.previewed = true;
-  const image = h("img", { alt: "sleeve kartı önizlemesi" });
-  // `data:` URI — CSP `img-src 'self' data:` buna izin veriyor. SVG bir
-  // resim olarak yükleniyor, belgeye karışmıyor.
+  const image = h("img", { alt: "sleeve card preview" });
+  // A `data:` URI — CSP `img-src 'self' data:` allows it. The SVG is loaded
+  // as an image; it does not mix into the document.
   image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
   $("sleevePreview").replaceChildren(image);
   $("sleevePreview").hidden = false;
@@ -972,8 +991,8 @@ $("sleeveForm").addEventListener("submit", (event) => {
 $("btnSleeveSave").addEventListener("click", async () => {
   const args = sleeveArgs();
   const path = await pickSavePath({
-    title: "sleeve kartını kaydet",
-    defaultPath: `headshell-sleeve-${args.year ?? "tum-zamanlar"}${args.story ? "-story" : ""}.png`,
+    title: "save the sleeve card",
+    defaultPath: `headshell-sleeve-${args.year ?? "all-time"}${args.story ? "-story" : ""}.png`,
     filters: [
       { name: "PNG", extensions: ["png"] },
       { name: "SVG", extensions: ["svg"] },
@@ -985,40 +1004,40 @@ $("btnSleeveSave").addEventListener("click", async () => {
   const written = response.written;
   toast(
     written
-      ? `kart yazıldı: ${written.path} · ${fmt(written.bytes)} bayt`
-      : "kart hesaplandı ama dosya yazılmadı",
+      ? `card written: ${written.path} · ${countOf(written.bytes, "byte")}`
+      : "the card was computed but no file was written",
     true,
   );
 });
 
-// ————————————————————————————————————— içe aktarma
+// ————————————————————————————————————— import
 
-// Tel değerleri (D-036); tanınmayan biçim ham adıyla gösterilir.
+// Wire values (D-036); an unrecognised format is shown by its raw name.
 const EXPORT_LABELS = {
-  spotify_extended: "Spotify genişletilmiş dinleme geçmişi",
-  spotify_account: "Spotify hesap verisi",
+  spotify_extended: "Spotify extended streaming history",
+  spotify_account: "Spotify account data",
   apple_music: "Apple Music",
   google_takeout: "Google Takeout",
 };
 
-// Atlama nedenleri tel değeri olarak geliyor (`not_music`, `missing_title`…).
-// Tanımadığımız bir neden gelirse ham değeri gösteriyoruz — yeni bir nedeni
-// sessizce yutmak, atlanan kaydı görünmez kılmak olurdu (K9).
+// Skip reasons arrive as wire values (`not_music`, `missing_title`…). If a
+// reason we do not know arrives, we show the raw value — silently swallowing
+// a new reason would make the skipped record invisible (K9).
 const SKIP_LABELS = {
-  not_music: "müzik değil",
-  missing_title: "parça adı yok",
-  missing_artist: "sanatçı adı yok",
-  bad_timestamp: "zaman damgası okunmadı",
-  bad_duration: "süre okunmadı",
+  not_music: "not music",
+  missing_title: "no track title",
+  missing_artist: "no artist name",
+  bad_timestamp: "timestamp not read",
+  bad_duration: "duration not read",
 };
 
-// Kimlik zincirinin halkaları, K6'nın sırasıyla.
+// The links of the identity chain, in K6's order.
 const CHAIN = [
   ["by_isrc", "ISRC", "m-isrc"],
   ["by_mbid", "MBID", "m-mbid"],
-  ["by_fuzzy", "bulanık", "m-fuzzy"],
-  ["by_fingerprint", "parmak izi", "m-fingerprint"],
-  ["by_local_key", "yerel anahtar", "m-local"],
+  ["by_fuzzy", "fuzzy", "m-fuzzy"],
+  ["by_fingerprint", "fingerprint", "m-fingerprint"],
+  ["by_local_key", "local key", "m-local"],
 ];
 
 $("importForm").addEventListener("submit", (event) => {
@@ -1029,9 +1048,9 @@ $("importForm").addEventListener("submit", (event) => {
 
 $("btnImportPick").addEventListener("click", async () => {
   const path = await pickFile({
-    title: "export arşivi seç",
+    title: "choose an export archive",
     multiple: false,
-    filters: [{ name: "Export arşivi", extensions: ["zip"] }],
+    filters: [{ name: "Export archive", extensions: ["zip"] }],
   });
   if (path) runImport(path);
 });
@@ -1041,44 +1060,47 @@ async function runImport(path) {
   const report = await call("import", { path });
   if (!report) return;
 
-  // Eşleştirme gibi kısmi başarı üreten işlemler **her zaman** özet döndürür:
-  // kaç kayıt geldi, kaçı ISRC ile, kaçı bulanık, kaçı eşleşmedi.
+  // Operations with partial success, like matching, **always** return a
+  // summary: how many records came, how many with ISRC, how many fuzzy, how
+  // many did not match.
   const i = report.import;
   const d = report.identity;
   const w = report.write;
   $("importSource").textContent =
-    `${i.source} · ${EXPORT_LABELS[i.export] ?? i.export} · ${fmt(i.files_matched)} dosya`;
+    `${i.source} · ${EXPORT_LABELS[i.export] ?? i.export} · ${countOf(i.files_matched, "file")}`;
   $("importSummary").replaceChildren(
-    figure(fmt(i.records_total), "ham kayıt"),
-    figure(fmt(i.listens), "dinlemeye dönüştü"),
-    figure(fmt(w.inserted), "yeni yazıldı"),
-    figure(fmt(w.duplicates), "zaten vardı", true),
-    figure(fmt(w.new_tracks), "yeni parça"),
-    figure(fmt(i.with_isrc), "ISRC taşıyan", true),
+    figure(fmt(i.records_total), "raw records"),
+    figure(fmt(i.listens), "became listens"),
+    figure(fmt(w.inserted), "newly written"),
+    figure(fmt(w.duplicates), "already there", true),
+    figure(fmt(w.new_tracks), "new tracks"),
+    figure(fmt(i.with_isrc), "carrying an ISRC", true),
   );
   renderChain(d);
 
-  // Atlananlar sebebiyle birlikte: "0 kayıt geldi" ile "geldi ama elendi"
-  // ayrı tanılardır (K9).
+  // The skipped ones with their reasons: "0 records came" and "they came but
+  // were filtered out" are separate diagnoses (K9).
   const skipped = Object.entries(i.skipped ?? {});
   const skippedLine = $("importSkipped");
   skippedLine.hidden = skipped.length === 0;
-  skippedLine.textContent = `atlanan: ${skipped.map(([why, n]) => `${SKIP_LABELS[why] ?? why} ${fmt(n)}`).join(" · ")}`;
+  skippedLine.textContent = `skipped: ${skipped.map(([why, n]) => `${SKIP_LABELS[why] ?? why} ${fmt(n)}`).join(" · ")}`;
 
   $("importResult").textContent = JSON.stringify({ import: i, identity: d, write: w }, null, 2);
   $("importReport").hidden = false;
 
-  // Geçmiş değişti: istatistik ve kart bir sonraki açılışta yeniden hesaplanır.
+  // The history changed: the statistics and the card are recomputed the next
+  // time they open.
   stats.loaded = false;
   sleeve.previewed = false;
-  toast(`içe aktarıldı · ${fmt(w.inserted)} yeni dinleme`, true);
+  toast(`imported · ${countOf(w.inserted, "new listen")}`, true);
 }
 
-/// Hangi halkanın kaç kaydı çözdüğü: oranlar parçanın bütüne oranı, bir
-/// eşik değil. "Otoriteli" sayılanı seçmek çekirdeğin işi (`ResolveSummary`).
+/// How many records each link resolved: the ratios are the part's share of the
+/// whole, not a threshold. Choosing what counts as "authoritative" is the
+/// core's job (`ResolveSummary`).
 function renderChain(summary) {
   const total = summary.total;
-  const bar = h("div", { class: "chain-bar", role: "img", "aria-label": "kimlik zinciri dağılımı" });
+  const bar = h("div", { class: "chain-bar", role: "img", "aria-label": "identity chain breakdown" });
   const legend = h("ul", { class: "chain-legend" });
   for (const [key, label, className] of CHAIN) {
     const count = summary[key] ?? 0;
@@ -1097,12 +1119,13 @@ function renderChain(summary) {
       ),
     );
   }
-  legend.append(h("li", {}, `toplam `, h("b", { text: fmt(total) })));
+  legend.append(h("li", {}, `total `, h("b", { text: fmt(total) })));
   $("importChain").replaceChildren(bar, legend);
 }
 
-// Sürükle-bırak: yol yazmak yerine arşivi pencereye bırakmak. Pencereye
-// girildiği an içe aktarma bölümü açılır ki bırakılacak yer görünsün.
+// Drag and drop: dropping the archive on the window instead of typing a
+// path. The moment the window is entered, the import section opens so the
+// place to drop it is visible.
 const dropzone = $("dropzone");
 listen("tauri://drag-enter", () => {
   openPanel("import");
@@ -1117,19 +1140,19 @@ listen("tauri://drag-drop", (event) => {
   runImport(path);
 });
 
-// ————————————————————————————————————— sağlayıcılar
+// ————————————————————————————————————— providers
 
-// Yetenek bayrakları `Capabilities` bit maskesi olarak geliyor
-// (çekirdekteki sabitlerle aynı sıra).
+// The capability flags arrive as the `Capabilities` bit mask (the same order
+// as the constants in the core).
 const CAPABILITIES = [
-  [1 << 0, "ara"],
-  [1 << 1, "gez"],
-  [1 << 2, "çal"],
-  [1 << 3, "kumanda"],
+  [1 << 0, "search"],
+  [1 << 1, "browse"],
+  [1 << 2, "play"],
+  [1 << 3, "control"],
 ];
 
-// Katalog girdisinin yetenekleri metin olarak geliyor.
-const CAPABILITY_NAMES = { search: "ara", browse: "gez", stream: "çal", control: "kumanda" };
+// A catalog entry's capabilities arrive as text.
+const CAPABILITY_NAMES = { search: "search", browse: "browse", stream: "play", control: "control" };
 
 let environment = null;
 
@@ -1161,10 +1184,10 @@ async function refreshProviders() {
           h(
             "td",
             {},
-            armedButton("sil", async () => {
+            armedButton("delete", async () => {
               const report = await call("server_remove", { name: server.id });
               if (report) {
-                toast(`${report.id} silindi · kalan: ${fmt(report.remaining)}`, true);
+                toast(`${report.id} removed · left: ${fmt(report.remaining)}`, true);
                 refreshProviders();
               }
             }),
@@ -1181,7 +1204,7 @@ function renderMusicDirs() {
   $("musicDirs").replaceChildren(
     ...(dirs.length > 0
       ? dirs.map((dir) => h("li", { text: dir }))
-      : [h("li", { class: "empty", text: "tanımlı değil" })]),
+      : [h("li", { class: "empty", text: "not set" })]),
   );
 }
 
@@ -1194,7 +1217,7 @@ function providerRow(info) {
     "tr",
     {},
     h("td", {}, h("div", { text: info.display_name }), h("div", { class: "dim mono", text: info.id })),
-    h("td", {}, h("div", { class: "caps" }, caps.length > 0 ? caps : h("span", { class: "dim", text: "yok" }))),
+    h("td", {}, h("div", { class: "caps" }, caps.length > 0 ? caps : h("span", { class: "dim", text: "none" }))),
     h("td", {}, status),
     h(
       "td",
@@ -1205,10 +1228,11 @@ function providerRow(info) {
           type: "button",
           onclick: async () => {
             const report = await call("provider_test", { name: info.id });
-            // "Bakmadım" ile "ulaşamadım" ayrı: hata uyarıda, sağlık cevabı burada.
+            // "I did not look" and "I could not reach it" are separate: the error is in
+            // the notice, the health answer is here.
             if (!report) {
               status.className = "health down";
-              status.replaceChildren(h("span", { class: "dot" }), " hata (bkz. uyarı)");
+              status.replaceChildren(h("span", { class: "dot" }), " error (see the notice)");
               return;
             }
             const health = report.health;
@@ -1217,15 +1241,15 @@ function providerRow(info) {
             status.replaceChildren(
               h("span", { class: "dot" }),
               health.reachable
-                ? ` ayakta${count === null ? "" : ` · ${fmt(count)} parça`}`
-                : ` ulaşılamıyor`,
+                ? ` up${count === null ? "" : ` · ${countOf(count, "track")}`}`
+                : ` unreachable`,
               health.reachable
                 ? null
-                : h("span", { class: "health-detail", text: ` — ${health.detail ?? "sebep bildirilmedi"}` }),
+                : h("span", { class: "health-detail", text: ` — ${health.detail ?? "no reason given"}` }),
             );
           },
         },
-        "sına",
+        "test",
       ),
     ),
   );
@@ -1237,12 +1261,12 @@ $("btnScanStale").addEventListener("click", () => scan(true));
 async function scan(onlyStale) {
   const report = await call("provider_scan", { ifStale: onlyStale });
   if (!report) return;
-  // "Değişmedi" ile "bakamadım" farklı şeyler: çekirdeğin verdiği sebep
-  // olduğu gibi gösteriliyor (K9).
+  // "Unchanged" and "I could not look" are different things: the reason the
+  // core gives is shown as it is (K9).
   toast(
     report.scanned
-      ? `tarandı · ${fmt(report.summary.indexed)} parça (${fmt(report.summary.failed)} okunamadı) · eklenen ${fmt(report.write.inserted)}, güncellenen ${fmt(report.write.updated)}, düşen ${fmt(report.write.removed)} — ${report.reason}`
-      : `tarama atlandı — ${report.reason}`,
+      ? `scanned · ${countOf(report.summary.indexed, "track")} (${fmt(report.summary.failed)} unreadable) · added ${fmt(report.write.inserted)}, updated ${fmt(report.write.updated)}, dropped ${fmt(report.write.removed)} — ${report.reason}`
+      : `scan skipped — ${report.reason}`,
     true,
   );
   refreshProviders();
@@ -1261,24 +1285,25 @@ $("serverForm").addEventListener("submit", async (event) => {
     name: name || null,
     verify: $("serverVerify").checked,
   });
-  // Parola formda kalmasın — başarısız denemede de.
+  // The password must not stay in the form — after a failed attempt either.
   $("serverPassword").value = "";
   $("serverApiKey").value = "";
   if (!report) return;
   const notes = report.notes.length > 0 ? ` · ${report.notes.join(" · ")}` : "";
-  toast(`${report.server.id} eklendi${report.verified ? " (doğrulandı)" : " (doğrulanmadı)"}${notes}`, true);
+  toast(`${report.server.id} added${report.verified ? " (verified)" : " (not verified)"}${notes}`, true);
   refreshProviders();
 });
 
-/// Geri alınamaz bir eylemin düğmesi: ilk basış yalnızca sorar, ikincisi
-/// yapar. Tarayıcının `confirm`'ü yerine düğmenin kendisi — webview'ler onu
-/// tutarlı göstermiyor ve diyalog izni yalnızca dosya seçimine açık.
+/// The button of an irreversible action: the first click only asks, the
+/// second does it. The button itself instead of the browser's `confirm` —
+/// webviews do not show that consistently, and the dialog permission is only
+/// open to file picking.
 function armedButton(label, action) {
   const button = h("button", { type: "button", class: "danger", text: label });
   let armed = null;
   button.addEventListener("click", async () => {
     if (!armed) {
-      button.textContent = `emin misiniz? ${label}`;
+      button.textContent = `really ${label}?`;
       armed = setTimeout(() => {
         armed = null;
         button.textContent = label;
@@ -1293,18 +1318,19 @@ function armedButton(label, action) {
   return button;
 }
 
-// ————————————————————————————————————— eklentiler (Faz 2 yüzeyi)
+// ————————————————————————————————————— plugins (the Phase 2 surface)
 //
-// Üç şey **ayrı ayrı** gösteriliyor ve hiçbiri diğerini bastırmıyor: manifest
-// sorunu, motorun kurması gereken eserler (D-055) ve onay durumu (D-040).
-// Hangi düğmenin öne çıkacağı bir görünüm kararı; eklentinin çalışıp
-// çalışamayacağına çekirdek karar veriyor (`PluginEntry::is_loadable`).
+// Three things are shown **separately**, and none of them suppresses the
+// others: a manifest problem, the artifacts the engine must install (D-055)
+// and the consent state (D-040). Which button stands out is a presentation
+// decision; whether the plugin can run is decided by the core
+// (`PluginEntry::is_loadable`).
 
 const CONSENT = {
-  approved: ["onaylı", "chip chip-ok"],
-  not_asked: ["onay bekliyor", "chip chip-warn"],
-  needs_approval: ["yeni izin istiyor", "chip chip-warn"],
-  disabled: ["kapalı", "chip"],
+  approved: ["approved", "chip chip-ok"],
+  not_asked: ["awaiting consent", "chip chip-warn"],
+  needs_approval: ["asks for new permissions", "chip chip-warn"],
+  disabled: ["disabled", "chip"],
 };
 
 const pluginTabs = segmented(document.querySelector("#panel-plugins .segmented"), (tab) => {
@@ -1322,11 +1348,12 @@ async function refreshPlugins() {
 
     const s = list.summary;
     $("pluginSummary").textContent =
-      `${fmt(s.discovered)} eklenti · ${fmt(s.ready)} hazır · ${fmt(s.needs_install)} kurulum bekliyor · ` +
-      `${fmt(s.awaiting_approval)} onay bekliyor · ${fmt(s.disabled)} kapalı · ` +
-      `${fmt(s.incompatible)} sürüm uyumsuz · ${fmt(s.broken)} bozuk`;
-    // Olmayan bir korumaya güven verilmez, var olanın sınırı da söylenir:
-    // iki not listeyle birlikte duruyor ve biri her zaman görünüyor.
+      `${countOf(s.discovered, "plugin")} · ${fmt(s.ready)} ready · ${fmt(s.needs_install)} awaiting install · ` +
+      `${fmt(s.awaiting_approval)} awaiting consent · ${fmt(s.disabled)} disabled · ` +
+      `${fmt(s.incompatible)} incompatible · ${fmt(s.broken)} broken`;
+    // No trust is given to a protection that does not exist, and the limit of
+    // the one that does is said: two notes sit with the list and one of them is
+    // always visible.
     $("pluginEnforce").hidden = list.permissions_enforced;
     $("pluginEnforced").hidden = !list.permissions_enforced;
     updatePluginBadge(s);
@@ -1334,14 +1361,14 @@ async function refreshPlugins() {
   if (pluginTabs.selected().id === "tabSecrets") refreshSecrets();
 }
 
-/// Kenar çubuğunda, kullanıcıdan bir şey bekleyen eklenti sayısı: onay ya da
-/// kurulum. Sayılar çekirdeğin özetinden.
+/// In the sidebar, the number of plugins waiting for something from the
+/// user: consent or installing. The numbers come from the core's summary.
 function updatePluginBadge(summary) {
   const waiting = summary.awaiting_approval + summary.needs_install;
   const badge = $("navPluginBadge");
   badge.hidden = waiting === 0;
   badge.textContent = String(waiting);
-  badge.title = `${waiting} eklenti sizi bekliyor`;
+  badge.title = waiting === 1 ? "1 plugin is waiting for you" : `${fmt(waiting)} plugins are waiting for you`;
 }
 
 function pluginCard(entry) {
@@ -1362,57 +1389,59 @@ function pluginCard(entry) {
 
   const card = h("li", { class: "plugin" }, head);
 
-  // Manifest okunamadıysa sebebi burada durur — düğmelerin çalışmama sebebi
-  // görünmeden kalmasın (K9).
+  // If the manifest could not be read, the reason stays here — so the reason
+  // the buttons do not work does not stay out of sight (K9).
   if (entry.problem) card.append(h("p", { class: "plugin-problem", text: entry.problem }));
 
   if (consent === "needs_approval") {
     card.append(
-      h("p", { class: "perms" }, h("b", { text: "yeni istediği ağ: " }), (entry.consent.extra?.net ?? []).join(", ") || "—"),
+      h("p", { class: "perms" }, h("b", { text: "newly requested network: " }), (entry.consent.extra?.net ?? []).join(", ") || "—"),
     );
   }
   const net = entry.permissions?.net ?? [];
   card.append(
-    h("p", { class: "perms" }, h("b", { text: "ağ: " }), net.length > 0 ? net.join(", ") : "istemiyor"),
+    h("p", { class: "perms" }, h("b", { text: "network: " }), net.length > 0 ? net.join(", ") : "none requested"),
   );
 
-  // Motorun indireceği eserler ayrı satırda (D-055): indirmeyi eklenti değil
-  // motor yapıyor, o yüzden eklentinin izin listesine karışmıyor.
+  // The artifacts the engine will download go on a separate line (D-055): the
+  // engine does the downloading, not the plugin, so they do not mix with the
+  // plugin's permission list.
   for (const requirement of entry.requires ?? []) {
     card.append(
       h(
         "p",
         { class: "plugin-need" },
-        h("b", { text: "motor: " }),
+        h("b", { text: "engine: " }),
         `${requirement.name} ${requirement.version} (${requirement.platform}) — ${requirementText(requirement.state)}`,
       ),
     );
   }
 
   const actions = h("div", { class: "actions" });
-  // Kurulum yalnızca kurulumla düzelecek bir eksik varsa: platformu
-  // desteklenmeyen bir eser için "kur" boşa bir düğme olurdu.
+  // Install only if something is missing that installing will fix: for an
+  // artifact whose platform is not supported, "install" would be a pointless
+  // button.
   const installable = (entry.requires ?? []).some(
     (requirement) => requirement.state === "Missing" || requirement.state?.Corrupt,
   );
   if (consent === "not_asked" || consent === "needs_approval") {
-    actions.append(pluginButton("onayla", "plugin_approve", entry.name, true));
+    actions.append(pluginButton("approve", "plugin_approve", entry.name, true));
   }
-  if (installable) actions.append(pluginButton("araçları kur", "plugin_install", entry.name, true));
-  if (consent === "disabled") actions.append(pluginButton("aç", "plugin_enable", entry.name, true));
-  if (consent === "approved") actions.append(pluginButton("kapat", "plugin_disable", entry.name));
+  if (installable) actions.append(pluginButton("install the tools", "plugin_install", entry.name, true));
+  if (consent === "disabled") actions.append(pluginButton("enable", "plugin_enable", entry.name, true));
+  if (consent === "approved") actions.append(pluginButton("disable", "plugin_disable", entry.name));
   actions.append(h("span", { class: "spacer" }));
   if (consent && consent !== "not_asked") {
-    actions.append(pluginButton("onayı unut", "plugin_forget", entry.name));
+    actions.append(pluginButton("forget consent", "plugin_forget", entry.name));
   }
   actions.append(
-    // Kaldırma geri alınamaz (dizin `state/` ile birlikte gider).
-    armedButton("kaldır", async () => {
+    // Removing cannot be undone (the directory goes along with `state/`).
+    armedButton("remove", async () => {
       const report = await call("plugin_remove", { name: entry.name });
       if (!report) return;
-      const kept = report.kept_secrets.length ? ` · kalan sırlar: ${report.kept_secrets.join(", ")}` : "";
+      const kept = report.kept_secrets.length ? ` · secrets left: ${report.kept_secrets.join(", ")}` : "";
       toast(
-        `${report.name} kaldırıldı · onay ${report.consent_forgotten ? "unutuldu" : "kaydı yoktu"}${kept}`,
+        `${report.name} removed · consent ${report.consent_forgotten ? "forgotten" : "had no record"}${kept}`,
         true,
       );
       refreshPlugins();
@@ -1422,22 +1451,23 @@ function pluginCard(entry) {
   return card;
 }
 
-/// Eser durumu dıştan etiketli geliyor: `"Missing"` ya da
+/// The artifact state arrives externally tagged: `"Missing"` or
 /// `{ Installed: { path } }` / `{ Corrupt: { expected, found } }` /
 /// `{ Unsupported: { platform, available } }`.
 function requirementText(state) {
-  if (state === "Missing") return "kurulmamış";
+  if (state === "Missing") return "not installed";
   if (typeof state === "object" && state !== null) {
-    if (state.Installed) return `kurulu · ${state.Installed.path}`;
+    if (state.Installed) return `installed · ${state.Installed.path}`;
     if (state.Corrupt) {
-      return `karma tutmuyor (beklenen ${short(state.Corrupt.expected)}, bulunan ${short(state.Corrupt.found)})`;
+      return `hash mismatch (expected ${short(state.Corrupt.expected)}, found ${short(state.Corrupt.found)})`;
     }
-    // Kurulum bunu düzeltmez; "kur" düğmesi bu yüzden gösterilmiyor.
+    // Installing does not fix this; that is why the "install" button is not
+    // shown.
     if (state.Unsupported) {
-      return `bu platform (${state.Unsupported.platform}) için yayın yok · beyan edilenler: ${state.Unsupported.available.join(", ")}`;
+      return `no release for this platform (${state.Unsupported.platform}) · declared: ${state.Unsupported.available.join(", ")}`;
     }
   }
-  // Bilinmeyen bir durum sessizce "iyi" sayılmaz.
+  // An unknown state is not silently counted as "fine".
   return JSON.stringify(state);
 }
 
@@ -1454,8 +1484,8 @@ function pluginButton(label, command, name, primary = false) {
       onclick: async () => {
         const report = await call(command, { name });
         if (!report) return;
-        // Kurulum raporunun şekli onay raporundan farklı: ikisi de kendi
-        // alanlarıyla özetleniyor, ortak bir "sonuç" tipi uydurulmuyor.
+        // The install report's shape differs from the consent report's: each is
+        // summarised with its own fields; no common "result" type is made up.
         toast(report.action ? consentText(report) : installText(name, report), true);
         refreshPlugins();
       },
@@ -1464,12 +1494,13 @@ function pluginButton(label, command, name, primary = false) {
   );
 }
 
-// Onay komutunun adı tel değeri (D-036); tanınmayan ad ham gösterilir.
+// The name of the consent command is a wire value (D-036); an unrecognised
+// name is shown raw.
 const ACTION_LABELS = {
-  approve: "onaylandı",
-  disable: "kapatıldı",
-  enable: "açıldı",
-  forget: "onay unutuldu",
+  approve: "approved",
+  disable: "disabled",
+  enable: "enabled",
+  forget: "consent forgotten",
 };
 
 function consentText(report) {
@@ -1478,27 +1509,28 @@ function consentText(report) {
 }
 
 function installText(name, report) {
-  const origin = report.fetched ? `katalogdan ${report.fetched.version} indirildi` : "araçlar";
-  const tools = report.ready ? "hazır" : "eksik kaldı";
+  const origin = report.fetched ? `downloaded ${report.fetched.version} from the catalog` : "tools";
+  const tools = report.ready ? "ready" : "still incomplete";
   const consent = CONSENT[report.consent?.state]?.[0] ?? report.consent?.state ?? "—";
-  return `${name}: ${origin} · ${fmt(report.declared)} eser, ${tools} · ${consent}`;
+  return `${name}: ${origin} · ${countOf(report.declared, "artifact")}, ${tools} · ${consent}`;
 }
 
 $("btnPluginReload").addEventListener("click", refreshPlugins);
 
-// ————————————————————————————————————— katalog (D-071)
+// ————————————————————————————————————— catalog (D-071)
 //
-// Katalog **yalnızca düğmeyle** okunur: panel açılınca ağa çıkılmaz ("bir
-// export'u içe aktarmak kimseyi sessizce ağa bağlamaz"ın arayüzdeki hâli).
-// Durum ve sebep çekirdekten geliyor; burada yalnızca yazılıyor.
+// The catalog is read **only with the button**: opening the panel does not go
+// online (the interface's version of "importing an export never silently
+// connects anyone to the network"). The state and the reason come from the
+// core; they are only written out here.
 
 const INSTALL = {
   not_installed: [null, null],
-  current: ["kurulu · güncel", "chip chip-ok"],
-  update_available: ["güncelleme var", "chip chip-info"],
-  manual: ["elle kurulmuş", "chip"],
-  modified: ["yerelde değiştirilmiş", "chip chip-warn"],
-  unreadable: ["köken kaydı okunamadı", "chip chip-err"],
+  current: ["installed · up to date", "chip chip-ok"],
+  update_available: ["update available", "chip chip-info"],
+  manual: ["installed by hand", "chip"],
+  modified: ["changed locally", "chip chip-warn"],
+  unreadable: ["origin record unreadable", "chip chip-err"],
 };
 
 async function refreshCatalog() {
@@ -1507,19 +1539,19 @@ async function refreshCatalog() {
   $("catalogList").replaceChildren(...report.plugins.map((plugin) => catalogCard(plugin, report.platform)));
   const s = report.summary;
   $("catalogSummary").textContent =
-    `${fmt(s.listed)} eklenti · ${fmt(s.installable)} kurulabilir · ${fmt(s.installed)} kurulu · ` +
-    `${fmt(s.updates)} güncelleme · ${fmt(s.problems)} kurulamaz`;
+    `${countOf(s.listed, "plugin")} · ${fmt(s.installable)} installable · ${fmt(s.installed)} installed · ` +
+    `${countOf(s.updates, "update")} · ${fmt(s.problems)} cannot be installed`;
   const delisted = $("catalogDelisted");
   delisted.hidden = report.delisted.length === 0;
   delisted.textContent = report.delisted.length
-    ? `Katalogdan çekilmiş ama bu makinede kurulu: ${report.delisted.join(", ")}. ` +
-      "Kaldırmak için kurulu sekmesinde \"kaldır\"."
+    ? `Pulled from the catalog but installed on this machine: ${report.delisted.join(", ")}. ` +
+      "To remove them, use \"remove\" on the installed tab."
     : "";
 }
 
 function catalogCard(plugin, platform) {
   const state = plugin.installed?.state;
-  const [stateText, stateClass] = plugin.problem ? ["kurulamaz", "chip chip-err"] : (INSTALL[state] ?? [state, "chip"]);
+  const [stateText, stateClass] = plugin.problem ? ["cannot be installed", "chip chip-err"] : (INSTALL[state] ?? [state, "chip"]);
   const card = h(
     "li",
     { class: "plugin" },
@@ -1533,26 +1565,27 @@ function catalogCard(plugin, platform) {
   );
 
   if (plugin.description) card.append(h("p", { class: "plugin-desc", text: plugin.description }));
-  // Kurulamayan girdi gizlenmiyor: kullanıcı aradığını neden kuramadığını görsün (K9).
+  // An entry that cannot be installed is not hidden: the user should see why
+  // they cannot install what they were looking for (K9).
   if (plugin.problem) card.append(h("p", { class: "plugin-problem", text: plugin.problem }));
   const detail = installDetail(plugin.installed);
   if (detail) card.append(h("p", { class: "plugin-need", text: detail }));
 
   if (!plugin.problem) {
     const caps = (plugin.capabilities ?? []).map((cap) => CAPABILITY_NAMES[cap] ?? cap);
-    if (caps.length > 0) card.append(h("p", { class: "perms" }, h("b", { text: "yapabildiği: " }), caps.join(" · ")));
+    if (caps.length > 0) card.append(h("p", { class: "perms" }, h("b", { text: "can do: " }), caps.join(" · ")));
     const net = plugin.permissions?.net ?? [];
-    card.append(h("p", { class: "perms" }, h("b", { text: "ağ: " }), net.length > 0 ? net.join(", ") : "istemiyor"));
+    card.append(h("p", { class: "perms" }, h("b", { text: "network: " }), net.length > 0 ? net.join(", ") : "none requested"));
     for (const requirement of plugin.requires ?? []) {
       const here = requirement.assets?.[platform];
       card.append(
         h(
           "p",
           { class: "plugin-need" },
-          h("b", { text: "motor: " }),
+          h("b", { text: "engine: " }),
           here
             ? `${requirement.name} ${requirement.version} (${platform})`
-            : `${requirement.name} ${requirement.version} — bu platform (${platform}) için yayın yok`,
+            : `${requirement.name} ${requirement.version} — no release for this platform (${platform})`,
         ),
       );
     }
@@ -1560,10 +1593,10 @@ function catalogCard(plugin, platform) {
 
   const actions = h("div", { class: "actions" });
   if (!plugin.problem && state === "not_installed") {
-    actions.append(catalogButton("kur", "plugin_install", { name: plugin.name }));
+    actions.append(catalogButton("install", "plugin_install", { name: plugin.name }));
   }
   if (!plugin.problem && state === "update_available") {
-    actions.append(catalogButton("güncelle", "plugin_update", { name: plugin.name }));
+    actions.append(catalogButton("update", "plugin_update", { name: plugin.name }));
   }
   if (actions.childElementCount) card.append(actions);
   return card;
@@ -1572,13 +1605,13 @@ function catalogCard(plugin, platform) {
 function installDetail(installed) {
   switch (installed?.state) {
     case "update_available":
-      return `kurulu ${installed.installed} → katalogda ${installed.available}`;
+      return `installed ${installed.installed} → ${installed.available} in the catalog`;
     case "modified":
-      return `kurulu ${installed.version}; elle değiştirilen dosyalar: ${installed.files.join(", ")} — güncelleme üstüne yazmaz`;
+      return `installed ${installed.version}; files changed by hand: ${installed.files.join(", ")} — an update does not overwrite them`;
     case "manual":
-      return "elle kurulmuş (köken kaydı yok) — katalog ona dokunmaz";
+      return "installed by hand (no origin record) — the catalog does not touch it";
     case "unreadable":
-      return `köken kaydı okunamadı: ${installed.detail}`;
+      return `origin record unreadable: ${installed.detail}`;
     default:
       return null;
   }
@@ -1595,7 +1628,8 @@ function catalogButton(label, command, args) {
         if (!report) return;
         toast(command === "plugin_update" ? updateText(report) : installText(args.name, report), true);
         refreshCatalog();
-        // Kurulan eklenti onay bekler (D-040): sonucun yaşadığı yere geçilir.
+        // An installed plugin awaits consent (D-040): switch to where the result
+        // lives.
         if (command === "plugin_install") pluginTabs.select($("tabInstalled"));
         refreshPlugins();
       },
@@ -1611,30 +1645,30 @@ function updateText(report) {
     let text;
     switch (outcome.state) {
       case "updated":
-        text = `güncellendi ${outcome.from} → ${outcome.to}`;
-        // Araç değişikliği onay istemez (D-071) ama söylenir.
+        text = `updated ${outcome.from} → ${outcome.to}`;
+        // A tool change does not ask for consent (D-071), but it is said.
         for (const change of outcome.tools_changed) {
-          text += ` · araç değişti: ${change.name} ${change.from ?? "—"} → ${change.to ?? "—"}`;
+          text += ` · tool changed: ${change.name} ${change.from ?? "—"} → ${change.to ?? "—"}`;
         }
         if (outcome.permissions_added.net.length) {
-          text += ` · yeni izin istiyor: ${outcome.permissions_added.net.join(", ")}`;
+          text += ` · asks for new permissions: ${outcome.permissions_added.net.join(", ")}`;
         }
         break;
       case "current":
-        text = `güncel (${outcome.version})`;
+        text = `up to date (${outcome.version})`;
         break;
       case "skipped":
-        text = `atlandı — ${outcome.reason}`;
+        text = `skipped — ${outcome.reason}`;
         break;
       default:
-        text = `GÜNCELLENEMEDİ — ${outcome.error ?? JSON.stringify(outcome)}`;
+        text = `COULD NOT UPDATE — ${outcome.error ?? JSON.stringify(outcome)}`;
     }
     return `${plugin.name}: ${text}`;
   });
   const total =
-    `${fmt(s.checked)} eklenti: ${fmt(s.updated)} güncellendi, ${fmt(s.current)} güncel, ` +
-    `${fmt(s.skipped)} atlandı, ${fmt(s.failed)} başarısız`;
-  return lines.length ? `${lines.join(" · ")} (${total})` : "katalogdan kurulmuş eklenti yok";
+    `${countOf(s.checked, "plugin")}: ${fmt(s.updated)} updated, ${fmt(s.current)} up to date, ` +
+    `${fmt(s.skipped)} skipped, ${fmt(s.failed)} failed`;
+  return lines.length ? `${lines.join(" · ")} (${total})` : "no plugins installed from the catalog";
 }
 
 $("btnCatalogLoad").addEventListener("click", refreshCatalog);
@@ -1645,17 +1679,17 @@ $("btnCatalogUpdateAll").addEventListener("click", async () => {
   if (report.summary.failed === 0) {
     toast(text, true);
   } else {
-    // Düşen bir güncelleme hata olarak kalır; aşama düşenin kendi
-    // zincirinden okunuyor (K9), uydurulmuyor.
+    // A failed update stays an error; the stage is read from the failed one's
+    // own chain (K9), not made up.
     const failed = report.plugins.find((plugin) => plugin.outcome.state === "failed");
-    const stage = failed?.outcome.error?.match(/ADIM: (\S+)/)?.[1];
+    const stage = failed?.outcome.error?.match(/STEP: (\S+)/)?.[1];
     toast({ stage, chain: text });
   }
   refreshPlugins();
   refreshCatalog();
 });
 
-// ————————————————————————————————————— sırlar (D-042)
+// ————————————————————————————————————— secrets (D-042)
 
 async function refreshSecrets() {
   const list = await call("secrets");
@@ -1672,10 +1706,10 @@ async function refreshSecrets() {
           h(
             "td",
             {},
-            armedButton("sil", async () => {
+            armedButton("delete", async () => {
               const report = await call("secret_remove", { namespace, key });
               if (!report) return;
-              toast(`${report.namespace}/${report.key} ${report.changed ? "silindi" : "zaten yoktu"}`, true);
+              toast(`${report.namespace}/${report.key} ${report.changed ? "removed" : "was not there"}`, true);
               refreshSecrets();
             }),
           ),
@@ -1695,26 +1729,27 @@ $("secretForm").addEventListener("submit", async (event) => {
     key: $("secretKey").value.trim(),
     value: $("secretValue").value,
   });
-  // Değer formda kalmasın — başarısız denemede de.
+  // The value must not stay in the form — after a failed attempt either.
   $("secretValue").value = "";
   if (!report) return;
-  toast(`${report.namespace}/${report.key} kaydedildi`, true);
+  toast(`${report.namespace}/${report.key} saved`, true);
   refreshSecrets();
 });
 
-// ————————————————————————————————————— tema (§3.3)
+// ————————————————————————————————————— theme (§3.3)
 //
-// Uygulama tek satır: tema deposunun verdiği CSS'i `<style>` etiketine
-// yazmak. Doğrulama, `api` sürüm kontrolü, "genişletilmiş mi" kararı ve
-// önizleme renkleri Rust tarafında (`src/theme.rs`); burada yalnızca
-// gösteriliyor.
+// Applying is one line: writing the CSS the theme store gives into the
+// `<style>` tag. Validation, the `api` version check, the "is it extended"
+// decision and the preview colours are on the Rust side (`src/theme.rs`);
+// they are only shown here.
 
 function applyTheme(theme) {
   if (!theme) return;
-  // `textContent` — `innerHTML` değil: tema CSS'i metin olarak konuyor,
-  // içindeki `</style>` bir etiket olarak yorumlanmıyor.
+  // `textContent` — not `innerHTML`: the theme CSS goes in as text, and a
+  // `</style>` inside it is not interpreted as a tag.
   $("themeCss").textContent = theme.css ?? "";
-  // Süre token'ı değişmiş olabilir: yaylar yeni temadan okusun.
+  // The duration token may have changed: the springs should read it from the
+  // new theme.
   invalidateMotion();
   if (theme.problem) toast({ stage: "CONFIG_LOAD", chain: theme.problem });
 }
@@ -1723,11 +1758,11 @@ async function refreshThemes() {
   const list = await call("themes_list");
   if (!list) return;
 
-  $("themeDir").textContent = [`tema dizini    : ${list.dir}`, `sözleşme sürümü: api ${list.api}`].join("\n");
+  $("themeDir").textContent = [`theme directory : ${list.dir}`, `contract version: api ${list.api}`].join("\n");
 
-  // Varsayılan da bir seçenek: temadan geri dönüş yolu görünür olmalı.
+  // The default is an option too: the way back from a theme must be visible.
   $("themeList").replaceChildren(
-    themeCard({ id: null, name: "varsayılan", author: "headshell", builtin: true, preview: list.default_preview }, list.active),
+    themeCard({ id: null, name: "default", author: "headshell", builtin: true, preview: list.default_preview }, list.active),
     ...list.themes.map((theme) => themeCard(theme, list.active)),
   );
 
@@ -1747,13 +1782,13 @@ function themeCard(theme, activeId) {
   card.append(name);
 
   const foot = h("div", { class: "theme-foot" });
-  if (theme.builtin && theme.id) foot.append(h("span", { class: "tag", text: "yerleşik" }));
-  // D-038: reddetmiyoruz, işaretliyoruz. Etiket kullanıcıya "bu tema
-  // sözleşmenin dışına çıkıyor, garantisi yok" diyor.
-  if (theme.extended) foot.append(h("span", { class: "tag warn", text: "genişletilmiş · garantisi yok" }));
+  if (theme.builtin && theme.id) foot.append(h("span", { class: "tag", text: "built in" }));
+  // D-038: we do not reject, we flag. The label tells the user "this theme goes
+  // outside the contract, there is no guarantee".
+  if (theme.extended) foot.append(h("span", { class: "tag warn", text: "extended · no guarantee" }));
   foot.append(
     current
-      ? h("button", { type: "button", disabled: true }, icon("check"), "kullanılıyor")
+      ? h("button", { type: "button", disabled: true }, icon("check"), "in use")
       : h(
           "button",
           {
@@ -1765,15 +1800,16 @@ function themeCard(theme, activeId) {
               refreshThemes();
             },
           },
-          "uygula",
+          "apply",
         ),
   );
   card.append(foot);
   return card;
 }
 
-/// Temanın kendi token'larıyla çizilmiş küçük bir pencere. Değerler ham CSS
-/// metni; geçersiz bir değer örneği boş bırakır, kartı düşürmez.
+/// A small window drawn with the theme's own tokens. The values are raw CSS
+/// text; an invalid value leaves the swatch empty, it does not break the
+/// card.
 function swatch(preview) {
   const box = h("div", { class: "swatch", "aria-hidden": "true" });
   const parts = [
@@ -1793,16 +1829,16 @@ function swatch(preview) {
 
 $("btnThemeReload").addEventListener("click", refreshThemes);
 
-// ————————————————————————————————————— tanı
+// ————————————————————————————————————— diagnostics
 
 async function refreshDiag() {
-  // Metin çekirdeğin kendi `render()`'ı — `headshell diag`'ın bastığının
-  // aynısı (`diag_text`). JSON hâli katlı duruyor.
+  // The text is the core's own `render()` — the same thing `headshell diag`
+  // prints (`diag_text`). The JSON form stays folded.
   const text = await call("diag_text");
   const block = $("diagResult");
   block.hidden = text === undefined;
   $("btnDiagCopy").hidden = !text;
-  block.textContent = text ?? "henüz çalıştırılmış bir komut yok";
+  block.textContent = text ?? "no command has been run yet";
   const report = await call("diag");
   $("diagRawFold").hidden = !report;
   $("diagRaw").textContent = report ? JSON.stringify(report, null, 2) : "";
@@ -1810,19 +1846,20 @@ async function refreshDiag() {
 
 $("btnDiag").addEventListener("click", refreshDiag);
 
-// Tanı raporu kopyalanmak için var; elle seçtirmek onu kullanılmaz kılıyordu.
+// The diagnostics report exists to be copied; making the user select it by
+// hand made it unusable.
 $("btnDiagCopy").addEventListener("click", () => {
   const text = $("diagResult").textContent;
-  if (text) copyText(text, "tanı raporu panoya kopyalandı");
+  if (text) copyText(text, "diagnostics report copied to the clipboard");
 });
 
-// Kimlik zincirinin halkaları — tel değerleri (D-036).
+// The links of the identity chain — wire values (D-036).
 const METHOD_LABELS = {
   isrc: "ISRC",
-  mbid: "MBID (üstveri araması)",
-  fuzzy: "bulanık eşleşme",
-  fingerprint: "ses parmak izi",
-  local_key: "yerel anahtar — otoritesiz",
+  mbid: "MBID (metadata lookup)",
+  fuzzy: "fuzzy match",
+  fingerprint: "audio fingerprint",
+  local_key: "local key — no authority",
 };
 
 $("resolveForm").addEventListener("submit", async (event) => {
@@ -1833,21 +1870,21 @@ $("resolveForm").addEventListener("submit", async (event) => {
   if (!report) return;
   const res = report.resolution;
   const facts = [
-    ["sorgu", `${report.artist} - ${report.title}`],
-    ["kimlik", res.canonical_id],
-    ["yöntem", `${METHOD_LABELS[res.method] ?? res.method} · güven ${percent.format(res.confidence)}`],
+    ["query", `${report.artist} - ${report.title}`],
+    ["identity", res.canonical_id],
+    ["method", `${METHOD_LABELS[res.method] ?? res.method} · confidence ${percent.format(res.confidence)}`],
     [
-      "eşleşme",
+      "match",
       res.matched
         ? `${res.matched.artist} - ${res.matched.title} [${res.matched.mbid}]`
-        : "yok (üstveri kaynağı aday döndürmedi)",
+        : "none (the metadata source returned no candidates)",
     ],
   ];
   if (res.matched?.disambiguation) facts.push(["not", res.matched.disambiguation]);
-  // Beraberlik sessiz kalmamalı: seçim eşdeğerler arasından yapıldıysa
-  // kullanıcı bunu görmeli, yoksa keyfi bir seçimi kesin bir cevap sanır.
+  // A tie must not stay silent: if the choice was made among equals, the user
+  // must see it, otherwise they take an arbitrary choice for a definite answer.
   if (res.tied_candidates > 1) {
-    facts.push(["belirsiz", `${fmt(res.tied_candidates)} aday aynı skoru aldı; seçim belirlenimci ama keyfi`]);
+    facts.push(["tied", `${countOf(res.tied_candidates, "candidate")} got the same score; the choice is deterministic but arbitrary`]);
   }
   $("resolveFacts").replaceChildren(
     ...facts.flatMap(([label, value]) => [h("dt", { text: label }), h("dd", { text: value })]),
@@ -1856,11 +1893,11 @@ $("resolveForm").addEventListener("submit", async (event) => {
   $("resolveCard").hidden = false;
 });
 
-// ————————————————————————————————————— olaylar
+// ————————————————————————————————————— events
 //
-// Olaylar yalnızca **bir şey değiştiğinde** geliyor (D-033). Aradaki
-// sessizlikte pozisyon çapadan tahmin ediliyor; bu yüzden "hâlâ çalıyor"
-// diye bir mesaj yok.
+// Events only arrive **when something changes** (D-033). In the silence in
+// between, the position is estimated from the anchor; that is why there is no
+// "still playing" message.
 
 listen("headshell://tick", async (event) => {
   const report = event.payload;
@@ -1869,17 +1906,18 @@ listen("headshell://tick", async (event) => {
     renderQueue(await call("queue"));
   }
   if (report.listens_recorded > 0) {
-    // Geçmiş büyüdü: istatistik ve kart bir sonraki açılışta yeniden
-    // hesaplanır. Ekrandaki sayılar bayat kalıp yeni dinlemeyi yok saymasın.
+    // The history grew: the statistics and the card are recomputed the next time
+    // they open. The numbers on screen must not go stale and ignore the new
+    // listen.
     stats.loaded = false;
     sleeve.previewed = false;
   }
   if (report.store_error) {
-    // Kayıtlar atılmadı, elde tutuldu ve yeniden denenecek — ama kullanıcı
-    // bilsin (K9).
+    // The records were not thrown away; they were held back and will be retried —
+    // but the user should know (K9).
     toast({
       stage: "LIBRARY_WRITE",
-      chain: `ADIM: LIBRARY_WRITE\n  → ${report.store_error}\n  → ${report.listens_pending} dinleme elde tutuldu, sonraki turda yeniden denenecek`,
+      chain: `STEP: LIBRARY_WRITE\n  → ${report.store_error}\n  → ${countOf(report.listens_pending, "listen")} held back, to be retried on the next round`,
     });
   }
 });
@@ -1893,11 +1931,11 @@ listen("headshell://busy", (event) => {
   field.hidden = !label;
 });
 
-// ————————————————————————————————————— açılış
+// ————————————————————————————————————— startup
 
 (async function boot() {
-  // Tema **ilk iş**: varsayılan renklerle bir kare çizip sonra temaya
-  // atlamak, her açılışta bir yanıp sönme olurdu.
+  // The theme **first**: drawing a frame with the default colours and then
+  // jumping to the theme would flash on every start.
   applyTheme(await call("theme_active"));
   watchMotionPreference();
   openPanel("now", { instant: true });
@@ -1906,16 +1944,16 @@ listen("headshell://busy", (event) => {
   if (environment) {
     $("appVersion").textContent = `headshell ${environment.version}`;
     $("envBlock").textContent = [
-      `sürüm       : ${environment.version}`,
-      `veri dizini : ${environment.data_dir}`,
-      `veritabanı  : ${environment.database}`,
-      `müzik       : ${environment.music_dirs.length > 0 ? environment.music_dirs.join(", ") : "tanımlı değil (HEADSHELL_MUSIC_DIRS)"}`,
+      `version     : ${environment.version}`,
+      `data dir    : ${environment.data_dir}`,
+      `database    : ${environment.database}`,
+      `music       : ${environment.music_dirs.length > 0 ? environment.music_dirs.join(", ") : "not set (HEADSHELL_MUSIC_DIRS)"}`,
     ].join("\n");
   }
   renderQueue(await call("queue"));
   renderAnchor(await call("anchor"));
 
-  // Kenar çubuğundaki eklenti rozeti: diskten okunur, ağa çıkılmaz.
+  // The plugin badge in the sidebar: read from disk, nothing goes online.
   const plugins = await call("plugins");
   if (plugins) updatePluginBadge(plugins.summary);
 })();

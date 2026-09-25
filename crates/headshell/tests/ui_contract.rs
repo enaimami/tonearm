@@ -1,29 +1,30 @@
-//! Arayüzün kendi içindeki bağları ve §3.3 sınıf sözleşmesi.
+//! The interface's internal links and the §3.3 class contract.
 //!
-//! Webview'de tip denetimi yok: `$("playQuery")` yazım hatasıyla `null`
-//! döner, `null.addEventListener` açılışta patlar ve **pencere boş kalır**.
-//! Derleyici bunu görmez, `cargo test` de görmezdi — bu dosya görüyor.
+//! The webview has no type checking: `$("playQuery")` returns `null` on a
+//! typo, `null.addEventListener` blows up at startup and **the window stays
+//! empty**. The compiler does not see this, and neither would `cargo test` —
+//! this file does.
 //!
-//! Üç bağ kilitleniyor:
+//! Three links are locked down:
 //!
-//! 1. Betiklerin (`app.js`, `motion.js`) aradığı her `id` `index.html`'de
-//!    tanımlı.
-//! 2. Kenar çubuğundaki her `data-panel` bir `panel-*` bölümüne denk geliyor
-//!    ve `app.js`'teki `PANELS` listesiyle aynı kümede — kısayol
-//!    (`Ctrl`+`1`…`9`) yanlış panele gitmesin.
-//! 3. D-037/2'nin **sınıf sözleşmesi**: temaların hedeflediği sınıf adları
-//!    hâlâ ulaşılabilir — bir seçici olarak ya da işaretlemede. README
-//!    "habersiz yeniden adlandırılmazlar" diyor; "habersiz" kelimesini bu
-//!    test tutuyor.
+//! 1. Every `id` the scripts (`app.js`, `motion.js`) look up is defined in
+//!    `index.html`.
+//! 2. Every `data-panel` in the sidebar lands on a `panel-*` section and is in
+//!    the same set as the `PANELS` list in `app.js` — so the shortcut
+//!    (`Ctrl`+`1`…`9`) does not go to the wrong panel.
+//! 3. D-037/2's **class contract**: the class names themes target are still
+//!    reachable — as a selector or in the markup. The README says "they are
+//!    not renamed without notice"; this test holds the "without notice".
 //!
-//! Ayrıca ölü token denetimi: `:root`'ta ilan edilen her `--headshell-*` token'ının
-//! en az bir kullanımı olmalı. Kullanılmayan bir token, tema yazarına
-//! tutulmayan bir söz verir.
+//! Also a dead token check: every `--headshell-*` token declared in `:root`
+//! must be used at least once. An unused token makes the theme author a
+//! promise that is not kept.
 //!
-//! D-072 üç sessiz kırılma daha ekledi: tanımsız bir simge boş bir kare
-//! çizer, satır içi `style` niteliğini CSP (`style-src 'self'`) hiçbir şey
-//! demeden yok sayar, ve katalogdan gelen bir açıklama (D-071, uzak veri)
-//! işaretleme olarak yazılırsa IPC'ye erişen bir sayfaya betik sokabilir.
+//! D-072 added three more silent breakages: an undefined icon draws an empty
+//! square, CSP (`style-src 'self'`) ignores an inline `style` attribute
+//! without saying anything, and a description from the catalog (D-071,
+//! remote data) written as markup could smuggle a script into a page with
+//! IPC access.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -35,11 +36,11 @@ const STYLE_CSS: &str = include_str!("../ui/style.css");
 const STARTUP_ERROR_HTML: &str = include_str!("../ui/startup-error.html");
 const STARTUP_ERROR_JS: &str = include_str!("../ui/startup-error.js");
 
-/// `api: 1`'in taahhüt ettiği sınıf adları.
+/// The class names `api: 1` promises.
 ///
-/// README bu listeyi "`.topbar`, `.player`, `.queue`, `.toast`, …" diye
-/// örnekliyordu; üç nokta test edilemez, bu liste edilir. Bir adı buradan
-/// çıkarmak `THEME_API`'yi artırmayı gerektirir (bkz. `src/theme.rs`).
+/// The README gave this list as an example: "`.topbar`, `.player`, `.queue`,
+/// `.toast`, …"; an ellipsis cannot be tested, this list can. Removing a name
+/// from here requires bumping `THEME_API` (see `src/theme.rs`).
 const CONTRACT_CLASSES: &[&str] = &[
     "topbar",
     "brand",
@@ -90,9 +91,8 @@ const CONTRACT_CLASSES: &[&str] = &[
     "info",
 ];
 
-/// `haystack` içinde `needle`'dan sonra gelen her eşleşmenin kapanışa kadarki
-/// parçasını toplar. Küçük bir tarayıcı: bu iş için bağımlılık eklemeye
-/// değmez.
+/// Collects, for every match after `needle` in `haystack`, the piece up to
+/// the closing character. A small scanner: not worth adding a dependency for.
 fn collect_between(haystack: &str, open: &str, close: char) -> Vec<String> {
     let mut found = Vec::new();
     let mut rest = haystack;
@@ -115,7 +115,11 @@ fn every_id_the_script_looks_up_exists_in_the_page() {
         .iter()
         .flat_map(|script| collect_between(script, "$(\"", '"'))
         .collect();
-    assert!(wanted.len() > 30, "id taraması boş kaldı: {}", wanted.len());
+    assert!(
+        wanted.len() > 30,
+        "the id scan came up empty: {}",
+        wanted.len()
+    );
 
     let mut missing: Vec<String> = wanted
         .into_iter()
@@ -126,7 +130,7 @@ fn every_id_the_script_looks_up_exists_in_the_page() {
 
     assert!(
         missing.is_empty(),
-        "app.js var olmayan id arıyor (açılışta pencere boş kalır): {missing:?}"
+        "app.js looks up ids that do not exist (the window stays empty at startup): {missing:?}"
     );
 }
 
@@ -137,10 +141,10 @@ fn the_sidebar_the_sections_and_the_shortcut_list_name_the_same_panels() {
 
     let list = APP_JS
         .split_once("const PANELS = [")
-        .expect("app.js içinde PANELS listesi yok")
+        .expect("no PANELS list in app.js")
         .1
         .split_once(']')
-        .expect("PANELS listesi kapanmıyor")
+        .expect("the PANELS list does not close")
         .0;
     let mut from_script: Vec<String> = collect_between(list, "\"", '"')
         .into_iter()
@@ -150,22 +154,22 @@ fn the_sidebar_the_sections_and_the_shortcut_list_name_the_same_panels() {
 
     assert_eq!(
         from_sidebar, from_script,
-        "kenar çubuğu ile Ctrl+sayı kısayolunun panel listesi ayrışmış"
+        "the panel lists of the sidebar and the Ctrl+number shortcut have parted ways"
     );
 
     for panel in &from_sidebar {
         assert!(
             INDEX_HTML.contains(&format!("id=\"panel-{panel}\"")),
-            "`{panel}` sekmesinin bölümü yok — sekme boş bir içeriğe götürür"
+            "the `{panel}` tab has no section — the tab leads to empty content"
         );
     }
 }
 
 #[test]
 fn the_class_names_themes_target_are_still_reachable() {
-    // Ölçüt "CSS'te bir kuralı var mı" **değil**: `.panel` hiçbir kural
-    // taşımıyor ama DOM'da duruyor ve bir tema onu hedefleyebiliyor. Sözleşme
-    // sınıfın *ulaşılabilir* olmasıdır — ya bir seçici olarak, ya işaretlemede.
+    // The criterion is **not** "does it have a rule in CSS": `.panel` carries no
+    // rule, but it is in the DOM and a theme can target it. The contract is that
+    // the class is *reachable* — either as a selector or in the markup.
     let markup_classes = class_attribute_words(INDEX_HTML);
     let mut missing = Vec::new();
     for class in CONTRACT_CLASSES {
@@ -177,11 +181,11 @@ fn the_class_names_themes_target_are_still_reachable() {
     }
     assert!(
         missing.is_empty(),
-        "sözleşmedeki sınıf artık ne seçici ne işaretleme — temalar bunları hedefliyor (D-037/2): {missing:?}"
+        "a class in the contract is no longer a selector or in the markup — themes target these (D-037/2): {missing:?}"
     );
 }
 
-/// `index.html`'deki bütün `class="…"` niteliklerinin kelimeleri.
+/// The words of every `class="…"` attribute in `index.html`.
 fn class_attribute_words(html: &str) -> Vec<String> {
     collect_between(html, "class=\"", '"')
         .iter()
@@ -194,8 +198,8 @@ fn class_attribute_words(html: &str) -> Vec<String> {
         .collect()
 }
 
-/// `.foo` seçicisi var mı. `.foobar` yanlış eşleşmesin diye sınıf adından
-/// sonraki karakter bir ad karakteri olmamalı.
+/// Is there a `.foo` selector. So `.foobar` does not match by mistake, the
+/// character after the class name must not be a name character.
 fn defines_class(css: &str, class: &str) -> bool {
     let needle = format!(".{class}");
     let mut rest = css;
@@ -210,29 +214,30 @@ fn defines_class(css: &str, class: &str) -> bool {
     false
 }
 
-/// `hidden` özniteliği bir sınıf kuralına yenilmemeli.
+/// The `hidden` attribute must not lose to a class rule.
 ///
-/// Bu test bir hatadan sonra yazıldı: `.sheet { display: flex }` UA
-/// stylesheet'in `[hidden] { display: none }` kuralını eziyordu ve kısayol
-/// penceresi her açılışta açık geliyordu. İşaretleme doğruydu, JavaScript
-/// doğruydu, yalnızca özgüllük yanlıştı — davranış testi de görmezdi.
+/// This test was written after a bug: `.sheet { display: flex }` overrode the
+/// UA stylesheet's `[hidden] { display: none }` rule and the shortcut sheet
+/// came up open on every start. The markup was right, the JavaScript was
+/// right, only the specificity was wrong — a behaviour test would not have
+/// seen it either.
 #[test]
 fn the_hidden_attribute_outranks_layout_rules() {
-    // Satır başındaki eşleşme aranıyor: bu dosyanın kendi yorumu da
-    // `[hidden] { display: none }` metnini içeriyor ve testin ilk hâli tam
-    // ona takılmıştı.
+    // A match at the start of a line is looked for: this file's own comment
+    // also contains the text `[hidden] { display: none }`, and the first
+    // version of the test tripped over exactly that.
     let rule = STYLE_CSS
         .split_once("\n[hidden] {")
         .expect(
-            "`[hidden]` kuralı yok: `display` tanımlayan bir sınıf `hidden` öğeyi ekranda bırakır",
+            "no `[hidden]` rule: a class that defines `display` leaves a `hidden` element on screen",
         )
         .1
         .split_once('}')
-        .expect("`[hidden]` kuralı kapanmıyor")
+        .expect("the `[hidden]` rule does not close")
         .0;
     assert!(
         rule.contains("display: none") && rule.contains("!important"),
-        "`[hidden]` kuralı var ama sınıfları yenmiyor: {rule:?}"
+        "there is a `[hidden]` rule but it does not beat the classes: {rule:?}"
     );
 }
 
@@ -240,10 +245,10 @@ fn the_hidden_attribute_outranks_layout_rules() {
 fn no_declared_token_is_dead() {
     let root = STYLE_CSS
         .split_once(":root {")
-        .expect("style.css içinde :root bloğu yok")
+        .expect("no :root block in style.css")
         .1
         .split_once("\n}")
-        .expect(":root bloğu kapanmıyor")
+        .expect("the :root block does not close")
         .0;
 
     let declared: Vec<&str> = root
@@ -252,48 +257,51 @@ fn no_declared_token_is_dead() {
         .filter_map(|line| line.split(':').next())
         .map(str::trim)
         .collect();
-    assert!(declared.len() >= 14, "token seti küçüldü: {declared:?}");
+    assert!(
+        declared.len() >= 14,
+        "the token set has shrunk: {declared:?}"
+    );
 
     for token in declared {
         let uses = STYLE_CSS.matches(&format!("var(--{token})")).count();
         assert!(
             uses > 0,
-            "`--{token}` ilan edilmiş ama hiç kullanılmıyor — tema yazarına tutulmayan bir söz"
+            "`--{token}` is declared but never used — a promise to the theme author that is not kept"
         );
     }
 }
 
-/// Açılış hatası penceresi (D-070) kendi başına bir sayfa: betiğin yazdığı
-/// öğe orada olmalı, yoksa kullanıcı yine **boş** bir pencere görür — bu
-/// sayfanın var oluş sebebinin tam tersi.
+/// The startup error window (D-070) is a page of its own: the element the
+/// script writes to must be there, otherwise the user sees an **empty** window
+/// again — the exact opposite of why this page exists.
 #[test]
 fn the_startup_error_page_has_the_element_its_script_writes_to() {
     assert!(
         STARTUP_ERROR_HTML.contains("src=\"startup-error.js\""),
-        "sayfa betiğini yüklemiyor"
+        "the page does not load its script"
     );
     let ids = collect_between(STARTUP_ERROR_JS, "getElementById(\"", '"');
-    assert!(!ids.is_empty(), "betik hiçbir öğeye yazmıyor");
+    assert!(!ids.is_empty(), "the script writes to no element");
     for id in ids {
         assert!(
             STARTUP_ERROR_HTML.contains(&format!("id=\"{id}\"")),
-            "startup-error.js `{id}` arıyor, sayfada yok"
+            "startup-error.js looks up `{id}`, which is not on the page"
         );
     }
-    // Metin işaretleme olarak yorumlanmamalı: hata zinciri kullanıcı verisi
-    // (dosya yolu, sunucu mesajı) taşıyabilir.
+    // The text must not be interpreted as markup: the error chain can carry
+    // user data (a file path, a server message).
     let code_uses_inner_html = STARTUP_ERROR_JS
         .lines()
         .filter(|line| !line.trim_start().starts_with("//"))
         .any(|line| line.contains("innerHTML"));
     assert!(
         !code_uses_inner_html,
-        "hata metni `innerHTML` ile yazılıyor"
+        "the error text is written with `innerHTML`"
     );
 }
 
-/// Yorum satırlarını atlar: bir yorum bir yasağı ya da bir kalıbı **anlatabilir**
-/// ("`innerHTML` değil") ve bu, kodun onu kullandığı anlamına gelmez.
+/// Skips comment lines: a comment can **describe** a prohibition or a pattern
+/// ("not `innerHTML`"), and that does not mean the code uses it.
 fn code_lines(source: &str) -> impl Iterator<Item = &str> {
     source.lines().filter(|line| {
         let line = line.trim_start();
@@ -301,10 +309,10 @@ fn code_lines(source: &str) -> impl Iterator<Item = &str> {
     })
 }
 
-/// Kullanılan her simge setin içinde tanımlı olmalı (D-072).
+/// Every icon used must be defined in the set (D-072).
 ///
-/// `<use href="#i-yok">` hata vermez, boş bir kare çizer: oynatma düğmesi
-/// görünmez olur ve hiçbir test, hiçbir konsol bunu söylemez.
+/// `<use href="#i-missing">` gives no error, it draws an empty square: the
+/// play button becomes invisible and no test, no console says so.
 #[test]
 fn every_icon_the_page_draws_is_in_the_sprite() {
     let mut used = collect_between(INDEX_HTML, "href=\"#i-", '"');
@@ -314,7 +322,7 @@ fn every_icon_the_page_draws_is_in_the_sprite() {
     }
     used.sort();
     used.dedup();
-    assert!(used.len() > 15, "simge taraması boş kaldı: {used:?}");
+    assert!(used.len() > 15, "the icon scan came up empty: {used:?}");
 
     let missing: Vec<&String> = used
         .iter()
@@ -322,18 +330,17 @@ fn every_icon_the_page_draws_is_in_the_sprite() {
         .collect();
     assert!(
         missing.is_empty(),
-        "setinde olmayan simge kullanılıyor (boş kare çizilir): {missing:?}"
+        "icons not in the set are used (an empty square is drawn): {missing:?}"
     );
 }
 
-/// Hiçbir betik bir dizeyi işaretleme olarak yazmaz; metin `textContent` ile
-/// gider.
+/// No script writes a string as markup; text goes through `textContent`.
 ///
-/// Arayüzün gösterdiği verinin bir kısmı bu makinede bile üretilmiyor:
-/// katalogdaki açıklamalar ve eklenti adları uzak bir indeksten geliyor
-/// (D-071). `innerHTML` ile yazılan bir açıklama, IPC'ye — yani sırlara,
-/// eklenti onayına, dosya yazmaya — erişen bir sayfaya işaretleme sokardı.
-/// Satır içi `style` niteliği de burada: CSP onu sessizce yok sayar.
+/// Part of the data the interface shows is not even produced on this machine:
+/// the descriptions and plugin names in the catalog come from a remote index
+/// (D-071). A description written with `innerHTML` would smuggle markup into a
+/// page that has IPC access — that is, to secrets, plugin consent, writing
+/// files. The inline `style` attribute is here too: CSP ignores it silently.
 #[test]
 fn no_script_writes_markup_or_inline_style() {
     const FORBIDDEN: &[&str] = &[
@@ -353,7 +360,7 @@ fn no_script_writes_markup_or_inline_style() {
             for pattern in FORBIDDEN {
                 assert!(
                     !line.contains(pattern),
-                    "{name} `{pattern}` kullanıyor: {}",
+                    "{name} uses `{pattern}`: {}",
                     line.trim()
                 );
             }
@@ -361,9 +368,10 @@ fn no_script_writes_markup_or_inline_style() {
     }
 }
 
-/// CSP `style-src 'self'` satır içi `style="…"` niteliğini uygulamaz ve
-/// bunu kimseye söylemez: öğe stilsiz kalır. Dinamik değerler (ilerleme
-/// çubuğu, tema önizlemesi) `el.style` ile yazılıyor — CSSOM, CSP'ye takılmıyor.
+/// CSP `style-src 'self'` does not apply an inline `style="…"` attribute and
+/// tells nobody: the element stays unstyled. Dynamic values (the progress
+/// bar, the theme preview) are written with `el.style` — the CSSOM does not
+/// trip over the CSP.
 #[test]
 fn the_pages_carry_no_inline_style_attribute() {
     for (name, html) in [
@@ -372,7 +380,7 @@ fn the_pages_carry_no_inline_style_attribute() {
     ] {
         assert!(
             !html.contains(" style=\""),
-            "{name} satır içi `style` niteliği taşıyor; CSP onu yok sayar"
+            "{name} carries an inline `style` attribute; CSP ignores it"
         );
     }
 }

@@ -1,36 +1,40 @@
-//! Oynatma çapası — durumun tek gösterimi (D-015).
+//! The playback anchor — the single representation of state (D-015).
 //!
-//! Tüketici (TUI, GUI, mobil, Faz 4'te oda) pozisyonu **kendisi hesaplar**:
+//! The consumer (TUI, GUI, mobile, a room in Phase 4) **computes the position
+//! itself**:
 //!
 //! ```text
 //! pos = position_ms + (now - wall_time) * rate
 //! ```
 //!
-//! Bu yüzden çekirdek saniyede yüzlerce bildirim göndermez; tüketici ne sıklıkta
-//! çizmek istiyorsa o sıklıkta çapayı okur ve aradaki zamanı kendisi doldurur.
+//! So the core does not send hundreds of notifications per second; the
+//! consumer reads the anchor as often as it wants to draw and fills in the
+//! time in between itself.
 //!
-//! **Faz 4 notu:** Odaların senkron primitifi birebir bu tiptir (PLAN 4.1).
-//! Bugün yerel oynatma için yazılıyor, yarın ağdan yayınlanacak — iki ayrı
-//! durum modeli tutulmasın diye baştan aynı şekilde tasarlandı.
+//! **Phase 4 note:** the rooms' sync primitive is exactly this type (PLAN
+//! 4.1). Today it is written for local playback, tomorrow it will be broadcast
+//! over the network — it was designed the same way from the start so there
+//! are not two separate state models.
 
 use serde::{Deserialize, Serialize};
 
 use crate::ids::CanonicalId;
 
-/// Oynatıcının kaba durumu.
+/// The player's coarse state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PlayState {
-    /// Hiçbir şey yüklü değil.
+    /// Nothing is loaded.
     Stopped,
-    /// Yüklü ve ilerliyor.
+    /// Loaded and advancing.
     Playing,
-    /// Yüklü ama duraklatılmış; pozisyon donmuş.
+    /// Loaded but paused; the position is frozen.
     Paused,
-    /// Yüklü, ilerlemiyor, veri bekliyor (ağ/disk).
+    /// Loaded, not advancing, waiting for data (network/disk).
     ///
-    /// `Paused`'dan ayrı: kullanıcı istemedi, hat bekliyor. Tüketici bunu
-    /// farklı göstermeli — sessizce "duraklatıldı" demek kullanıcıyı yanıltır.
+    /// Separate from `Paused`: the user did not ask for it, the pipeline is
+    /// waiting. The consumer should show this differently — silently saying
+    /// "paused" misleads the user.
     Buffering,
 }
 
@@ -45,7 +49,7 @@ impl PlayState {
         }
     }
 
-    /// Zaman ilerliyor mu? Yalnızca `Playing`'de.
+    /// Is time advancing? Only in `Playing`.
     #[must_use]
     pub const fn advances(self) -> bool {
         matches!(self, Self::Playing)
@@ -58,29 +62,31 @@ impl std::fmt::Display for PlayState {
     }
 }
 
-/// Oynatma durumunun tek gösterimi: bir zaman çapası.
+/// The single representation of playback state: a time anchor.
 ///
-/// `uniffi` için düz bir record — trait object, lifetime, closure yok (K7).
+/// A plain record for `uniffi` — no trait objects, lifetimes or closures
+/// (K7).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlaybackAnchor {
-    /// Çalan parçanın kanonik kimliği. `Stopped` iken `None`.
+    /// The canonical identity of the playing track. `None` while `Stopped`.
     pub track: Option<CanonicalId>,
-    /// Çapanın alındığı duvar saati.
+    /// The wall-clock time the anchor was taken at.
     pub wall_time: jiff::Timestamp,
-    /// Parça içindeki pozisyon, `wall_time` anında.
+    /// The position within the track, at `wall_time`.
     pub position_ms: u64,
-    /// Çalma hızı. `1.0` normal; `0.0` ilerlemiyor demek.
+    /// The playback rate. `1.0` is normal; `0.0` means not advancing.
     ///
-    /// Faz 4'te sürüklenme düzeltmesi bunu `1.001` gibi değerlere çekecek
-    /// (PLAN 4.4) — bugünden alan olarak var ki o gün yüzey değişmesin.
+    /// In Phase 4 drift correction will pull this to values like `1.001` (PLAN
+    /// 4.4) — the field exists from today so the surface does not change that
+    /// day.
     pub rate: f64,
     pub state: PlayState,
-    /// Parçanın toplam süresi (biliniyorsa). İlerleme çubuğu için.
+    /// The track's total duration (if known). For the progress bar.
     pub duration_ms: Option<u64>,
 }
 
 impl PlaybackAnchor {
-    /// Hiçbir şey çalmıyor.
+    /// Nothing is playing.
     #[must_use]
     pub fn stopped() -> Self {
         Self {
@@ -93,11 +99,12 @@ impl PlaybackAnchor {
         }
     }
 
-    /// Verilen an için pozisyonu hesaplar.
+    /// Computes the position for the given moment.
     ///
-    /// Tüketicinin yapacağı hesabın çekirdekteki karşılığı — GUI, TUI ve mobil
-    /// aynı formülü üç kez yazmasın diye burada duruyor (Altın Kural).
-    /// Pozisyon `duration_ms` biliniyorsa onu aşmaz.
+    /// The core's counterpart of the calculation the consumer does — it lives
+    /// here so the GUI, the TUI and mobile do not write the same formula three
+    /// times (the Golden Rule). If `duration_ms` is known the position does not
+    /// go past it.
     #[must_use]
     pub fn position_at(&self, now: jiff::Timestamp) -> u64 {
         if !self.state.advances() || self.rate <= 0.0 {
@@ -113,13 +120,13 @@ impl PlaybackAnchor {
             clippy::cast_precision_loss,
             clippy::cast_possible_truncation,
             clippy::cast_sign_loss,
-            reason = "milisaniye ölçeğinde gösterim; f64 kaybı duyulmaz"
+            reason = "shown at millisecond scale; the f64 loss is inaudible"
         )]
         let advanced = (elapsed as f64 * self.rate) as u64;
         self.clamp_to_duration(self.position_ms.saturating_add(advanced))
     }
 
-    /// Şu andaki pozisyon.
+    /// The position right now.
     #[must_use]
     pub fn position_now(&self) -> u64 {
         self.position_at(jiff::Timestamp::now())
@@ -138,7 +145,7 @@ mod tests {
     use super::*;
 
     fn at(seconds: i64) -> jiff::Timestamp {
-        jiff::Timestamp::from_second(seconds).expect("test zaman damgası")
+        jiff::Timestamp::from_second(seconds).expect("test timestamp")
     }
 
     fn anchor(state: PlayState, position_ms: u64, rate: f64) -> PlaybackAnchor {
@@ -155,30 +162,27 @@ mod tests {
     #[test]
     fn playing_advances_with_wall_clock() {
         let a = anchor(PlayState::Playing, 30_000, 1.0);
-        // Çapadan 10 saniye sonra: 30sn + 10sn.
+        // 10 seconds after the anchor: 30 s + 10 s.
         assert_eq!(a.position_at(at(1010)), 40_000);
     }
 
     #[test]
     fn paused_position_is_frozen() {
         let a = anchor(PlayState::Paused, 30_000, 0.0);
-        assert_eq!(
-            a.position_at(at(1010)),
-            30_000,
-            "duraklatılmış ilerlememeli"
-        );
+        assert_eq!(a.position_at(at(1010)), 30_000, "paused must not advance");
     }
 
     #[test]
     fn buffering_does_not_advance_either() {
-        // Buffering'de ses çıkmıyor; pozisyonun ilerlemesi kullanıcıyı yanıltır.
+        // No sound comes out while buffering; an advancing position would mislead
+        // the user.
         let a = anchor(PlayState::Buffering, 30_000, 1.0);
         assert_eq!(a.position_at(at(1010)), 30_000);
     }
 
     #[test]
     fn rate_scales_the_elapsed_time() {
-        // Faz 4 sürüklenme düzeltmesi: %10 hızlı çalarken 10sn'de 11sn ilerler.
+        // Phase 4 drift correction: playing 10% fast, it advances 11 s in 10 s.
         let a = anchor(PlayState::Playing, 0, 1.1);
         assert_eq!(a.position_at(at(1010)), 11_000);
     }
@@ -186,7 +190,7 @@ mod tests {
     #[test]
     fn position_never_exceeds_the_known_duration() {
         let a = anchor(PlayState::Playing, 230_000, 1.0);
-        // 60 saniye sonra 290sn olurdu ama parça 240sn.
+        // After 60 seconds it would be 290 s, but the track is 240 s.
         assert_eq!(a.position_at(at(1060)), 240_000);
     }
 
@@ -196,7 +200,7 @@ mod tests {
         assert_eq!(
             a.position_at(at(900)),
             30_000,
-            "geriye giden saat pozisyonu geri sarmamalı"
+            "a clock going backwards must not rewind the position"
         );
     }
 

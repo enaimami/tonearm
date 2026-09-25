@@ -1,13 +1,14 @@
-/* Gün Işığı — açık tema (PLAN §3.4 referans teması).
+/* Daylight — a light theme (the PLAN §3.4 reference theme).
  *
- * Bu tema token setinin **karşı kutbu**: temel arayüz koyu yazılmıştı, bu
- * dosya aynı sözleşmeyle açık bir arayüz üretiyor. Tek bir sınıf adı
- * hedeflenmiyor; yalnızca `:root` token'ları — yani "genişletilmiş" değil,
- * garantili yüzeyin içinde (D-038).
+ * This theme is the token set's **opposite pole**: the base interface was
+ * written dark, and this file produces a light interface with the same
+ * contract. Not a single class name is targeted; only `:root` tokens — so
+ * it is not "extended", it stays inside the guaranteed surface (D-038).
  *
- * `--headshell-color-scheme` bu tema yazılırken doğdu: token'lar yalnızca bizim
- * çizdiğimiz renkleri değiştiriyor, ama onay kutusu, imleç ve kaydırma
- * çubuğu motorun kendi çizdiği parçalar. Açık bir palette koyu kalıyorlardı.
+ * `--headshell-color-scheme` was born while this theme was written: the
+ * tokens only change the colours we draw, but checkboxes, the caret and
+ * scroll bars are parts the engine draws itself. They stayed dark on a
+ * light palette.
  */
 
 :root {

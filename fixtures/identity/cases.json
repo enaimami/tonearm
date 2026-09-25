@@ -1,11 +1,11 @@
 {
-  "description": "Kimlik çözümlemesinin etiketli doğruluk kümesi. Bu dosyanın ürettiği oran projenin en önemli metriğidir; eşleştirmeye dokunan her değişiklikten sonra ölç. Yeni bir hata sınıfı bulunca önce buraya bir vaka ekle ve testin düştüğünü gör. MBID'ler fixture değerleridir, gerçek MusicBrainz kimliği olarak kullanılamaz.",
+  "description": "The labelled accuracy set for identity resolution. The rate this file produces is the project's most important metric; measure it after every change that touches matching. When you find a new class of error, first add a case here and watch the test fail. The MBIDs are fixture values and cannot be used as real MusicBrainz ids.",
   "expectations": {
-    "expect_mbid (dolu)": "çözümleme tam olarak bu kayda bağlanmalı",
-    "expect_mbid (null)": "hiçbir otoriteye bağlanmamalı — yerel anahtara düşmeli",
-    "expect_method": "verilmişse zincirin bu halkasının çözmesi beklenir",
-    "class": "vaka sınıfı; test sınıf bazında da oran basar",
-    "radio_edit / uzun-kısa sürümler": "D-010: kanonik kimlik kayıt düzeyindedir, radio edit ayrı bir kayıttır. Süre farkı bunu kanıtlıyorsa eşleşme reddedilir; süre bilinmiyorsa zincir elindeki kanıtla en iyi tahminini bulanık güvenle verir."
+    "expect_mbid (set)": "the resolution must be tied to exactly this recording",
+    "expect_mbid (null)": "it must not be tied to any authority — it must fall back to the local key",
+    "expect_method": "if given, this link of the chain is expected to resolve it",
+    "class": "the case class; the test prints the rate per class too",
+    "radio_edit / long-short versions": "D-010: the canonical identity is at the recording level, and a radio edit is a separate recording. If the duration difference proves this, the match is refused; if the duration is unknown, the chain gives its best guess from the evidence at hand, with fuzzy confidence."
   },
   "counts": {
     "total": 72,
@@ -173,7 +173,7 @@
   "cases": [
     {
       "class": "exact",
-      "note": "birebir aynı",
+      "note": "exactly the same",
       "artist": "Radiohead",
       "title": "Creep",
       "duration_ms": 238000,
@@ -181,7 +181,7 @@
     },
     {
       "class": "case",
-      "note": "büyük/küçük harf",
+      "note": "upper/lower case",
       "artist": "RADIOHEAD",
       "title": "creep",
       "duration_ms": 238000,
@@ -189,7 +189,7 @@
     },
     {
       "class": "punctuation",
-      "note": "noktalama farkı",
+      "note": "a punctuation difference",
       "artist": "Daft Punk",
       "title": "Aerodynamic!",
       "duration_ms": 212000,
@@ -197,7 +197,7 @@
     },
     {
       "class": "punctuation",
-      "note": "sanatçı adında eğik çizgi",
+      "note": "a slash in the artist name",
       "artist": "AC/DC",
       "title": "Back in Black",
       "duration_ms": 255000,
@@ -205,7 +205,7 @@
     },
     {
       "class": "punctuation",
-      "note": "başlıktaki tire parçanın adının parçası, ek değil",
+      "note": "the dash in the title is part of the track's name, not a suffix",
       "artist": "Sault",
       "title": "9 - Reprise",
       "duration_ms": 181000,
@@ -213,7 +213,7 @@
     },
     {
       "class": "the_prefix",
-      "note": "'The' öneki yok",
+      "note": "no 'The' prefix",
       "artist": "Beatles",
       "title": "Yesterday",
       "duration_ms": 125000,
@@ -221,7 +221,7 @@
     },
     {
       "class": "the_prefix",
-      "note": "başlıktaki 'The' korunmalı",
+      "note": "the 'The' in the title must be kept",
       "artist": "Tame Impala",
       "title": "The Less I Know The Better",
       "duration_ms": 216000,
@@ -229,7 +229,7 @@
     },
     {
       "class": "typo",
-      "note": "sanatçıda harf hatası",
+      "note": "a typo in the artist",
       "artist": "Radiohed",
       "title": "Creep",
       "duration_ms": 238000,
@@ -237,7 +237,7 @@
     },
     {
       "class": "typo",
-      "note": "başlıkta harf hatası",
+      "note": "a typo in the title",
       "artist": "Radiohead",
       "title": "Creap",
       "duration_ms": 238000,
@@ -245,7 +245,7 @@
     },
     {
       "class": "disambiguation",
-      "note": "aynı sanatçının başka parçası karışmamalı",
+      "note": "another track by the same artist must not get mixed in",
       "artist": "Radiohead",
       "title": "Karma Police",
       "duration_ms": 261000,
@@ -253,7 +253,7 @@
     },
     {
       "class": "disambiguation",
-      "note": "aynı ada sahip iki sanatçıdan doğru olanı",
+      "note": "the right one of two artists with the same name",
       "artist": "Nirvana",
       "title": "Lithium",
       "duration_ms": 257000,
@@ -261,16 +261,16 @@
     },
     {
       "class": "isrc",
-      "note": "ISRC her şeyi ezer — sanatçı ve başlık kasten yanlış",
-      "artist": "yanlis",
-      "title": "yanlis",
+      "note": "the ISRC overrides everything — the artist and title are wrong on purpose",
+      "artist": "wrong",
+      "title": "wrong",
       "duration_ms": null,
       "isrc": "GBAYE9200001",
       "expect_mbid": "b1a9c0e9-d987-4042-ae91-78d6a3267d69"
     },
     {
       "class": "isrc",
-      "note": "ISRC katalogdaki kayda götürür",
+      "note": "the ISRC leads to the recording in the catalog",
       "artist": "Beyonce",
       "title": "Halo",
       "duration_ms": 261000,
@@ -279,18 +279,18 @@
     },
     {
       "class": "isrc",
-      "note": "biçimsiz ISRC yok sayılır, zincir devam eder",
+      "note": "a malformed ISRC is ignored, the chain carries on",
       "artist": "Radiohead",
       "title": "Creep",
       "duration_ms": 238000,
-      "isrc": "GEÇERSİZ",
+      "isrc": "NOT-AN-ISRC",
       "expect_mbid": "b1a9c0e9-d987-4042-ae91-78d6a3267d69"
     },
     {
       "class": "isrc",
-      "note": "katalogda olmayan ISRC yine de otoritedir — MBID değil ISRC kimliği",
-      "artist": "Bilinmeyen Sanatçı",
-      "title": "Bilinmeyen Parça",
+      "note": "an ISRC not in the catalog is still an authority — an ISRC identity, not an MBID",
+      "artist": "Unknown Artist",
+      "title": "Unknown Track",
       "duration_ms": null,
       "isrc": "TRZ012400001",
       "expect_mbid": null,
@@ -298,7 +298,7 @@
     },
     {
       "class": "edition",
-      "note": "tireli remaster eki",
+      "note": "a hyphenated remaster suffix",
       "artist": "Radiohead",
       "title": "Creep - Remastered",
       "duration_ms": 238000,
@@ -306,7 +306,7 @@
     },
     {
       "class": "edition",
-      "note": "parantezli remaster",
+      "note": "a remaster in parentheses",
       "artist": "Radiohead",
       "title": "Creep (Remastered 2011)",
       "duration_ms": null,
@@ -314,7 +314,7 @@
     },
     {
       "class": "edition",
-      "note": "tireli yıllı remaster",
+      "note": "a dashed remaster with a year",
       "artist": "Pink Floyd",
       "title": "Wish You Were Here - 2011 Remaster",
       "duration_ms": 334000,
@@ -322,7 +322,7 @@
     },
     {
       "class": "edition",
-      "note": "köşeli parantezli deluxe",
+      "note": "a deluxe in square brackets",
       "artist": "Şebnem Ferah",
       "title": "Sil Baştan [Deluxe Edition]",
       "duration_ms": 291000,
@@ -330,7 +330,7 @@
     },
     {
       "class": "edition",
-      "note": "yıldönümü sürümü",
+      "note": "an anniversary edition",
       "artist": "Linkin Park",
       "title": "Numb (20th Anniversary Edition)",
       "duration_ms": 187000,
@@ -338,7 +338,7 @@
     },
     {
       "class": "edition",
-      "note": "genişletilmiş sürüm",
+      "note": "an expanded edition",
       "artist": "Portishead",
       "title": "Roads (Expanded Edition)",
       "duration_ms": 303000,
@@ -346,7 +346,7 @@
     },
     {
       "class": "edition",
-      "note": "mono sürüm",
+      "note": "a mono version",
       "artist": "The Beatles",
       "title": "Yesterday (Mono Version)",
       "duration_ms": 125000,
@@ -354,7 +354,7 @@
     },
     {
       "class": "edition",
-      "note": "stereo sürüm",
+      "note": "a stereo version",
       "artist": "The Beatles",
       "title": "Yesterday (Stereo)",
       "duration_ms": 125000,
@@ -362,7 +362,7 @@
     },
     {
       "class": "edition",
-      "note": "albüm sürümü etiketi",
+      "note": "an album version label",
       "artist": "Radiohead",
       "title": "Creep (Album Version)",
       "duration_ms": 238000,
@@ -370,7 +370,7 @@
     },
     {
       "class": "edition",
-      "note": "bonus parça etiketi",
+      "note": "a bonus track label",
       "artist": "Pink Floyd",
       "title": "Wish You Were Here (Bonus Track)",
       "duration_ms": 334000,
@@ -378,7 +378,7 @@
     },
     {
       "class": "edition",
-      "note": "tek sürümü etiketi",
+      "note": "a single version label",
       "artist": "Beyoncé",
       "title": "Halo (Single Version)",
       "duration_ms": 261000,
@@ -386,7 +386,7 @@
     },
     {
       "class": "edition",
-      "note": "sürüm eki + feat birlikte",
+      "note": "a version suffix + feat together",
       "artist": "Linkin Park",
       "title": "Numb (feat. Jay-Z) [Remastered]",
       "duration_ms": 187000,
@@ -394,7 +394,7 @@
     },
     {
       "class": "featuring",
-      "note": "feat. eki başlıkta",
+      "note": "a feat. suffix in the title",
       "artist": "Linkin Park",
       "title": "Numb feat. Jay-Z",
       "duration_ms": 187000,
@@ -402,7 +402,7 @@
     },
     {
       "class": "featuring",
-      "note": "ft. kısaltması",
+      "note": "the ft. abbreviation",
       "artist": "Linkin Park",
       "title": "Numb ft. Jay-Z",
       "duration_ms": 187000,
@@ -410,7 +410,7 @@
     },
     {
       "class": "featuring",
-      "note": "featuring açık yazımı",
+      "note": "featuring spelled out",
       "artist": "Linkin Park",
       "title": "Numb featuring Jay-Z",
       "duration_ms": 187000,
@@ -418,7 +418,7 @@
     },
     {
       "class": "featuring",
-      "note": "'with' varyasyonu",
+      "note": "the 'with' variation",
       "artist": "Linkin Park",
       "title": "Numb (with Jay-Z)",
       "duration_ms": 187000,
@@ -426,7 +426,7 @@
     },
     {
       "class": "featuring",
-      "note": "feat sanatçı alanında",
+      "note": "feat in the artist field",
       "artist": "Linkin Park feat. Jay-Z",
       "title": "Numb",
       "duration_ms": 187000,
@@ -434,7 +434,7 @@
     },
     {
       "class": "featuring",
-      "note": "feat sanatçı alanında, süre bilinmiyor",
+      "note": "feat in the artist field, duration unknown",
       "artist": "Linkin Park ft. Jay-Z",
       "title": "Numb",
       "duration_ms": null,
@@ -442,7 +442,7 @@
     },
     {
       "class": "turkish",
-      "note": "Türkçe karakterler ASCII'ye katlanmış",
+      "note": "Turkish characters folded to ASCII",
       "artist": "Sebnem Ferah",
       "title": "Sil Bastan",
       "duration_ms": 291000,
@@ -450,7 +450,7 @@
     },
     {
       "class": "turkish",
-      "note": "Türkçe karakterler olduğu gibi",
+      "note": "Turkish characters as they are",
       "artist": "Şebnem Ferah",
       "title": "Sil Baştan",
       "duration_ms": null,
@@ -458,7 +458,7 @@
     },
     {
       "class": "turkish",
-      "note": "transliterasyon",
+      "note": "transliteration",
       "artist": "Muslum Gurses",
       "title": "Nilufer",
       "duration_ms": 268000,
@@ -466,7 +466,7 @@
     },
     {
       "class": "turkish",
-      "note": "özgün yazım",
+      "note": "the original spelling",
       "artist": "Müslüm Gürses",
       "title": "Nilüfer",
       "duration_ms": 268000,
@@ -474,7 +474,7 @@
     },
     {
       "class": "turkish",
-      "note": "tamamı büyük harf, noktalı İ dahil",
+      "note": "all upper case, dotted İ included",
       "artist": "MÜSLÜM GÜRSES",
       "title": "NİLÜFER",
       "duration_ms": 268000,
@@ -482,7 +482,7 @@
     },
     {
       "class": "turkish",
-      "note": "transliterasyon",
+      "note": "transliteration",
       "artist": "Sezen Aksu",
       "title": "Gulumse",
       "duration_ms": 245000,
@@ -490,7 +490,7 @@
     },
     {
       "class": "turkish",
-      "note": "özgün yazım",
+      "note": "the original spelling",
       "artist": "Sezen Aksu",
       "title": "Gülümse",
       "duration_ms": null,
@@ -498,7 +498,7 @@
     },
     {
       "class": "turkish",
-      "note": "kısa başlık, Türkçe sanatçı",
+      "note": "a short title, a Turkish artist",
       "artist": "Mercan Dede",
       "title": "Nar",
       "duration_ms": 412000,
@@ -506,7 +506,7 @@
     },
     {
       "class": "diacritics",
-      "note": "aksan katlanmış sanatçı adı",
+      "note": "an artist name with folded diacritics",
       "artist": "Beyonce",
       "title": "Halo",
       "duration_ms": 261000,
@@ -514,7 +514,7 @@
     },
     {
       "class": "classical",
-      "note": "icracı adıyla tam eşleşme",
+      "note": "an exact match with the performer's name",
       "artist": "Glenn Gould",
       "title": "Goldberg Variations, BWV 988: Aria",
       "duration_ms": 232000,
@@ -522,7 +522,7 @@
     },
     {
       "class": "classical",
-      "note": "icracı doğru, noktalama farklı",
+      "note": "the performer is right, the punctuation differs",
       "artist": "Glenn Gould",
       "title": "Goldberg Variations BWV 988 Aria",
       "duration_ms": 232000,
@@ -530,7 +530,7 @@
     },
     {
       "class": "classical",
-      "note": "icracı doğru, uzun başlık",
+      "note": "the performer is right, a long title",
       "artist": "Wilhelm Kempff",
       "title": "Piano Sonata No. 14 \"Moonlight\": I. Adagio sostenuto",
       "duration_ms": 331000,
@@ -538,7 +538,7 @@
     },
     {
       "class": "radio_edit",
-      "note": "D-010: radio edit ayrı bir kayıttır. 240 sn'lik edit, 570 sn'lik orijinale bağlanmamalı — süre farkı kanıtın kendisi",
+      "note": "D-010: a radio edit is a separate recording. The 240 s edit must not be tied to the 570 s original — the duration difference is the evidence itself",
       "artist": "Underworld",
       "title": "Born Slippy .NUXX - Radio Edit",
       "duration_ms": 240000,
@@ -546,7 +546,7 @@
     },
     {
       "class": "radio_edit",
-      "note": "radio edit, süre bilinmiyor — süre bilinmiyor, zincir kanıtsız en iyi tahminini verir",
+      "note": "a radio edit, duration unknown — with the duration unknown, the chain gives its best guess without evidence",
       "artist": "Daft Punk",
       "title": "Aerodynamic (Radio Edit)",
       "duration_ms": null,
@@ -554,7 +554,7 @@
     },
     {
       "class": "radio_edit",
-      "note": "uzun sürüm etiketi — süre bilinmiyor, zincir kanıtsız en iyi tahminini verir",
+      "note": "a long version label — with the duration unknown, the chain gives its best guess without evidence",
       "artist": "Daft Punk",
       "title": "Aerodynamic (Extended Version)",
       "duration_ms": null,
@@ -562,23 +562,23 @@
     },
     {
       "class": "unknown",
-      "note": "katalogda olmayan parça",
-      "artist": "Bilinmeyen Sanatçı",
-      "title": "Bilinmeyen Parça",
+      "note": "a track not in the catalog",
+      "artist": "Unknown Artist",
+      "title": "Unknown Track",
       "duration_ms": 200000,
       "expect_mbid": null
     },
     {
       "class": "unknown",
-      "note": "yalnızca sanatçı doğru, başlık katalogda yok",
+      "note": "only the artist is right, the title is not in the catalog",
       "artist": "Portishead",
-      "title": "Var Olmayan Parça",
+      "title": "A Track That Does Not Exist",
       "duration_ms": 200000,
       "expect_mbid": null
     },
     {
       "class": "unknown",
-      "note": "yalnızca sanatçı doğru, Türkçe başlık katalogda yok",
+      "note": "only the artist is right, a Turkish title not in the catalog",
       "artist": "Şebnem Ferah",
       "title": "Var Olmayan Şarkı",
       "duration_ms": null,
@@ -586,7 +586,7 @@
     },
     {
       "class": "unknown",
-      "note": "aynı sanatçı adı, katalogda olmayan parça (60'lar Nirvana'sı)",
+      "note": "the same artist name, a track not in the catalog (the 60s Nirvana)",
       "artist": "Nirvana",
       "title": "Rainbow Chaser",
       "duration_ms": 165000,
@@ -594,15 +594,15 @@
     },
     {
       "class": "cover",
-      "note": "cover — aynı başlık, başka sanatçı",
-      "artist": "Kapak Grubu",
+      "note": "a cover — the same title, another artist",
+      "artist": "Cover Band",
       "title": "Creep",
       "duration_ms": 480000,
       "expect_mbid": null
     },
     {
       "class": "cover",
-      "note": "cover — Nirvana'nın Bowie yorumu ayrı kayıttır",
+      "note": "a cover — Nirvana's version of Bowie is a separate recording",
       "artist": "Nirvana",
       "title": "The Man Who Sold the World",
       "duration_ms": 261000,
@@ -610,7 +610,7 @@
     },
     {
       "class": "cover",
-      "note": "tribute grubu",
+      "note": "a tribute band",
       "artist": "The Rock Tribute Band",
       "title": "Karma Police",
       "duration_ms": 261000,
@@ -618,7 +618,7 @@
     },
     {
       "class": "cover",
-      "note": "enstrümantal/piyano yorumu",
+      "note": "an instrumental/piano version",
       "artist": "Piano Tribute Players",
       "title": "Halo",
       "duration_ms": 261000,
@@ -626,7 +626,7 @@
     },
     {
       "class": "cover",
-      "note": "karaoke sürümü",
+      "note": "a karaoke version",
       "artist": "Karaoke Version",
       "title": "Creep",
       "duration_ms": 238000,
@@ -634,7 +634,7 @@
     },
     {
       "class": "live",
-      "note": "canlı kayıt stüdyo kaydından ayrıdır",
+      "note": "a live recording is separate from the studio recording",
       "artist": "Radiohead",
       "title": "Creep (Live at Glastonbury)",
       "duration_ms": null,
@@ -642,7 +642,7 @@
     },
     {
       "class": "live",
-      "note": "canlı kayıt — tireli etiket",
+      "note": "a live recording — a dashed label",
       "artist": "Pink Floyd",
       "title": "Wish You Were Here - Live",
       "duration_ms": null,
@@ -650,7 +650,7 @@
     },
     {
       "class": "live",
-      "note": "canlı kayıt — süre yakın ama ayrı kayıt",
+      "note": "a live recording — a close duration but a separate recording",
       "artist": "Portishead",
       "title": "Roads (Live in NYC)",
       "duration_ms": 320000,
@@ -658,7 +658,7 @@
     },
     {
       "class": "live",
-      "note": "canlı albüm eki",
+      "note": "a live album suffix",
       "artist": "Linkin Park",
       "title": "Numb (Live in Texas)",
       "duration_ms": null,
@@ -666,7 +666,7 @@
     },
     {
       "class": "remix",
-      "note": "remix ayrı kayıttır",
+      "note": "a remix is a separate recording",
       "artist": "Daft Punk",
       "title": "Aerodynamic (Slum Village Remix)",
       "duration_ms": 260000,
@@ -674,7 +674,7 @@
     },
     {
       "class": "remix",
-      "note": "remix, süre bilinmiyor",
+      "note": "a remix, duration unknown",
       "artist": "Daft Punk",
       "title": "Aerodynamic (Slum Village Remix)",
       "duration_ms": null,
@@ -682,7 +682,7 @@
     },
     {
       "class": "classical",
-      "note": "besteci icracı yerine geçemez",
+      "note": "the composer cannot stand in for the performer",
       "artist": "Johann Sebastian Bach",
       "title": "Goldberg Variations, BWV 988: Aria",
       "duration_ms": 232000,
@@ -690,7 +690,7 @@
     },
     {
       "class": "classical",
-      "note": "besteci icracı yerine geçemez",
+      "note": "the composer cannot stand in for the performer",
       "artist": "Ludwig van Beethoven",
       "title": "Piano Sonata No. 14 \"Moonlight\": I. Adagio sostenuto",
       "duration_ms": 331000,
@@ -698,7 +698,7 @@
     },
     {
       "class": "same_title",
-      "note": "aynı başlık, alakasız sanatçı",
+      "note": "the same title, an unrelated artist",
       "artist": "Adele",
       "title": "Yesterday",
       "duration_ms": 210000,
@@ -706,7 +706,7 @@
     },
     {
       "class": "same_title",
-      "note": "aynı başlık, alakasız sanatçı",
+      "note": "the same title, an unrelated artist",
       "artist": "Marshmello",
       "title": "Numb",
       "duration_ms": 195000,
@@ -714,7 +714,7 @@
     },
     {
       "class": "same_title",
-      "note": "aynı başlık, alakasız Türk sanatçı",
+      "note": "the same title, an unrelated Turkish artist",
       "artist": "Ahmet Kaya",
       "title": "Nilüfer",
       "duration_ms": 268000,
@@ -722,15 +722,15 @@
     },
     {
       "class": "same_title",
-      "note": "aynı başlık, alakasız sanatçı, süre birebir",
-      "artist": "Bilinmeyen",
+      "note": "the same title, an unrelated artist, the exact same duration",
+      "artist": "Unknown",
       "title": "Roads",
       "duration_ms": 303000,
       "expect_mbid": null
     },
     {
       "class": "mb_disambiguation",
-      "note": "katalogdaki canlı kayıt yalnızca notta işaretli, başlığı düz 'Creep'; süre bilinmiyor",
+      "note": "the live recording in the catalog is only marked in the note, its title is plainly 'Creep'; duration unknown",
       "artist": "Radiohead",
       "title": "Creep",
       "duration_ms": null,
@@ -738,7 +738,7 @@
     },
     {
       "class": "mb_disambiguation",
-      "note": "kullanıcı canlı kaydı arıyor: başlıktaki etiket katalogdaki notla eşleşmeli",
+      "note": "the user is looking for the live recording: the label in the title must match the note in the catalog",
       "artist": "Radiohead",
       "title": "Creep (Live)",
       "duration_ms": null,
@@ -746,7 +746,7 @@
     },
     {
       "class": "mb_disambiguation",
-      "note": "süre iki kayda da yakın; ayrımı yalnızca not veriyor",
+      "note": "the duration is close to both recordings; only the note tells them apart",
       "artist": "Portishead",
       "title": "Roads",
       "duration_ms": 310000,

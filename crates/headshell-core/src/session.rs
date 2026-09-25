@@ -1,8 +1,9 @@
-//! Çekirdeğin dış yüzeyi.
+//! The core's outer surface.
 //!
-//! CLI, GUI ve mobil bağlamalar **yalnızca** buradaki yöntemleri çağırır:
-//! her komut tek bir çağrıdır, tanı kaydı ve kalıcılık burada halledilir.
-//! Bir yeteneği CLI'den silsen çekirdek onu hâlâ sunar — Altın Kural'ın testi.
+//! The CLI, the GUI and the mobile bindings call **only** the methods here:
+//! every command is a single call, and diagnostics and persistence are taken
+//! care of here. Delete a capability from the CLI and the core still offers
+//! it — the Golden Rule's test.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -38,7 +39,7 @@ use crate::secrets::Secrets;
 use crate::sleeve::{self, CardSize, SleeveData};
 use crate::stats::{self, StatsQuery, StatsReport};
 
-/// Bir içe aktarma komutunun tam sonucu.
+/// The full result of an import command.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ImportReport {
     pub import: ImportSummary,
@@ -47,7 +48,7 @@ pub struct ImportReport {
     pub diag: DiagReport,
 }
 
-/// Tek parça çözümlemesinin sonucu.
+/// The result of resolving a single track.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ResolveReport {
     pub query: String,
@@ -57,7 +58,7 @@ pub struct ResolveReport {
     pub diag: DiagReport,
 }
 
-/// Arama sonucu.
+/// Search result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SearchReport {
     pub query: String,
@@ -65,25 +66,25 @@ pub struct SearchReport {
     pub diag: DiagReport,
 }
 
-/// İstatistik sonucu.
+/// Statistics result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StatsResponse {
     pub report: StatsReport,
     pub diag: DiagReport,
 }
 
-/// Sleeve kartı sonucu.
+/// Sleeve card result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SleeveResponse {
     pub data: SleeveData,
     pub size: CardSize,
-    /// Dosya yazıldıysa biçim, yol ve bayt sayısı.
+    /// Format, path and byte count, if a file was written.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub written: Option<WrittenCard>,
     pub diag: DiagReport,
 }
 
-/// Yazılan kart dosyasının bilgisi.
+/// The written card file.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WrittenCard {
     pub path: std::path::PathBuf,
@@ -91,14 +92,14 @@ pub struct WrittenCard {
     pub kind: sleeve::CardFileKind,
 }
 
-/// Kayıtlı sağlayıcıların listesi.
+/// The list of registered providers.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProviderListReport {
     pub providers: Vec<ProviderInfo>,
     pub diag: DiagReport,
 }
 
-/// Bir sağlayıcının sınama sonucu.
+/// The result of testing a provider.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProviderTestReport {
     pub info: ProviderInfo,
@@ -106,101 +107,104 @@ pub struct ProviderTestReport {
     pub diag: DiagReport,
 }
 
-/// Kurulu eklentilerin listesi (Faz 2 §2.1).
+/// The list of installed plugins (Phase 2 §2.1).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PluginListReport {
     pub plugins: Vec<PluginEntry>,
     pub summary: PluginSummary,
-    /// İzinler zorlanıyor mu — **hayır** (D-040), ve bu her çıktıda yazar.
-    /// Olmayan bir korumaya güvendirmemek için alan sabit değil, görünür.
+    /// Are permissions enforced — **no** (D-040), and every output says so.
+    /// The field is visible rather than implied so no one relies on a
+    /// protection that does not exist.
     pub permissions_enforced: bool,
     pub diag: DiagReport,
 }
 
-/// Bir onay komutunun sonucu (`approve`, `disable`, `enable`, `forget`).
+/// The result of a consent command (`approve`, `disable`, `enable`, `forget`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PluginConsentReport {
     pub name: String,
-    /// Hangi komut çalıştı.
+    /// Which command ran.
     pub action: String,
-    /// Eklentinin **beyan ettiği** izinler.
+    /// The permissions the plugin **declares**.
     pub permissions: Permissions,
-    /// Motorun onun için indireceği eserler (D-055, D-069).
+    /// The artifacts the engine will download for it (D-055, D-069).
     ///
-    /// `permissions.net`'ten **ayrı** duruyor ve bu bilerek: indirmeyi
-    /// eklenti değil motor yapar. Aynı listeye karışsaydı kullanıcı "bu
-    /// eklenti github.com'a bağlanıyor" diye okurdu — bağlanan motor, ve
-    /// indirdiği şey karmasıyla sabitli.
+    /// Kept **apart** from `permissions.net`, on purpose: the engine does the
+    /// download, not the plugin. Mixed into the same list, the user would read
+    /// "this plugin connects to github.com" — it is the engine that connects,
+    /// and what it downloads is pinned by its hash.
     #[serde(default)]
     pub requires: Vec<crate::plugin::manifest::Requirement>,
-    /// Eserlerin hangi platform için çözüldüğü — onay ekranı bu platformun
-    /// yayınını gösterir.
+    /// The platform the artifacts were resolved for — the consent screen shows
+    /// this platform's release.
     #[serde(default)]
     pub platform: String,
-    /// Komuttan sonraki durum.
+    /// The state after the command.
     pub status: ConsentStatus,
     pub permissions_enforced: bool,
     pub diag: DiagReport,
 }
 
-/// `headshell plugin install` çıktısı (D-055, D-069, D-071).
+/// Output of `headshell plugin install` (D-055, D-069, D-071).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PluginInstallReport {
-    /// Eklenti artık çalışabilir mi: beyan edilen eserlerin **hepsi** hazır mı.
+    /// Can the plugin run now: are **all** declared artifacts ready.
     pub ready: bool,
-    /// Manifestin beyan ettiği eser sayısı. `0` geçerli bir cevap: eklenti
-    /// hiçbir şey istemiyor demek, "bakmadım" demek değil (K9).
+    /// The number of artifacts the manifest declares. `0` is a valid answer:
+    /// the plugin needs nothing, it does not mean "didn't look" (K9).
     pub declared: usize,
-    /// Eserlerin çözüldüğü platform (`linux-x86_64`). api 1'de burada
-    /// motorun bulduğu Python yazıyordu; api 2'de yorumlayıcı gömülü ve
-    /// seçilecek tek şey platformun ikilisi.
+    /// The platform the artifacts were resolved for (`linux-x86_64`). In api 1
+    /// this held the Python the engine had found; in api 2 the interpreter is
+    /// embedded and the only thing to choose is the platform's binary.
     pub platform: String,
-    /// Eklenti bu komutta katalogdan indirildiyse ne indirildiği (D-071).
-    /// `None`: eklenti zaten diskteydi ve katalog **okunmadı**.
+    /// What was downloaded, if this command fetched the plugin from the catalog
+    /// (D-071). `None`: the plugin was already on disk and the catalog was
+    /// **not read**.
     #[serde(default)]
     pub fetched: Option<CatalogFetch>,
-    /// Eklentinin beyan ettiği izinler — onaya sunulacak olan.
+    /// The permissions the plugin declares — the ones up for approval.
     #[serde(default)]
     pub permissions: Permissions,
-    /// Kurulumdan sonraki onay durumu. Katalogdan gelmek onay değildir
-    /// (D-040): yeni kurulan eklenti `not_asked` der.
+    /// Consent state after the install. Coming from the catalog is not consent
+    /// (D-040): a freshly installed plugin says `not_asked`.
     pub consent: ConsentStatus,
     pub report: crate::plugin::artifact::InstallReport,
     pub diag: DiagReport,
 }
 
-/// `headshell plugin catalog` çıktısı (D-071).
+/// Output of `headshell plugin catalog` (D-071).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PluginCatalogReport {
-    /// Okunan katalog.
+    /// The catalog that was read.
     pub index: String,
-    /// Araç durumunun ölçüldüğü platform.
+    /// The platform the tool state was measured for.
     pub platform: String,
     pub plugins: Vec<CatalogPlugin>,
-    /// **Bu katalogdan** kurulmuş ama artık listede olmayan eklentiler.
+    /// Plugins installed **from this catalog** that are no longer listed.
     pub delisted: Vec<String>,
     pub summary: CatalogSummary,
     pub diag: DiagReport,
 }
 
-/// Bir eklentinin güncelleme sonucu.
+/// One plugin's update result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PluginUpdate {
     pub name: String,
     pub outcome: UpdateOutcome,
-    /// Güncellenen sürümün araçlarının kurulumu (D-055). Yalnızca
-    /// `updated`'da dolu.
+    /// Installing the updated version's tools (D-055). Only filled in for
+    /// `updated`.
     #[serde(default)]
     pub tools: Vec<(String, InstallOutcome)>,
-    /// Araçlar kurulamadıysa sebebi. Eklentinin dosyaları yine de güncellendi
-    /// ve bu ayrı söyleniyor: "güncellendi" ile "çalışır" aynı şey değil.
+    /// Why the tools could not be installed, if they could not. The plugin's
+    /// files were updated anyway, and this says so separately: "updated" and
+    /// "works" are not the same thing.
     pub tools_error: Option<String>,
-    /// Güncellemeden sonraki onay durumu; izinler büyüdüyse
-    /// `needs_approval` (D-040).
+    /// Consent state after the update; `needs_approval` if the permissions grew
+    /// (D-040).
     pub consent: Option<ConsentStatus>,
 }
 
-/// `headshell plugin update` çıktısı (D-071).
+/// Output of `headshell plugin update` (D-071).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PluginUpdateReport {
     pub index: String,
@@ -210,43 +214,45 @@ pub struct PluginUpdateReport {
     pub diag: DiagReport,
 }
 
-/// `headshell plugin remove` çıktısı (D-071).
+/// Output of `headshell plugin remove` (D-071).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PluginRemoveReport {
     pub name: String,
     pub removed: Removed,
-    /// Onay kaydı vardı ve unutuldu: aynı adla yeniden kurulan bir eklenti
-    /// baştan sorulur — başka bir eklenti eskisinin onayını devralmasın.
+    /// There was a consent record and it was forgotten: a plugin reinstalled
+    /// under the same name is asked again from scratch — another plugin must
+    /// not inherit the old one's consent.
     pub consent_forgotten: bool,
-    /// Eklentinin ad alanında **kalan** sırların anahtar adları (D-042).
-    /// Silinmedi: kullanıcının girdiği bir değer (çerez, anahtar) sessizce
-    /// gitmemeli. Değerler bu listede yok.
+    /// Key names of the secrets **left** in the plugin's namespace (D-042).
+    /// Not deleted: a value the user typed in (a cookie, a key) must not vanish
+    /// silently. The values are not in this list.
     pub kept_secrets: Vec<String>,
     pub diag: DiagReport,
 }
 
-/// `headshell plugin index` çıktısı — katalog deposunun bakımı (D-071).
+/// Output of `headshell plugin index` — catalog repository maintenance
+/// (D-071).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PluginIndexReport {
-    /// İndeks dosyası.
+    /// The index file.
     pub path: std::path::PathBuf,
     pub url_template: String,
     pub plugins: Vec<IndexedPlugin>,
-    /// Diskteki indeks üretilenle zaten aynı mıydı.
+    /// Was the index on disk already identical to the generated one.
     pub up_to_date: bool,
-    /// Bu komut dosyayı yazdı mı (`--check` hiç yazmaz).
+    /// Did this command write the file (`--check` never writes).
     pub written: bool,
     pub diag: DiagReport,
 }
 
-/// Sır deposunun **anahtar adları** (değerler yok, D-042).
+/// The secret store's **key names** (no values, D-042).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SecretListReport {
     pub namespaces: std::collections::BTreeMap<String, Vec<String>>,
     pub diag: DiagReport,
 }
 
-/// Bir sır yazma/silme komutunun sonucu. Değer **taşımaz**.
+/// The result of writing or removing a secret. Carries **no** value.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SecretWriteReport {
     pub namespace: String,
@@ -256,34 +262,36 @@ pub struct SecretWriteReport {
     pub diag: DiagReport,
 }
 
-/// Tarama sonucu.
+/// Scan result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScanReport {
-    /// Taranan kök dizinler. Boşsa kullanıcı `HEADSHELL_MUSIC_DIRS` vermemiş.
+    /// The root directories scanned. Empty if the user gave no
+    /// `HEADSHELL_MUSIC_DIRS`.
     pub dirs: Vec<std::path::PathBuf>,
     pub summary: ScanSummary,
-    /// Kalıcı kataloğa ne yazıldığı: eklenen, güncellenen, düşen satırlar.
+    /// What was written to the persistent catalog: inserted, updated and
+    /// dropped rows.
     pub write: CatalogWriteSummary,
-    /// Tarama gerçekten koştu mu. `--if-stale` atlamış olabilir (D-025).
+    /// Did the scan actually run. `--if-stale` may have skipped it (D-025).
     pub scanned: bool,
-    /// Neden koştu ya da neden atlandı — tanıya ait (K9): "değişmedi" ile
-    /// "bakamadım" farklı şeylerdir.
+    /// Why it ran or why it was skipped — this belongs to diagnostics (K9):
+    /// "unchanged" and "couldn't look" are different things.
     pub reason: String,
     pub diag: DiagReport,
 }
 
-/// Kayıtlı bir uzak sunucunun **sırsız** özeti.
+/// A **secret-free** summary of a registered remote server.
 ///
-/// Token ve API anahtarı bu tipte **yok**: `--json` çıktısı boru hattına,
-/// log'a ya da hata raporuna girebilir. Kimlik bilgisi yalnızca `0600`
-/// izinli `servers.json`'da durur (D-021).
+/// The token and the API key are **not** in this type: `--json` output can
+/// end up in a pipeline, a log or a bug report. Credentials live only in
+/// `servers.json` with `0600` permissions (D-021).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerSummary {
     pub id: ProviderId,
     pub kind: ServerKind,
     pub url: String,
     pub username: String,
-    /// Hangi kimlik yolu: `subsonic_token` ya da `api_key`.
+    /// Which credential path: `subsonic_token` or `api_key`.
     pub auth: String,
 }
 
@@ -302,27 +310,29 @@ impl ServerSummary {
     }
 }
 
-/// Kayıtlı sunucuların listesi.
+/// The list of registered servers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerListReport {
     pub servers: Vec<ServerSummary>,
-    /// Kayıt dosyasının yolu — "nereye yazıldı?" sorusu tanıya ait.
+    /// Path of the registry file — "where was it written?" is a diagnostics
+    /// question.
     pub path: std::path::PathBuf,
     pub diag: DiagReport,
 }
 
-/// Sunucu ekleme sonucu.
+/// Result of adding a server.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerAddReport {
     pub server: ServerSummary,
-    /// Sunucuya bağlanıp kimlik doğrulandı mı.
+    /// Was the server contacted and the login verified.
     pub verified: bool,
-    /// Kayıt sırasında oluşan gözlemler (zayıf entropi, öğrenilemeyen alan…).
+    /// Observations made while registering (weak entropy, a field that could
+    /// not be learned…).
     pub notes: Vec<String>,
     pub diag: DiagReport,
 }
 
-/// Sunucu silme sonucu.
+/// Result of removing a server.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerRemoveReport {
     pub id: ProviderId,
@@ -331,30 +341,30 @@ pub struct ServerRemoveReport {
     pub diag: DiagReport,
 }
 
-/// Çalma seçenekleri.
+/// Playback options.
 ///
-/// Ayrı bir struct: `uniffi` için de tek bir record olarak geçer ve yeni
-/// seçenek eklemek çağıranların imzasını kırmaz.
+/// A separate struct: it crosses `uniffi` as a single record, and adding an
+/// option does not break callers' signatures.
 ///
-/// `query` ödünç değil **sahipli** bir `String`: K7 dışa açılan tiplerde
-/// lifetime yasaklıyor ve `uniffi` bir record alanında `&str`'i ifade
-/// edemiyor. Kopyanın bedeli komut başına tek bir kısa metin.
+/// `query` is an **owned** `String`, not a borrow: K7 forbids lifetimes in
+/// exported types and `uniffi` cannot express `&str` in a record field. The
+/// copy costs one short string per command.
 #[derive(Debug, Clone)]
 pub struct PlayOptions {
-    /// Aranacak metin.
+    /// The text to search for.
     pub query: String,
-    /// Eşleşen tüm parçalar kuyruğa alınsın mı (false: yalnızca ilki).
+    /// Queue every matching track (false: only the first).
     pub all: bool,
-    /// Kuyruk karıştırılsın mı.
+    /// Shuffle the queue.
     pub shuffle: bool,
-    /// Çalmadan yalnızca kuyruğu göster.
+    /// Show the queue without playing.
     pub dry_run: bool,
-    /// Aramadan en fazla kaç sonuç alınacağı.
+    /// The maximum number of search results to take.
     pub limit: usize,
 }
 
 impl PlayOptions {
-    /// Varsayılan seçeneklerle: ilk eşleşmeyi çal.
+    /// With default options: play the first match.
     #[must_use]
     pub fn new(query: String) -> Self {
         Self {
@@ -367,51 +377,54 @@ impl PlayOptions {
     }
 }
 
-/// Bir çalma komutunun sonucu.
+/// The result of a play command.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlayReport {
     pub query: String,
-    /// Kuyruğa alınan parçalar.
+    /// The tracks that were queued.
     pub queued: Vec<QueueItem>,
-    /// Çalma sonunda üretilen dinleme kayıtları (§1.6).
+    /// Listen records produced by playback (§1.6).
     pub listens_recorded: usize,
-    /// Gerçekten çalındı mı (`--dry-run` ile false).
+    /// Did it actually play (false with `--dry-run`).
     pub played: bool,
     pub diag: DiagReport,
 }
 
-/// Açık bir kütüphane üzerinde çalışan oturum.
+/// A session working on an open library.
 pub struct Session {
     config: Config,
     library: SqliteLibrary,
 }
 
 impl Session {
-    /// Yapılandırmadaki kütüphaneyi açar (yoksa oluşturur).
+    /// Opens the library named in the configuration (creating it if needed).
     ///
     /// # Errors
-    /// Veri dizini oluşturulamazsa ya da veritabanı açılamazsa.
+    /// If the data directory cannot be created or the database cannot be
+    /// opened.
     pub fn open(config: Config) -> Result<Self> {
         config.ensure_data_dir()?;
         let library = SqliteLibrary::open(config.database_path())?;
         Ok(Self { config, library })
     }
 
-    /// Kullanılan yapılandırma.
+    /// The configuration in use.
     #[must_use]
     pub fn config(&self) -> &Config {
         &self.config
     }
 
-    /// Bir export arşivini içe aktarır, kimlikleri çözer ve kütüphaneye yazar.
+    /// Imports an export archive, resolves identities and writes to the
+    /// library.
     ///
-    /// Üstveri kaynağı çağıran tarafından verilir; Faz 0'da
-    /// [`OfflineLookup`] ile çağrılır, ağ geldiğinde imza değişmez.
-    /// Generic değil `Arc<dyn _>` — K7 (`uniffi` generic ifade edemez).
+    /// The metadata source is supplied by the caller; in Phase 0 it is called
+    /// with [`OfflineLookup`], and the signature does not change once the
+    /// network arrives. `Arc<dyn _>`, not a generic — K7 (`uniffi` cannot
+    /// express generics).
     ///
     /// # Errors
-    /// Arşiv okunamaz/tanınmazsa, çözümleme kaynağı hata verirse ya da
-    /// yazma başarısız olursa. Hata hangi aşamada olduğunu taşır.
+    /// If the archive cannot be read or recognised, the resolution source
+    /// fails, or writing fails. The error carries the stage it happened in.
     pub async fn import_archive(
         &mut self,
         path: &Path,
@@ -459,8 +472,8 @@ impl Session {
         let write = self.library.insert_listens(&listens)?;
         write.record_into(rec);
 
-        // Çözümleme sonuçlarını parça satırlarına da yaz ki `search` ve
-        // sonraki çalıştırmalar hangi yöntemin çözdüğünü bilsin.
+        // Also write the resolutions onto the track rows, so `search` and later
+        // runs know which method resolved them.
         let mut seen = std::collections::HashSet::new();
         for (listen, resolution) in listens.iter().zip(&resolutions) {
             let key =
@@ -473,10 +486,10 @@ impl Session {
         Ok((outcome.summary, identity, write))
     }
 
-    /// Tek bir `"Sanatçı - Başlık"` sorgusunu kimlik zincirinden geçirir.
+    /// Runs a single `"Artist - Title"` query through the identity chain.
     ///
     /// # Errors
-    /// Sorgu biçimsizse ya da üstveri kaynağı hata verirse.
+    /// If the query is malformed or the metadata source fails.
     pub async fn resolve_track(
         &self,
         query: &str,
@@ -493,13 +506,13 @@ impl Session {
                 "identity.confidence_pct",
                 (resolution.confidence * 100.0) as i64,
             );
-            // Beraberlik tanının parçası: "%97 güven" ile "%97 güven, 10 aday
-            // berabere" aynı çalıştırmayı anlatmıyor (K9).
+            // Ties are part of the diagnosis: "97% confidence" and "97% confidence,
+            // 10 candidates tied" do not describe the same run (K9).
             rec.set(
                 "identity.tied_candidates",
                 i64::try_from(resolution.tied_candidates).unwrap_or(i64::MAX),
             );
-            rec.note(format!("yöntem: {}", resolution.method));
+            rec.note(format!("method: {}", resolution.method));
             Ok((track, resolution))
         }
         .await;
@@ -516,18 +529,18 @@ impl Session {
         })
     }
 
-    /// Bir **ses dosyasını** kimlik zincirinden geçirir.
+    /// Runs an **audio file** through the identity chain.
     ///
-    /// [`Self::resolve_track`]'ten farkı, zincirin 4. halkasının da
-    /// çalışabilmesi: üstveri dosyanın kendi etiketlerinden okunur ve metin
-    /// halkaları sonuçsuz kalırsa parmak izi sorulur.
+    /// Unlike [`Self::resolve_track`], the chain's 4th link can run too: the
+    /// metadata is read from the file's own tags, and the fingerprint is asked
+    /// if the text links come up empty.
     ///
-    /// `fingerprint_lookup` `None` ise zincir üç halkayla biter — bu
-    /// **bir kusur değil bir yapılandırma**: kullanıcı ağa çıkmayı istemediyse
-    /// AcoustID'ye de sorulmaz.
+    /// If `fingerprint_lookup` is `None` the chain ends after three links —
+    /// this is **a configuration, not a defect**: if the user did not want to
+    /// go online, AcoustID is not asked either.
     ///
     /// # Errors
-    /// Dosya okunamazsa ya da bir kaynak hata verirse.
+    /// If the file cannot be read or a source fails.
     pub async fn resolve_file(
         &self,
         path: &Path,
@@ -539,9 +552,9 @@ impl Session {
             format!("resolve --file {label:?}"),
             Some(self.config.data_dir().to_path_buf()),
         );
-        // Halkanın bağlı olup olmadığı tanının parçası: parmak izi kaynağı
-        // yokken "eşleşme bulunamadı" ile kaynak varken bulunamaması aynı
-        // çalıştırma değil (K9).
+        // Whether the link was wired up is part of the diagnosis: "no match found"
+        // without a fingerprint source and not finding one with a source are not
+        // the same run (K9).
         rec.set(
             "identity.fingerprint_lookup",
             i64::from(fingerprint_lookup.is_some()),
@@ -562,7 +575,7 @@ impl Session {
                 "identity.tied_candidates",
                 i64::try_from(resolution.tied_candidates).unwrap_or(i64::MAX),
             );
-            rec.note(format!("yöntem: {}", resolution.method));
+            rec.note(format!("method: {}", resolution.method));
             Ok((track, resolution))
         }
         .await;
@@ -578,14 +591,15 @@ impl Session {
         })
     }
 
-    /// Bu kurulumun AcoustID kaynağı — anahtar sır deposundan okunur.
+    /// This setup's AcoustID source — the key is read from the secret store.
     ///
-    /// `None` dönmesi "ağ istenmedi" demek. Anahtarın **bulunamaması** ise
-    /// `None` değil: kaynak yine kurulur ve ilk çağrıda ne yapılacağını
-    /// söyleyen bir hata döner (K9 — "istemedim" ile "yapamıyorum" ayrı).
+    /// Returning `None` means "no network was requested". A **missing** key is
+    /// not `None`: the source is still built, and its first call returns an
+    /// error that says what to do (K9 — "didn't want to" and "can't" are
+    /// different).
     ///
     /// # Errors
-    /// Sır deposu okunamazsa ya da bu derlemede HTTP istemcisi yoksa.
+    /// If the secret store cannot be read or this build has no HTTP client.
     #[cfg(feature = "fingerprint")]
     pub fn fingerprint_lookup_for(
         &self,
@@ -606,16 +620,16 @@ impl Session {
         Ok(Some(Arc::new(lookup)))
     }
 
-    /// Bu kurulumun AcoustID kaynağı.
+    /// This setup's AcoustID source.
     ///
-    /// Bu derlemede `fingerprint` feature'ı kapalı: zincirin 4. halkası yok
-    /// ve `None` bunu anlatıyor. Çağıran sessizce "eşleşme yok" görmesin diye
-    /// [`crate::identity::fingerprint::fingerprint_file`] aynı durumu ayrıca
-    /// hata olarak da söylüyor.
+    /// The `fingerprint` feature is off in this build: the chain has no 4th
+    /// link and `None` says so. So that the caller does not silently see "no
+    /// match", [`crate::identity::fingerprint::fingerprint_file`] also reports
+    /// the same condition as an error.
     ///
     /// # Errors
-    /// Bu derlemede hiç hata dönmez; imza açık derlemeyle aynı kalsın diye
-    /// `Result`.
+    /// Never errors in this build; it returns `Result` so the signature matches
+    /// the build that has the feature.
     #[cfg(not(feature = "fingerprint"))]
     pub fn fingerprint_lookup_for(
         &self,
@@ -624,14 +638,14 @@ impl Session {
         Ok(None)
     }
 
-    /// Kütüphanede tam metin arama.
+    /// Full-text search over the library.
     ///
-    /// Gösterilen çalma sayısı `rule`'u geçen dinlemelerdir — `stats` ile
-    /// birebir aynı hesap (D-008). Ham olay sayısı yalnızca tanı kaydına
-    /// (`search.listen_events`) yazılır.
+    /// The play count shown is the listens that pass `rule` — exactly the same
+    /// calculation as `stats` (D-008). The raw event count is only written to
+    /// the diagnostics record (`search.listen_events`).
     ///
     /// # Errors
-    /// Sorgu boşsa ya da veritabanı hatasında.
+    /// If the query is empty or on a database error.
     pub fn search(&self, query: &str, limit: usize, rule: PlayRule) -> Result<SearchReport> {
         let mut rec = Recorder::start(
             format!("library search {query:?}"),
@@ -655,10 +669,10 @@ impl Session {
         })
     }
 
-    /// Kütüphanedeki dinlemelerden istatistik üretir.
+    /// Builds statistics from the listens in the library.
     ///
     /// # Errors
-    /// Kütüphane okunamazsa.
+    /// If the library cannot be read.
     pub fn stats(&self, query: StatsQuery) -> Result<StatsResponse> {
         let mut rec = Recorder::start(
             "stats".to_owned(),
@@ -672,13 +686,14 @@ impl Session {
         self.finish(rec, result, |report, diag| StatsResponse { report, diag })
     }
 
-    /// Paylaşılabilir Sleeve kartı üretir ve isteğe bağlı olarak dosyaya yazar.
+    /// Builds a shareable Sleeve card and optionally writes it to a file.
     ///
-    /// `out` verilirse uzantıya göre SVG veya PNG yazar; verilmezse yalnızca
-    /// veri döner (JSON çıktısı veya başka bir tüketici için).
+    /// With `out`, writes SVG or PNG according to the extension; without it,
+    /// only the data is returned (for JSON output or another consumer).
     ///
     /// # Errors
-    /// Kütüphane okunamazsa, rasterizasyon veya dosya yazma başarısız olursa.
+    /// If the library cannot be read, or rasterisation or writing the file
+    /// fails.
     pub fn sleeve(
         &self,
         query: StatsQuery,
@@ -717,7 +732,7 @@ impl Session {
                         "sleeve.bytes_written",
                         i64::try_from(bytes).unwrap_or(i64::MAX),
                     );
-                    rec.note(format!("çıktı: {}", path.display()));
+                    rec.note(format!("output: {}", path.display()));
                     Some(WrittenCard {
                         path: path.to_owned(),
                         bytes,
@@ -738,11 +753,11 @@ impl Session {
         })
     }
 
-    /// Sağlayıcıları listeler.
+    /// Lists the providers.
     ///
     /// # Errors
-    /// Şu an hata üretmiyor; imza sağlayıcılar ağa taşındığında (Faz 2)
-    /// değişmesin diye `Result`.
+    /// Does not error today; it returns `Result` so the signature does not
+    /// change once providers move onto the network (Phase 2).
     pub fn providers(&self, registry: &ProviderRegistry) -> Result<ProviderListReport> {
         let mut rec = Recorder::start(
             "provider list".to_owned(),
@@ -759,10 +774,10 @@ impl Session {
         })
     }
 
-    /// Bir sağlayıcıyı sınar: ayakta mı, kaç parça görüyor.
+    /// Tests a provider: is it up, how many tracks does it see.
     ///
     /// # Errors
-    /// Sağlayıcı kayıtlı değilse ya da sağlık sorgusu hata verirse.
+    /// If the provider is not registered or the health check fails.
     pub async fn test_provider(
         &self,
         registry: &ProviderRegistry,
@@ -779,7 +794,7 @@ impl Session {
                     Stage::ProviderCall,
                     ErrorKind::NotFound {
                         what: format!(
-                            "sağlayıcı: {id} (kayıtlı olanlar: {})",
+                            "provider: {id} (registered: {})",
                             registry
                                 .list()
                                 .iter()
@@ -816,16 +831,16 @@ impl Session {
         })
     }
 
-    /// Bir uzak sunucu kaydeder (§1.3, D-019/D-021).
+    /// Registers a remote server (§1.3, D-019/D-021).
     ///
-    /// Parola **saklanmaz**: Subsonic'te salt/token türetilir, Jellyfin'de
-    /// erişim anahtarına çevrilir. `spec.verify` açıksa kaydetmeden önce
-    /// sunucuya bağlanılır — yanlış parolayı bir hafta sonra "çalmıyor"
-    /// diye keşfetmektense şimdi söylemek iyidir.
+    /// The password is **not stored**: Subsonic derives a salt/token, Jellyfin
+    /// exchanges it for an access key. If `spec.verify` is on, the server is
+    /// contacted before saving — better to say now that the password is wrong
+    /// than to discover a week later that "it doesn't play".
     ///
     /// # Errors
-    /// Aynı adla kayıt varsa, adres/kimlik eksikse, doğrulama başarısızsa
-    /// ya da kayıt dosyası yazılamazsa.
+    /// If a server with the same name exists, the address or credentials are
+    /// missing, verification fails, or the registry file cannot be written.
     pub async fn add_server(
         &self,
         spec: NewServer,
@@ -844,18 +859,18 @@ impl Session {
                 return Err(Error::new(
                     Stage::ConfigLoad,
                     ErrorKind::InvalidInput {
-                        detail: "`local` adı yerel dosya sağlayıcısına ait".to_owned(),
+                        detail: "the name `local` belongs to the local file provider".to_owned(),
                     },
                 ));
             }
             if servers.iter().any(|existing| existing.id == spec.id) {
-                // Üzerine sessizce yazmak, kullanıcının çalışan kaydını
-                // fark etmeden değiştirmek olurdu.
+                // Silently overwriting would change the user's working entry without them
+                // noticing.
                 return Err(Error::new(
                     Stage::ConfigLoad,
                     ErrorKind::InvalidInput {
                         detail: format!(
-                            "{} adında bir sunucu zaten kayıtlı; önce `headshell provider remove {}`",
+                            "a server named {} is already registered; first run `headshell provider remove {}`",
                             spec.id, spec.id
                         ),
                     },
@@ -885,10 +900,10 @@ impl Session {
         })
     }
 
-    /// Kayıtlı uzak sunucuları listeler (kimlik bilgisi olmadan).
+    /// Lists the registered remote servers (without credentials).
     ///
     /// # Errors
-    /// Kayıt dosyası okunamaz ya da bozuksa.
+    /// If the registry file cannot be read or is corrupt.
     pub fn list_servers(&self) -> Result<ServerListReport> {
         let mut rec = Recorder::start(
             "provider servers".to_owned(),
@@ -909,13 +924,13 @@ impl Session {
         })
     }
 
-    /// Bir uzak sunucu kaydını siler.
+    /// Removes a remote server entry.
     ///
-    /// Kayıtlı olmayan bir ad **hata**: "sildim" deyip hiçbir şey yapmamak
-    /// yazım hatasını gizler.
+    /// A name that is not registered is an **error**: saying "removed" while
+    /// doing nothing would hide a typo.
     ///
     /// # Errors
-    /// Ad kayıtlı değilse ya da dosya yazılamazsa.
+    /// If the name is not registered or the file cannot be written.
     pub fn remove_server(&self, id: &ProviderId) -> Result<ServerRemoveReport> {
         let mut rec = Recorder::start(
             format!("provider remove {id}"),
@@ -930,7 +945,7 @@ impl Session {
                 return Err(Error::new(
                     Stage::ConfigLoad,
                     ErrorKind::NotFound {
-                        what: format!("kayıtlı sunucu: {id}"),
+                        what: format!("registered server: {id}"),
                     },
                 ));
             }
@@ -951,11 +966,11 @@ impl Session {
         })
     }
 
-    /// Yerel müzik dizinlerini tarar ve indeksi tazeler.
+    /// Scans the local music directories and refreshes the index.
     ///
     /// # Errors
-    /// Kök dizin okunamazsa. Tek tek dosya hataları hata değildir; özette
-    /// sayılır (K9).
+    /// If a root directory cannot be read. Errors on individual files are not
+    /// errors; they are counted in the summary (K9).
     pub async fn scan_providers(&mut self, registry: &ProviderRegistry) -> Result<ScanReport> {
         let mut rec = Recorder::start(
             "provider scan".to_owned(),
@@ -978,23 +993,25 @@ impl Session {
             summary,
             write,
             scanned: true,
-            reason: "istendi".to_owned(),
+            reason: "requested".to_owned(),
             diag,
         })
     }
 
-    /// Yalnızca **bayatsa** tarar (D-025).
+    /// Scans only if **stale** (D-025).
     ///
-    /// Sağlayıcıya ucuz bir soru soruyor: katalog son taramadan beri değişmiş
-    /// olabilir mi? Yerel sağlayıcı dizin damgalarına bakıp cevaplıyor; tam
-    /// tarama yapılmıyor. Cevap "bilmiyorum" ise **tarıyoruz** — bilmediğimiz
-    /// için atlamak, kullanıcının eklediği dosyayı görünmez yapardı.
+    /// Asks the provider a cheap question: could the catalog have changed since
+    /// the last scan? The local provider answers from directory timestamps;
+    /// no full scan happens. If the answer is "don't know", we **scan** —
+    /// skipping because we don't know would make a file the user added
+    /// invisible.
     ///
-    /// Bu bir dizin izleme (watch) değil, tetiklenince bakan bir yoklama:
-    /// `notify` bağımlılığı eklenmedi, davranış her platformda aynı.
+    /// This is not directory watching, it is a poll that looks when triggered:
+    /// no `notify` dependency was added and the behaviour is the same on every
+    /// platform.
     ///
     /// # Errors
-    /// Bayatlık sorusu ya da tarama başarısız olursa.
+    /// If the staleness question or the scan fails.
     pub async fn scan_providers_if_stale(
         &mut self,
         registry: &ProviderRegistry,
@@ -1009,25 +1026,25 @@ impl Session {
         for provider in registry.all() {
             let id = provider.info().id;
             let Some(last) = self.library.last_scanned_at_ms(&id)? else {
-                reasons.push(format!("{id}: hiç taranmadı"));
+                reasons.push(format!("{id}: never scanned"));
                 stale = true;
                 continue;
             };
             match provider.catalog_changed_since(last).await? {
                 Some(true) => {
-                    reasons.push(format!("{id}: değişmiş"));
+                    reasons.push(format!("{id}: changed"));
                     stale = true;
                 }
-                Some(false) => reasons.push(format!("{id}: değişmemiş")),
-                // "Bilmiyorum" atlamak için yeterli değil.
+                Some(false) => reasons.push(format!("{id}: unchanged")),
+                // "Don't know" is not enough to skip.
                 None => {
-                    reasons.push(format!("{id}: bilinmiyor"));
+                    reasons.push(format!("{id}: unknown"));
                     stale = true;
                 }
             }
         }
         let reason = reasons.join(", ");
-        rec.note(format!("bayatlık: {reason}"));
+        rec.note(format!("staleness: {reason}"));
 
         if !stale {
             rec.set("scan.skipped", 1);
@@ -1062,10 +1079,10 @@ impl Session {
         })
     }
 
-    /// Taramayı yürütür ve sonucu **kalıcı kataloğa** yazar.
+    /// Runs the scan and writes the result to the **persistent catalog**.
     ///
-    /// Kütüphane ödünç alma çakışmasını önlemek için `&mut SqliteLibrary`
-    /// ayrı parametre; `self` üzerinden çağrılamıyordu.
+    /// `&mut SqliteLibrary` is a separate parameter to avoid a library borrow
+    /// conflict; it could not be called through `self`.
     async fn scan_inner(
         library: &mut SqliteLibrary,
         registry: &ProviderRegistry,
@@ -1076,7 +1093,7 @@ impl Session {
 
         for provider in registry.all() {
             let info = provider.info();
-            // Damgalar: değişmemiş dosyanın etiketi yeniden okunmasın.
+            // Timestamps: an unchanged file's tags are not read again.
             let known = library.catalog_stamps(&info.id)?;
 
             let Some(scan) = provider.scan_catalog(&known).await? else {
@@ -1091,8 +1108,8 @@ impl Session {
             total.unreadable_dirs += scan.summary.unreadable_dirs;
             total.unchanged += scan.summary.unchanged;
 
-            // Değişmemiş satırların üstverisi taramadan gelmez; katalogdaki
-            // hâlini koruyoruz. Aksi halde her tarama onları silerdi.
+            // Metadata of unchanged rows does not come from the scan; we keep what is
+            // in the catalog. Otherwise every scan would delete them.
             let mut rows = Vec::with_capacity(scan.tracks.len());
             for entry in scan.tracks {
                 match entry.track {
@@ -1121,20 +1138,20 @@ impl Session {
             return Err(Error::new(
                 Stage::ProviderCall,
                 ErrorKind::NotFound {
-                    what: "taranabilir kataloğu olan sağlayıcı".to_owned(),
+                    what: "provider with a scannable catalog".to_owned(),
                 },
             ));
         }
         Ok((total, write_total))
     }
 
-    /// Aramayı çalınabilir bir kuyruğa çevirir.
+    /// Turns a search into a playable queue.
     ///
-    /// `all` false ise yalnızca ilk eşleşme alınır. Sonuç boşsa **hata**
-    /// döner: "çaldım ama ses yok" durumundan iyidir.
+    /// If `all` is false only the first match is taken. An empty result is an
+    /// **error**: better than "played it, but no sound".
     ///
     /// # Errors
-    /// Sağlayıcı yoksa, arama hata verirse ya da hiç eşleşme yoksa.
+    /// If there is no provider, the search fails, or nothing matches.
     pub async fn queue_from_search(
         &self,
         registry: &ProviderRegistry,
@@ -1142,15 +1159,16 @@ impl Session {
         all: bool,
         limit: usize,
     ) -> Result<Vec<QueueItem>> {
-        // Önce **kalıcı katalog**: tarama bir kez yapılır, arama diske
-        // gitmeden FTS ile cevaplanır. Sağlayıcıya sormak yalnızca katalog
-        // boşsa gerekir (henüz taranmamış ya da uzak sağlayıcı).
+        // The **persistent catalog** first: the scan happens once, and the search
+        // is answered by FTS without touching the disk. Asking the provider is
+        // needed only if the catalog is empty (not scanned yet, or a remote
+        // provider).
         let mut items: Vec<QueueItem> = self
             .library
             .search_catalog(query, limit)?
             .into_iter()
             .filter(|hit| {
-                // Katalogda duran ama artık çalınamayan sağlayıcıyı atla.
+                // Skip a provider that is still in the catalog but can no longer play.
                 registry.get(&hit.id.provider).is_some_and(|provider| {
                     provider
                         .info()
@@ -1170,7 +1188,7 @@ impl Session {
                 return Err(Error::new(
                     Stage::PlaybackResolve,
                     ErrorKind::NotFound {
-                        what: "ses akışı verebilen sağlayıcı".to_owned(),
+                        what: "provider that can stream audio".to_owned(),
                     },
                 ));
             }
@@ -1188,7 +1206,7 @@ impl Session {
                 Stage::PlaybackResolve,
                 ErrorKind::NotFound {
                     what: format!(
-                        "{query:?} ile eşleşen parça (indeks boşsa: `headshell provider scan`)"
+                        "track matching {query:?} (if the index is empty: `headshell provider scan`)"
                     ),
                 },
             ));
@@ -1199,15 +1217,16 @@ impl Session {
         Ok(items)
     }
 
-    /// Arar, kuyruğa alır, çalar ve dinleme kayıtlarını yazar.
+    /// Searches, queues, plays and writes the listen records.
     ///
-    /// Çalma bitene kadar bekler — CLI'nin bir döngü yazmasına gerek kalmasın
-    /// diye akışın tamamı burada (Altın Kural). GUI ileride bunun yerine
-    /// [`Session::queue_from_search`] + kendi `Player`'ıyla kendi döngüsünü
-    /// kurar; ikisi de aynı çekirdek parçalarını kullanır.
+    /// Waits until playback ends — the whole flow is here so the CLI does not
+    /// have to write a loop (Golden Rule). The GUI later builds its own loop
+    /// with [`Session::queue_from_search`] and its own `Player` instead; both
+    /// use the same core parts.
     ///
     /// # Errors
-    /// Eşleşme yoksa, sağlayıcı çalamıyorsa ya da ses hattı kurulamazsa.
+    /// If nothing matches, the provider cannot play, or the audio pipeline
+    /// cannot be set up.
     pub async fn play(
         &mut self,
         registry: &ProviderRegistry,
@@ -1235,14 +1254,14 @@ impl Session {
 
             player.play_items(items.clone()).await?;
 
-            // Kuyruk bitene kadar sür. Yoklama aralığı çapadan bağımsız:
-            // pozisyon tüketici tarafında hesaplanır (D-015), burada
-            // yalnızca "parça bitti mi" sorulur.
+            // Run until the queue ends. The poll interval is independent of the
+            // anchor: the position is computed on the consumer's side (D-015); here
+            // we only ask "did the track end".
             //
-            // Uyku `std::thread::sleep`: çekirdek bir async çalışma zamanı
-            // seçmez (PLAN konvansiyonu), `tokio::time` burada kullanılamaz.
-            // Ses zaten kendi iş parçacığında çaldığı için bu bekleme sesi
-            // kesmiyor; yalnızca bu çağrı bloklanıyor.
+            // The sleep is `std::thread::sleep`: the core does not choose an async
+            // runtime (PLAN convention), so `tokio::time` cannot be used here. Audio
+            // plays on its own thread, so this wait does not interrupt the sound;
+            // only this call blocks.
             loop {
                 player.tick().await?;
                 if player.state() == crate::playback::PlayState::Stopped {
@@ -1259,7 +1278,8 @@ impl Session {
 
         let report = match result {
             Ok((items, listens, played)) => {
-                // Scrobble'lar burada yazılır: import verisiyle aynı tabloya (§1.6).
+                // Scrobbles are written here: into the same table as imported data
+                // (§1.6).
                 let written = self.record_listens(&listens)?;
                 rec.set(
                     "play.queued",
@@ -1288,14 +1308,14 @@ impl Session {
         )
     }
 
-    /// Bir arama sonucundan hazır bir [`crate::playback::Player`] kurar.
+    /// Builds a ready [`crate::playback::Player`] from a search result.
     ///
-    /// `Session::play`'den farkı: **beklemez**. Çağıran kendi döngüsünü
-    /// yürütür (TUI çizim döngüsü, GUI zamanlayıcısı), `tick()` çağırır ve
-    /// biten dinlemeleri [`Session::record_listens`] ile yazar.
+    /// Unlike `Session::play` it **does not wait**. The caller runs its own
+    /// loop (the TUI's draw loop, the GUI's timer), calls `tick()` and writes
+    /// finished listens with [`Session::record_listens`].
     ///
     /// # Errors
-    /// Eşleşme yoksa ya da ilk parça çalınamazsa.
+    /// If nothing matches or the first track cannot be played.
     pub async fn player_from_search(
         &self,
         registry: &ProviderRegistry,
@@ -1317,13 +1337,13 @@ impl Session {
         Ok(player)
     }
 
-    /// Çalınan parçaların dinleme kayıtlarını kütüphaneye yazar (§1.6).
+    /// Writes the listen records of played tracks to the library (§1.6).
     ///
-    /// Import verisiyle **aynı tabloya** yazılır: geçmiş ve bugün tek bir
-    /// zaman çizelgesi olur.
+    /// They go into the **same table** as imported data: past and present
+    /// become one timeline.
     ///
     /// # Errors
-    /// Yazma başarısız olursa.
+    /// If writing fails.
     pub fn record_listens(&mut self, listens: &[Listen]) -> Result<WriteSummary> {
         if listens.is_empty() {
             return Ok(WriteSummary::default());
@@ -1331,10 +1351,10 @@ impl Session {
         self.library.insert_listens(listens)
     }
 
-    /// Kurulu eklentileri listeler (Faz 2 §2.1). **Süreç başlatmaz.**
+    /// Lists the installed plugins (Phase 2 §2.1). **Starts no process.**
     ///
     /// # Errors
-    /// Eklenti dizini okunamaz ya da onay defteri bozuksa.
+    /// If the plugin directory cannot be read or the consent ledger is corrupt.
     pub fn plugins(&self) -> Result<PluginListReport> {
         let mut rec = Recorder::start(
             "plugin list".to_owned(),
@@ -1355,30 +1375,33 @@ impl Session {
         })
     }
 
-    /// Bir eklentiyi kurar (D-055, D-069, D-071).
+    /// Installs a plugin (D-055, D-069, D-071).
     ///
-    /// Eklenti diskte **yoksa** önce katalogdan indirilir
-    /// ([`crate::plugin::catalog`]): dosyalar sha256 ile doğrulanır, inen
-    /// manifest indeksin gösterdiğiyle karşılaştırılır ve köken kaydıyla
-    /// birlikte yerine konur. Ardından — eklenti zaten diskteyse yalnızca
-    /// bu — beyan ettiği araçlar motorla kurulur.
+    /// If the plugin is **not** on disk, it is first downloaded from the catalog
+    /// ([`crate::plugin::catalog`]): files are verified by sha256, the
+    /// downloaded manifest is compared with what the index showed, and it is
+    /// put in place together with its origin record. Then — and only this, if
+    /// the plugin was already on disk — the tools it declares are installed by
+    /// the engine.
     ///
-    /// **Ağa çıkar ve bunu `--online` beklemeden yapar.** Bayrak örtük ağ
-    /// erişimini engellemek için var ("bir export'u içe aktarmak kimseyi
-    /// sessizce ağa bağlamaz"); burada indirme komutun kendisidir, yan
-    /// etkisi değil. Kullanıcı `install` yazdıysa indirilmesini istemiştir.
+    /// **It goes online, and does so without waiting for `--online`.** That
+    /// flag exists to prevent implicit network access ("importing an export
+    /// never silently connects anyone to the network"); here the download is
+    /// the command itself, not a side effect. A user who typed `install` asked
+    /// for the download.
     ///
-    /// Diskte zaten olan eklenti için katalog **okunmaz** — bu komut
-    /// güncellemez ([`Self::update_plugins`]) — ve kurulu eserler için ağa
-    /// hiç çıkılmaz. Kurulan eklenti onay bekler: katalogdan gelmek onay
-    /// değildir (D-040).
+    /// For a plugin already on disk the catalog is **not read** — this command
+    /// does not update ([`Self::update_plugins`]) — and installed artifacts
+    /// never go to the network. An installed plugin awaits consent: coming from
+    /// the catalog is not consent (D-040).
     ///
     /// # Errors
-    /// Ad geçersizse, eklenti ne diskte ne katalogda varsa, katalog
-    /// okunamazsa, bir dosyanın karması tutmazsa, manifest bozuksa, HTTP
-    /// istemcisi bu derlemede yoksa ya da dosyalar yazılamazsa. Bir **esere**
-    /// ulaşamamak hata değil: [`InstallOutcome`] içinde raporlanır, çünkü
-    /// "ulaşılamadı", "yetim" ve "karma tutmadı" ayrı tanılardır (K9).
+    /// If the name is invalid, the plugin is neither on disk nor in the
+    /// catalog, the catalog cannot be read, a file's hash does not match, the
+    /// manifest is corrupt, this build has no HTTP client, or the files cannot
+    /// be written. Failing to reach an **artifact** is not an error: it is
+    /// reported in [`InstallOutcome`], because "unreachable", "orphaned" and
+    /// "hash mismatch" are different diagnoses (K9).
     pub async fn install_plugin(
         &self,
         name: &str,
@@ -1419,15 +1442,15 @@ impl Session {
         if let Ok((_, outcomes, fetched, consent)) = &result {
             match fetched {
                 Some(fetched) => rec.note(format!(
-                    "katalogdan indirildi: {name} {} ← {}",
+                    "downloaded from the catalog: {name} {} ← {}",
                     fetched.version, fetched.index
                 )),
-                None => rec.note("eklenti zaten diskteydi; katalog okunmadı".to_owned()),
+                None => rec.note("plugin was already on disk; catalog not read".to_owned()),
             }
             for (name, outcome) in outcomes {
                 rec.note(format!("{name}: {}", outcome.describe()));
             }
-            rec.note(format!("onay: {}", consent.describe()));
+            rec.note(format!("consent: {}", consent.describe()));
         }
 
         let plugin = name.to_owned();
@@ -1451,23 +1474,24 @@ impl Session {
         )
     }
 
-    /// Eklenti kataloğunu okur ve bu makineye karşı gösterir (D-071): her
-    /// eklenti kurulu mu, güncellemesi var mı, neden kurulamıyor.
+    /// Reads the plugin catalog and shows it against this machine (D-071):
+    /// whether each plugin is installed, whether it has an update, why it
+    /// cannot be installed.
     ///
-    /// Ağa **yalnızca** kataloğu okumak için çıkar; hiçbir şey kurmaz. Adres
-    /// [`Config::plugin_index_url`].
+    /// Goes online **only** to read the catalog; installs nothing. The address
+    /// is [`Config::plugin_index_url`].
     ///
     /// # Errors
-    /// Kataloğa ulaşılamazsa (`NETWORK_REQUEST`), indeks yoksa ya da
-    /// okunamıyorsa (`PLUGIN_CATALOG`). Bozuk bir **girdi** hata değil:
-    /// o girdinin `problem`'inde yazar.
+    /// If the catalog cannot be reached (`NETWORK_REQUEST`), or the index is
+    /// missing or unreadable (`PLUGIN_CATALOG`). A broken **entry** is not an
+    /// error: it is written in that entry's `problem`.
     pub async fn plugin_catalog(&self, http: Arc<dyn HttpClient>) -> Result<PluginCatalogReport> {
         let mut rec = Recorder::start(
             "plugin catalog".to_owned(),
             Some(self.config.data_dir().to_path_buf()),
         );
         let index = self.config.plugin_index_url();
-        rec.note(format!("katalog: {index}"));
+        rec.note(format!("catalog: {index}"));
 
         let result = match catalog::fetch(http.as_ref(), &index).await {
             Ok(catalog) => catalog.survey(&self.config),
@@ -1482,7 +1506,7 @@ impl Session {
             }
             for name in &survey.delisted {
                 rec.note(format!(
-                    "{name}: bu katalogdan kurulmuş ama artık listede yok"
+                    "{name}: installed from this catalog but no longer listed"
                 ));
             }
         }
@@ -1498,20 +1522,23 @@ impl Session {
         })
     }
 
-    /// Katalogdan kurulmuş eklentileri katalogdaki sürüme getirir (D-071).
+    /// Brings plugins installed from the catalog to the catalog's version
+    /// (D-071).
     ///
-    /// `name` verilirse yalnızca o eklenti, ve yapılamıyorsa (elle kurulmuş,
-    /// yerelde değiştirilmiş, katalogda yok) **hata** — kullanıcı açıkça
-    /// istedi. Verilmezse katalogdaki adlardan kurulu olanların hepsi; tek
-    /// birinin düşmesi ötekileri durdurmaz, sonuçlar tek tek yazar (K9).
+    /// With `name`, only that plugin, and if that cannot be done (installed by
+    /// hand, changed locally, not in the catalog) it is an **error** — the user
+    /// asked explicitly. Without it, every installed plugin whose name is in
+    /// the catalog; one failing does not stop the others, and each result is
+    /// written separately (K9).
     ///
-    /// Güncelleme **yalnızca** köken kaydı olan ve dosyaları kayıtla aynı
-    /// olan eklentiye dokunur. Yeni sürümün araçları kurulur; araç
-    /// değişikliği onay istemez ama raporda yazar. İzinler büyüdüyse eklenti
-    /// yeniden onay bekler (D-040).
+    /// An update touches **only** a plugin that has an origin record and whose
+    /// files match that record. The new version's tools are installed; a tool
+    /// change needs no consent but is written in the report. If the permissions
+    /// grew, the plugin awaits consent again (D-040).
     ///
     /// # Errors
-    /// Katalog okunamazsa; `name` verildiyse o eklenti güncellenemezse.
+    /// If the catalog cannot be read; with `name`, if that plugin cannot be
+    /// updated.
     pub async fn update_plugins(
         &self,
         name: Option<&str>,
@@ -1525,7 +1552,7 @@ impl Session {
         let index = self.config.plugin_index_url();
         let platform = crate::plugin::artifact::current_platform();
         let store = ArtifactStore::new(&self.config);
-        rec.note(format!("katalog: {index}"));
+        rec.note(format!("catalog: {index}"));
 
         let result = async {
             let catalog = catalog::fetch(http.as_ref(), &index).await?;
@@ -1544,7 +1571,7 @@ impl Session {
                             Stage::PluginCatalog,
                             ErrorKind::PluginCatalog {
                                 index: index.clone(),
-                                detail: format!("{plugin} güncellenmedi: {reason}"),
+                                detail: format!("{plugin} not updated: {reason}"),
                             },
                         ));
                     }
@@ -1586,7 +1613,7 @@ impl Session {
                 if let UpdateOutcome::Updated { tools_changed, .. } = &plugin.outcome {
                     for change in tools_changed {
                         rec.note(format!(
-                            "{}: araç değişti — {} (onay istenmez, D-071)",
+                            "{}: tool changed — {} (no consent needed, D-071)",
                             plugin.name,
                             change.describe()
                         ));
@@ -1604,17 +1631,18 @@ impl Session {
         })
     }
 
-    /// Bir eklentiyi kaldırır: dizinini (içindeki `state/` ile) siler ve
-    /// onayını unutur (D-071).
+    /// Removes a plugin: deletes its directory (with the `state/` inside) and
+    /// forgets its consent (D-071).
     ///
-    /// Onay **önce** unutulur: dizin silinemezse eklenti onaysız kalır — ters
-    /// sıra, onaylı ama yarım silinmiş bir eklenti bırakabilirdi. Sırlar ve
-    /// motorun kurduğu araçlar silinmez; kalan sırların adları raporda.
-    /// Dizin bir sembolik bağlantıysa yalnızca bağlantı kaldırılır.
+    /// Consent is forgotten **first**: if the directory cannot be deleted the
+    /// plugin is left without consent — the reverse order could leave a plugin
+    /// that is approved but half deleted. Secrets and the tools the engine
+    /// installed are not deleted; the names of the remaining secrets are in the
+    /// report. If the directory is a symbolic link, only the link is removed.
     ///
     /// # Errors
-    /// Ad geçersizse, eklenti kurulu değilse, onay defteri ya da sır dosyası
-    /// bozuksa, dizin silinemezse.
+    /// If the name is invalid, the plugin is not installed, the consent ledger
+    /// or the secret file is corrupt, or the directory cannot be deleted.
     pub fn remove_plugin(&self, name: &str) -> Result<PluginRemoveReport> {
         let mut rec = Recorder::start(
             format!("plugin remove {name}"),
@@ -1637,23 +1665,23 @@ impl Session {
         })();
 
         if let Ok((removed, consent_forgotten, kept_secrets)) = &result {
-            rec.note(format!("kaldırıldı: {}", removed.path.display()));
+            rec.note(format!("removed: {}", removed.path.display()));
             if let Some(target) = &removed.link_target {
                 rec.note(format!(
-                    "bir bağlantıydı; hedefine dokunulmadı: {}",
+                    "was a link; its target was not touched: {}",
                     target.display()
                 ));
             }
             rec.note(format!(
-                "onay: {}",
+                "consent: {}",
                 if *consent_forgotten {
-                    "unutuldu"
+                    "forgotten"
                 } else {
-                    "kaydı yoktu"
+                    "had no record"
                 }
             ));
             if !kept_secrets.is_empty() {
-                rec.note(format!("kalan sırlar: {}", kept_secrets.join(", ")));
+                rec.note(format!("remaining secrets: {}", kept_secrets.join(", ")));
             }
         }
 
@@ -1671,20 +1699,20 @@ impl Session {
         )
     }
 
-    /// Katalog deposunun indeksini üretir ya da denetler (D-071).
+    /// Generates or checks the catalog repository's index (D-071).
     ///
-    /// Katalog **bakımı** için: `dir` bir `headshell/plugins` kopyası. Her
-    /// eklenti çekirdeğin kendi manifest doğrulamasından geçer — kurulumda
-    /// uygulanacak kuralın aynısı — ve dosyaların karması hesaplanır.
-    /// `url_template` verilmezse var olan `index.json`'daki kullanılır, ki
-    /// her üretim aynı adresleri yazsın.
+    /// For catalog **maintenance**: `dir` is a copy of `headshell/plugins`. Every
+    /// plugin goes through the core's own manifest validation — the same rule
+    /// that installation applies — and the files' hashes are computed. Without
+    /// `url_template` the one in the existing `index.json` is used, so every
+    /// build writes the same addresses.
     ///
-    /// `check` açıkken hiçbir şey yazılmaz; indeks güncel değilse **neyin**
-    /// farklı olduğunu söyleyen bir hata döner (katalog deposunun CI'ı).
+    /// With `check` nothing is written; if the index is out of date, an error
+    /// says **what** differs (the catalog repository's CI).
     ///
     /// # Errors
-    /// Şablon yoksa ya da geçersizse, bir eklenti geçersizse, `check`
-    /// açıkken indeks güncel değilse, dosya okunamaz ya da yazılamazsa.
+    /// If the template is missing or invalid, a plugin is invalid, the index is
+    /// out of date with `check`, or a file cannot be read or written.
     pub fn build_plugin_index(
         &self,
         dir: &Path,
@@ -1709,9 +1737,10 @@ impl Session {
                         Stage::PluginCatalog,
                         ErrorKind::PluginCatalog {
                             index: origin.clone(),
-                            detail: "adres şablonu yok: ilk üretimde `--url-template` verin; \
-                                     sonrakiler index.json'daki şablonu kullanır"
-                                .to_owned(),
+                            detail:
+                                "no address template: pass `--url-template` on the first build; \
+                                     later builds use the template in index.json"
+                                    .to_owned(),
                         },
                     )
                 })?,
@@ -1728,15 +1757,15 @@ impl Session {
             if check && !up_to_date {
                 let differences = match &existing {
                     Some(old) => catalog::index_differences(old, &built.json),
-                    None => vec!["index.json yok".to_owned()],
+                    None => vec!["no index.json".to_owned()],
                 };
                 return Err(Error::new(
                     Stage::PluginCatalog,
                     ErrorKind::PluginCatalog {
                         index: origin.clone(),
                         detail: format!(
-                            "index.json güncel değil — `headshell plugin index {}` ile yeniden \
-                             üretin: {}",
+                            "index.json is out of date — regenerate it with `headshell plugin index {}`: \
+                             {}",
                             dir.display(),
                             differences.join("; ")
                         ),
@@ -1759,11 +1788,11 @@ impl Session {
                 rec.note(format!("{} {}", plugin.name, plugin.version));
             }
             rec.note(if *written {
-                "index.json yazıldı".to_owned()
+                "index.json written".to_owned()
             } else if *up_to_date {
-                "index.json zaten güncel".to_owned()
+                "index.json already up to date".to_owned()
             } else {
-                "index.json yazılmadı".to_owned()
+                "index.json not written".to_owned()
             });
         }
 
@@ -1781,13 +1810,15 @@ impl Session {
         )
     }
 
-    /// Bir eklentinin **beyan ettiği** izinleri onaylar (D-040).
+    /// Approves the permissions a plugin **declares** (D-040).
     ///
-    /// Onaylanan küme manifestten okunur: çağıran kendi izin listesini
-    /// uyduramaz, kullanıcı yalnızca eklentinin istediğine evet der.
+    /// The approved set is read from the manifest: the caller cannot make up
+    /// its own permission list, the user only says yes to what the plugin asks
+    /// for.
     ///
     /// # Errors
-    /// Eklenti bulunamazsa, manifesti bozuksa ya da defter yazılamazsa.
+    /// If the plugin is not found, its manifest is corrupt, or the ledger
+    /// cannot be written.
     pub fn approve_plugin(&self, name: &str) -> Result<PluginConsentReport> {
         self.consent_command(name, "approve", |store, name, requested| {
             store.approve(name, requested, jiff::Timestamp::now());
@@ -1795,30 +1826,31 @@ impl Session {
         })
     }
 
-    /// Eklentiyi kapatır; onay kaydı korunur.
+    /// Disables a plugin; the consent record is kept.
     ///
     /// # Errors
-    /// Eklenti bulunamazsa ya da hiç onaylanmamışsa.
+    /// If the plugin is not found or was never approved.
     pub fn disable_plugin(&self, name: &str) -> Result<PluginConsentReport> {
         self.consent_command(name, "disable", |store, name, _| {
             missing_consent(store.disable(name), name)
         })
     }
 
-    /// Kapalı bir eklentiyi yeniden açar.
+    /// Re-enables a disabled plugin.
     ///
     /// # Errors
-    /// Eklenti bulunamazsa ya da hiç onaylanmamışsa.
+    /// If the plugin is not found or was never approved.
     pub fn enable_plugin(&self, name: &str) -> Result<PluginConsentReport> {
         self.consent_command(name, "enable", |store, name, _| {
             missing_consent(store.enable(name), name)
         })
     }
 
-    /// Onayı tamamen unutur: eklenti bir dahaki sefere baştan sorulur.
+    /// Forgets consent entirely: the plugin is asked again from scratch next
+    /// time.
     ///
     /// # Errors
-    /// Eklenti bulunamazsa ya da hiç onaylanmamışsa.
+    /// If the plugin is not found or was never approved.
     pub fn forget_plugin(&self, name: &str) -> Result<PluginConsentReport> {
         self.consent_command(name, "forget", |store, name, _| {
             missing_consent(store.forget(name), name)
@@ -1851,22 +1883,22 @@ impl Session {
 
         if let Ok((manifest, status)) = &result {
             rec.note(format!(
-                "beyan edilen izinler: {}",
+                "declared permissions: {}",
                 manifest.permissions.describe()
             ));
             for requirement in &manifest.requires {
                 match requirement.asset_for(&platform) {
                     Some(asset) => rec.note(format!(
-                        "motorun indireceği: {} {} ({platform}) ← {} (sha256 {})",
+                        "the engine will download: {} {} ({platform}) ← {} (sha256 {})",
                         requirement.name, requirement.version, asset.url, asset.sha256
                     )),
                     None => rec.note(format!(
-                        "{} {}: bu platform ({platform}) için yayın yok",
+                        "{} {}: no release for this platform ({platform})",
                         requirement.name, requirement.version
                     )),
                 }
             }
-            rec.note(format!("durum: {}", status.describe()));
+            rec.note(format!("state: {}", status.describe()));
         }
 
         self.finish(rec, result, move |(manifest, status), diag| {
@@ -1883,13 +1915,13 @@ impl Session {
         })
     }
 
-    /// Sır deposundaki **anahtar adlarını** listeler (D-042).
+    /// Lists the **key names** in the secret store (D-042).
     ///
-    /// Değerler dönmüyor: bu çıktı `--json` ile boru hattına ve tanı
-    /// raporuna gidebilir.
+    /// No values are returned: this output can go to a pipeline with `--json`
+    /// and into the diagnostics report.
     ///
     /// # Errors
-    /// Sır dosyası bozuksa.
+    /// If the secret file is corrupt.
     pub fn secrets(&self) -> Result<SecretListReport> {
         let mut rec = Recorder::start(
             "secret list".to_owned(),
@@ -1908,10 +1940,10 @@ impl Session {
         })
     }
 
-    /// Bir sır yazar.
+    /// Writes a secret.
     ///
     /// # Errors
-    /// Sır dosyası okunamaz ya da yazılamazsa.
+    /// If the secret file cannot be read or written.
     pub fn set_secret(&self, namespace: &str, key: &str, value: &str) -> Result<SecretWriteReport> {
         self.secret_command(namespace, key, "set", |secrets| {
             secrets.set(namespace, key, value);
@@ -1919,10 +1951,10 @@ impl Session {
         })
     }
 
-    /// Bir sırrı siler.
+    /// Removes a secret.
     ///
     /// # Errors
-    /// Sır dosyası okunamaz/yazılamazsa ya da anahtar yoksa.
+    /// If the secret file cannot be read or written, or the key does not exist.
     pub fn remove_secret(&self, namespace: &str, key: &str) -> Result<SecretWriteReport> {
         self.secret_command(namespace, key, "remove", |secrets| {
             if secrets.remove(namespace, key) {
@@ -1931,7 +1963,7 @@ impl Session {
                 Err(Error::new(
                     Stage::ConfigLoad,
                     ErrorKind::NotFound {
-                        what: format!("sır: {namespace} / {key}"),
+                        what: format!("secret: {namespace} / {key}"),
                     },
                 ))
             }
@@ -1945,7 +1977,7 @@ impl Session {
         action: &str,
         apply: impl FnOnce(&mut Secrets) -> Result<bool>,
     ) -> Result<SecretWriteReport> {
-        // Komut satırı tanıya yazılıyor; **değer buraya girmiyor** (D-042).
+        // The command line goes into diagnostics; **the value does not** (D-042).
         let rec = Recorder::start(
             format!("secret {action} {namespace} {key}"),
             Some(self.config.data_dir().to_path_buf()),
@@ -1971,18 +2003,19 @@ impl Session {
         })
     }
 
-    /// Son çalıştırmanın tanı raporu.
+    /// The last run's diagnostics report.
     ///
     /// # Errors
-    /// Rapor dosyası bozuksa.
+    /// If the report file is corrupt.
     pub fn last_diag(&self) -> Result<Option<DiagReport>> {
         crate::diag::load_last_run(&self.config.last_run_path())
     }
 
-    /// Komutu kapatır: tanı raporunu diske yazar, sonucu paketler.
+    /// Closes a command: writes the diagnostics report to disk and wraps the
+    /// result.
     ///
-    /// Rapor hem başarıda hem başarısızlıkta yazılır — `headshell diag` en çok
-    /// bir şey patladığında lazım olur.
+    /// The report is written on success and on failure alike — `headshell diag`
+    /// is needed most when something has blown up.
     fn finish<T, R>(
         &self,
         rec: Recorder,
@@ -1994,17 +2027,18 @@ impl Session {
             Err(err) => rec.finish(Err(err)),
         };
         if let Err(write_err) = crate::diag::save_last_run(&self.config.last_run_path(), &report) {
-            // Tanı yazılamadıysa asıl hatayı gizleme; yalnızca logla.
-            tracing::warn!(error = %write_err.chain_text(), "tanı raporu yazılamadı");
+            // If diagnostics could not be written, do not hide the real error; just
+            // log it.
+            tracing::warn!(error = %write_err.chain_text(), "could not write the diagnostics report");
         }
         result.map(|value| wrap(value, report))
     }
 }
 
-/// Onay defterinde kaydı olmayan eklenti için ortak hata.
+/// The shared error for a plugin with no record in the consent ledger.
 ///
-/// `disable`/`enable`/`forget` hiç onaylanmamış bir eklentide sessizce
-/// başarılı olmamalı: kullanıcı bir şey yaptığını sanır (K9).
+/// `disable`/`enable`/`forget` must not silently succeed on a plugin that
+/// was never approved: the user would think they did something (K9).
 fn missing_consent(found: bool, name: &str) -> Result<()> {
     if found {
         Ok(())
@@ -2013,14 +2047,15 @@ fn missing_consent(found: bool, name: &str) -> Result<()> {
             Stage::PluginLoad,
             ErrorKind::PluginNotApproved {
                 plugin: name.to_owned(),
-                detail: "onay defterinde kaydı yok — önce `headshell plugin approve`".to_owned(),
+                detail: "no record in the consent ledger — first run `headshell plugin approve`"
+                    .to_owned(),
             },
         ))
     }
 }
 
-/// Bir eklentinin beyan ettiği araçları motorla kurar (D-055). Hiç araç
-/// istemiyorsa ağa çıkılmaz ve boş liste döner.
+/// Installs the tools a plugin declares with the engine (D-055). If it asks
+/// for none, no network access happens and an empty list is returned.
 fn install_artifacts(
     store: &ArtifactStore,
     manifest: &PluginManifest,
@@ -2036,7 +2071,7 @@ fn install_artifacts(
     Ok(outcomes)
 }
 
-/// Yola göre zip mi dizin mi olduğuna karar verir.
+/// Decides from the path whether it is a zip or a directory.
 fn open_archive(path: &Path) -> Result<Box<dyn import::ExportArchive>> {
     let meta = std::fs::metadata(path)
         .map_err(|source| crate::error::io_err(Stage::ImportRead, path, source))?;
@@ -2048,41 +2083,45 @@ fn open_archive(path: &Path) -> Result<Box<dyn import::ExportArchive>> {
         Err(Error::new(
             Stage::ImportRead,
             ErrorKind::InvalidInput {
-                detail: format!("{} ne dosya ne dizin", path.display()),
+                detail: format!("{} is neither a file nor a directory", path.display()),
             },
         ))
     }
 }
 
-/// Kimlik zincirinin üstveri kaynağını nereden alacağı.
+/// Where the identity chain gets its metadata source.
 ///
-/// Ağa çıkmak **açık bir tercih**: `headshell` ağ olmadan da eksiksiz çalışan bir
-/// araçtır ve bir export'u içe aktarmak kimseyi sessizce MusicBrainz'e
-/// bağlamamalı. Seçim çekirdekte duruyor ki GUI ve mobil aynı iki seçeneği
-/// aynı adlarla sunsun (Altın Kural).
+/// Going online is **an explicit choice**: `headshell` is a tool that works
+/// fully without a network, and importing an export must not silently
+/// connect anyone to MusicBrainz. The choice lives in the core so the GUI
+/// and mobile offer the same two options under the same names (Golden
+/// Rule).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LookupMode {
-    /// Ağ yok: zincir ISRC'den öteye gitmez, gerisi `LocalKey`'e düşer.
+    /// No network: the chain goes no further than ISRC; the rest falls to
+    /// `LocalKey`.
     #[default]
     Offline,
-    /// MusicBrainz'e sorar — zincirin 2. ve 3. halkası çalışır.
+    /// Asks MusicBrainz — the chain's 2nd and 3rd links run.
     ///
-    /// **Yavaştır ve bu kaçınılmaz:** MusicBrainz anonim istemciye saniyede
-    /// bir istek veriyor, yani binlerce parçalık bir export saatler sürer.
-    /// Tek parçalık `resolve` için uygun, toplu içe aktarma için değil.
+    /// **It is slow, unavoidably:** MusicBrainz gives an anonymous client one
+    /// request per second, so an export of thousands of tracks takes hours.
+    /// Fine for a single-track `resolve`, not for a bulk import.
     Online,
 }
 
-/// Verilen kipin üstveri kaynağı.
+/// The metadata source for the given mode.
 ///
-/// Dönüş tipi somut değil `Arc<dyn MetadataLookup>` (D-006): çağıranlar
-/// — CLI, GUI, mobil — kaynağı değiştirdiğimizde imza görmeden geçsin.
+/// The return type is `Arc<dyn MetadataLookup>`, not a concrete type
+/// (D-006): callers — CLI, GUI, mobile — should not see a signature change
+/// when we swap the source.
 ///
 /// # Errors
-/// [`LookupMode::Online`] istendi ama bu derlemede HTTP istemcisi yok
-/// (`http-client` feature'ı kapalı). Sessizce çevrimdışına düşmüyoruz:
-/// kullanıcı ağ istediğini söyledi ve neden alamadığını bilmeli (K9).
+/// [`LookupMode::Online`] was requested but this build has no HTTP client
+/// (the `http-client` feature is off). We do not silently fall back to
+/// offline: the user said they want the network and should know why they
+/// cannot have it (K9).
 pub fn lookup_for(mode: LookupMode) -> Result<Arc<dyn MetadataLookup>> {
     match mode {
         LookupMode::Offline => Ok(default_lookup()),
@@ -2090,7 +2129,7 @@ pub fn lookup_for(mode: LookupMode) -> Result<Arc<dyn MetadataLookup>> {
     }
 }
 
-/// Varsayılan üstveri kaynağı: ağ yok.
+/// The default metadata source: no network.
 #[must_use]
 pub fn default_lookup() -> Arc<dyn MetadataLookup> {
     Arc::new(OfflineLookup)

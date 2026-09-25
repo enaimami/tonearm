@@ -1,48 +1,51 @@
-//! Ses parmak izi (Chromaprint) — kimlik zincirinin **4. halkası** için girdi.
+//! The audio fingerprint (Chromaprint) — the input for the identity chain's
+//! **4th link**.
 //!
-//! Zincirin ilk üç halkası metne bakıyor: ISRC, MusicBrainz araması, bulanık
-//! eşleşme. Üçü de etiketlerin doğru olduğunu varsayar. Etiketi `track01.mp3`
-//! olan bir dosyada üçü de çaresizdir — parmak izi **sesin kendisine** bakan
-//! tek halka.
+//! The first three links of the chain look at text: the ISRC, a MusicBrainz
+//! search, a fuzzy match. All three assume the tags are right. On a file
+//! tagged `track01.mp3` all three are helpless — the fingerprint is the only
+//! link that looks at **the audio itself**.
 //!
-//! ## Neden `rusty-chromaprint`, `fpcalc` değil (D-045)
+//! ## Why `rusty-chromaprint` and not `fpcalc` (D-045)
 //!
-//! Öneri Chromaprint'in resmî CLI'sini alt süreç olarak çağırmaktı: bağımlılık
-//! ağacına tek satır eklemez. Kullanıcı saf Rust'ı seçti — PCM zaten
-//! symphonia'dan geliyor ve kullanıcıdan hiçbir kurulum istenmiyor. Bedeli
-//! ölçüldü: ağaç 49'dan **88 crate'e** çıkıyor (`rustfft` + `rubato`). Bu
-//! yüzden ayrı bir `fingerprint` feature'ı arkasında; `audio` açıp parmak izi
-//! istemeyen bir derleme (mobil çalma) o ağacı taşımaz.
+//! The proposal was to call Chromaprint's official CLI as a subprocess: it
+//! adds not a single line to the dependency tree. The user chose pure Rust —
+//! the PCM already comes from symphonia and nothing has to be installed by
+//! the user. The price was measured: the tree grows from 49 to **88 crates**
+//! (`rustfft` + `rubato`). That is why it sits behind a separate
+//! `fingerprint` feature; a build that turns on `audio` but does not want
+//! fingerprints (mobile playback) does not carry that tree.
 //!
-//! ## Yapılandırma sözleşme
+//! ## The configuration is a contract
 //!
-//! [`Configuration::preset_test2`] AcoustID'nin sunucu tarafında beklediği
-//! algoritma. Değiştirmek, üretilen parmak izini AcoustID'nin veritabanıyla
-//! karşılaştırılamaz kılar — sessizce "eşleşme yok" döner. Bu yüzden burada
-//! sabit ve seçenek olarak sunulmuyor.
+//! [`Configuration::preset_test2`] is the algorithm AcoustID expects on the
+//! server side. Changing it makes the fingerprints produced incomparable with
+//! AcoustID's database — it silently returns "no match". That is why it is
+//! fixed here and not offered as an option.
 
 use std::path::Path;
 
 use crate::diag::Stage;
 use crate::error::{Error, ErrorKind, Result};
 
-/// Bir dosyadan çıkarılmış parmak izi.
+/// A fingerprint extracted from a file.
 ///
-/// `uniffi` uyumlu: alanlar düz veri, ömür yok.
+/// `uniffi` compatible: the fields are plain data, no lifetimes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fingerprint {
-    /// Ham alt-parmak izleri. Karşılaştırma için; AcoustID'ye bu gitmiyor.
+    /// The raw sub-fingerprints. For comparison; this is not what goes to
+    /// AcoustID.
     pub raw: Vec<u32>,
-    /// Sesin uzunluğu, **tam saniye**.
+    /// The length of the audio, in **whole seconds**.
     ///
-    /// AcoustID sorguda bunu ayrı bir parametre olarak istiyor ve eşleşmeyi
-    /// süreye göre de daraltıyor. Kaptan okunamazsa çözülen örneklerden
-    /// hesaplanır — tahmin değil, sayım.
+    /// AcoustID wants this as a separate parameter in the query and also narrows
+    /// the match by duration. If it cannot be read from the container it is
+    /// computed from the decoded samples — a count, not a guess.
     pub duration_secs: u32,
 }
 
 impl Fingerprint {
-    /// AcoustID'nin beklediği biçim: sıkıştırılmış + URL-güvenli base64.
+    /// The format AcoustID expects: compressed + URL-safe base64.
     #[cfg(feature = "fingerprint")]
     #[must_use]
     pub fn to_acoustid_string(&self) -> String {
@@ -53,13 +56,13 @@ impl Fingerprint {
     }
 }
 
-/// URL-güvenli base64, **dolgusuz**.
+/// URL-safe base64, **unpadded**.
 ///
-/// AcoustID parmak izini sorgu dizesinde bekliyor: standart alfabenin `+` ve
-/// `/` karakterleri orada kaçırılmak zorunda kalır, `=` dolgusu ise bazı
-/// aracılar tarafından kırpılır. Kendimiz yazıyoruz — tek kullanım için bir
-/// kodlama crate'i eklemek, zaten 39 crate büyüyen bir ağaca bir tane daha
-/// eklerdi.
+/// AcoustID expects the fingerprint in the query string: the standard
+/// alphabet's `+` and `/` characters would have to be escaped there, and the
+/// `=` padding gets trimmed by some intermediaries. We write it ourselves —
+/// adding an encoding crate for a single use would add one more crate to a
+/// tree that has already grown by 39.
 #[cfg(feature = "fingerprint")]
 fn base64_url_nopad(data: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
@@ -69,8 +72,8 @@ fn base64_url_nopad(data: &[u8]) -> String {
         let b1 = chunk.get(1).map_or(0, |b| u32::from(*b));
         let b2 = chunk.get(2).map_or(0, |b| u32::from(*b));
         let triple = (b0 << 16) | (b1 << 8) | b2;
-        // Girdinin kaç baytı varsa o kadar 6-bitlik hane yazılır: 1 bayt → 2
-        // hane, 2 bayt → 3 hane, 3 bayt → 4 hane.
+        // As many 6-bit digits are written as the input has bytes: 1 byte → 2
+        // digits, 2 bytes → 3 digits, 3 bytes → 4 digits.
         let digits = chunk.len() + 1;
         for i in 0..digits {
             let shift = 18 - 6 * i;
@@ -81,12 +84,13 @@ fn base64_url_nopad(data: &[u8]) -> String {
     out
 }
 
-/// Bir ses dosyasının parmak izini çıkarır.
+/// Extracts an audio file's fingerprint.
 ///
 /// # Errors
-/// Dosya açılamaz, kap tanınmaz, kod çözücü kurulamaz ya da içinde ses izi
-/// yoksa. Bozuk **tek paketler** hata değil: sayılır, atlanır ve toplamı
-/// raporlanır — bir çizik parmak izini tümden kaybettirmemeli.
+/// If the file cannot be opened, the container is not recognised, the
+/// decoder cannot be set up or there is no audio track in it. Corrupt
+/// **single packets** are not an error: they are counted, skipped and the
+/// total is reported — one scratch must not lose the whole fingerprint.
 #[cfg(feature = "fingerprint")]
 pub fn fingerprint_file(path: &Path) -> Result<Fingerprint> {
     use rusty_chromaprint::{Configuration, Fingerprinter};
@@ -112,42 +116,44 @@ pub fn fingerprint_file(path: &Path) -> Result<Fingerprint> {
             FormatOptions::default(),
             MetadataOptions::default(),
         )
-        .map_err(|err| fingerprint_err(format!("{label} açılamadı: {err}")))?;
+        .map_err(|err| fingerprint_err(format!("could not open {label}: {err}")))?;
 
     let track = format
         .default_track(TrackType::Audio)
-        .ok_or_else(|| fingerprint_err(format!("{label} içinde ses izi yok")))?;
+        .ok_or_else(|| fingerprint_err(format!("no audio track in {label}")))?;
     let track_id = track.id;
     let codec_params = track
         .codec_params
         .as_ref()
         .and_then(|params| params.audio())
-        .ok_or_else(|| fingerprint_err(format!("{label} için kod çözücü parametreleri okunamadı")))?
+        .ok_or_else(|| {
+            fingerprint_err(format!("could not read the decoder parameters for {label}"))
+        })?
         .clone();
 
     let sample_rate = codec_params
         .sample_rate
-        .ok_or_else(|| fingerprint_err(format!("{label} örnekleme hızını bildirmiyor")))?;
+        .ok_or_else(|| fingerprint_err(format!("{label} does not report a sample rate")))?;
     let channels = codec_params
         .channels
         .as_ref()
         .map_or(0, symphonia::core::audio::Channels::count);
     if channels == 0 {
         return Err(fingerprint_err(format!(
-            "{label} kanal sayısını bildirmiyor"
+            "{label} does not report a channel count"
         )));
     }
 
     let mut decoder = symphonia::default::get_codecs()
         .make_audio_decoder(&codec_params, &AudioDecoderOptions::default())
-        .map_err(|err| fingerprint_err(format!("kod çözücü kurulamadı: {err}")))?;
+        .map_err(|err| fingerprint_err(format!("could not set up the decoder: {err}")))?;
 
     let config = Configuration::preset_test2();
     let mut printer = Fingerprinter::new(&config);
     let channel_count = u32::try_from(channels).unwrap_or(u32::MAX);
     printer
         .start(sample_rate, channel_count)
-        .map_err(|err| fingerprint_err(format!("parmak izi başlatılamadı: {err}")))?;
+        .map_err(|err| fingerprint_err(format!("could not start the fingerprint: {err}")))?;
 
     let mut samples: Vec<i16> = Vec::new();
     let mut frames_seen: u64 = 0;
@@ -157,7 +163,7 @@ pub fn fingerprint_file(path: &Path) -> Result<Fingerprint> {
         let packet = match format.next_packet() {
             Ok(Some(packet)) => packet,
             Ok(None) => break,
-            Err(err) => return Err(fingerprint_err(format!("paket okunamadı: {err}"))),
+            Err(err) => return Err(fingerprint_err(format!("could not read a packet: {err}"))),
         };
         if packet.track_id != track_id {
             continue;
@@ -170,31 +176,32 @@ pub fn fingerprint_file(path: &Path) -> Result<Fingerprint> {
                 printer.consume(&samples);
             }
             Err(symphonia::core::errors::Error::DecodeError(msg)) => {
-                // Tek bozuk paket parmak izini düşürmemeli — ama sessiz de
-                // kalmamalı: yeterince paket düşerse parmak izi eşleşmez ve
-                // sebebi görünür olmalı (K9).
+                // A single corrupt packet must not drop the fingerprint — but it
+                // must not stay silent either: if enough packets are dropped the
+                // fingerprint will not match, and the reason must be visible (K9).
                 skipped_packets += 1;
-                tracing::warn!(hata = %msg, "paket çözülemedi, parmak izinde atlanıyor");
+                tracing::warn!(error = %msg, "could not decode a packet; skipping it in the fingerprint");
             }
-            Err(err) => return Err(fingerprint_err(format!("çözme durdu: {err}"))),
+            Err(err) => return Err(fingerprint_err(format!("decoding stopped: {err}"))),
         }
     }
     printer.finish();
 
     if skipped_packets > 0 {
         tracing::warn!(
-            dosya = %label,
-            atlanan = skipped_packets,
-            "parmak izi eksik paketlerle üretildi"
+            file = %label,
+            skipped = skipped_packets,
+            "the fingerprint was produced with missing packets"
         );
     }
 
     let raw = printer.fingerprint().to_vec();
     if raw.is_empty() {
-        // Sessizce boş parmak izi döndürmek, AcoustID'den "eşleşme yok"
-        // aldırıp kusuru orada aratırdı. Sesin kısalığı ayrı bir tanıdır.
+        // Silently returning an empty fingerprint would get a "no match"
+        // from AcoustID and send people hunting for the fault there. Audio
+        // that is too short is a separate diagnosis.
         return Err(fingerprint_err(format!(
-            "{label} parmak izi üretemeyecek kadar kısa ({frames_seen} çerçeve)"
+            "{label} is too short to produce a fingerprint ({frames_seen} frames)"
         )));
     }
 
@@ -202,12 +209,12 @@ pub fn fingerprint_file(path: &Path) -> Result<Fingerprint> {
     Ok(Fingerprint { raw, duration_secs })
 }
 
-/// Bir ses dosyasının parmak izini çıkarır.
+/// Extracts an audio file's fingerprint.
 ///
 /// # Errors
-/// Bu derlemede `fingerprint` feature'ı kapalı olduğu için **her zaman** hata
-/// döner. Sessizce "eşleşme yok" demiyoruz: zincirin 4. halkasının neden
-/// atlandığı derleme kararıdır ve öyle söylenir (K9).
+/// In this build the `fingerprint` feature is off, so it **always** returns
+/// an error. We do not silently say "no match": skipping the chain's 4th link
+/// is a build decision and is said as such (K9).
 #[cfg(not(feature = "fingerprint"))]
 pub fn fingerprint_file(path: &Path) -> Result<Fingerprint> {
     let _ = path;
@@ -215,13 +222,13 @@ pub fn fingerprint_file(path: &Path) -> Result<Fingerprint> {
         Stage::IdentityResolve,
         ErrorKind::Unsupported {
             provider: "chromaprint".to_owned(),
-            what: "ses parmak izi (`fingerprint` feature'ı kapalı derleme)".to_owned(),
+            what: "audio fingerprint (a build with the `fingerprint` feature off)".to_owned(),
             capabilities: "NONE".to_owned(),
         },
     ))
 }
 
-/// Parmak izi aşamasının hatası.
+/// The error of the fingerprint stage.
 #[cfg(feature = "fingerprint")]
 fn fingerprint_err(detail: impl Into<String>) -> Error {
     Error::new(
@@ -236,8 +243,8 @@ fn fingerprint_err(detail: impl Into<String>) -> Error {
 mod tests {
     use super::*;
 
-    /// Parmak izi üretebilecek kadar uzun sentetik fixture — üretimi
-    /// `fixtures/audio/README.md`'de yazılı.
+    /// A synthetic fixture long enough to produce a fingerprint — how it is made
+    /// is written in `fixtures/audio/README.md`.
     const SAMPLE: &str = "fingerprint_sample.flac";
 
     fn fixture(name: &str) -> std::path::PathBuf {
@@ -249,45 +256,47 @@ mod tests {
     #[test]
     fn a_real_file_produces_a_stable_fingerprint() {
         let path = fixture(SAMPLE);
-        let first = fingerprint_file(&path).expect("fixture parmak izi verebilmeli");
-        let second = fingerprint_file(&path).expect("ikinci koşum");
+        let first = fingerprint_file(&path).expect("the fixture must yield a fingerprint");
+        let second = fingerprint_file(&path).expect("second run");
 
         assert!(!first.raw.is_empty());
-        assert_eq!(first.duration_secs, 15, "fixture 15 saniye");
+        assert_eq!(first.duration_secs, 15, "the fixture is 15 seconds");
         assert_eq!(
             first, second,
-            "aynı dosya iki kez aynı parmak izini vermeli"
+            "the same file must give the same fingerprint twice"
         );
     }
 
-    /// Chromaprint'in ilk öğesi birkaç saniyelik pencere ister; daha kısa ses
-    /// parmak izi **üretemez**. Bu bir kusur değil bir tanıdır ve öyle
-    /// söylenmeli — boş bir parmak izi AcoustID'den "eşleşme yok" aldırır ve
-    /// kusuru yanlış yerde arattırır (K9).
+    /// Chromaprint's first item needs a window of a few seconds; shorter audio
+    /// **cannot** produce a fingerprint. This is not a flaw but a diagnosis and
+    /// must be said as such — an empty fingerprint gets a "no match" from
+    /// AcoustID and sends people hunting for the fault in the wrong place (K9).
     #[test]
     fn a_file_too_short_to_fingerprint_says_so_instead_of_returning_empty() {
-        // 2 saniyelik fixture — eşiğin kasıtlı olarak altında.
+        // A 2-second fixture — deliberately below the threshold.
         let err = fingerprint_file(&fixture("Test Artist - Mp3 Track.mp3")).unwrap_err();
         let text = err.chain_text();
-        assert!(text.starts_with("ADIM: IDENTITY_RESOLVE"), "{text}");
-        assert!(text.contains("kısa"), "{text}");
+        assert!(text.starts_with("STEP: IDENTITY_RESOLVE"), "{text}");
+        assert!(text.contains("too short"), "{text}");
     }
 
-    /// Bozuk dosya sessizce boş dönmemeli — hangi aşamada battığını söylemeli.
+    /// A corrupt file must not come back empty silently — it must say at which
+    /// stage it failed.
     #[test]
     fn a_corrupt_file_reports_the_stage_instead_of_returning_nothing() {
         let err = fingerprint_file(&fixture("corrupt.flac")).unwrap_err();
         let text = err.chain_text();
-        assert!(text.starts_with("ADIM: IDENTITY_RESOLVE"), "{text}");
+        assert!(text.starts_with("STEP: IDENTITY_RESOLVE"), "{text}");
     }
 
     #[test]
     fn a_missing_file_is_an_io_error_not_an_empty_fingerprint() {
-        let err = fingerprint_file(&fixture("yok-boyle-bir-dosya.mp3")).unwrap_err();
+        let err = fingerprint_file(&fixture("no-such-file.mp3")).unwrap_err();
         assert!(err.chain_text().contains("IDENTITY_RESOLVE"));
     }
 
-    /// AcoustID biçimi: URL'de kaçırılması gereken karakter kalmamalı.
+    /// The AcoustID format: no character that would need escaping in a URL may
+    /// remain.
     #[test]
     fn the_acoustid_string_is_url_safe_and_unpadded() {
         let encoded = fingerprint_file(&fixture(SAMPLE))
@@ -296,11 +305,11 @@ mod tests {
         assert!(!encoded.is_empty());
         assert!(
             !encoded.contains(['+', '/', '=']),
-            "URL-güvenli alfabe dışı karakter: {encoded}"
+            "a character outside the URL-safe alphabet: {encoded}"
         );
     }
 
-    /// Kodlayıcı bilinen vektörlerde doğru mu (RFC 4648 §10, URL alfabesi).
+    /// Is the encoder right on known vectors (RFC 4648 §10, URL alphabet).
     #[test]
     fn base64_matches_known_vectors() {
         assert_eq!(base64_url_nopad(b""), "");
@@ -310,7 +319,7 @@ mod tests {
         assert_eq!(base64_url_nopad(b"foob"), "Zm9vYg");
         assert_eq!(base64_url_nopad(b"fooba"), "Zm9vYmE");
         assert_eq!(base64_url_nopad(b"foobar"), "Zm9vYmFy");
-        // `+` ve `/` üreten baytlar URL alfabesinde `-` ve `_` olmalı.
+        // Bytes that produce `+` and `/` must be `-` and `_` in the URL alphabet.
         assert_eq!(base64_url_nopad(&[0xfb, 0xff]), "-_8");
     }
 }

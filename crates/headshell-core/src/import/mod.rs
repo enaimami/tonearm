@@ -1,7 +1,8 @@
-//! Veri export dosyalarından içe aktarma.
+//! Importing from data export files.
 //!
-//! **Değişmez kural #1:** içe aktarma sağlayıcı API'sinden değil, kullanıcının
-//! GDPR taşınabilirlik hakkıyla indirdiği export dosyalarından yapılır.
+//! **Invariant #1:** importing is done from the export files the user
+//! downloaded under their GDPR data portability right, not from a provider's
+//! API.
 
 pub mod archive;
 pub mod spotify;
@@ -17,21 +18,22 @@ use crate::model::{ExportKind, Listen};
 
 pub use archive::{DirArchive, ExportArchive, MemoryArchive, ZipArchive};
 
-/// Bir kaydın neden `Listen`'e dönüşmediği.
+/// Why a record did not become a `Listen`.
 ///
-/// Sessizce düşürmek yok — her atlanan kayıt bir nedene sayılır ve raporlanır.
+/// No silent dropping — every skipped record is counted under a reason and
+/// reported.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SkipReason {
-    /// Podcast/sesli kitap — müzik değil.
+    /// Podcast/audiobook — not music.
     NotMusic,
-    /// Parça adı yok.
+    /// No track title.
     MissingTitle,
-    /// Sanatçı adı yok.
+    /// No artist name.
     MissingArtist,
-    /// Zaman damgası okunamadı.
+    /// The timestamp could not be read.
     BadTimestamp,
-    /// `ms_played` alanı yok ya da anlamsız.
+    /// The `ms_played` field is missing or meaningless.
     BadDuration,
 }
 
@@ -54,35 +56,37 @@ impl fmt::Display for SkipReason {
     }
 }
 
-/// İçe aktarmanın özeti. Kısmi başarı üreten her işlem böyle bir özet döndürür.
+/// The summary of an import. Every operation that can partly succeed returns
+/// a summary like this.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImportSummary {
-    /// Kaynağın adı (zip yolu ya da dizin).
+    /// The name of the source (zip path or directory).
     pub source: String,
-    /// Hangi export biçimi olarak ayrıştırıldı.
+    /// Which export format it was parsed as.
     pub export: ExportKind,
-    /// Arşivde bu biçime ait kaç dosya bulundu.
+    /// How many files of this format were found in the archive.
     pub files_matched: usize,
-    /// Bu dosyalarda toplam kaç ham kayıt vardı.
+    /// How many raw records these files held in total.
     pub records_total: usize,
-    /// Kaçı `Listen`'e dönüştü.
+    /// How many became a `Listen`.
     pub listens: usize,
-    /// Atlananlar, nedene göre.
+    /// The skipped ones, by reason.
     pub skipped: BTreeMap<SkipReason, usize>,
-    /// Kaçında export'un kendisi ISRC verdi (kimlik zincirinin ilk halkası).
+    /// How many had an ISRC from the export itself (the first link of the
+    /// identity chain).
     pub with_isrc: usize,
-    /// Kaçında sağlayıcı parça kimliği vardı.
+    /// How many had a provider track id.
     pub with_provider_id: usize,
 }
 
 impl ImportSummary {
-    /// Toplam atlanan kayıt sayısı.
+    /// The total number of skipped records.
     #[must_use]
     pub fn skipped_total(&self) -> usize {
         self.skipped.values().sum()
     }
 
-    /// Sayaçları tanı kaydediciye aktarır.
+    /// Copies the counters into the diagnostics recorder.
     pub fn record_into(&self, recorder: &mut crate::diag::Recorder) {
         recorder.set("import.files_matched", as_i64(self.files_matched));
         recorder.set("import.records_total", as_i64(self.records_total));
@@ -99,26 +103,26 @@ fn as_i64(value: usize) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
 }
 
-/// İçe aktarmanın çıktısı: dinlemeler + özet.
+/// The output of an import: listens + a summary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportOutcome {
     pub listens: Vec<Listen>,
     pub summary: ImportSummary,
 }
 
-/// Ayrıştırıcıların ortak arayüzü. Her export biçimi için bir tane.
+/// The common interface of the parsers. One for each export format.
 pub(crate) trait ExportParser {
-    /// Bu ayrıştırıcının ilgilendiği biçim.
+    /// The format this parser handles.
     fn kind(&self) -> ExportKind;
 
-    /// Arşivdeki hangi girdiler bu biçime ait.
+    /// Which entries in the archive belong to this format.
     fn matching_entries(&self, entries: &[String]) -> Vec<String>;
 
-    /// Tek bir girdiyi ayrıştırır ve toplayıcıya yazar.
+    /// Parses a single entry and writes it into the sink.
     fn parse_entry(&self, entry: &str, body: &[u8], sink: &mut ParseSink) -> Result<()>;
 }
 
-/// Ayrıştırma sırasında dinlemeleri ve atlama nedenlerini toplar.
+/// Collects the listens and skip reasons during parsing.
 #[derive(Debug, Default)]
 pub(crate) struct ParseSink {
     pub(crate) listens: Vec<Listen>,
@@ -138,11 +142,13 @@ impl ParseSink {
     }
 }
 
-/// Arşivin hangi export biçimi olduğunu içindeki dosya adlarından belirler.
+/// Determines which export format an archive is, from the file names inside
+/// it.
 ///
 /// # Errors
-/// Tanınan hiçbir biçim yoksa [`ErrorKind::UnsupportedExport`] — arşivde ne
-/// bulunduğu hata metnine yazılır ki kullanıcı yanlış zip verdiğini görsün.
+/// [`ErrorKind::UnsupportedExport`] if no known format is found — what was
+/// found in the archive is written into the error text, so the user sees they
+/// gave the wrong zip.
 pub fn detect(archive: &dyn ExportArchive) -> Result<ExportKind> {
     let entries = archive.entry_names();
     for parser in parsers() {
@@ -155,11 +161,11 @@ pub fn detect(archive: &dyn ExportArchive) -> Result<ExportKind> {
         Stage::ImportDetect,
         ErrorKind::UnsupportedExport {
             detail: format!(
-                "{} içinde tanınan bir geçmiş dosyası yok ({} girdi). İlk girdiler: {}",
+                "there is no recognised history file in {} ({} entries). First entries: {}",
                 archive.source_label(),
                 entries.len(),
                 if sample.is_empty() {
-                    "(arşiv boş)".to_owned()
+                    "(the archive is empty)".to_owned()
                 } else {
                     sample.join(", ")
                 }
@@ -175,14 +181,15 @@ fn parsers() -> Vec<Box<dyn ExportParser>> {
     ]
 }
 
-/// Bir arşivi içe aktarır.
+/// Imports an archive.
 ///
-/// Biçim otomatik belirlenir. Kanonik kimlik çözümlemesi burada yapılmaz —
-/// o ayrı bir aşamadır ([`crate::identity`]), böylece hangi adımın ne ürettiği
-/// ayrı ayrı raporlanabilir.
+/// The format is detected automatically. Canonical identity resolution is not
+/// done here — that is a separate stage ([`crate::identity`]), so what each
+/// step produced can be reported separately.
 ///
 /// # Errors
-/// Biçim tanınmazsa, arşiv okunamazsa ya da bir dosya hiç ayrıştırılamazsa.
+/// If the format is not recognised, the archive cannot be read or a file
+/// cannot be parsed at all.
 pub fn import(archive: &mut dyn ExportArchive) -> Result<ImportOutcome> {
     let export = detect(&*archive)?;
     let entries = archive.entry_names();
@@ -193,7 +200,7 @@ pub fn import(archive: &mut dyn ExportArchive) -> Result<ImportOutcome> {
             Error::new(
                 Stage::ImportDetect,
                 ErrorKind::UnsupportedExport {
-                    detail: format!("{export} için ayrıştırıcı yok"),
+                    detail: format!("no parser for {export}"),
                 },
             )
         })?;
@@ -202,7 +209,7 @@ pub fn import(archive: &mut dyn ExportArchive) -> Result<ImportOutcome> {
     let mut sink = ParseSink::default();
     for entry in &matched {
         let body = archive.read_entry(entry)?;
-        tracing::debug!(entry, bytes = body.len(), "export girdisi ayrıştırılıyor");
+        tracing::debug!(entry, bytes = body.len(), "parsing an export entry");
         parser.parse_entry(entry, &body, &mut sink)?;
     }
 
@@ -231,7 +238,7 @@ pub fn import(archive: &mut dyn ExportArchive) -> Result<ImportOutcome> {
         records = summary.records_total,
         listens = summary.listens,
         skipped = summary.skipped_total(),
-        "içe aktarma tamamlandı"
+        "import finished"
     );
     Ok(ImportOutcome {
         listens: sink.listens,
@@ -245,7 +252,7 @@ mod tests {
 
     #[test]
     fn detect_reports_what_it_saw_when_unsupported() {
-        let archive = MemoryArchive::new("boş.zip").with_entry("readme.txt", b"merhaba".to_vec());
+        let archive = MemoryArchive::new("empty.zip").with_entry("readme.txt", b"hello".to_vec());
         let err = detect(&archive).unwrap_err();
         assert_eq!(err.stage(), Stage::ImportDetect);
         let text = err.chain_text();

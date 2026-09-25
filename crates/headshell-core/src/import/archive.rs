@@ -1,7 +1,7 @@
-//! Export arşivine erişim soyutlaması.
+//! An abstraction for accessing an export archive.
 //!
-//! Dosya sistemine dokunan her şey trait arkasında; testler `MemoryArchive`
-//! kullanır, ağa ya da gerçek zip'e ihtiyaç duymaz.
+//! Everything that touches the file system is behind a trait; tests use a
+//! `MemoryArchive` and need neither a network nor a real zip.
 
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
@@ -9,32 +9,34 @@ use std::path::{Path, PathBuf};
 use crate::diag::Stage;
 use crate::error::{Error, ErrorKind, Result, io_err};
 
-/// İçe aktarılacak kayıtların bulunduğu kap: zip, açılmış dizin ya da bellek.
+/// The container holding the records to import: a zip, an extracted
+/// directory or memory.
 pub trait ExportArchive {
-    /// Arşivdeki dosya yollarının tamamı (dizinler hariç).
+    /// All the file paths in the archive (without directories).
     fn entry_names(&self) -> Vec<String>;
 
-    /// Tek bir girdinin ham içeriği.
+    /// The raw contents of a single entry.
     ///
     /// # Errors
-    /// Girdi yoksa ya da okunamazsa [`ErrorKind::Io`] / [`ErrorKind::Archive`].
+    /// [`ErrorKind::Io`] / [`ErrorKind::Archive`] if the entry does not exist or
+    /// cannot be read.
     fn read_entry(&mut self, name: &str) -> Result<Vec<u8>>;
 
-    /// Rapor ve hata mesajlarında görünecek kaynak adı.
+    /// The source name shown in reports and error messages.
     fn source_label(&self) -> String;
 }
 
-/// Bir `.zip` export dosyası.
+/// A `.zip` export file.
 pub struct ZipArchive {
     path: PathBuf,
     inner: zip::ZipArchive<std::fs::File>,
 }
 
 impl ZipArchive {
-    /// Zip'i açar ve merkezî dizinini okur.
+    /// Opens the zip and reads its central directory.
     ///
     /// # Errors
-    /// Dosya açılamazsa ya da geçerli bir zip değilse hata döner.
+    /// Returns an error if the file cannot be opened or is not a valid zip.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
         let file = std::fs::File::open(&path)
@@ -83,17 +85,18 @@ impl ExportArchive for ZipArchive {
     }
 }
 
-/// Açılmış bir export dizini. Kullanıcı zip'i kendisi açtıysa da çalışsın.
+/// An extracted export directory. It should work even if the user unzipped
+/// it themselves.
 pub struct DirArchive {
     root: PathBuf,
     files: Vec<String>,
 }
 
 impl DirArchive {
-    /// Dizini özyinelemeli tarar.
+    /// Scans the directory recursively.
     ///
     /// # Errors
-    /// Dizin okunamazsa [`ErrorKind::Io`].
+    /// [`ErrorKind::Io`] if the directory cannot be read.
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
         let root = root.as_ref().to_path_buf();
         let mut files = Vec::new();
@@ -137,7 +140,7 @@ impl ExportArchive for DirArchive {
     }
 }
 
-/// Bellekteki sahte arşiv — testler için.
+/// A fake in-memory archive — for tests.
 #[derive(Debug, Default, Clone)]
 pub struct MemoryArchive {
     label: String,
@@ -174,7 +177,7 @@ impl ExportArchive for MemoryArchive {
                 Error::new(
                     Stage::ImportRead,
                     ErrorKind::NotFound {
-                        what: format!("arşiv girdisi {name}"),
+                        what: format!("archive entry {name}"),
                     },
                 )
             })

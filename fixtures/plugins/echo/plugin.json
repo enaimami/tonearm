@@ -1,12 +1,12 @@
 {
   "name": "echo",
-  "display_name": "Echo (sınama)",
+  "display_name": "Echo (test)",
   "version": "0.2.0",
   "api": 2,
   "main": "main.js",
   "capabilities": ["search", "stream"],
   "permissions": {
-    "net": ["ornek.gecersiz"]
+    "net": ["example.invalid"]
   },
-  "description": "Eklenti sözleşmesini sınayan sabit kataloglu eklenti. Ağa çıkmaz."
+  "description": "A plugin with a fixed catalog that exercises the plugin contract. It never goes online."
 }

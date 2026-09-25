@@ -1,29 +1,31 @@
-//! YouTube Music eklentisi, **gerçek YouTube Music'e karşı** (Faz 2 §2.5, D-048).
+//! The YouTube Music plugin, **against the real YouTube Music** (Phase 2
+//! §2.5, D-048).
 //!
-//! `plugin_soundcloud.rs`'in kardeşi ve aynı yordamı izliyor: eklenti canlı
-//! katalogdan (`headshell/plugins`, D-071) veri dizinine kurulup canlı
-//! serviste yürütülüyor. Sınanan şey protokol
-//! değil (onu `plugin_process.rs` sabit kataloglu bir fixture'la sınıyor),
-//! **eklentinin kendisi**: InnerTube araması, yt-dlp'nin çözdüğü adres ve
-//! sesin gerçekten çalması.
+//! The sibling of `plugin_soundcloud.rs`, and it follows the same procedure:
+//! the plugin is installed into the data directory from the live catalog
+//! (`headshell/plugins`, D-071) and run against the live service. What is
+//! tested is not the protocol (`plugin_script.rs` tests that with a
+//! fixed-catalog fixture) but **the plugin itself**: the InnerTube search,
+//! the address yt-dlp resolves, and the audio really playing.
 //!
-//! **Bu testler varsayılan koşuma dahildir** (D-043) ve iki başarısızlığı ayrı
-//! tutuyor (K9):
+//! **These tests are part of the default run** (D-043) and keep two failures
+//! apart (K9):
 //!
-//! - **Ulaşamamak** başarısızlık değil: ağ yoksa test kendini atlar ve
-//!   sebebini `stderr`'e yazar.
-//! - **Ulaşıp beklenmeyeni almak** düşer.
+//! - **Not reaching it** is not a failure: without a network the test skips
+//!   itself and writes the reason to `stderr`.
+//! - **Reaching it and getting the unexpected** fails.
 //!
-//! Ne `python3` ne `yt-dlp` bir ön koşul: eklenti gömülü QuickJS'te koşuyor
-//! ve motor yt-dlp'nin **bu platformun** kendi kendine yeten ikilisini
-//! manifestteki sabitlenmiş sürümden indiriyor (D-069). Ağ varken indirememek
-//! **atlama sebebi değil, düşme sebebidir** — beyan edilen adres ölmüşse
-//! (yetim) bunu sessizce geçmek, bozuk bir manifesti yeşil göstermek olurdu.
+//! Neither `python3` nor `yt-dlp` is a prerequisite: the plugin runs in
+//! embedded QuickJS, and the engine downloads yt-dlp's self-contained binary
+//! **for this platform** from the version pinned in the manifest (D-069).
+//! Failing to download while the network is up **is not a reason to skip but
+//! a reason to fail** — if the declared address is dead (orphaned), passing
+//! over it silently would show a broken manifest as green.
 //!
-//! Kırmızı yandığında ilk soru: **son commit'e mi baksam, yoksa
-//! `yt-dlp -J "https://music.youtube.com/watch?v=..."` mi çeksem?** İkincisi
-//! çalışıyorsa ve testler hâlâ kırmızıysa kusur bizdedir. yt-dlp eskiyse
-//! kusur da bizde: sürümü manifest sabitliyor, kullanıcı değil.
+//! When it turns red, the first question: **should I look at the last commit,
+//! or run `yt-dlp -J "https://music.youtube.com/watch?v=..."`?** If the second
+//! works and the tests are still red, the fault is ours. If yt-dlp is out of
+//! date, the fault is ours too: the manifest pins the version, not the user.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -39,17 +41,17 @@ use headshell_core::plugin::manifest::{PluginManifest, Requirement};
 use headshell_core::provider::{AudioSource, Capabilities, Provider};
 use headshell_core::secrets::{Secrets, plugin_namespace};
 
-/// yt-dlp'nin bu platform ikilisi: koşum başına en çok bir kez iner.
+/// yt-dlp's binary for this platform: downloaded at most once per run.
 ///
-/// Eklenti yt-dlp'yi kendi aramıyor (D-055); onu motor kuruyor. Test de
-/// **aynı yoldan** geçiyor. İndirme ~40 MB, o yüzden sonuç projenin
-/// `target/tmp`'sinde tutuluyor (D-070) — ama körü körüne değil:
+/// The plugin does not look for yt-dlp itself (D-055); the engine installs it.
+/// The test goes **the same way**. The download is ~40 MB, so the result is
+/// kept in the project's `target/tmp` (D-070) — but not blindly:
 ///
-/// - Önbellekteki dosyanın karması her koşumda yeniden doğrulanıyor.
-/// - İndirme adresinin **hâlâ yaşadığı** her koşumda soruluyor (gövdesi
-///   okunmadan). Önbellek bunu atlasaydı adres öldüğünde (yetim, D-055) bu
-///   makine yeşil kalır, temiz bir makine kırmızı yanardı — sonuç makineye
-///   bağlı olurdu.
+/// - The hash of the cached file is verified again on every run.
+/// - Whether the download address is **still alive** is asked on every run
+///   (without reading the body). If the cache skipped this, when the address
+///   died (orphaned, D-055) this machine would stay green and a clean machine
+///   would turn red — the result would depend on the machine.
 fn shared_ytdlp(requirement: &Requirement) -> Result<PathBuf, String> {
     static SHARED: std::sync::OnceLock<Result<PathBuf, String>> = std::sync::OnceLock::new();
     SHARED.get_or_init(|| fetch_ytdlp(requirement)).clone()
@@ -60,29 +62,31 @@ fn fetch_ytdlp(requirement: &Requirement) -> Result<PathBuf, String> {
     let store = ArtifactStore::new(&Config::with_data_dir(&cache));
     let platform = store.platform().to_owned();
     let Some(asset) = requirement.asset_for(&platform) else {
-        return Err(format!("{platform} için yayın beyan edilmemiş"));
+        return Err(format!("no release declared for {platform}"));
     };
     let source = default_artifact_source().map_err(|err| err.chain_text())?;
 
-    // Adres yaşıyor mu: yalnızca durum kodu, gövde okunmadan.
+    // Is the address alive: the status code only, without reading the body.
     match source.open(&asset.url) {
         Ok(response) if response.status == 404 || response.status == 410 => {
             return Err(format!(
-                "YETİM — {} {} dedi; önbellekteki kopya bunu gizlemeyecek",
+                "ORPHANED — {} said {}; the cached copy will not hide this",
                 asset.url, response.status
             ));
         }
         Ok(_) => {}
-        // Ulaşılamadıysa hüküm yok: önbellek varsa onunla devam, yoksa
-        // aşağıdaki kurulum zaten ne olduğunu söyleyecek.
+        // If it could not be reached there is no verdict: carry on with the
+        // cache if there is one; otherwise the install below will say what
+        // happened.
         Err(err) => eprintln!(
-            "uyarı: {} yoklanamadı ({}), önbellekle devam",
+            "warning: could not probe {} ({}), carrying on with the cache",
             asset.url,
             err.chain_text().replace('\n', " ")
         ),
     }
 
-    // `install` karma tutuyorsa ağa hiç çıkmıyor, tutmuyorsa yeniden iniyor.
+    // If the hash matches `install` does not go online at all; if not, it
+    // downloads again.
     match store.install(source.as_ref(), requirement) {
         Ok(outcome) if outcome.is_ready() => Ok(store.artifact_path(requirement)),
         Ok(outcome) => Err(outcome.describe()),
@@ -90,10 +94,10 @@ fn fetch_ytdlp(requirement: &Requirement) -> Result<PathBuf, String> {
     }
 }
 
-/// YouTube Music'e TCP ile ulaşılabiliyor mu.
+/// Can YouTube Music be reached over TCP.
 ///
-/// Yalnızca DNS + bağlantı; HTTP'ye hiç girilmiyor. Amaç "ağ var mı"
-/// sorusunu cevaplamak, servisin sağlığını ölçmek değil.
+/// Only DNS + connect; it never goes into HTTP. The goal is answering "is
+/// there a network", not measuring the service's health.
 fn ytmusic_reachable() -> bool {
     use std::net::ToSocketAddrs;
     let Ok(mut addrs) = ("music.youtube.com", 443).to_socket_addrs() else {
@@ -104,20 +108,21 @@ fn ytmusic_reachable() -> bool {
     })
 }
 
-/// Testin koşulup koşulamayacağını söyler; koşulamıyorsa sebebini yazar.
+/// Says whether the test can run; if it cannot, writes the reason.
 fn prerequisites_met(test: &str) -> bool {
-    // Motor eseri HTTP ile indiriyor; bu derlemede istemci yoksa test
-    // koşulamaz. "Koşamadım" ile "koştu ve düştü" ayrı tanılar (K9) —
-    // ve atlanan test geçmiş sayılmaz (D-043).
+    // The engine downloads the artifact over HTTP; if this build has no
+    // client the test cannot run. "I could not run" and "I ran and failed"
+    // are separate diagnoses (K9) — and a skipped test does not count as
+    // passed (D-043).
     if let Err(err) = default_artifact_source() {
         eprintln!(
-            "{test}: {} — atlanıyor (bu derleme yt-dlp'yi indiremez)",
+            "{test}: {} — skipped (this build cannot download yt-dlp)",
             err.chain_text().replace('\n', " ")
         );
         return false;
     }
     if !ytmusic_reachable() {
-        eprintln!("{test}: music.youtube.com:443'e ulaşılamadı — atlanıyor (ağ yok sayılıyor)");
+        eprintln!("{test}: could not reach music.youtube.com:443 — skipped (taken as no network)");
         return false;
     }
     true
@@ -127,16 +132,17 @@ fn temp_config(name: &str) -> support::TestConfig {
     support::TestConfig::new(&format!("ytmusic-{name}"))
 }
 
-/// CI ortam değişkenindeki YouTube çerezlerini sır deposuna yazar.
+/// Writes the YouTube cookies from the CI environment variable into the
+/// secret store.
 ///
-/// YouTube veri merkezi adreslerine bot duvarı çıkarıyor ("Sign in to
-/// confirm you're not a bot") ve çerezsiz hiçbir akış çözülemiyor. Çerez
-/// **sır deposundan** geçiyor, çıplak bir ortam değişkeninden değil:
-/// kullanıcının `headshell secret set plugin:ytmusic cookies` ile yaptığı
-/// yolun aynısı sınansın (D-042).
+/// YouTube puts up a bot wall for data centre addresses ("Sign in to confirm
+/// you're not a bot"), and without cookies no stream can be resolved. The
+/// cookies go **through the secret store**, not through a bare environment
+/// variable: so the same route the user takes with `headshell secret set
+/// plugin:ytmusic cookies` is tested (D-042).
 ///
-/// Dönüş: çerez verildi mi. Verilmediyse bot duvarı ölçülebilir bir şey
-/// değildir ve test kendini atlar.
+/// Returns: whether cookies were given. If not, the bot wall is not something
+/// that can be measured and the test skips itself.
 fn store_cookies(config: &Config) -> bool {
     let Ok(raw) = std::env::var("HEADSHELL_TEST_YTMUSIC_COOKIES") else {
         return false;
@@ -150,32 +156,33 @@ fn store_cookies(config: &Config) -> bool {
     true
 }
 
-/// Eklentiyi canlı katalogdan kurar — kullanıcının yaptığı şeyin aynısı
-/// (D-071). Kataloğa ulaşılamıyorsa `None`: test atlanır ve sebebi yazılır.
+/// Installs the plugin from the live catalog — the same thing the user does
+/// (D-071). `None` if the catalog cannot be reached: the test is skipped and
+/// the reason is written.
 async fn install(config: &Config, test: &str) -> Option<PluginProvider> {
     let dir = match support::install_from_catalog(config, "ytmusic").await {
         Ok(dir) => dir,
         Err(reason) => {
-            eprintln!("{test}: {reason} — atlanıyor (ağ yok sayılıyor)");
+            eprintln!("{test}: {reason} — skipped (taken as no network)");
             return None;
         }
     };
 
     let manifest = PluginManifest::load(&dir).unwrap();
 
-    // Motorun işi: eklentinin beyan ettiği eserleri kur. Test bunu
-    // kullanıcının `headshell plugin install` ile yaptığının aynısı olarak
-    // yapıyor (paylaşılan önbellekten), sonra sağlayıcıyı kuruyor.
+    // The engine's job: install the artifacts the plugin declares. The test
+    // does this the same way the user does with `headshell plugin install`
+    // (from the shared cache), then sets up the provider.
     for requirement in &manifest.requires {
         let shared = match shared_ytdlp(requirement) {
             Ok(path) => path,
-            Err(reason) => panic!("yt-dlp kurulamadı: {reason}"),
+            Err(reason) => panic!("could not install yt-dlp: {reason}"),
         };
         let store = ArtifactStore::new(config);
         std::fs::create_dir_all(store.runtime_dir()).unwrap();
-        // Sabit bağ, kopya değil: her test 40 MB'ı yeniden yazmasın. Bağ
-        // kurulamazsa (başka dosya sistemi) kopyaya düşülür; `copy`
-        // çalıştırma bitini de taşıyor.
+        // A hard link, not a copy: so every test does not rewrite 40 MB. If
+        // the link cannot be made (another file system) it falls back to a
+        // copy; `copy` carries the execute bit too.
         let target = store.artifact_path(requirement);
         if std::fs::hard_link(&shared, &target).is_err() {
             std::fs::copy(&shared, &target).unwrap();
@@ -186,18 +193,18 @@ async fn install(config: &Config, test: &str) -> Option<PluginProvider> {
     Some(PluginProvider::from_manifest(config, &manifest, &dir, &secrets).unwrap())
 }
 
-/// Arama, K6'nın bulanık eşleşme halkasının istediği alanları vermeli.
+/// Search must give the fields K6's fuzzy matching link wants.
 ///
-/// Bu testin var oluş sebebi bir ölçüm: yt-dlp'nin kendi araması yalnızca
-/// `title` + `id` veriyordu, sanatçı ve süre yoktu (D-048). InnerTube'a
-/// geçilmesinin tek gerekçesi bu ve regresyonu burada yakalanır.
+/// This test exists because of a measurement: yt-dlp's own search only gave
+/// `title` + `id`, no artist and no duration (D-048). That is the only reason
+/// for moving to InnerTube, and its regression is caught here.
 #[tokio::test]
 async fn a_search_carries_artist_and_duration_not_just_a_title() {
-    if !prerequisites_met("arama") {
+    if !prerequisites_met("search") {
         return;
     }
-    let config = temp_config("arama");
-    let Some(provider) = install(&config, "arama").await else {
+    let config = temp_config("search");
+    let Some(provider) = install(&config, "search").await else {
         return;
     };
 
@@ -209,23 +216,23 @@ async fn a_search_carries_artist_and_duration_not_just_a_title() {
     );
 
     let hits = provider.search("nujabes aruarian dance", 5).await.unwrap();
-    assert!(!hits.is_empty(), "canlı arama boş döndü");
+    assert!(!hits.is_empty(), "the live search came back empty");
 
     let mut with_duration = 0;
     for hit in &hits {
         assert!(
             !hit.track.title.trim().is_empty(),
-            "başlıksız parça: {hit:?}"
+            "a track without a title: {hit:?}"
         );
         assert!(
             !hit.track.artist.trim().is_empty(),
-            "sanatçısız parça: {hit:?}"
+            "a track without an artist: {hit:?}"
         );
-        // Sağlayıcı adını çekirdek ekliyor; eklenti çıplak id gönderiyor.
+        // The core adds the provider name; the plugin sends a bare id.
         assert_eq!(
             hit.id.provider.as_str(),
             "ytmusic",
-            "kimlik yanlış ad alanında: {}",
+            "the id is in the wrong namespace: {}",
             hit.id
         );
         if hit.track.duration_ms.unwrap_or(0) > 0 {
@@ -235,69 +242,72 @@ async fn a_search_carries_artist_and_duration_not_just_a_title() {
     assert_eq!(
         with_duration,
         hits.len(),
-        "süresi olmayan parça var; bulanık eşleşme halkası bunu kullanamaz: {hits:?}"
+        "there is a track without a duration; the fuzzy matching link cannot use it: {hits:?}"
     );
 }
 
-/// Sonuçlar YouTube'un verdiği **alaka sırasında** kalmalı: tam eşleşen bir
-/// sorguda ilk sonuç aranan parça olmalı.
+/// The results must stay in the **relevance order** YouTube gives: for an
+/// exactly matching query the first result must be the track searched for.
 ///
-/// İlk canlı koşum bunu kırık buldu: InnerTube ağacında satırları toplayan
-/// gezinme yığın tabanlıydı ve sırayı tersine çeviriyordu. `limit=5` en iyi
-/// eşleşmeyi değil rastgele beş satırı veriyordu — aranan parça listede hiç
-/// yoktu. Birim testi bunu göremezdi: gelen beş satırın hepsi geçerli
-/// parçaydı, yalnızca yanlış beş taneydi.
+/// The first live run found this broken: the walk that collected the rows in
+/// the InnerTube tree was stack-based and reversed the order. `limit=5` gave
+/// five random rows rather than the best matches — the track searched for was
+/// not in the list at all. A unit test could not have seen this: all five
+/// rows that came back were valid tracks, just the wrong five.
 ///
-/// **Neden iki çağrının sırasını karşılaştırmıyoruz:** ölçüldü, YouTube aynı
-/// sorguya aynı sırayı vermiyor. Beş koşumda ilk sonuç 5/5 aynı çıktı, 2. ve
-/// 3. sıralar oynadı. Test yalnızca kararlı olan şeyi iddia ediyor —
-/// D-045'in MusicBrainz'de öğrendiği ders (koşumlar arası kararsız bir
-/// servise kararlılık yazdırmak, kendi kodunu değil servisi sınamaktır).
+/// **Why we do not compare the order of two calls:** it was measured,
+/// YouTube does not give the same order to the same query. Across five runs
+/// the first result came out the same 5/5, while places 2 and 3 moved. The
+/// test only claims what is stable — the lesson D-045 learned at MusicBrainz
+/// (forcing stability out of a service that is unstable across runs tests
+/// the service, not your own code).
 #[tokio::test]
 async fn the_best_match_comes_first_not_somewhere_in_the_list() {
-    if !prerequisites_met("sıra") {
+    if !prerequisites_met("order") {
         return;
     }
-    let config = temp_config("sira");
-    let Some(provider) = install(&config, "sıra").await else {
+    let config = temp_config("order");
+    let Some(provider) = install(&config, "order").await else {
         return;
     };
 
     let hits = provider.search("nujabes aruarian dance", 5).await.unwrap();
-    assert!(!hits.is_empty(), "canlı arama boş döndü");
+    assert!(!hits.is_empty(), "the live search came back empty");
 
     let first = &hits[0].track;
     let artist = first.artist.to_lowercase();
     let title = first.title.to_lowercase();
     assert!(
         artist.contains("nujabes") && title.contains("aruarian"),
-        "ilk sonuç aranan parça değil — sıra bozulmuş olabilir. \
-         Gelen liste: {:?}",
+        "the first result is not the track searched for — the order may be broken. \
+         The list that came back: {:?}",
         hits.iter()
             .map(|hit| format!("{} - {}", hit.track.artist, hit.track.title))
             .collect::<Vec<_>>()
     );
 }
 
-/// Çözülen kaynak, **kısıtlamayı kaldıran** `Range` başlığını taşımalı.
+/// The resolved source must carry the `Range` header that **lifts the
+/// throttling**.
 ///
-/// Ölçüldü (D-048): aynı adres düz GET'te 32 KB/s, `Range: bytes=0-` ile
-/// 8 MB/s veriyor — 250 kat. Başlık düşerse hiçbir şey "bozulmaz", ses
-/// yalnızca 2× gerçek zamanda iner ve ilk dalgalanmada kesilir. Sessizce
-/// kötüleşen bir kusurun tek bekçisi bu assert.
+/// Measured (D-048): the same address gives 32 KB/s on a plain GET and 8 MB/s
+/// with `Range: bytes=0-` — 250 times as much. If the header drops, nothing
+/// "breaks"; the audio just downloads at 2× real time and cuts out at the
+/// first fluctuation. This assert is the only guard against a flaw that
+/// degrades silently.
 #[tokio::test]
 async fn a_search_hit_resolves_to_a_stream_with_the_unthrottling_range_header() {
-    if !prerequisites_met("kaynak çözümü") {
+    if !prerequisites_met("resolving the source") {
         return;
     }
-    let config = temp_config("cozum");
+    let config = temp_config("resolve");
     let cookies_given = store_cookies(&config);
-    let Some(provider) = install(&config, "kaynak çözümü").await else {
+    let Some(provider) = install(&config, "resolving the source").await else {
         return;
     };
 
     let hits = provider.search("nujabes aruarian dance", 5).await.unwrap();
-    assert!(!hits.is_empty(), "canlı arama boş döndü");
+    assert!(!hits.is_empty(), "the live search came back empty");
 
     let mut resolved = None;
     let mut refusals = Vec::new();
@@ -307,11 +317,11 @@ async fn a_search_hit_resolves_to_a_stream_with_the_unthrottling_range_header() 
                 resolved = Some(source);
                 break;
             }
-            Ok(None) => refusals.push(format!("{}: çalınamaz", hit.id)),
-            // `chain_text`, düz `{err}` değil: `Error`'ın `Display`'i yalnızca
-            // `ADIM: X` basıyor ve bu test CI'da tam olarak öyle düşmüştü —
-            // üç aday, üç aşama adı, sıfır sebep. Tanıyı yutan bir hata
-            // mesajı K9'un yasakladığı şeydir.
+            Ok(None) => refusals.push(format!("{}: cannot be played", hit.id)),
+            // `chain_text`, not a plain `{err}`: `Error`'s `Display` only prints
+            // `STEP: X`, and this test failed in CI exactly like that — three
+            // candidates, three stage names, zero reasons. An error message that
+            // swallows the diagnosis is what K9 forbids.
             Err(err) => refusals.push(format!("{}: {}", hit.id, err.chain_text())),
         }
     }
@@ -319,55 +329,59 @@ async fn a_search_hit_resolves_to_a_stream_with_the_unthrottling_range_header() 
     let Some(source) = resolved else {
         let report = refusals.join("\n  ");
 
-        // YouTube veri merkezi adreslerine bot duvarı çıkarıyor. Çerez
-        // verilmişse duvarı aşmak **bizim işimiz** ve aşamamak düşme
-        // sebebidir. Çerez verilmemişse ölçülebilir bir şey yok: servis
-        // bakmamıza izin vermedi, ürün hakkında hiçbir şey söylemedi.
-        // Bu, D-043'ün "ulaşamadım" tarafıdır (D-061).
+        // YouTube puts up a bot wall for data centre addresses. If cookies
+        // were given, getting past the wall is **our job** and failing to is
+        // a reason to fail. If no cookies were given there is nothing to
+        // measure: the service did not let us look and said nothing about
+        // the product. This is D-043's "could not reach it" side (D-061).
         //
-        // Eşleşme **dar**: yalnızca bot duvarının kendi imzası. Başka her
-        // ret hâlâ düşürür, yoksa gerçek bir regresyon buraya saklanırdı.
+        // The match is **narrow**: only the bot wall's own signature. Every
+        // other refusal still fails, otherwise a real regression would hide
+        // here.
         if !cookies_given && report.contains("not a bot") {
             eprintln!(
-                "kaynak çözümü: YouTube bot duvarı ve çerez verilmemiş — \
-                 atlanıyor (bu bir başarısızlık değil).\n  \
-                 Çerez vermek için: HEADSHELL_TEST_YTMUSIC_COOKIES\n  {report}"
+                "resolving the source: YouTube bot wall and no cookies given — \
+                 skipped (this is not a failure).\n  \
+                 To give cookies: HEADSHELL_TEST_YTMUSIC_COOKIES\n  {report}"
             );
             return;
         }
-        panic!("üç adayın hiçbiri çözülmedi:\n  {report}");
+        panic!("none of the three candidates resolved:\n  {report}");
     };
 
     match source {
         AudioSource::HttpStream { url, headers } => {
             assert!(
                 url.starts_with("https://"),
-                "akış adresi https değil: {url}"
+                "the stream address is not https: {url}"
             );
             let range = headers
                 .iter()
                 .find(|header| header.name.eq_ignore_ascii_case("range"))
-                .unwrap_or_else(|| panic!("Range başlığı yok; akış kısıtlanır: {headers:?}"));
+                .unwrap_or_else(|| {
+                    panic!("no Range header; the stream will be throttled: {headers:?}")
+                });
             assert_eq!(range.value, "bytes=0-");
         }
-        other => panic!("http akışı bekleniyordu, gelen: {other:?}"),
+        other => panic!("an http stream was expected, got: {other:?}"),
     }
 }
 
-/// Olmayan bir parça, yt-dlp'nin **kendi cümlesiyle** hata vermeli.
+/// A track that does not exist must fail **in yt-dlp's own words**.
 ///
-/// SoundCloud eklentisinde bunun karşılığı "yok cevabıdır, hata değil" idi;
-/// burada bilerek farklı: yt-dlp "This video is unavailable", "Private video"
-/// ve "Sign in to confirm you're not a bot" arasındaki farkı biliyor ve o
-/// ayrım kullanıcıya ulaşmalı. `Ok(None)`'a düzleştirmek üç tanıyı bire
-/// indirirdi (K9, D-048).
+/// In the SoundCloud plugin the counterpart was "none is an answer, not an
+/// error"; here it is deliberately different: yt-dlp knows the difference
+/// between "This video is unavailable", "Private video" and "Sign in to
+/// confirm you're not a bot", and that distinction must reach the user.
+/// Flattening it into `Ok(None)` would turn three diagnoses into one (K9,
+/// D-048).
 #[tokio::test]
 async fn a_missing_track_fails_with_the_tools_own_words() {
-    if !prerequisites_met("olmayan parça") {
+    if !prerequisites_met("a missing track") {
         return;
     }
-    let config = temp_config("yok");
-    let Some(provider) = install(&config, "olmayan parça").await else {
+    let config = temp_config("missing");
+    let Some(provider) = install(&config, "a missing track").await else {
         return;
     };
 
@@ -375,33 +389,35 @@ async fn a_missing_track_fails_with_the_tools_own_words() {
     let err = provider
         .resolve_source(&id)
         .await
-        .expect_err("olmayan parça için hata bekleniyordu");
+        .expect_err("an error was expected for a missing track");
 
-    // `Display` yalnızca aşamayı yazar (`ADIM: PROVIDER_CALL`); sebep zinciri
-    // `chain_text()`'te ve CLI ile GUI'nin kullanıcıya gösterdiği de o.
+    // `Display` only writes the stage (`STEP: PROVIDER_CALL`); the chain of
+    // causes is in `chain_text()`, and that is also what the CLI and the GUI
+    // show the user.
     let message = err.chain_text();
     assert!(
         message.contains("yt-dlp"),
-        "hata yt-dlp'nin mesajını taşımıyor: {message}"
+        "the error does not carry yt-dlp's message: {message}"
     );
     assert!(
-        message.contains("ADIM: PROVIDER_CALL"),
-        "hata hangi aşamada olduğunu söylemiyor: {message}"
+        message.contains("STEP: PROVIDER_CALL"),
+        "the error does not say which stage it is in: {message}"
     );
 }
 
-/// §2.5'in asıl kanıtı: YouTube Music'ten gelen ses **gerçekten çalıyor**.
+/// §2.5's real proof: the audio coming from YouTube Music **really plays**.
 ///
-/// Buradaki tuzak ölçülmüştü: yt-dlp'nin `bestaudio` seçimi opus/webm verir
-/// ve çekirdeğin symphonia'sında ne o kodek ne o kap var. Eklenti m4a'ya
-/// sabitli; bu test o sabitin doğru olduğunu söyleyen tek yer.
+/// The trap here had been measured: yt-dlp's `bestaudio` choice gives
+/// opus/webm, and the core's symphonia has neither that codec nor that
+/// container. The plugin is pinned to m4a; this test is the only place that
+/// says that pin is right.
 #[tokio::test]
 async fn a_ytmusic_track_actually_plays() {
-    if !prerequisites_met("çalma") {
+    if !prerequisites_met("playback") {
         return;
     }
-    let config = temp_config("calma");
-    let Some(provider) = install(&config, "çalma").await else {
+    let config = temp_config("playback");
+    let Some(provider) = install(&config, "playback").await else {
         return;
     };
 
@@ -414,7 +430,7 @@ async fn a_ytmusic_track_actually_plays() {
         .search("nujabes aruarian dance", 1)
         .await
         .unwrap();
-    assert!(!hits.is_empty(), "canlı arama boş döndü");
+    assert!(!hits.is_empty(), "the live search came back empty");
     let item = headshell_core::playback::QueueItem {
         id: hits[0].id.clone(),
         track: hits[0].track.clone(),
@@ -422,11 +438,11 @@ async fn a_ytmusic_track_actually_plays() {
 
     let mut player = headshell_core::playback::Player::new(registry);
     if let Err(err) = player.play_items(vec![item]).await {
-        eprintln!("çalma: ses hattı açılamadı ({err}) — atlanıyor");
+        eprintln!("playback: could not open the audio pipeline ({err}) — skipped");
         return;
     }
 
-    // Sesin gerçekten ilerlediğini ölç: pozisyon artmalı.
+    // Measure that the audio really advances: the position must grow.
     let mut positions = Vec::new();
     for _ in 0..12 {
         std::thread::sleep(std::time::Duration::from_millis(500));
@@ -440,6 +456,6 @@ async fn a_ytmusic_track_actually_plays() {
     let best = positions.iter().map(|(_, ms)| *ms).max().unwrap_or(0);
     assert!(
         best > 1000,
-        "ses ilerlemedi; ölçülen durum/pozisyon dizisi: {positions:?}"
+        "the audio did not advance; the measured state/position sequence: {positions:?}"
     );
 }

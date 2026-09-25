@@ -1,32 +1,34 @@
-//! Linux'ta pencere ortamının düzeltilmesi (D-029, D-031).
+//! Fixing up the window environment on Linux (D-029, D-031).
 //!
-//! **Neden gerekli.** §3.1 ölçümü (D-028) Wayland + DMABUF yolunda kare
-//! hızının 2.4× düştüğünü buldu: 58.8 → 23.8 fps. İki değişken **birlikte**
-//! gerekiyor; DMABUF'u tek başına kapatmak kaydırmayı *kötüleştiriyor*.
+//! **Why it is needed.** The §3.1 measurement (D-028) found the frame rate
+//! dropping 2.4× on the Wayland + DMABUF path: 58.8 → 23.8 fps. Both variables
+//! are needed **together**; turning off DMABUF alone makes scrolling
+//! *worse*.
 //!
-//! **Neden `exec`.** `std::env::set_var` Rust 2024'te `unsafe` ve workspace
-//! `unsafe_code = "forbid"` diyor — `forbid` paket düzeyinde `allow` ile
-//! geçersiz kılınamaz. `CommandExt::exec` güvenli bir çağrı: süreç imajını
-//! değiştirir, PID korunur (masaüstü/servis bütünleşmesi bozulmaz), yeni
-//! ortam çocuğa doğar.
+//! **Why `exec`.** `std::env::set_var` is `unsafe` in Rust 2024 and the
+//! workspace says `unsafe_code = "forbid"` — `forbid` cannot be overridden
+//! with `allow` at the package level. `CommandExt::exec` is a safe call: it
+//! replaces the process image, keeps the PID (desktop/service integration
+//! does not break), and the new environment is born into the child.
 //!
-//! **Döngü koruması yapıdan geliyor, bayraktan değil:** yalnızca *eksik*
-//! değişkenler kuruluyor. Yeniden başlayan sürecin gözünde eksik yok, o
-//! yüzden ikinci kez `exec` etmiyor.
+//! **The loop guard comes from the structure, not a flag:** only *missing*
+//! variables are set. In the eyes of the restarted process nothing is
+//! missing, so it does not `exec` a second time.
 
-/// Kullanıcının kendi ayarı **ezilmiyor**: bilerek Wayland'da koşmak isteyen
-/// biri `GDK_BACKEND=wayland` verdiğinde ona karışmıyoruz.
+/// The user's own setting **is not overridden**: when someone who wants to
+/// run on Wayland on purpose sets `GDK_BACKEND=wayland`, we leave it alone.
 #[cfg(target_os = "linux")]
 const FIXUP: [(&str, &str); 2] = [
     ("GDK_BACKEND", "x11"),
     ("WEBKIT_DISABLE_DMABUF_RENDERER", "1"),
 ];
 
-/// Ortamı düzeltip süreci yeniden başlatır. Gerekmiyorsa hiçbir şey yapmaz.
+/// Fixes up the environment and restarts the process. Does nothing if it is
+/// not needed.
 ///
-/// Dönerse iki şeyden biri olmuştur: düzeltme gerekmedi, ya da yeniden
-/// başlatma başarısız oldu. İkincisinde sessizce yavaş çalışmıyoruz — sebep
-/// yazılıyor (K9).
+/// If it returns, one of two things happened: no fix was needed, or the
+/// restart failed. In the second case we do not silently run slowly — the
+/// reason is written (K9).
 #[cfg(target_os = "linux")]
 pub fn fixup() {
     use std::os::unix::process::CommandExt as _;
@@ -40,7 +42,7 @@ pub fn fixup() {
     }
 
     let Ok(exe) = std::env::current_exe() else {
-        eprintln!("ADIM: ENV_FIXUP — kendi yolum bulunamadı, düzeltme atlandı");
+        eprintln!("STEP: ENV_FIXUP — could not find my own path, fixup skipped");
         return;
     };
 
@@ -51,15 +53,15 @@ pub fn fixup() {
     }
     let applied: Vec<&str> = missing.iter().map(|(name, _)| *name).collect();
     eprintln!(
-        "ADIM: ENV_FIXUP — {} kurulup yeniden başlatılıyor (D-028)",
+        "STEP: ENV_FIXUP — setting {} and restarting (D-028)",
         applied.join(", ")
     );
 
-    // `exec` yalnızca **başarısızsa** döner.
+    // `exec` only returns **if it fails**.
     let err = command.exec();
-    eprintln!("ADIM: ENV_FIXUP — yeniden başlatılamadı ({err}), düzeltmesiz devam");
+    eprintln!("STEP: ENV_FIXUP — could not restart ({err}), carrying on without the fixup");
 }
 
-/// Linux dışında düzeltilecek bir şey yok: ölçüm WebKitGTK'ya özgüydü.
+/// Nothing to fix outside Linux: the measurement was specific to WebKitGTK.
 #[cfg(not(target_os = "linux"))]
 pub fn fixup() {}

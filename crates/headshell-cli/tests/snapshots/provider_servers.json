@@ -1,28 +1,28 @@
 {
   "diag": {
-    "command": "<değişken>",
+    "command": "<variable>",
     "counters": {
       "server.count": 1
     },
     "env": {
-      "arch": "<değişken>",
-      "data_dir": "<değişken>",
-      "headshell_version": "<değişken>",
-      "os": "<değişken>"
+      "arch": "<variable>",
+      "data_dir": "<variable>",
+      "headshell_version": "<variable>",
+      "os": "<variable>"
     },
     "error_chain": [],
     "failed_at": null,
-    "finished_at": "<değişken>",
+    "finished_at": "<variable>",
     "notes": [],
-    "started_at": "<değişken>"
+    "started_at": "<variable>"
   },
-  "path": "<değişken>",
+  "path": "<variable>",
   "servers": [
     {
       "auth": "subsonic_token",
-      "id": "ev",
+      "id": "home",
       "kind": "subsonic",
-      "url": "https://muzik.ev",
+      "url": "https://music.home",
       "username": "enai"
     }
   ]

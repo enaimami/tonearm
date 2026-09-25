@@ -1,21 +1,21 @@
 {
   "description": [
-    "Çapadan pozisyon tahmininin doğruluk kümesi (PLAN §3.2).",
+    "The accuracy set for estimating the position from the anchor (PLAN §3.2).",
     "",
-    "Neden var: pozisyon webview'de çekirdeğe sormadan tahmin ediliyor, yani",
-    "formülün ikinci bir kopyası JS'te yaşıyor. İki kopya zamanla kayar ve kayma",
-    "kimsenin fark etmediği bir yerde başlar — ilerleme çubuğu birkaç yüz",
-    "milisaniye yalan söyler, kimse şikâyet etmez, sonra Faz 4'te aynı formül",
-    "oda senkronunu sürer.",
+    "Why it exists: in the webview the position is estimated without asking the",
+    "core, so a second copy of the formula lives in JS. Two copies drift over time,",
+    "and the drift starts where nobody notices — the progress bar lies by a few",
+    "hundred milliseconds, nobody complains, and then in Phase 4 the same formula",
+    "drives room sync.",
     "",
-    "Bu dosya iki tarafın da okuduğu tek doğruluk kaynağı. Rust tarafı:",
-    "crates/headshell-core/tests/anchor_parity.rs. JS tarafı:",
-    "crates/headshell/tests/anchor_parity_js.rs (crates/headshell/ui/anchor.js'i gömülü QuickJS'te koşturarak).",
+    "This file is the single source of truth both sides read. The Rust side:",
+    "crates/headshell-core/tests/anchor_parity.rs. The JS side:",
+    "crates/headshell/tests/anchor_parity_js.rs (running crates/headshell/ui/anchor.js in embedded QuickJS).",
     "",
-    "Anahtarlar ve vaka adları İngilizce (D-036): bu dosya iki dilden okunuyor",
-    "ve kümeyi büyütecek kişi Türkçe bilmek zorunda değil.",
+    "Keys and case names are in English (D-036): this file is read from two",
+    "languages, and whoever grows the set does not have to know anything else.",
     "",
-    "wall_time ve now RFC 3339. expected_ms tam sayı milisaniye."
+    "wall_time and now are RFC 3339. expected_ms is an integer number of milliseconds."
   ],
   "cases": [
     {
@@ -86,10 +86,10 @@
     {
       "name": "phase 4 drift correction: rate 1.001 — TRUNCATED, not rounded",
       "note": [
-        "100000 * 1.001 ikilik tabanda tam 100100 etmez, 100099.999… eder.",
-        "Çekirdek `as u64` ile kırpıyor: 100099. JS tarafı Math.round kullanırsa",
-        "100100 der ve iki kopya buradan ayrılır — kümedeki en değerli vaka bu.",
-        "JS karşılığı: Math.floor(elapsed_ms * rate)."
+        "100000 * 1.001 is not exactly 100100 in binary, it is 100099.999….",
+        "The core truncates with `as u64`: 100099. If the JS side used Math.round",
+        "it would say 100100 and the two copies would part ways here — the most",
+        "valuable case in the set. The JS counterpart: Math.floor(elapsed_ms * rate)."
       ],
       "anchor": {
         "track": "mbid:1",

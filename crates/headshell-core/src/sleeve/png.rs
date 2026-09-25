@@ -1,23 +1,25 @@
-//! PNG rasterizasyonu (D-011: opsiyonel `render-png` feature).
+//! PNG rasterisation (D-011: the optional `render-png` feature).
 //!
-//! Çekirdek her zaman SVG üretir; bu modül yalnızca feature açıkken derlenir.
+//! The core always produces SVG; this module is only compiled when the
+//! feature is on.
 
 use crate::diag::Stage;
 use crate::error::{Error, ErrorKind, Result};
 
 use super::CardSize;
 
-/// SVG'yi PNG olarak rasterize eder.
+/// Rasterises SVG as PNG.
 ///
 /// # Errors
-/// SVG ayrıştırma, pixmap oluşturma veya PNG kodlama başarısız olursa.
+/// If SVG parsing, pixmap creation or PNG encoding fails.
 #[allow(clippy::field_reassign_with_default)]
 pub fn render(svg: &str, size: CardSize) -> Result<Vec<u8>> {
-    // Sistem fontlarını yükle ve sans-serif için somut bir aile bağla.
+    // Load the system fonts and bind a concrete family for sans-serif.
     let mut fontdb = resvg::usvg::fontdb::Database::new();
     fontdb.load_system_fonts();
 
-    // Font ailesi seç: tercih sırasıyla sistemde bulunan ilkini kullan.
+    // Pick a font family: use the first one found on the system, in order of
+    // preference.
     let sans = pick_sans(&fontdb);
     if let Some(ref family) = sans {
         fontdb.set_sans_serif_family(family);
@@ -32,7 +34,7 @@ pub fn render(svg: &str, size: CardSize) -> Result<Vec<u8>> {
         Error::new(
             Stage::SleeveRender,
             ErrorKind::CardRender {
-                detail: format!("SVG ayrıştırılamadı: {e}"),
+                detail: format!("could not parse the SVG: {e}"),
             },
         )
     })?;
@@ -41,7 +43,7 @@ pub fn render(svg: &str, size: CardSize) -> Result<Vec<u8>> {
         Error::new(
             Stage::SleeveRender,
             ErrorKind::CardRender {
-                detail: format!("{}×{} pixmap oluşturulamadı", size.width, size.height),
+                detail: format!("could not create a {}×{} pixmap", size.width, size.height),
             },
         )
     })?;
@@ -56,13 +58,13 @@ pub fn render(svg: &str, size: CardSize) -> Result<Vec<u8>> {
         Error::new(
             Stage::SleeveRender,
             ErrorKind::CardRender {
-                detail: format!("PNG kodlanamadı: {e}"),
+                detail: format!("could not encode the PNG: {e}"),
             },
         )
     })
 }
 
-/// Sistemde var olan bir sans-serif font ailesini bulur.
+/// Finds a sans-serif font family present on the system.
 fn pick_sans(db: &resvg::usvg::fontdb::Database) -> Option<String> {
     let preferred = [
         "DejaVu Sans",
@@ -85,7 +87,7 @@ fn pick_sans(db: &resvg::usvg::fontdb::Database) -> Option<String> {
             return Some(name.to_owned());
         }
     }
-    // Son çare: herhangi bir yüzeyin ilk ailesini kullan.
+    // Last resort: use the first family of any face.
     db.faces()
         .next()
         .and_then(|face| face.families.first().map(|(s, _)| s.clone()))
@@ -121,8 +123,8 @@ mod tests {
         let size = CardSize::square();
 
         let svg = crate::sleeve::render_svg(&data, size);
-        let png = render(&svg, size).expect("png üretilemedi");
-        // PNG başlık kontrolü.
+        let png = render(&svg, size).expect("could not produce the png");
+        // The PNG header check.
         assert_eq!(&png[0..8], b"\x89PNG\r\n\x1a\n");
     }
 }

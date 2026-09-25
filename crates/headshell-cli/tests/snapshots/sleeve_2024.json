@@ -37,7 +37,7 @@
     "year": 2024
   },
   "diag": {
-    "command": "<değişken>",
+    "command": "<variable>",
     "counters": {
       "sleeve.discoveries": 0,
       "sleeve.hours": 17,
@@ -51,16 +51,16 @@
       "stats.without_canonical_id": 0
     },
     "env": {
-      "arch": "<değişken>",
-      "data_dir": "<değişken>",
-      "headshell_version": "<değişken>",
-      "os": "<değişken>"
+      "arch": "<variable>",
+      "data_dir": "<variable>",
+      "headshell_version": "<variable>",
+      "os": "<variable>"
     },
     "error_chain": [],
     "failed_at": null,
-    "finished_at": "<değişken>",
+    "finished_at": "<variable>",
     "notes": [],
-    "started_at": "<değişken>"
+    "started_at": "<variable>"
   },
   "size": {
     "height": 1080,

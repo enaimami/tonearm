@@ -1,9 +1,9 @@
-//! Elle çalıştırılan çalma denemesi — ses gerçekten çıkıyor mu?
+//! A playback probe run by hand — does sound really come out?
 //!
-//! CI'da koşmaz (ses aygıtı gerektirir). Kullanım:
+//! Does not run in CI (it needs an audio device). Usage:
 //!
 //! ```bash
-//! cargo run -p headshell-core --features audio --example playback_probe -- <dosya>
+//! cargo run -p headshell-core --features audio --example playback_probe -- <file>
 //! ```
 
 fn main() {
@@ -18,12 +18,12 @@ fn main() {
 
     match headshell_core::playback::AudioEngine::play_file(path) {
         Ok(engine) => {
-            println!("dosya : {}", path.display());
-            println!("süre  : {:?} ms", engine.duration_ms());
+            println!("file    : {}", path.display());
+            println!("duration: {:?} ms", engine.duration_ms());
             for _ in 0..30 {
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 println!(
-                    "durum={} pozisyon={}ms bitti={}",
+                    "state={} position={}ms finished={}",
                     engine.state(),
                     engine.position_ms(),
                     engine.finished()
@@ -33,9 +33,9 @@ fn main() {
                 }
             }
             if let Some(err) = engine.take_error() {
-                println!("HATA: {err}");
+                println!("ERROR: {err}");
             }
         }
-        Err(err) => println!("açılamadı:\n{}", err.chain_text()),
+        Err(err) => println!("could not open:\n{}", err.chain_text()),
     }
 }

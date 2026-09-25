@@ -1,16 +1,18 @@
-//! Aynı arama iki kez: MusicBrainz aynı aday kümesini mi döndürüyor?
+//! The same search twice: does MusicBrainz return the same set of
+//! candidates?
 //!
-//! D-046'nın canlı koşumu `the_same_query_always_yields_the_same_canonical_id`
-//! testini düşürdü. Bu sonda sebebi ayırıyor: skorlama mı kararsız, yoksa
-//! **gelen aday kümesi** mi? İkisi bambaşka kusurlar ve ölçmeden ayrılmıyorlar.
+//! D-046's live run failed the `the_same_query_always_yields_the_same_canonical_id`
+//! test. This probe separates the cause: is the scoring unstable, or **the
+//! incoming candidate set**? They are entirely different flaws and cannot be
+//! told apart without measuring.
 //!
-//! Ölçülen (2026-09-02): aynı sorgu art arda iki kez 25 aday döndürüyor ve bazı
-//! koşumlarda **ortak aday sayısı sıfır** — MusicBrainz aramayı birden çok
-//! indeks kopyasından sunuyor. Bir kopya içinde sıra sabit, kopyalar arasında
-//! top-25 tamamen farklı.
+//! Measured (2026-09-02): the same query twice in a row returns 25 candidates,
+//! and in some runs **the number of shared candidates is zero** — MusicBrainz
+//! serves search from several index replicas. Within one replica the order is
+//! fixed; between replicas the top 25 are completely different.
 //!
 //! ```bash
-//! cargo run -p headshell-core --features http-client --example mb_stability_probe -- "Sanatçı" "Başlık"
+//! cargo run -p headshell-core --features http-client --example mb_stability_probe -- "Artist" "Title"
 //! ```
 
 use headshell_core::identity::{MetadataLookup as _, Resolver};
@@ -24,7 +26,7 @@ async fn main() {
     let duration_ms: Option<u64> = args.next().and_then(|raw| raw.parse().ok());
 
     let Ok(http) = headshell_core::net::default_http_client() else {
-        println!("`http-client` feature'ı kapalı derleme — sonda çalışamaz.");
+        println!("a build with the `http-client` feature off — the probe cannot run.");
         return;
     };
     let lookup = std::sync::Arc::new(
@@ -33,15 +35,15 @@ async fn main() {
     );
     let resolver = Resolver::new(lookup.clone());
     let track = TrackRef::new(&artist, &title).with_duration_ms(duration_ms);
-    println!("sorgu: {artist} — {title} (süre {duration_ms:?})");
+    println!("query: {artist} — {title} (duration {duration_ms:?})");
 
     let mut sets: Vec<Vec<String>> = Vec::new();
     for round in 1..=2 {
         match lookup.search_recordings(&artist, &title).await {
             Ok(found) => {
-                println!("koşum {round}: {} aday", found.len());
-                // En iyi beş adayın skoru ve süresi: eşitlik gerçek mi, yoksa
-                // skorlama ayırt edebilecekken ayırmıyor mu?
+                println!("run {round}: {} candidates", found.len());
+                // The score and duration of the best five candidates: is the tie real, or
+                // does the scoring fail to tell apart what it could?
                 let mut scored: Vec<(f64, String, Option<u64>)> = found
                     .iter()
                     .map(|c| {
@@ -59,7 +61,7 @@ async fn main() {
                     .collect();
                 scored.sort_by(|a, b| b.0.total_cmp(&a.0));
                 for (score, mbid, dur) in scored.iter().take(5) {
-                    println!("    {score:.4}  {mbid}  süre={dur:?}");
+                    println!("    {score:.4}  {mbid}  duration={dur:?}");
                 }
                 sets.push(
                     found
@@ -69,27 +71,28 @@ async fn main() {
                 );
             }
             Err(err) => {
-                println!("koşum {round} başarısız:\n{}", err.chain_text());
+                println!("run {round} failed:\n{}", err.chain_text());
                 return;
             }
         }
 
-        // Zincirin bu küme üzerinde ne yaptığı: kimlik, yöntem, kaç aday
-        // berabere. Asıl soru "aynı cevabı mı veriyor", ve beraberlik sayısı
-        // reddetme kuralının hangi eşikte tutacağını söylüyor.
+        // What the chain does with this set: the identity, the method, how many
+        // candidates are tied. The real question is "does it give the same
+        // answer", and the tie count says at which threshold the refusal rule
+        // will hold.
         match resolver.resolve(&track).await {
             Ok(res) => println!(
-                "  → {} ({}, güven {:.3}, berabere {})",
+                "  → {} ({}, confidence {:.3}, tied {})",
                 res.canonical_id, res.method, res.confidence, res.tied_candidates
             ),
-            Err(err) => println!("  → çözümleme hatası: {}", err.chain_text()),
+            Err(err) => println!("  → resolution error: {}", err.chain_text()),
         }
     }
 
     let (first, second) = (&sets[0], &sets[1]);
     let overlap = first.iter().filter(|id| second.contains(id)).count();
-    println!("aynı sıra mı : {}", first == second);
-    println!("ortak aday   : {overlap}");
-    println!("1. ilk üç    : {:?}", &first[..first.len().min(3)]);
-    println!("2. ilk üç    : {:?}", &second[..second.len().min(3)]);
+    println!("same order?  : {}", first == second);
+    println!("shared       : {overlap}");
+    println!("1. first three: {:?}", &first[..first.len().min(3)]);
+    println!("2. first three: {:?}", &second[..second.len().min(3)]);
 }

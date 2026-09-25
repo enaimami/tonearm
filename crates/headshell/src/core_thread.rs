@@ -1,25 +1,28 @@
-//! Çekirdeği barındıran iş parçacığı: tik döngüsü + iş kuyruğu (D-032, D-033).
+//! The thread that hosts the core: the tick loop + the job queue (D-032,
+//! D-033).
 //!
-//! **Kabuk yalnızca döngüyü sürer.** İlerletme, dinleme yazma ve rapor üretme
-//! `LiveSession::tick()` içinde — TUI ile aynı çağrı, aynı dans ikinci kez
-//! yazılmıyor (Altın Kural).
+//! **The shell only drives the loop.** Advancing, writing listens and
+//! producing the report happen inside `LiveSession::tick()` — the same call
+//! as the TUI; the same dance is not written a second time (the Golden Rule).
 //!
-//! Komutlar ve tik **aynı** iş parçacığında sırayla koşuyor. Kilit yok, yarış
-//! yok: kanal zaten sıralıyor. Bunun neden böyle olduğu [`crate::state`]
-//! başında yazılı.
+//! Commands and ticks run in order on **the same** thread. No lock, no race:
+//! the channel already puts them in order. Why it is like this is written at
+//! the top of [`crate::state`].
 //!
-//! ## Olaylar neden zamanlayıcıyla gitmiyor
+//! ## Why events do not go out on a timer
 //!
-//! D-028 köprünün saniyede ~10.000 olay taşıdığını ölçtü; yani bu bir
-//! performans önlemi değil. Sebep şu: webview pozisyonu **çapadan tahmin
-//! ediyor** (D-015), o yüzden "hâlâ çalıyor" mesajının taşıdığı bilgi sıfır.
-//! Yalnızca tahminin bilemeyeceği şeyler gönderiliyor — parça değişti,
-//! dinleme yazıldı, depo hata verdi, kuyruk bitti, **ya da çapanın tahmine
-//! girdi olan kısmı değişti** (durum, hız, süre, parça kimliği).
+//! D-028 measured the bridge carrying ~10,000 events per second; so this is
+//! not a performance measure. The reason is this: the webview **estimates the
+//! position from the anchor** (D-015), so a "still playing" message carries
+//! zero information. Only what the estimate cannot know is sent — the track
+//! changed, a listen was written, the store gave an error, the queue ended,
+//! **or the part of the anchor that feeds the estimate changed** (state,
+//! rate, duration, track identity).
 //!
-//! Son madde D-033'ün ilk listesinde yoktu ve arayüzü sessizce dondurdu:
-//! ses `Buffering` başlayıp `Playing`'e geçiyor, `Buffering` ilerlemediği
-//! için ilerleme çubuğu 0:00'da kalıyordu. Ayrıntı [`worth_sending`].
+//! The last item was not on D-033's first list, and it silently froze the
+//! interface: audio starts as `Buffering` and moves to `Playing`, and since
+//! `Buffering` does not advance, the progress bar stayed at 0:00. Details in
+//! [`worth_sending`].
 
 use std::time::Duration;
 
@@ -30,23 +33,26 @@ use headshell_core::playback::TickReport;
 
 use crate::state::{CommandError, Core, Job};
 
-/// Tur aralığı. Ses hattından bağımsız: yalnızca "parça bitti mi" sorusu.
-/// TUI ile aynı değer — iki kabuk aynı ritimde ilerlesin.
+/// The round interval. Independent of the audio pipeline: only the question
+/// "did the track end". The same value as the TUI — both shells advance at
+/// the same rhythm.
 const TICK: Duration = Duration::from_millis(200);
 
-/// Bir turda kayda değer bir şey olduğunda giden olay. Yükü `TickReport`.
+/// The event that goes out when something notable happened in a round. Its
+/// payload is a `TickReport`.
 pub const TICK_EVENT: &str = "headshell://tick";
 
-/// `tick()` hata döndürdüğünde giden olay. Yükü `CommandError`.
+/// The event that goes out when `tick()` returns an error. Its payload is a
+/// `CommandError`.
 ///
-/// Oturum **düşürülmüyor**: hata bir parçaya ait, oturum bütününe değil.
-/// Ama yutulmuyor da (K9).
+/// The session **is not dropped**: the error belongs to one track, not to the
+/// whole session. But it is not swallowed either (K9).
 pub const ERROR_EVENT: &str = "headshell://error";
 
-/// Çekirdeği kendi iş parçacığında başlatır.
+/// Starts the core on its own thread.
 ///
 /// # Errors
-/// İş parçacığı ya da çalışma zamanı kurulamazsa.
+/// If the thread or the runtime cannot be set up.
 pub fn spawn(
     core: Core,
     jobs: mpsc::UnboundedReceiver<Job>,
@@ -58,65 +64,68 @@ pub fn spawn(
 }
 
 fn run(mut core: Core, mut jobs: mpsc::UnboundedReceiver<Job>, app: &AppHandle) {
-    // Tek iş parçacıklı çalışma zamanı: çekirdek `Send` olmayan future'lar
-    // üretiyor ve zaten hepsi burada koşacak. Çalışma zamanını **kabuk**
-    // seçiyor (konvansiyon) — CLI de aynı seçimi yapıyor.
+    // A single-threaded runtime: the core produces futures that are not
+    // `Send`, and they will all run here anyway. The **shell** picks the
+    // runtime (the convention) — the CLI makes the same choice.
     let rt = match tokio::runtime::Builder::new_current_thread()
         .enable_time()
         .build()
     {
         Ok(rt) => rt,
         Err(source) => {
-            eprintln!("ADIM: CONFIG_LOAD\n  çekirdek çalışma zamanı kurulamadı: {source}");
+            eprintln!("STEP: CONFIG_LOAD\n  could not set up the core runtime: {source}");
             return;
         }
     };
 
     rt.block_on(async move {
         let mut ticker = tokio::time::interval(TICK);
-        // Gecikmiş turlar birikip peş peşe boşalmasın: geç kalındıysa
-        // atlanır. `tick()` bir sayaç değil, "bir şey oldu mu" sorusu.
+        // Late rounds must not pile up and fire back to back: if it is late,
+        // it is skipped. `tick()` is not a counter but the question "did
+        // anything happen".
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
-        // Son gönderilen çapanın tahmin edilemeyen kısmı. Karşılaştırma
-        // yapılacak ki aynı şey iki kez gönderilmesin.
+        // The unpredictable part of the last anchor sent. It is compared so
+        // the same thing is not sent twice.
         let mut last = Notable::of(&core.live.anchor());
 
         loop {
             tokio::select! {
                 job = jobs.recv() => match job {
                     Some(job) => job(&mut core).await,
-                    // Gönderen ucun hepsi düştü: uygulama kapanıyor.
+                    // Every sending end is gone: the app is closing.
                     None => break,
                 },
                 _ = ticker.tick() => run_tick(&mut core, app, &mut last).await,
             }
         }
 
-        // Kapanış: `tick` her turda yazıyor (D-032), yani burada yazılacak
-        // bir şey kalması beklenmiyor — kalırsa depo o an hata veriyordu ve
-        // bu son deneme. Pencere gittiği için gösterilecek yüzey yok, ama
-        // kayıp sessiz de olmamalı.
+        // Shutdown: `tick` writes every round (D-032), so nothing is expected
+        // to be left to write here — if something is, the store was failing
+        // at that moment and this is the last attempt. With the window gone
+        // there is no surface to show it on, but the loss must not be silent
+        // either.
         match core.live.shutdown() {
             Ok(summary) if summary.inserted > 0 => {
-                eprintln!("kapanışta yazılan dinleme: {}", summary.inserted);
+                eprintln!("listens written at shutdown: {}", summary.inserted);
             }
             Ok(_) => {}
             Err(err) => {
                 eprintln!("{}", err.chain_text());
-                eprintln!("elde kalan dinleme: {}", core.live.pending_listens());
+                eprintln!("listens still held back: {}", core.live.pending_listens());
             }
         }
     });
 }
 
-/// Çapanın **tahmin edilemeyen** kısmı.
+/// The **unpredictable** part of the anchor.
 ///
-/// Webview pozisyonu `position_ms + (now - wall_time) × rate` ile yürütüyor.
-/// Bu alanlar o formülün girdisi ya da bağlamı: değiştiklerinde tahmin
-/// yanlışa döner, değişmediklerinde göndermenin taşıdığı bilgi sıfırdır.
+/// The webview advances the position with `position_ms + (now - wall_time) ×
+/// rate`. These fields are that formula's inputs or its context: when they
+/// change the estimate goes wrong; when they do not, sending carries zero
+/// information.
 ///
-/// `position_ms` bilerek **yok**: tahminin işi zaten o.
+/// `position_ms` is left out on purpose: that is the estimate's job anyway.
 #[derive(Debug, Clone, PartialEq)]
 struct Notable {
     track: Option<headshell_core::ids::CanonicalId>,
@@ -136,12 +145,13 @@ impl Notable {
     }
 }
 
-/// Bu tur webview'e gönderilmeli mi?
+/// Should this round be sent to the webview?
 ///
-/// Ayrı bir fonksiyon çünkü asıl karar burada ve sınanabilir olmalı: yanlış
-/// bir "hayır" arayüzü **sessizce** dondurur. Nitekim ilk hâli tam bunu yaptı
-/// — `Buffering → Playing` geçişi listede yoktu, tahmin `Buffering`'de
-/// ilerlemediği için ilerleme çubuğu 0:00'da kaldı ve hiçbir hata görünmedi.
+/// A separate function because the real decision is here and it must be
+/// testable: a wrong "no" freezes the interface **silently**. Indeed the
+/// first version did exactly that — the `Buffering → Playing` transition was
+/// not on the list, the estimate does not advance in `Buffering`, so the
+/// progress bar stayed at 0:00 and no error was visible.
 fn worth_sending(last: &Notable, report: &TickReport) -> bool {
     report.track_changed
         || report.listens_recorded > 0
@@ -150,7 +160,7 @@ fn worth_sending(last: &Notable, report: &TickReport) -> bool {
         || Notable::of(&report.anchor) != *last
 }
 
-/// Bir tur: çekirdeği ilerlet, yalnızca kayda değer olanı bildir.
+/// One round: advance the core, report only what is notable.
 async fn run_tick(core: &mut Core, app: &AppHandle, last: &mut Notable) {
     match core.live.tick().await {
         Ok(report) => {
@@ -182,8 +192,8 @@ mod tests {
             },
             state,
             duration_ms,
-            // Zaman damgası için `stopped()`: bu paket `jiff`e doğrudan
-            // bağlı değil ve olmasına da gerek yok.
+            // `stopped()` for the timestamp: this package does not depend on
+            // `jiff` directly, and it has no need to.
             ..PlaybackAnchor::stopped()
         }
     }
@@ -199,8 +209,8 @@ mod tests {
         }
     }
 
-    /// Kaydırma yalnızca zaman geçmesinden ibaretse gönderilmez: webview
-    /// pozisyonu zaten çapadan yürütüyor.
+    /// If only time passed, nothing is sent: the webview already advances the
+    /// position from the anchor.
     #[test]
     fn a_tick_that_only_advanced_time_is_not_worth_sending() {
         let last = Notable::of(&anchor(PlayState::Playing, 1_000, Some(240_000)));
@@ -209,12 +219,12 @@ mod tests {
         assert!(!worth_sending(&last, &next));
     }
 
-    /// **Bu testin sebebi gerçek bir hata.** İlk sürümde yalnızca parça
-    /// değişimi/dinleme/hata/bitiş gönderiliyordu. Çalma başladığında motor
-    /// önce `Buffering` diyor, sonra tampon dolunca `Playing`'e geçiyor —
-    /// ama o geçiş gönderilmediği için webview elindeki `Buffering` çapasıyla
-    /// kalıyordu ve `Buffering` ilerlemediği için çubuk 0:00'da donuyordu.
-    /// Hiçbir hata görünmüyordu; sadece "çalmıyor" gibi duruyordu.
+    /// **The reason for this test is a real bug.** The first version only sent
+    /// track changes/listens/errors/the end. When playback starts the engine
+    /// first says `Buffering`, then moves to `Playing` once the buffer fills —
+    /// but since that transition was not sent, the webview kept the `Buffering`
+    /// anchor it had, and since `Buffering` does not advance, the bar froze at
+    /// 0:00. No error was visible; it just looked like "not playing".
     #[test]
     fn the_buffering_to_playing_transition_must_be_sent() {
         let last = Notable::of(&anchor(PlayState::Buffering, 0, Some(10_000)));
@@ -223,8 +233,8 @@ mod tests {
         assert!(worth_sending(&last, &next));
     }
 
-    /// Süre kaptan geç okunabiliyor: `None` → `Some` de bir değişimdir,
-    /// yoksa ilerleme çubuğu oranını hiç öğrenemez.
+    /// The duration can be read late from the container: `None` → `Some` is a
+    /// change too, otherwise the progress bar could never learn its ratio.
     #[test]
     fn learning_the_duration_later_is_a_change() {
         let last = Notable::of(&anchor(PlayState::Playing, 0, None));
@@ -246,7 +256,7 @@ mod tests {
     fn a_store_error_is_never_swallowed() {
         let last = Notable::of(&anchor(PlayState::Playing, 0, Some(240_000)));
         let mut next = report(anchor(PlayState::Playing, 1_000, Some(240_000)));
-        next.store_error = Some("ADIM: LIBRARY_WRITE\n  disk dolu".to_owned());
+        next.store_error = Some("STEP: LIBRARY_WRITE\n  disk full".to_owned());
 
         assert!(worth_sending(&last, &next));
     }

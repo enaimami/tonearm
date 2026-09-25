@@ -1,17 +1,19 @@
-//! Testler için sahte HTTP istemcisi.
+//! A fake HTTP client for tests.
 //!
-//! Konvansiyon: "ağa dokunan her şey trait arkasında olsun ki testler sahte
-//! kullanabilsin". Bu, o cümlenin karşılığı — sağlayıcı mantığı (URL kurma,
-//! kimlik, JSON ayrıştırma, hata çevirme) ağ olmadan sınanır.
+//! The convention: "everything that touches the network should be behind a
+//! trait so tests can use a fake". This is that sentence made real — provider
+//! logic (building URLs, credentials, JSON parsing, error translation) is
+//! tested without a network.
 //!
-//! Taşıma katmanının kendisi bununla sınanmaz; onun için gerçek istemciyi
-//! gerçek bir sokete bağlayan entegrasyon testi var (D-022).
+//! The transport layer itself is not tested with this; for that there is an
+//! integration test that connects the real client to a real socket (D-022).
 
 use std::sync::Mutex;
 
 use super::{HttpClient, HttpFuture, HttpRequest, HttpResponse};
 
-/// URL'sinde `pattern` geçen isteğe hazır yanıt döndüren istemci.
+/// A client that returns a canned response to requests whose URL contains
+/// `pattern`.
 pub(crate) struct FakeHttp {
     routes: Vec<Route>,
     seen: Mutex<Vec<HttpRequest>>,
@@ -32,7 +34,7 @@ impl FakeHttp {
         }
     }
 
-    /// URL'sinde `pattern` geçen isteğe `body` ile 200 döner.
+    /// Returns 200 with `body` for requests whose URL contains `pattern`.
     pub(crate) fn route(mut self, pattern: &str, body: &str) -> Self {
         self.routes.push(Route {
             pattern: pattern.to_owned(),
@@ -43,7 +45,7 @@ impl FakeHttp {
         self
     }
 
-    /// Durum kodu verilen yanıt.
+    /// A response with the given status code.
     pub(crate) fn route_status(mut self, pattern: &str, status: u16, body: &str) -> Self {
         self.routes.push(Route {
             pattern: pattern.to_owned(),
@@ -54,11 +56,11 @@ impl FakeHttp {
         self
     }
 
-    /// `location`'a yönlendiren yanıt (eklenti motorunun yönlendirme
-    /// denetimi bununla sınanıyor, D-069).
+    /// A response redirecting to `location` (the plugin engine's redirect check
+    /// is tested with this, D-069).
     ///
-    /// Bugün tek çağıranı `plugin-engine` feature'ının arkasındaki
-    /// testler; feature kapalıyken çağrılmıyor.
+    /// Today its only callers are the tests behind the `plugin-engine` feature;
+    /// it is not called when the feature is off.
     #[allow(dead_code)]
     pub(crate) fn route_redirect(mut self, pattern: &str, status: u16, location: &str) -> Self {
         self.routes.push(Route {
@@ -70,7 +72,7 @@ impl FakeHttp {
         self
     }
 
-    /// Şimdiye kadar görülen istekler (sırayla).
+    /// The requests seen so far (in order).
     pub(crate) fn requests(&self) -> Vec<HttpRequest> {
         self.seen
             .lock()
@@ -78,21 +80,22 @@ impl FakeHttp {
             .unwrap_or_default()
     }
 
-    /// Son istek — gövdesiyle birlikte.
+    /// The last request — with its body.
     ///
-    /// `last_url` yetmediği yer için: bir POST'un asıl yükü gövdededir ve
-    /// "parmak izi URL'de mi gövdede mi gitti" ancak buradan görülür.
+    /// For where `last_url` is not enough: a POST's real payload is in the body,
+    /// and "did the fingerprint go in the URL or in the body" can only be seen
+    /// here.
     ///
-    /// Bugün tek çağıranı `identity::acoustid` testleri ve o modül
-    /// `fingerprint` feature'ının arkasında; feature kapalıyken bu metot
-    /// çağrılmıyor. Ölü değil **koşullu** — feature adını buraya yazmak,
-    /// genel bir test yardımcısını tek bir özelliğe bağlardı.
+    /// Today its only callers are the `identity::acoustid` tests, and that module
+    /// is behind the `fingerprint` feature; when the feature is off this method is
+    /// not called. It is not dead but **conditional** — writing the feature name
+    /// here would tie a general test helper to a single feature.
     #[allow(dead_code)]
     pub(crate) fn last_request(&self) -> Option<HttpRequest> {
         self.requests().last().cloned()
     }
 
-    /// Son isteğin URL'si.
+    /// The URL of the last request.
     pub(crate) fn last_url(&self) -> String {
         self.requests()
             .last()
@@ -117,11 +120,11 @@ impl HttpClient for FakeHttp {
                     headers: route.headers.clone(),
                     body: route.body.clone(),
                 }),
-                // Eşleşmeyen istek sessizce boş dönmez: test yanlış URL
-                // kurulduğunu görmeli.
+                // A request that matches nothing does not silently come back empty: the test
+                // must see that a wrong URL was built.
                 None => Err(super::network_err(
                     &request.url,
-                    "sahte istemcide bu URL için yol tanımlı değil",
+                    "no route is defined for this URL in the fake client",
                 )),
             }
         })

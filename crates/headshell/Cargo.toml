@@ -1,16 +1,16 @@
 [package]
 name = "headshell"
-description = "headshell-core üzerine Tauri masaüstü kabuğu. İş mantığı içermez."
+description = "The Tauri desktop shell on top of headshell-core. Contains no business logic."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
-# Paket adı `headshell` (D-030) ama ikili adı değil: `headshell-cli` zaten `headshell` adında
-# bir ikili üretiyor ve aynı workspace'te iki `headshell` çıktısı çakışır.
-# CLI'nin adı kullanıcıya vaat edilmiş (`headshell import ...`), o yüzden değişen
-# taraf burası.
+# The package is named `headshell` (D-030), but the binary is not: `headshell-cli` already
+# produces a binary called `headshell`, and two `headshell` outputs in one workspace collide.
+# The CLI's name is promised to the user (`headshell import ...`), so this is the side
+# that changes.
 [[bin]]
 name = "headshell-desktop"
 path = "src/main.rs"
@@ -19,29 +19,29 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-# D-028: GO/NO-GO ölçüldü, WebKitGTK Linux'ta kabul edildi (ortam şartıyla).
+# D-028: GO/NO-GO was measured; WebKitGTK was accepted on Linux (with an environment condition).
 tauri = { version = "2", features = [] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
-# Çalışma zamanını **kabuk** seçer, çekirdek değil (konvansiyon). Tauri zaten
-# tokio taşıyor; buradaki tek ihtiyaç tik döngüsünün uykusu.
+# The **shell** picks the runtime, not the core (the convention). Tauri carries
+# tokio anyway; the only need here is the tick loop's sleep.
 tokio = { version = "1.53.1", features = ["rt", "time", "sync", "macros"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-# D-030: bağımlılık tek yönlü — bu paket `headshell-cli`'yi görmez.
+# D-030: the dependency goes one way — this package does not see `headshell-cli`.
 headshell-core = { workspace = true, features = ["render-png", "audio", "http-client", "plugin-engine"] }
-# Yerel dosya diyaloğu: export arşivini ve kartın kaydedileceği yeri seçmek
-# için. Kabuğa ait bir bağımlılık — `headshell-core`'un ağacına girmez, mobil
-# binary boyutunu etkilemez. İzni `capabilities/default.json`'da yalnızca
-# `open`/`save` ile sınırlı: diyalog bir yol **döndürür**, dosyayı okuyup
-# yazan taraf yine çekirdektir.
+# The native file dialog: for picking the export archive and where to save the
+# card. A shell dependency — it does not enter `headshell-core`'s tree and does
+# not affect the mobile binary size. Its permission in `capabilities/default.json`
+# is limited to `open`/`save`: the dialog **returns** a path, and the side that
+# reads and writes the file is still the core.
 tauri-plugin-dialog = "2"
 
 [dev-dependencies]
-# D-070: `tests/anchor_parity_js.rs` webview'in çapa formülünü (`ui/anchor.js`)
-# eskiden `node` ile koşturuyordu. Artık çekirdeğin eklenti motoruyla aynı
-# QuickJS ile: ağaca yeni crate girmiyor (çekirdek zaten getiriyor), testi
-# koşturan makineye de bir çalışma zamanı kurdurulmuyor.
+# D-070: `tests/anchor_parity_js.rs` used to run the webview's anchor formula
+# (`ui/anchor.js`) with `node`. Now it uses the same QuickJS as the core's plugin
+# engine: no new crate enters the tree (the core already brings it), and the
+# machine running the test does not have to install a runtime.
 rquickjs = { version = "0.14", default-features = false, features = ["std"] }
 
 [lints]

@@ -1,15 +1,15 @@
-//! Tiplenmiş çekirdek hataları.
+//! Typed core errors.
 //!
-//! Her hata bir [`Stage`] taşır — "nerede bozuldu?" sorusunun cevabı
-//! hatanın kendisinde durur, log'da aranmaz.
+//! Every error carries a [`Stage`] — the answer to "where did it break?" lives
+//! in the error itself, not somewhere in the log.
 
 use std::path::PathBuf;
 
 use crate::diag::Stage;
 
-/// Çekirdeğin döndürdüğü tek hata tipi.
+/// The one error type the core returns.
 #[derive(Debug, thiserror::Error)]
-#[error("ADIM: {stage}")]
+#[error("STEP: {stage}")]
 pub struct Error {
     stage: Stage,
     #[source]
@@ -22,22 +22,23 @@ impl Error {
         Self { stage, kind }
     }
 
-    /// Hatanın oluştuğu aşama.
+    /// The stage the error happened in.
     #[must_use]
     pub fn stage(&self) -> Stage {
         self.stage
     }
 
-    /// Hatanın türü.
+    /// The kind of error.
     #[must_use]
     pub fn kind(&self) -> &ErrorKind {
         &self.kind
     }
 
-    /// `ADIM: X` + neden zinciri, tek satırlarda. CLI ve GUI aynısını gösterir.
+    /// `STEP: X` + the chain of causes, one per line. The CLI and the GUI show the
+    /// same text.
     #[must_use]
     pub fn chain_text(&self) -> String {
-        let mut out = format!("ADIM: {}", self.stage);
+        let mut out = format!("STEP: {}", self.stage);
         let mut current: Option<&dyn std::error::Error> = Some(&self.kind);
         while let Some(err) = current {
             out.push_str("\n  → ");
@@ -48,116 +49,118 @@ impl Error {
     }
 }
 
-/// Ne bozuldu.
+/// What broke.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum ErrorKind {
-    #[error("dosya işlemi başarısız: {path}")]
+    #[error("file operation failed: {path}")]
     Io {
         path: PathBuf,
         #[source]
         source: std::io::Error,
     },
 
-    #[error("arşiv okunamadı: {path}")]
+    #[error("could not read the archive: {path}")]
     Archive {
         path: PathBuf,
         #[source]
         source: zip::result::ZipError,
     },
 
-    #[error("JSON ayrıştırılamadı: {entry}")]
+    #[error("could not parse JSON: {entry}")]
     Json {
-        /// Arşiv içi yol ya da dosya adı.
+        /// Path inside the archive, or a file name.
         entry: String,
         #[source]
         source: serde_json::Error,
     },
 
-    #[error("veritabanı hatası")]
+    #[error("database error")]
     Database {
         #[source]
         source: rusqlite::Error,
     },
 
-    #[error("tanınmayan export biçimi: {detail}")]
+    #[error("unrecognised export format: {detail}")]
     UnsupportedExport { detail: String },
 
-    #[error("{entry} içindeki {index}. kayıt bozuk: {detail}")]
+    #[error("record {index} in {entry} is corrupt: {detail}")]
     MalformedRecord {
         entry: String,
         index: usize,
         detail: String,
     },
 
-    #[error("bulunamadı: {what}")]
+    #[error("not found: {what}")]
     NotFound { what: String },
 
-    #[error("geçersiz girdi: {detail}")]
+    #[error("invalid input: {detail}")]
     InvalidInput { detail: String },
 
-    #[error("kart üretilemedi: {detail}")]
+    #[error("could not produce the card: {detail}")]
     CardRender { detail: String },
 
-    /// Sağlayıcı bu yeteneğe sahip değil.
+    /// The provider does not have this capability.
     ///
-    /// "Yapamıyorum" ile "sonuç yok" farklı şeylerdir; ikincisi boş liste,
-    /// birincisi bu hata (K9).
-    #[error("{provider} bunu yapamıyor: {what} (yetenekleri: {capabilities})")]
+    /// "I can't" and "no results" are different things; the latter is an empty
+    /// list, the former is this error (K9).
+    #[error("{provider} cannot do this: {what} (capabilities: {capabilities})")]
     Unsupported {
         provider: String,
         what: String,
         capabilities: String,
     },
 
-    #[error("ses hattı hatası: {detail}")]
+    #[error("audio pipeline error: {detail}")]
     Audio { detail: String },
 
-    /// Taşıma katmanı hatası: bağlanamadı, zaman aşımı, TLS, DNS.
+    /// A transport-layer error: could not connect, timeout, TLS, DNS.
     ///
-    /// Uygulama katmanı hatasından (`RemoteApi`) ayrı: "sunucuya
-    /// ulaşamadım" ile "sunucu hayır dedi" farklı tanılardır (K9).
-    #[error("ağ isteği başarısız: {url} ({detail})")]
+    /// Separate from an application-layer error (`RemoteApi`): "I could not reach
+    /// the server" and "the server said no" are different diagnoses (K9).
+    #[error("network request failed: {url} ({detail})")]
     Network { url: String, detail: String },
 
-    /// Sunucu 2xx dışında bir durum kodu döndürdü.
-    #[error("sunucu HTTP {status} döndürdü: {url} — {detail}")]
+    /// The server returned a status code outside 2xx.
+    #[error("the server returned HTTP {status}: {url} — {detail}")]
     HttpStatus {
         url: String,
         status: u16,
         detail: String,
     },
 
-    /// Eklenti manifesti okunamadı ya da geçersiz (Faz 2, §2.1).
-    #[error("eklenti manifesti geçersiz: {path} — {detail}")]
+    /// A plugin manifest could not be read or is invalid (Phase 2, §2.1).
+    #[error("invalid plugin manifest: {path} — {detail}")]
     PluginManifest { path: PathBuf, detail: String },
 
-    /// Eklenti motorunun bir adımı tökezledi (D-055, D-069).
+    /// A step of the plugin engine stumbled (D-055, D-069).
     ///
-    /// `step` **hangi adımda** olduğunu söyler — platform eşleme, eser
-    /// indirme, karma doğrulama, betiği okuma. Motorun bütün başarısızlıkları aynı cümleye
-    /// çıkmamalı: "yt-dlp yok" ile "yt-dlp indirilemedi" ile "indirilen
-    /// yt-dlp'nin karması tutmadı" üç ayrı tanıdır ve üçünün çözümü
-    /// farklıdır (K9).
-    #[error("eklenti motoru — {step}: {detail}")]
+    /// `step` says **at which step** — platform matching, artifact download, hash
+    /// verification, reading the script. The engine's failures must not all come
+    /// out as the same sentence: "no yt-dlp", "yt-dlp could not be downloaded" and
+    /// "the downloaded yt-dlp's hash did not match" are three separate diagnoses
+    /// with three different fixes (K9).
+    #[error("plugin engine — {step}: {detail}")]
     PluginRuntime { step: String, detail: String },
 
-    /// Eklenti kataloğu bir şeyi reddetti (D-071): indeks bozuk, girdi
-    /// geçersiz, inen dosyanın karması tutmuyor, ya da istenen işlem bu
-    /// eklentiye yapılamıyor (elle kurulmuş, yerelde değiştirilmiş).
+    /// The plugin catalog refused something (D-071): the index is corrupt, an
+    /// entry is invalid, a downloaded file's hash does not match, or the requested
+    /// operation cannot be done to this plugin (installed by hand, changed
+    /// locally).
     ///
-    /// `index` hangi katalogdan söz edildiğini söyler: kullanıcı
-    /// `HEADSHELL_PLUGIN_INDEX` ile başka bir katalog seçmiş olabilir ve
-    /// hatanın hangisinden geldiği tahmin edilmemeli (K9).
-    #[error("eklenti kataloğu ({index}): {detail}")]
+    /// `index` says which catalog is meant: the user may have picked another
+    /// catalog with `HEADSHELL_PLUGIN_INDEX`, and which one the error came from
+    /// must not be left to guesswork (K9).
+    #[error("plugin catalog ({index}): {detail}")]
     PluginCatalog { index: String, detail: String },
 
-    /// Eklentinin protokol sürümü çekirdeğinkiyle uyuşmuyor.
+    /// The plugin's protocol version does not match the core's.
     ///
-    /// Faz 2'nin "bitti sayılır" ölçütünün yarısı bu hata: uyumsuz eklenti
-    /// **yüklenmez**, çekirdek çökmez, kullanıcı neyin uyuşmadığını görür.
+    /// This error is half of Phase 2's "counts as done" criterion: an
+    /// incompatible plugin **is not loaded**, the core does not crash, and the
+    /// user sees what does not match.
     #[error(
-        "{plugin} eklentisi bu sürümle konuşamıyor: eklenti api {plugin_api}, çekirdek api {host_api}"
+        "the {plugin} plugin cannot talk to this version: plugin api {plugin_api}, core api {host_api}"
     )]
     PluginIncompatible {
         plugin: String,
@@ -165,60 +168,63 @@ pub enum ErrorKind {
         host_api: u32,
     },
 
-    /// Eklenti izinleri onaylanmamış ya da onay geri alınmış.
-    #[error("{plugin} eklentisi onaylanmadı: {detail}")]
+    /// The plugin's permissions have not been approved, or the consent was
+    /// withdrawn.
+    #[error("the {plugin} plugin is not approved: {detail}")]
     PluginNotApproved { plugin: String, detail: String },
 
-    /// Eklentinin iş parçacığı başlatılamadı ya da düştü (D-069).
+    /// The plugin's thread could not be started or fell over (D-069).
     ///
-    /// JS'in fırlattığı bir hata bu değil — o [`ErrorKind::PluginThrew`].
-    /// Bu, motorun kendisinin eklentiyi taşıyamadığı durum: iş parçacığı
-    /// açılamadı, QuickJS kurulamadı, ya da eklenti vazgeçilecek kadar çok
-    /// kez düştü.
-    #[error("{plugin} eklentisi çalışmıyor: {detail}")]
+    /// This is not an error thrown by the JS — that is
+    /// [`ErrorKind::PluginThrew`]. This is the case where the engine itself cannot
+    /// carry the plugin: the thread could not be opened, QuickJS could not be set
+    /// up, or the plugin fell over so many times that the engine gave up.
+    #[error("the {plugin} plugin is not running: {detail}")]
     PluginCrashed { plugin: String, detail: String },
 
-    /// Eklenti verilen sürede cevap vermedi.
+    /// The plugin did not answer within the time allowed.
     ///
-    /// Zaman aşımı çökmeden ayrı: asılı kalan bir eklenti ölmüş bir
-    /// eklentiden farklı bir sorundur ve farklı çözülür (K9).
-    #[error("{plugin} eklentisi {method} çağrısına {seconds} sn içinde cevap vermedi")]
+    /// A timeout is separate from a crash: a hung plugin is a different problem
+    /// from a dead one and is fixed differently (K9).
+    #[error("the {plugin} plugin did not answer the {method} call within {seconds} s")]
     PluginTimeout {
         plugin: String,
         method: String,
         seconds: u64,
     },
 
-    /// Eklentinin kodu bir hata fırlattı — motor sağ, eklenti işi reddetti.
+    /// The plugin's code threw an error — the engine is fine, the plugin refused
+    /// the work.
     ///
-    /// `location` JS yığınının ilk satırı (`main.js:42:7`): "neden" kadar
-    /// "nerede" de tanının parçası (K9), ve eklenti yazarı onsuz hatayı
-    /// kendi kodunda aramak zorunda kalır.
-    #[error("{plugin} eklentisi {method} çağrısında hata verdi: {message}{location}")]
+    /// `location` is the first line of the JS stack (`main.js:42:7`): "where" is as
+    /// much a part of the diagnosis as "why" (K9), and without it the plugin
+    /// author has to hunt for the error in their own code.
+    #[error("the {plugin} plugin failed on the {method} call: {message}{location}")]
     PluginThrew {
         plugin: String,
         method: String,
         message: String,
-        /// Boş ya da ` (main.js:42:7)` biçiminde.
+        /// Empty, or of the form ` (main.js:42:7)`.
         location: String,
     },
 
-    /// Eklenti sözleşmeye uymadı: beyan ettiği bir fonksiyonu dışa
-    /// aktarmıyor ya da beklenmeyen biçimde bir değer döndürdü.
+    /// The plugin broke the contract: it does not export a function it declared,
+    /// or it returned a value in an unexpected shape.
     ///
-    /// [`ErrorKind::PluginThrew`]'dan ayrı: "eklenti hayır dedi" ile
-    /// "eklentinin kodu motorla anlaşamıyor" farklı tanılardır. İlkini
-    /// kullanıcı bekleyerek ya da yapılandırarak çözer, ikincisini yalnızca
-    /// eklenti yazarı (K9).
-    #[error("{plugin} eklentisi sözleşmeye uymuyor ({method}): {detail}")]
+    /// Separate from [`ErrorKind::PluginThrew`]: "the plugin said no" and "the
+    /// plugin's code cannot get along with the engine" are different diagnoses.
+    /// The user fixes the first by waiting or by configuring; only the plugin
+    /// author can fix the second (K9).
+    #[error("the {plugin} plugin breaks the contract ({method}): {detail}")]
     PluginContract {
         plugin: String,
         method: String,
         detail: String,
     },
 
-    /// Sunucu HTTP 200 döndü ama gövdede hata var (Subsonic'in yaptığı gibi).
-    #[error("{server} isteği reddetti: {message} (kod {code}, uç nokta: {endpoint})")]
+    /// The server returned HTTP 200 but the body holds an error (as Subsonic
+    /// does).
+    #[error("{server} refused the request: {message} (code {code}, endpoint: {endpoint})")]
     RemoteApi {
         server: String,
         endpoint: String,
@@ -227,10 +233,10 @@ pub enum ErrorKind {
     },
 }
 
-/// Çekirdek sonuç tipi.
+/// The core result type.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// `io::Error`'ı yolu ve aşamasıyla birlikte sarar.
+/// Wraps an `io::Error` together with its path and stage.
 pub(crate) fn io_err(stage: Stage, path: impl Into<PathBuf>, source: std::io::Error) -> Error {
     Error::new(
         stage,
@@ -249,12 +255,12 @@ mod tests {
     fn chain_text_starts_with_stage_and_lists_causes() {
         let err = io_err(
             Stage::ImportRead,
-            "/yok/dosya.zip",
+            "/missing/file.zip",
             std::io::Error::new(std::io::ErrorKind::NotFound, "no such file"),
         );
         let text = err.chain_text();
-        assert!(text.starts_with("ADIM: IMPORT_READ"), "{text}");
-        assert!(text.contains("/yok/dosya.zip"), "{text}");
+        assert!(text.starts_with("STEP: IMPORT_READ"), "{text}");
+        assert!(text.contains("/missing/file.zip"), "{text}");
         assert!(text.contains("no such file"), "{text}");
         assert_eq!(err.stage(), Stage::ImportRead);
     }

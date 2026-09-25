@@ -1,8 +1,9 @@
-//! Entegrasyon testlerinin ortak yardımcıları (D-070).
+//! Shared helpers for integration tests (D-070).
 //!
-//! Her entegrasyon testi dosyası ayrı bir crate ve bu modül her birine
-//! `mod support;` ile ayrıca derleniyor. Bir dosyanın kullanmadığı yardımcıyı
-//! derleyici o crate için ölü sayar; uyarı bu yüzden modül düzeyinde kapalı.
+//! Every integration test file is a separate crate, and this module is
+//! compiled into each one separately with `mod support;`. The compiler counts
+//! a helper a file does not use as dead for that crate; that is why the
+//! warning is off at the module level.
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
@@ -10,19 +11,20 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use headshell_core::config::Config;
 
-/// Testlerin yazdığı kök: Cargo'nun `CARGO_TARGET_TMPDIR`'i (`target/tmp`).
+/// The root tests write to: Cargo's `CARGO_TARGET_TMPDIR` (`target/tmp`).
 ///
-/// İşletim sisteminin ortak geçici dizini değil. Testler dizinlerini
-/// siliyor, ama öldürülmüş bir koşumun artığı bile makinenin `/tmp`'sine
-/// değil projenin `target`'ına düşer ve `cargo clean` ile gider. Bir zamanlar
-/// ortak `/tmp`'ye yazılıyordu ve bir geliştirme makinesinde 1,2 GB
-/// birikmişti — o makinede `/tmp` bir tmpfs, yani bellekti.
+/// Not the operating system's shared temporary directory. Tests delete their
+/// directories, but even the leftovers of a killed run land in the project's
+/// `target`, not in the machine's `/tmp`, and go away with `cargo clean`.
+/// They once wrote to the shared `/tmp`, and 1.2 GB piled up on a development
+/// machine — on that machine `/tmp` was a tmpfs, that is, memory.
 #[must_use]
 pub fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
 }
 
-/// Kendini silen geçici dizin — düşen bir testte de (`Drop` panikte koşar).
+/// A temporary directory that deletes itself — in a failing test too (`Drop`
+/// runs during a panic).
 pub struct TempDir(PathBuf);
 
 impl TempDir {
@@ -30,7 +32,7 @@ impl TempDir {
     pub fn new(label: &str) -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let base = root();
-        std::fs::create_dir_all(&base).expect("test kökü açılmalı");
+        std::fs::create_dir_all(&base).expect("the test root must open");
         loop {
             let dir = base.join(format!(
                 "{label}-{}-{}",
@@ -39,9 +41,12 @@ impl TempDir {
             ));
             match std::fs::create_dir(&dir) {
                 Ok(()) => return Self(dir),
-                // Öldürülmüş bir koşumdan kalma aynı adlı dizin: kullanılmaz.
+                // A directory with the same name left over from a killed run: not used.
                 Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(err) => panic!("geçici dizin açılamadı ({}): {err}", dir.display()),
+                Err(err) => panic!(
+                    "could not open a temporary directory ({}): {err}",
+                    dir.display()
+                ),
             }
         }
     }
@@ -72,15 +77,15 @@ impl Drop for TempDir {
             && err.kind() != std::io::ErrorKind::NotFound
         {
             eprintln!(
-                "uyarı: geçici dizin silinemedi ({}): {err}",
+                "warning: could not delete the temporary directory ({}): {err}",
                 self.0.display()
             );
         }
     }
 }
 
-/// Kendini silen bir veri dizini üstünde `Config`; `&Config` bekleyen her
-/// yere verilebilir.
+/// A `Config` on top of a data directory that deletes itself; it can be
+/// passed anywhere a `&Config` is expected.
 pub struct TestConfig {
     _dir: TempDir,
     config: Config,
@@ -103,18 +108,22 @@ impl std::ops::Deref for TestConfig {
     }
 }
 
-/// Bir eklentiyi **canlı katalogdan** veri dizinine kurar (D-071) —
-/// kullanıcının `headshell plugin install <ad>` ile yaptığının aynısı.
+/// Installs a plugin **from the live catalog** into the data directory
+/// (D-071) — the same thing the user does with `headshell plugin install
+/// <name>`.
 ///
-/// Eklentiler bu depoda durmuyor, `headshell/plugins`'te yaşıyor; canlı
-/// testler onları kullanıcının aldığı yoldan alıyor ve böylece katalog da
-/// uçtan uca sınanıyor: indeks, sha256, manifest karşılaştırması, kurulum.
-/// Adres `HEADSHELL_PLUGIN_INDEX`'ten ya da varsayılandan.
+/// Plugins do not live in this repository, they live in `headshell/plugins`;
+/// the live tests take them the way the user does, and so the catalog is
+/// tested end to end as well: the index, sha256, the manifest comparison,
+/// the install. The address comes from `HEADSHELL_PLUGIN_INDEX` or the
+/// default.
 ///
-/// İki başarısızlık ayrı (K9, D-043):
-/// - Kataloğa **ulaşılamadıysa** `Err(sebep)` döner; çağıran testi atlar.
-/// - Ulaşılıp eklenti **kurulamadıysa** panikler: indeks bozuk, dosya yok ya
-///   da karma tutmuyor. Bu kırmızı yanmalı — kullanıcı da kuramaz.
+/// Two failures are kept apart (K9, D-043):
+/// - If the catalog **could not be reached** it returns `Err(reason)`; the
+///   caller skips the test.
+/// - If it was reached but the plugin **could not be installed** it panics:
+///   the index is broken, a file is missing or a hash does not match. This
+///   must turn red — the user cannot install it either.
 pub async fn install_from_catalog(config: &Config, name: &str) -> Result<PathBuf, String> {
     use headshell_core::diag::Stage;
     use headshell_core::plugin::catalog;
@@ -129,11 +138,11 @@ pub async fn install_from_catalog(config: &Config, name: &str) -> Result<PathBuf
     match result {
         Ok(_) => Ok(config.plugins_dir().join(name)),
         Err(err) if err.stage() == Stage::NetworkRequest => Err(format!(
-            "katalog ({index}) okunamadı: {}",
+            "could not read the catalog ({index}): {}",
             err.chain_text().replace('\n', " ")
         )),
         Err(err) => panic!(
-            "{name} katalogdan kurulamadı ({index}):\n{}",
+            "could not install {name} from the catalog ({index}):\n{}",
             err.chain_text()
         ),
     }

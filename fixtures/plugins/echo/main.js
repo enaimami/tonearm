@@ -1,9 +1,9 @@
-// Sınama eklentisi: eklenti sözleşmesini (api 2) **eksiksiz** uygulayan en
-// küçük örnek. Ağa çıkmaz, sabit bir katalogla cevap verir.
+// The test plugin: the smallest example that implements the plugin contract
+// (api 2) **in full**. It never goes online and answers from a fixed catalog.
 //
-// Kötü eklenti taklidi burada yok — zaman aşımı, fırlatma, izinsiz ağ ve
-// eksik dışa aktarım testleri kendi küçük betiklerini yazıyor. Bu dosya
-// `docs/eklenti-yazma.md`'deki iskeletin çalışan hâli olarak temiz kalıyor.
+// There is no misbehaving-plugin act here — the timeout, throwing, unpermitted
+// network and missing export tests write their own small scripts. This file
+// stays clean as the working form of the skeleton in `docs/writing-plugins.md`.
 
 const CATALOG = [
   {
@@ -20,21 +20,21 @@ const CATALOG = [
     title: "Gülümse",
     album: "Gülümse",
     duration_ms: 254000,
-    // Bilerek biçimsiz: çekirdek bunu düşürüp saymalı, kabul etmemeli.
-    isrc: "uydurma",
+    // Malformed on purpose: the core must drop and count it, not accept it.
+    isrc: "bogus",
   },
 ];
 
-// Arama "ezhel" ile "EZHEL"i aynı saymalı. QuickJS'te `Intl` yok; yerel
-// ayara duyarlı katlama gerekseydi elle yazılması gerekirdi.
+// Search must treat "ezhel" and "EZHEL" as the same. QuickJS has no `Intl`;
+// locale-aware folding, if it were needed, would have to be written by hand.
 const fold = (text) => text.toLowerCase();
 
 export function health() {
   return {
     reachable: true,
     track_count: CATALOG.length,
-    // Sırrın **değeri** değil, varlığı raporlanıyor.
-    detail: host.secrets.get("token") === null ? "sır yok" : "sır var",
+    // The secret's presence is reported, not its **value**.
+    detail: host.secrets.get("token") === null ? "no secret" : "has secret",
   };
 }
 
@@ -47,12 +47,12 @@ export function search(query, limit) {
 
 export function resolve_source(id) {
   if (!CATALOG.some((track) => track.id === id)) {
-    // "Yok" bir cevaptır, hata değil.
+    // "None" is an answer, not an error.
     return null;
   }
   return {
     kind: "http_stream",
-    url: `https://ornek.gecersiz/${id}.mp3`,
+    url: `https://example.invalid/${id}.mp3`,
     headers: [{ name: "authorization", value: host.secrets.get("token") ?? "" }],
   };
 }

@@ -1,16 +1,17 @@
-//! `http-client` feature'ının somut istemcisi: `ureq` + rustls (D-020).
+//! The concrete client of the `http-client` feature: `ureq` + rustls (D-020).
 //!
-//! **Bu dosya `ureq`'e dokunan tek yerdir.** Crate değişirse burası değişir;
-//! sağlayıcılar [`super::HttpClient`] trait'ini gördüğü için etkilenmez.
+//! **This file is the only place that touches `ureq`.** If the crate changes,
+//! this changes; providers see the [`super::HttpClient`] trait and are not
+//! affected.
 //!
-//! ## Bloklama uyarısı
+//! ## A note on blocking
 //!
-//! `ureq` bloklayan bir API. [`UreqClient::send`] async imzanın içinde
-//! bloklar — çekirdek bir çalışma zamanı seçmediği için (`#[tokio::main]`
-//! kurmaz) `spawn_blocking` çağıramıyoruz. CLI için bu sorun değil: komut
-//! zaten cevabı bekliyor. Bloklamayan bir taşıma isteyen çağıran (GUI'nin
-//! olay döngüsü, mobil) kendi `HttpClient`'ını verir; trait sınırı bu takası
-//! geri alınabilir kılan şeydir.
+//! `ureq` is a blocking API. [`UreqClient::send`] blocks inside an async
+//! signature — since the core does not choose a runtime (it does not set up
+//! `#[tokio::main]`) we cannot call `spawn_blocking`. For the CLI this is not
+//! a problem: the command is waiting for the answer anyway. A caller that
+//! wants a non-blocking transport (the GUI's event loop, mobile) supplies its
+//! own `HttpClient`; the trait boundary is what makes this trade reversible.
 
 use std::io::Read;
 use std::time::Duration;
@@ -18,44 +19,48 @@ use std::time::Duration;
 use super::{HttpClient, HttpFuture, HttpHeader, HttpMethod, HttpRequest, HttpResponse};
 use crate::error::Result;
 
-/// Üstveri yanıtları için tavan. Ses baytları buradan geçmez (bkz.
-/// [`UreqClient::open_stream`]); düşmanca bir sunucu belleği doldurmasın.
+/// The cap for metadata responses. Audio bytes do not go through here (see
+/// [`UreqClient::open_stream`]); a hostile server must not fill memory.
 const MAX_BODY_BYTES: u64 = 32 * 1024 * 1024;
 
-/// Genel zaman aşımı: bağlantı + okuma. Sunucu asılı kalırsa komut da asılı
-/// kalmasın.
+/// The general timeout: connecting + reading. If the server hangs, the
+/// command must not hang with it.
 const TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Eklenti isteklerinin süresi — çağrı bütçesinin (20 sn) altında kalmalı.
+/// The time allowed for plugin requests — it must stay below the call budget
+/// (20 s).
 const PLUGIN_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// Gövdesi uzun süren istekler için süreler: eser indirme ve ses akışı.
+/// Time limits for requests whose body takes long: artifact downloads and
+/// audio streams.
 ///
-/// Genel süre burada işe yaramaz, çünkü gövdeyi de kapsar: 40 MB'lık bir
-/// ikili ya da FLAC yavaş bir bağlantıda 30 saniyeyi rahatça geçer.
+/// The general timeout is no use here, because it covers the body too: a
+/// 40 MB binary or FLAC easily takes more than 30 seconds on a slow
+/// connection.
 ///
-/// **Toplam süre yok**, bilerek: ureq 3.4'te süresi geçmiş bir son tarih
-/// hata değil 1 sn'lik bir okuma süresi oluyor, yani sürekli akan bir gövdeyi
-/// hiçbir toplam süre kesmiyor (ölçüldü, D-069 eki). Takılmaya karşı koruma
-/// sessizlik sınırı; boyuta karşı koruma çağıranın tavanı (eser 128 MB,
-/// akış 256 MB). Yavaş ama akan bir indirme kesilmez — kullanıcı için doğru
-/// olan da bu.
+/// **There is no total limit**, on purpose: in ureq 3.4 an expired deadline is
+/// not an error but becomes a 1 s read timeout, so no total limit ever cuts a
+/// body that keeps flowing (measured, D-069 addendum). The protection against
+/// stalling is the silence limit; the protection against size is the caller's
+/// cap (artifacts 128 MB, streams 256 MB). A slow but flowing download is not
+/// cut off — which is also what is right for the user.
 #[derive(Debug, Clone, Copy)]
 struct LongBody {
-    /// Ad çözme, bağlanma, isteği gönderme ve yanıt başlıklarını bekleme
-    /// sınırı: hiç cevap vermeyen bir sunucu bundan uzun takılı bırakmaz.
+    /// The limit for resolving the name, connecting, sending the request and
+    /// waiting for the response headers: a server that never answers does not
+    /// leave us stuck for longer than this.
     handshake: Duration,
-    /// Gövdede iki okuma arasındaki en uzun sessizlik.
+    /// The longest silence between two reads of the body.
     idle: Duration,
 }
 
-/// Eser indirme ve ses akışının ortak süreleri.
+/// The shared time limits of artifact downloads and audio streams.
 const LONG_BODY: LongBody = LongBody {
     handshake: TIMEOUT,
     idle: TIMEOUT,
 };
 
-/// `ureq` tabanlı HTTP istemcisi.
+/// A `ureq`-based HTTP client.
 pub struct UreqClient {
     agent: ureq::Agent,
 }
@@ -77,8 +82,8 @@ impl UreqClient {
     pub fn new() -> Self {
         let config = ureq::Agent::config_builder()
             .timeout_global(Some(TIMEOUT))
-            // Durum kodunu hata değil veri olarak istiyoruz: 401 ile
-            // "bağlanamadım" farklı tanılardır (K9).
+            // We want the status code as data, not as an error: 401 and "could not
+            // connect" are different diagnoses (K9).
             .http_status_as_error(false)
             .user_agent(concat!("headshell/", env!("CARGO_PKG_VERSION")))
             .build();
@@ -87,15 +92,16 @@ impl UreqClient {
         }
     }
 
-    /// Eklentilere verilen istemci: **yönlendirme izlemez** (D-069).
+    /// The client given to plugins: it **does not follow redirects** (D-069).
     ///
-    /// İzin denetimi istek adresine bakıyor; istemci yönlendirmeyi kendisi
-    /// izleseydi izinli bir adres eklentiyi izinsiz bir yere taşıyabilirdi.
-    /// 3xx olduğu gibi döner, her adımı motor izler ve yeniden sorar.
+    /// The permission check looks at the request address; if the client followed
+    /// redirects itself, an allowed address could carry the plugin somewhere it
+    /// is not allowed. A 3xx comes back as it is, and the engine follows each
+    /// step and asks again.
     ///
-    /// Süre de daha kısa: bir eklenti çağrısının bütçesi 20 sn ve tek bir
-    /// istek bunun hepsini yememeli — yavaş bir istek eklentiye bir hata
-    /// olarak dönsün, çağrının kendisi zaman aşımına uğramasın.
+    /// The time limit is shorter too: a plugin call's budget is 20 s and a single
+    /// request must not eat all of it — a slow request should come back to the
+    /// plugin as an error, rather than the call itself timing out.
     #[must_use]
     pub fn without_redirects() -> Self {
         let config = ureq::Agent::config_builder()
@@ -109,34 +115,35 @@ impl UreqClient {
         }
     }
 
-    /// Motorun eser indirmesi için istemci (D-069).
+    /// The client for the engine's artifact downloads (D-069).
     #[must_use]
     pub fn for_downloads() -> Self {
         Self::long_body(LONG_BODY)
     }
 
-    /// Ses akışı için istemci ([`Self::open_stream`] ile).
+    /// The client for audio streams (with [`Self::open_stream`]).
     ///
-    /// Eskiden [`Self::new`] kullanılıyordu ve 30 sn'lik genel süre gövdeyi
-    /// de kapsıyordu: 30 sn'de tamamı inmeyen bir parça (uzak bir sunucudan
-    /// FLAC, yavaş bir bağlantıdan herhangi bir şey) ortasında kesiliyordu.
+    /// [`Self::new`] used to be used, and its 30 s general timeout covered the
+    /// body too: a track that did not download completely in 30 s (FLAC from a
+    /// distant server, anything over a slow connection) was cut off halfway.
     #[must_use]
     pub fn for_streams() -> Self {
         Self::long_body(LONG_BODY)
     }
 
-    /// Genel süresi olmayan, aşama aşama sınırlanmış istemci.
+    /// A client without a general timeout, limited stage by stage.
     ///
-    /// Başlık bekleme `timeout_send_request` ile sınırlanıyor,
-    /// `timeout_recv_response` ile **değil**. ureq 3.4 bir aşamanın süresini
-    /// sonraki aşamada da denetliyor ve o aşamanın *bittiği* andan sayıyor:
-    /// `recv_response` gövdeyi de başlıkların geldiği andan itibaren
-    /// sınırlıyordu. İndirme istemcisinde 30 sn'ydi ve 30 sn'de inmeyen her
-    /// eser "timeout: receive response" ile kesildi (D-069 eki). Aynı kural
-    /// `send_request`'i başlık beklemeye taşıyor ve orada bırakıyor: gövdenin
-    /// öncülü yalnızca `recv_response`. `recv_body` ise her okumada yeniden
-    /// sayıldığı için bir toplam değil, sessizlik sınırı. Kural ureq'le
-    /// değişirse aşağıdaki testler düşer.
+    /// Waiting for the headers is limited with `timeout_send_request`, **not**
+    /// with `timeout_recv_response`. ureq 3.4 checks a stage's time limit in the
+    /// following stage too, and counts it from the moment that stage *ended*:
+    /// `recv_response` limited the body as well, counting from the moment the
+    /// headers arrived. In the download client it was 30 s, and every artifact
+    /// that did not download within 30 s was cut off with "timeout: receive
+    /// response" (D-069 addendum). The same rule carries `send_request` over to
+    /// the header wait and leaves it there: the only predecessor of the body is
+    /// `recv_response`. `recv_body` is counted again on every read, so it is a
+    /// silence limit, not a total. If the rule changes with ureq, the tests below
+    /// fail.
     fn long_body(limits: LongBody) -> Self {
         let config = ureq::Agent::config_builder()
             .timeout_resolve(Some(limits.handshake))
@@ -189,15 +196,15 @@ impl UreqClient {
         })
     }
 
-    /// Ses akışı için **ilerlemeli** okuyucu açar.
+    /// Opens a **progressive** reader for an audio stream.
     ///
-    /// [`HttpClient::send`]'den ayrı, çünkü o gövdeyi tamamen belleğe alır;
-    /// 40 MB'lık bir FLAC'ı çalmaya başlamadan önce indirmek "kesintisiz
-    /// çalma"nın tersidir. Dönen ikili: bilinen toplam uzunluk (varsa) ve
-    /// okuyucu.
+    /// Separate from [`HttpClient::send`], because that one takes the body into
+    /// memory whole; downloading a 40 MB FLAC before starting to play it is the
+    /// opposite of "gapless playback". It returns a pair: the known total length
+    /// (if any) and the reader.
     ///
     /// # Errors
-    /// Bağlantı kurulamazsa ya da sunucu 2xx dışında bir kod dönerse.
+    /// If no connection can be made or the server returns a code outside 2xx.
     pub fn open_stream(
         &self,
         url: &str,
@@ -211,17 +218,18 @@ impl UreqClient {
 
         let status = response.status().as_u16();
         if !(200..300).contains(&status) {
-            // Gövdeyi okumadan hata üretmek "ne dedi?" sorusunu cevapsız
-            // bırakır; kısa bir parçasını alıyoruz.
+            // Producing an error without reading the body leaves "what did it say?"
+            // unanswered; we take a short piece of it.
             let mut response = response;
             let detail = response
                 .body_mut()
                 .with_config()
                 .limit(1024)
                 .read_to_string()
-                .unwrap_or_else(|err| format!("(gövde okunamadı: {err})"));
-            // Aşama seçimi `error_for_status` ile aynı kuraldan (D-023):
-            // akış açarken 401 almak da bir kimlik sorunudur, ağ sorunu değil.
+                .unwrap_or_else(|err| format!("(could not read the body: {err})"));
+            // The stage is chosen by the same rule as in `error_for_status` (D-023):
+            // getting a 401 while opening a stream is a credential problem too, not a
+            // network problem.
             return Err(crate::Error::new(
                 super::stage_for_status(status),
                 crate::ErrorKind::HttpStatus {
@@ -265,7 +273,7 @@ impl crate::plugin::artifact::ArtifactSource for UreqClient {
 
 impl HttpClient for UreqClient {
     fn send<'a>(&'a self, request: &'a HttpRequest) -> HttpFuture<'a> {
-        // Bloklama kasıtlı ve dokümante (modül başlığı).
+        // The blocking is deliberate and documented (module header).
         Box::pin(std::future::ready(self.send_blocking(request)))
     }
 }
@@ -275,8 +283,8 @@ fn collect_headers(map: &ureq::http::HeaderMap) -> Vec<HttpHeader> {
         .map(|(name, value)| {
             HttpHeader::new(
                 name.as_str(),
-                // Geçersiz UTF-8 başlığını **düşürmüyoruz**: varlığı da bir
-                // bilgidir. Kayıpsız olmayan gösterim tanı içindir.
+                // We **do not drop** a header with invalid UTF-8: its presence is
+                // information too. The lossy form is for diagnostics.
                 String::from_utf8_lossy(value.as_bytes()).into_owned(),
             )
         })
@@ -285,8 +293,9 @@ fn collect_headers(map: &ureq::http::HeaderMap) -> Vec<HttpHeader> {
 
 #[cfg(test)]
 mod tests {
-    //! Süreler gerçek bir yerel sunucuya karşı sınanıyor: ureq'in hangi
-    //! süreyi hangi aşamada saydığı belgesinden okunamadı, ölçülerek bulundu.
+    //! The time limits are tested against a real local server: which limit ureq
+    //! counts at which stage could not be read from its documentation; it was
+    //! found by measuring.
 
     use std::io::{BufRead as _, BufReader, Read as _, Write as _};
     use std::net::{TcpListener, TcpStream};
@@ -300,8 +309,8 @@ mod tests {
         idle: Duration::from_secs(2),
     };
 
-    /// Tek bağlantılık yerel sunucu: isteğin başlıklarını okuyup bağlantıyı
-    /// `serve`'e verir.
+    /// A local server for a single connection: reads the request's headers and
+    /// hands the connection to `serve`.
     fn serve_once(serve: impl FnOnce(TcpStream) + Send + 'static) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
@@ -311,13 +320,13 @@ mod tests {
             };
             let mut request = BufReader::new(stream.try_clone().unwrap());
             let mut line = String::new();
-            // Başlıklar boş bir satırla biter.
+            // The headers end with an empty line.
             while request.read_line(&mut line).unwrap_or(0) > 2 {
                 line.clear();
             }
             serve(stream);
         });
-        format!("http://{addr}/eser")
+        format!("http://{addr}/artifact")
     }
 
     fn send_headers(stream: &mut TcpStream, length: usize) {
@@ -329,10 +338,10 @@ mod tests {
         stream.flush().unwrap();
     }
 
-    /// D-069 eki: eskiden gövde başlıklardan 30 sn sonra kesiliyordu.
+    /// D-069 addendum: the body used to be cut off 30 s after the headers.
     #[test]
     fn a_body_slower_than_the_handshake_budget_still_arrives_whole() {
-        // 10 × 150 ms: gövde, başlık bekleme süresinin üç katında iniyor.
+        // 10 × 150 ms: the body downloads over three times the header wait limit.
         let url = serve_once(|mut stream| {
             send_headers(&mut stream, 10 * 1024);
             for _ in 0..10 {
@@ -356,7 +365,7 @@ mod tests {
         });
         let started = Instant::now();
         let Err(err) = UreqClient::long_body(LIMITS).open(&url) else {
-            panic!("cevap vermeyen sunucu hata olmalı");
+            panic!("a server that does not answer must be an error");
         };
         let elapsed = started.elapsed();
         assert!(err.chain_text().contains("timeout"), "{}", err.chain_text());
@@ -379,7 +388,11 @@ mod tests {
         let mut bytes = Vec::new();
         let err = body.read_to_end(&mut bytes).unwrap_err();
         let elapsed = started.elapsed();
-        assert_eq!(bytes.len(), 1024, "gelen kısım okunmuş olmalı");
+        assert_eq!(
+            bytes.len(),
+            1024,
+            "the part that arrived must have been read"
+        );
         assert!(err.to_string().contains("timeout"), "{err}");
         assert!(elapsed < Duration::from_millis(2500), "{elapsed:?}");
     }

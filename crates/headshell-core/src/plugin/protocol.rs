@@ -1,30 +1,31 @@
-//! Eklenti sözleşmesinin **veri biçimi** (api 2, D-069).
+//! The **data format** of the plugin contract (api 2, D-069).
 //!
-//! api 1 bir tel protokolüydü: satır bazlı JSON-RPC, alt süreç, el sıkışma.
-//! api 2'de tel yok — eklenti çekirdeğin içindeki QuickJS'te koşar ve
-//! sözleşme **dışa aktarılan fonksiyonlardır**. Değerler JS ile Rust arasında
-//! JSON olarak geçer; bu dosya o JSON'un Rust tarafındaki şekli.
+//! api 1 was a wire protocol: line-based JSON-RPC, a subprocess, a handshake.
+//! In api 2 there is no wire — the plugin runs in QuickJS inside the core and
+//! the contract is **the exported functions**. Values cross between JS and
+//! Rust as JSON; this file is the Rust-side shape of that JSON.
 //!
-//! ## api 2'nin fonksiyonları
+//! ## The functions of api 2
 //!
-//! | Fonksiyon | Zorunlu | Dönüş | Karşılığı |
+//! | Function | Required | Returns | Counterpart |
 //! |---|---|---|---|
-//! | `health()` | evet | [`HealthResult`] | [`crate::provider::Provider::health`] |
-//! | `search(query, limit)` | `search` yeteneği varsa | [`WireTrack`] dizisi | [`crate::provider::Provider::search`] |
-//! | `resolve_source(id)` | `stream` yeteneği varsa | [`AudioSource`] ya da `null` | [`crate::provider::Provider::resolve_source`] |
+//! | `health()` | yes | [`HealthResult`] | [`crate::provider::Provider::health`] |
+//! | `search(query, limit)` | if it has the `search` capability | an array of [`WireTrack`] | [`crate::provider::Provider::search`] |
+//! | `resolve_source(id)` | if it has the `stream` capability | [`AudioSource`] or `null` | [`crate::provider::Provider::resolve_source`] |
 //!
-//! Fonksiyon adları bilerek api 1'in metot adlarıyla aynı (`resolve_source`,
-//! `resolveSource` değil): belge, sağlayıcı trait'i ve eklenti aynı adı
-//! kullanınca "hangi isim hangisine karşılık" tablosu gerekmiyor.
+//! The function names are deliberately the same as api 1's method names
+//! (`resolve_source`, not `resolveSource`): when the document, the provider
+//! trait and the plugin use the same name, no "which name maps to which"
+//! table is needed.
 //!
-//! ## Sürümleme
+//! ## Versioning
 //!
-//! [`PLUGIN_API`] tek bir tam sayı ve manifestte yazar; **eşit değilse
-//! eklenti yüklenmez** ve kullanıcı iki sayıyı da görür
-//! ([`crate::ErrorKind::PluginIncompatible`]). Kural D-039'un aynısı:
-//! **eklemek sürümü artırmaz, kaldırmak/anlamını değiştirmek artırır.** api
-//! 1'den 2'ye geçiş ikincisiydi: `exec` kalktı, eklentinin nerede koştuğu
-//! değişti.
+//! [`PLUGIN_API`] is a single integer and is written in the manifest; **if it
+//! is not equal the plugin is not loaded** and the user sees both numbers
+//! ([`crate::ErrorKind::PluginIncompatible`]). The rule is the same as
+//! D-039's: **adding does not bump the version, removing or changing a
+//! meaning does.** The move from api 1 to 2 was the latter: `exec` was
+//! removed, and where the plugin runs changed.
 
 use crate::ids::{Isrc, ProviderId, ProviderTrackId};
 use crate::model::TrackRef;
@@ -32,22 +33,22 @@ use crate::provider::{AudioSource, Capabilities};
 
 use serde::{Deserialize, Serialize};
 
-/// Çekirdeğin konuştuğu eklenti sözleşmesinin sürümü.
+/// The version of the plugin contract the core speaks.
 pub const PLUGIN_API: u32 = 2;
 
-/// Eklentinin dışa aktardığı fonksiyonların adları. Tanımlayıcılar
-/// İngilizce (D-036).
+/// The names of the functions a plugin exports. Identifiers are in English
+/// (D-036).
 pub mod export {
     pub const HEALTH: &str = "health";
     pub const SEARCH: &str = "search";
     pub const RESOLVE_SOURCE: &str = "resolve_source";
 }
 
-/// Yetenek adlarını bit maskesine çevirir.
+/// Turns capability names into a bit mask.
 ///
-/// Dönüş: `(maske, tanınmayan adlar)`. Tanınmayanı yutmuyoruz — çağıran
-/// bunu bir not olarak raporlar (K9). Boş liste hata değil: yeteneksiz bir
-/// eklenti (yalnızca `health`) geçerlidir.
+/// Returns: `(mask, unrecognised names)`. We do not swallow the
+/// unrecognised — the caller reports them as a note (K9). An empty list is
+/// not an error: a plugin without capabilities (only `health`) is valid.
 #[must_use]
 pub fn parse_capabilities(names: &[String]) -> (Capabilities, Vec<String>) {
     let mut caps = Capabilities::NONE;
@@ -64,7 +65,7 @@ pub fn parse_capabilities(names: &[String]) -> (Capabilities, Vec<String>) {
     (caps, unknown)
 }
 
-/// `health()` dönüşü.
+/// The return value of `health()`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HealthResult {
     pub reachable: bool,
@@ -74,12 +75,12 @@ pub struct HealthResult {
     pub detail: Option<String>,
 }
 
-/// Eklentinin döndürdüğü parça.
+/// A track returned by a plugin.
 ///
-/// [`crate::provider::ProviderTrack`]'in serde gösterimi değil, kasten daha
-/// yalın bir biçim: `id` çıplak bir dize, sağlayıcı adı **yok**. Sağlayıcı
-/// adını çekirdek ekler — eklenti başka bir sağlayıcının ad alanında kimlik
-/// uyduramasın diye.
+/// Not the serde form of [`crate::provider::ProviderTrack`], but a
+/// deliberately plainer shape: `id` is a bare string, and there is **no**
+/// provider name. The core adds the provider name — so a plugin cannot make
+/// up an id in another provider's namespace.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WireTrack {
     pub id: String,
@@ -89,14 +90,14 @@ pub struct WireTrack {
     pub album: Option<String>,
     #[serde(default)]
     pub duration_ms: Option<u64>,
-    /// ISRC — biçimi tutmuyorsa **düşürülür ve sayılır**, sessizce kabul
-    /// edilmez (K6: zincirin ilk halkası çürütülemez).
+    /// ISRC — if it does not fit the format it is **dropped and counted**, not
+    /// silently accepted (K6: the first link of the chain must not be corrupted).
     #[serde(default)]
     pub isrc: Option<String>,
 }
 
 impl WireTrack {
-    /// Çekirdek tiplerine çevirir. `dropped_isrc`: ISRC biçimsizdi mi.
+    /// Converts to core types. `dropped_isrc`: whether the ISRC was malformed.
     #[must_use]
     pub fn into_provider_track(
         self,
@@ -118,23 +119,24 @@ impl WireTrack {
     }
 }
 
-/// `resolve_source(id)` dönüşü: kaynak ya da `null`.
+/// The return value of `resolve_source(id)`: a source or `null`.
 ///
-/// `null` hata değil, "bu parça çalınamaz" cevabıdır. Eklentinin **yerel
-/// dosya** döndürmesi ise kabul edilmez: dosya sistemine erişimi yok, ve
-/// bir yol döndürebilseydi çekirdeğe istediği dosyayı açtırabilirdi
-/// ([`check_source`]).
+/// `null` is not an error, it is the answer "this track cannot be played".
+/// A plugin returning a **local file**, however, is not accepted: it has no
+/// file system access, and if it could return a path it could make the core
+/// open any file it liked ([`check_source`]).
 pub type SourceResult = Option<AudioSource>;
 
-/// Eklentinin döndürdüğü kaynağın izinlere uyup uymadığı.
+/// Whether the source a plugin returned stays within its permissions.
 ///
-/// Akış adresini çekirdek çeker (K3), ama adresi eklenti seçer: denetim
-/// olmasa bir eklenti beyan etmediği bir ana bilgisayara çekirdeği
-/// kendisi yerine gönderebilirdi. Kural istekle aynı — beyan edilmemiş
-/// adrese gidilmez (D-069).
+/// The core fetches the stream address (K3), but the plugin picks the
+/// address: without a check, a plugin could send the core in its place to a
+/// host it did not declare. The rule is the same as for requests — no
+/// undeclared address is visited (D-069).
 ///
 /// # Errors
-/// Kaynak yerel dosyaysa ya da adresi izinlerin dışındaysa, nedeniyle.
+/// If the source is a local file or its address is outside the permissions,
+/// with the reason.
 pub fn check_source(
     source: &AudioSource,
     permissions: &super::manifest::Permissions,
@@ -142,7 +144,7 @@ pub fn check_source(
     match source {
         AudioSource::HttpStream { url, .. } => permissions.check_url(url),
         AudioSource::LocalFile { .. } => Err(
-            "eklenti yerel dosya kaynağı döndürdü; eklentilerin dosya sistemine erişimi yok \
+            "the plugin returned a local file source; plugins have no file system access \
              (api 2)"
                 .to_owned(),
         ),
@@ -171,8 +173,8 @@ mod tests {
     fn a_wire_track_cannot_claim_another_providers_namespace() {
         let wire = WireTrack {
             id: "12345".to_owned(),
-            artist: "Sanatçı".to_owned(),
-            title: "Parça".to_owned(),
+            artist: "Artist".to_owned(),
+            title: "Track".to_owned(),
             album: None,
             duration_ms: Some(1000),
             isrc: Some("USRC17607839".to_owned()),
@@ -193,11 +195,14 @@ mod tests {
             title: "B".to_owned(),
             album: None,
             duration_ms: None,
-            isrc: Some("uydurma".to_owned()),
+            isrc: Some("bogus".to_owned()),
         };
         let (track, dropped) = wire.into_provider_track(&ProviderId::new("p"));
-        assert!(dropped, "biçimsiz ISRC sayılmalı");
-        assert!(track.track.isrc.is_none(), "biçimsiz ISRC kabul edilmemeli");
+        assert!(dropped, "a malformed ISRC must be counted");
+        assert!(
+            track.track.isrc.is_none(),
+            "a malformed ISRC must not be accepted"
+        );
     }
 
     #[test]
@@ -209,10 +214,10 @@ mod tests {
                 assert_eq!(url, "https://x/y");
                 assert!(headers.is_empty());
             }
-            other => panic!("beklenmeyen kaynak: {other:?}"),
+            other => panic!("unexpected source: {other:?}"),
         }
         let none: SourceResult = serde_json::from_str("null").unwrap();
-        assert!(none.is_none(), "`null` bir cevaptır, hata değil");
+        assert!(none.is_none(), "`null` is an answer, not an error");
     }
 
     #[test]
@@ -236,6 +241,6 @@ mod tests {
             path: "/etc/passwd".into(),
         };
         let err = check_source(&local, &permissions).unwrap_err();
-        assert!(err.contains("yerel dosya"), "{err}");
+        assert!(err.contains("local file"), "{err}");
     }
 }

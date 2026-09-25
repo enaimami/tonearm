@@ -1,6 +1,6 @@
 {
   "diag": {
-    "command": "<değişken>",
+    "command": "<variable>",
     "counters": {
       "identity.by_fingerprint": 0,
       "identity.by_fuzzy": 0,
@@ -21,16 +21,16 @@
       "library.offered": 60
     },
     "env": {
-      "arch": "<değişken>",
-      "data_dir": "<değişken>",
-      "headshell_version": "<değişken>",
-      "os": "<değişken>"
+      "arch": "<variable>",
+      "data_dir": "<variable>",
+      "headshell_version": "<variable>",
+      "os": "<variable>"
     },
     "error_chain": [],
     "failed_at": null,
-    "finished_at": "<değişken>",
+    "finished_at": "<variable>",
     "notes": [],
-    "started_at": "<değişken>"
+    "started_at": "<variable>"
   },
   "identity": {
     "by_fingerprint": 0,
@@ -49,7 +49,7 @@
       "bad_timestamp": 1,
       "not_music": 2
     },
-    "source": "<değişken>",
+    "source": "<variable>",
     "with_isrc": 0,
     "with_provider_id": 60
   },

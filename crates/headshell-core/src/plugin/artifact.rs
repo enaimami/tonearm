@@ -1,41 +1,45 @@
-//! Motorun eser tarafı: eklentilerin beyan ettiği araçları kurmak (D-055, D-069).
+//! The engine's artifact side: installing the tools plugins declare (D-055,
+//! D-069).
 //!
-//! D-049 kuralı koydu — **hiçbir eklenti root yetkisi ya da sistem çapında
-//! kurulum isteyemez.** D-055 bunu "eklenti sabitlenmiş bir eser beyan eder,
-//! motor indirir ve karmasını doğrular" diye uyguladı. D-069 iki şeyi
-//! değiştirdi:
+//! D-049 set the rule — **no plugin may ask for root or a system-wide
+//! install.** D-055 implemented it as "the plugin declares a pinned artifact,
+//! the engine downloads it and verifies its hash". D-069 changed two things:
 //!
-//! 1. **Python yok.** api 1'de eser yt-dlp'nin zipapp'iydi ve çalışmak için
-//!    sistemin Python'unu istiyordu — "kime göndersem bir sorun çıktı"nın
-//!    kaynağı buydu. api 2'de eser **platform başına** beyan edilir ve her
-//!    platform için kendi kendine yeten ikili seçilir (yt-dlp'nin
-//!    PyInstaller derlemeleri kendi Python'unu içinde taşıyor).
-//! 2. **Akarak indirme.** Kendi kendine yeten ikili ~40 MB; HTTP istemcisinin
-//!    gövdeyi belleğe alan yolu (32 MB tavan) ona yetmiyor. İndirme artık
-//!    diske akıyor ve karma akarken hesaplanıyor ([`ArtifactSource`]).
+//! 1. **No Python.** In api 1 the artifact was yt-dlp's zipapp, which needed
+//!    the system's Python to run — that was the source of "whoever I sent it
+//!    to had a problem". In api 2 an artifact is declared **per platform**,
+//!    and a self-contained binary is chosen for each platform (yt-dlp's
+//!    PyInstaller builds carry their own Python inside).
+//! 2. **Streaming downloads.** The self-contained binary is ~40 MB; the HTTP
+//!    client's path that buffers the body in memory (32 MB cap) is not enough
+//!    for it. The download now streams to disk and the hash is computed while
+//!    it streams ([`ArtifactSource`]).
 //!
-//! ## Platform anahtarı
+//! ## The platform key
 //!
-//! `<işletim sistemi>-<mimari>[-musl]`, iki parça da Rust'ın
-//! `std::env::consts` adları: `linux-x86_64`, `macos-aarch64`,
-//! `windows-x86`. Anahtar **çekirdeğin derlendiği hedeften** gelir, çalışma
-//! anında sistem yoklanmaz: çekirdek bir `musl` derlemesiyse musl ikilisi
-//! ister, çünkü o makinede glibc ikilisinin çalışacağı zaten bilinmiyor.
+//! `<operating system>-<architecture>[-musl]`, both parts Rust's
+//! `std::env::consts` names: `linux-x86_64`, `macos-aarch64`, `windows-x86`.
+//! The key comes **from the target the core was built for**; the system is not
+//! probed at runtime: if the core is a `musl` build it asks for the musl
+//! binary, because on that machine it is not known that a glibc binary would
+//! run anyway.
 //!
-//! ## Dört ayrı tanı, ve beşincisi (K9)
+//! ## Four separate diagnoses, and a fifth (K9)
 //!
-//! Bir eserin "hazır olmaması" tek bir şey değildir:
+//! An artifact "not being ready" is not one thing:
 //!
-//! - [`RequirementState::Missing`] — hiç kurulmadı. `headshell plugin install`.
-//! - [`RequirementState::Corrupt`] — diskte var, karması tutmuyor.
-//! - [`RequirementState::Unsupported`] — bu platform için yayın **yok**.
-//!   Kurulum düzeltmez; eklenti yazarının manifestine o platformu eklemesi
-//!   gerekir, ya da eserin kendisi o platformu desteklemiyordur.
-//! - **Kurulamadı** — ağa çıkılamadı. Yarın tekrar dene.
-//! - **Yetim** — kaynak 404/410 dedi. Düzeltmek eklenti yazarının işi.
+//! - [`RequirementState::Missing`] — never installed. `headshell plugin install`.
+//! - [`RequirementState::Corrupt`] — on disk, but its hash does not match.
+//! - [`RequirementState::Unsupported`] — **no** release for this platform.
+//!   Installing does not fix it; the plugin author has to add that platform to
+//!   the manifest, or the artifact itself does not support that platform.
+//! - **Could not install** — could not go online. Try again tomorrow.
+//! - **Orphaned** — the source said 404/410. Fixing it is the plugin author's
+//!   job.
 //!
-//! Yetim durumu **diske yazılmıyor**: bir GitHub kesintisi 5xx döndürür ama
-//! yazılsaydı tek bir kötü an bir eklentiyi kalıcı olarak damgalardı.
+//! The orphaned state **is not written to disk**: a GitHub outage returns 5xx,
+//! but if it were written, a single bad moment would brand a plugin
+//! permanently.
 
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
@@ -52,11 +56,11 @@ use crate::net::{HttpClient, HttpRequest};
 
 use super::manifest::Requirement;
 
-/// Manifestte tanınan platform anahtarları.
+/// The platform keys recognised in a manifest.
 ///
-/// Liste kapalı: yazım hatası (`linux-amd64`) sessizce "bu platform için
-/// yayın yok"a dönüşmesin diye manifest yüklenirken reddediliyor. Yeni bir
-/// platform eklemek `api`'yi artırmaz (§2.1: eklemek kırmaz).
+/// The list is closed: a typo (`linux-amd64`) is rejected when the manifest is
+/// loaded, so it does not silently turn into "no release for this platform".
+/// Adding a platform does not bump `api` (§2.1: adding does not break).
 pub const PLATFORMS: &[&str] = &[
     "linux-x86_64",
     "linux-aarch64",
@@ -71,7 +75,7 @@ pub const PLATFORMS: &[&str] = &[
     "windows-x86",
 ];
 
-/// Çekirdeğin çalıştığı platformun anahtarı.
+/// The key of the platform the core runs on.
 #[must_use]
 pub fn current_platform() -> String {
     let libc = if cfg!(target_env = "musl") {
@@ -82,25 +86,25 @@ pub fn current_platform() -> String {
     format!("{}-{}{libc}", std::env::consts::OS, std::env::consts::ARCH)
 }
 
-/// Bir indirmenin kabul edeceği en büyük gövde.
+/// The largest body a download accepts.
 ///
-/// Emniyet kemeri, güvenlik duvarı değil: yanlış bir adres diski
-/// doldurmasın. Bugünün en büyük eseri yt-dlp'nin Linux ikilisi (~40 MB).
-/// Aşıldığında **söyleniyor**, dosya yarım bırakılmıyor.
+/// A safety belt, not a firewall: a wrong address must not fill the disk.
+/// Today's largest artifact is yt-dlp's Linux binary (~40 MB). When it is
+/// exceeded this **is said**, and no half file is left behind.
 pub const MAX_ARTIFACT_BYTES: u64 = 128 * 1024 * 1024;
 
-/// Bir eserin diskteki durumu. **Ağa çıkmadan** ölçülür.
+/// An artifact's state on disk. Measured **without going online**.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RequirementState {
-    /// Kurulu ve karması beyanla uyuşuyor.
+    /// Installed, and its hash matches the declaration.
     Installed { path: PathBuf },
-    /// Hiç kurulmadı.
+    /// Never installed.
     Missing,
-    /// Diskte var ama karması tutmuyor — yarım inmiş ya da değişmiş.
+    /// On disk, but its hash does not match — half downloaded, or changed.
     Corrupt { expected: String, found: String },
-    /// Manifest bu platform için yayın beyan etmiyor. `available`, beyan
-    /// edilen platformlar — kullanıcı "hiç mi yok, yoksa yalnızca bende mi
-    /// yok?" sorusunun cevabını görsün.
+    /// The manifest declares no release for this platform. `available` is the
+    /// declared platforms — so the user sees the answer to "is there none at all,
+    /// or just none for me?".
     Unsupported {
         platform: String,
         available: Vec<String>,
@@ -108,20 +112,20 @@ pub enum RequirementState {
 }
 
 impl RequirementState {
-    /// Eklenti bununla çalışabilir mi.
+    /// Can the plugin run with this.
     #[must_use]
     pub const fn is_ready(&self) -> bool {
         matches!(self, Self::Installed { .. })
     }
 
-    /// Kullanıcıya gösterilecek tek satır.
+    /// One line to show the user.
     #[must_use]
     pub fn describe(&self) -> String {
         match self {
-            Self::Installed { path } => format!("kurulu ({})", path.display()),
-            Self::Missing => "kurulu değil".to_owned(),
+            Self::Installed { path } => format!("installed ({})", path.display()),
+            Self::Missing => "not installed".to_owned(),
             Self::Corrupt { expected, found } => format!(
-                "karma tutmuyor (beklenen {}…, bulunan {}…)",
+                "hash mismatch (expected {}…, found {}…)",
                 short_hash(expected),
                 short_hash(found)
             ),
@@ -135,36 +139,38 @@ impl RequirementState {
 
 fn unsupported_text(platform: &str, available: &[String]) -> String {
     format!(
-        "bu platform ({platform}) için yayın yok; beyan edilenler: {}. Kurulum bunu \
-         düzeltmez — eklentinin manifesti bu platformu içermiyor",
+        "no release for this platform ({platform}); declared: {}. Installing does not \
+         fix this — the plugin's manifest does not include this platform",
         available.join(", ")
     )
 }
 
-/// Bir eserin adı ve durumu — `headshell plugin list` bunu basar.
+/// An artifact's name and state — `headshell plugin list` prints this.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RequirementStatus {
     pub name: String,
     pub version: String,
-    /// Durumun ölçüldüğü platform.
+    /// The platform the state was measured for.
     pub platform: String,
     pub state: RequirementState,
 }
 
-/// Bir kurulum denemesinin sonucu (K9: ne oldu, hangi adımda).
+/// The result of one install attempt (K9: what happened, at which step).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InstallOutcome {
-    /// İndirildi, doğrulandı, yerine kondu.
+    /// Downloaded, verified, put in place.
     Installed { path: PathBuf },
-    /// Zaten kuruluydu; ağa çıkılmadı.
+    /// Was already installed; did not go online.
     AlreadyInstalled { path: PathBuf },
-    /// Kaynak "yok" dedi (404/410). Düzeltmesi eklenti yazarının işi.
+    /// The source said "gone" (404/410). Fixing it is the plugin author's job.
     Orphaned { status: u16 },
-    /// Ağa çıkılamadı ya da kaynak geçici bir hata döndü. Yarın tekrar dene.
+    /// Could not go online, or the source returned a temporary error. Try again
+    /// tomorrow.
     Unreachable { detail: String },
-    /// İndi ama karması beyanla uyuşmadı. **Yerine konmadı.**
+    /// Downloaded, but its hash did not match the declaration. **Not put in
+    /// place.**
     HashMismatch { expected: String, found: String },
-    /// Bu platform için yayın beyan edilmemiş; ağa çıkılmadı.
+    /// No release is declared for this platform; did not go online.
     Unsupported {
         platform: String,
         available: Vec<String>,
@@ -172,29 +178,29 @@ pub enum InstallOutcome {
 }
 
 impl InstallOutcome {
-    /// Eklenti bundan sonra çalışabilir mi.
+    /// Can the plugin run after this.
     #[must_use]
     pub const fn is_ready(&self) -> bool {
         matches!(self, Self::Installed { .. } | Self::AlreadyInstalled { .. })
     }
 
-    /// Kullanıcıya gösterilecek tek satır.
+    /// One line to show the user.
     #[must_use]
     pub fn describe(&self) -> String {
         match self {
-            Self::Installed { path } => format!("kuruldu → {}", path.display()),
-            Self::AlreadyInstalled { path } => format!("zaten kurulu ({})", path.display()),
+            Self::Installed { path } => format!("installed → {}", path.display()),
+            Self::AlreadyInstalled { path } => format!("already installed ({})", path.display()),
             Self::Orphaned { status } => format!(
-                "YETİM — kaynak {status} dedi: beyan edilen adres artık yok. \
-                 Bu bir ağ sorunu değil; düzeltmesi eklenti yazarına ait, \
-                 manifestin yeni bir sürümünü beklemek gerekiyor."
+                "ORPHANED — the source said {status}: the declared address no longer exists. \
+                 This is not a network problem; fixing it is up to the plugin author, \
+                 and a new version of the manifest has to be waited for."
             ),
             Self::Unreachable { detail } => {
-                format!("kurulamadı — kaynağa ulaşılamadı: {detail}")
+                format!("could not install — the source could not be reached: {detail}")
             }
             Self::HashMismatch { expected, found } => format!(
-                "KURULMADI — inen dosyanın karması beyanla uyuşmuyor \
-                 (beklenen {}…, inen {}…). Dosya yerine konmadı.",
+                "NOT INSTALLED — the downloaded file's hash does not match the declaration \
+                 (expected {}…, downloaded {}…). The file was not put in place.",
                 short_hash(expected),
                 short_hash(found)
             ),
@@ -206,52 +212,51 @@ impl InstallOutcome {
     }
 }
 
-/// Bir eklentinin bütün eserlerinin kurulum raporu.
+/// The install report for all of a plugin's artifacts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InstallReport {
     pub plugin: String,
-    /// Her eser için ne olduğu — sırası manifestteki sıra.
+    /// What happened to each artifact — in manifest order.
     pub outcomes: Vec<(String, InstallOutcome)>,
 }
 
 impl InstallReport {
-    /// Eklenti artık çalışabilir mi: eserlerin **hepsi** hazır mı.
+    /// Can the plugin run now: are **all** artifacts ready.
     #[must_use]
     pub fn is_ready(&self) -> bool {
         self.outcomes.iter().all(|(_, outcome)| outcome.is_ready())
     }
 }
 
-/// Açılmış bir indirme: durum kodu, bilinen uzunluk ve ilerlemeli okuyucu.
+/// An opened download: status code, known length and a streaming reader.
 pub struct ArtifactResponse {
     pub status: u16,
     pub length: Option<u64>,
     pub body: Box<dyn Read + Send>,
 }
 
-/// Eserin indirildiği yer.
+/// Where an artifact is downloaded from.
 ///
-/// [`HttpClient`]'tan ayrı bir trait, çünkü o gövdeyi **belleğe alır** (ve
-/// 32 MB'ta keser): üstveri çağrıları için doğru, 40 MB'lık bir ikili için
-/// değil. Bu trait gövdeyi okuyucu olarak verir; motor onu diske akıtırken
-/// karmasını hesaplar. Somut uygulaması `http-client` feature'ında
-/// (`UreqClient`), testlerde [`BufferedSource`].
+/// A separate trait from [`HttpClient`] because that one **buffers** the body
+/// (and cuts it at 32 MB): right for metadata calls, not for a 40 MB binary.
+/// This trait hands out the body as a reader; the engine streams it to disk
+/// and computes its hash as it goes. The concrete implementation is in the
+/// `http-client` feature (`UreqClient`), [`BufferedSource`] in tests.
 pub trait ArtifactSource: Send + Sync {
-    /// Adresi açar.
+    /// Opens the address.
     ///
     /// # Errors
-    /// Bağlantı kurulamazsa. **2xx dışı durum kodu hata değildir**:
-    /// [`ArtifactResponse::status`] olarak döner, çünkü 404 ile 503 ayrı
-    /// tanılardır (yetim / ulaşılamadı).
+    /// If no connection can be made. **A non-2xx status code is not an error**:
+    /// it comes back as [`ArtifactResponse::status`], because 404 and 503 are
+    /// different diagnoses (orphaned / unreachable).
     fn open(&self, url: &str) -> Result<ArtifactResponse>;
 }
 
-/// Herhangi bir [`HttpClient`]'ı eser kaynağına çevirir — gövdeyi belleğe
-/// alarak.
+/// Turns any [`HttpClient`] into an artifact source — by buffering the body.
 ///
-/// Kendi HTTP yığınını veren çağıranlar (mobil, testlerin sahte istemcisi)
-/// için. Gövde tavanı istemcinin kendisinindir; büyük eserlerde akan bir
-/// kaynak tercih edilmeli.
+/// For callers that bring their own HTTP stack (mobile, the tests' fake
+/// client). The body cap is the client's own; for large artifacts a
+/// streaming source should be preferred.
 pub struct BufferedSource(pub Arc<dyn HttpClient>);
 
 impl ArtifactSource for BufferedSource {
@@ -267,20 +272,20 @@ impl ArtifactSource for BufferedSource {
     }
 }
 
-/// Bu derlemenin eser kaynağı: diske akan indirme.
+/// This build's artifact source: a download that streams to disk.
 ///
 /// # Errors
-/// `http-client` feature'ı kapalıysa — sessizce "ağ yok" demek yerine hangi
-/// derleme kararının bunu yaptığını söyleyerek.
+/// If the `http-client` feature is off — saying which build decision caused
+/// it rather than silently saying "no network".
 #[cfg(feature = "http-client")]
 pub fn default_artifact_source() -> Result<Arc<dyn ArtifactSource>> {
     Ok(Arc::new(crate::net::UreqClient::for_downloads()))
 }
 
-/// Bu derlemenin eser kaynağı.
+/// This build's artifact source.
 ///
 /// # Errors
-/// Bu derlemede `http-client` kapalı olduğu için **her zaman** hata döner.
+/// In this build `http-client` is off, so it **always** returns an error.
 #[cfg(not(feature = "http-client"))]
 pub fn default_artifact_source() -> Result<Arc<dyn ArtifactSource>> {
     crate::net::default_http_client().map(|http| {
@@ -289,11 +294,11 @@ pub fn default_artifact_source() -> Result<Arc<dyn ArtifactSource>> {
     })
 }
 
-/// Eserlerin yaşadığı depo: `<data_dir>/runtime`.
+/// The store the artifacts live in: `<data_dir>/runtime`.
 ///
-/// Durumu yok denecek kadar az: dizin ve platform. Platform ayrı tutuluyor ki
-/// testler başka bir platformun davranışını makineyi değiştirmeden
-/// sınayabilsin.
+/// It has almost no state: a directory and a platform. The platform is kept
+/// separately so tests can exercise another platform's behaviour without
+/// changing the machine.
 #[derive(Debug, Clone)]
 pub struct ArtifactStore {
     runtime_dir: PathBuf,
@@ -301,13 +306,14 @@ pub struct ArtifactStore {
 }
 
 impl ArtifactStore {
-    /// Yapılandırmadan kurar, bu makinenin platformuyla. Dizin **açılmaz**.
+    /// Sets it up from the configuration, with this machine's platform. The
+    /// directory is **not created**.
     #[must_use]
     pub fn new(config: &Config) -> Self {
         Self::with_platform(config, &current_platform())
     }
 
-    /// Başka bir platform adına kurar — sınama ve tanı için.
+    /// Sets it up for another platform — for testing and diagnostics.
     #[must_use]
     pub fn with_platform(config: &Config, platform: &str) -> Self {
         Self {
@@ -316,19 +322,19 @@ impl ArtifactStore {
         }
     }
 
-    /// Eserlerin yaşadığı dizin.
+    /// The directory the artifacts live in.
     #[must_use]
     pub fn runtime_dir(&self) -> &Path {
         &self.runtime_dir
     }
 
-    /// Deponun platformu.
+    /// The store's platform.
     #[must_use]
     pub fn platform(&self) -> &str {
         &self.platform
     }
 
-    /// Bir eserin diskte olacağı yer.
+    /// Where an artifact will be on disk.
     #[must_use]
     pub fn artifact_path(&self, requirement: &Requirement) -> PathBuf {
         self.runtime_dir.join(requirement.file_name(&self.platform))
@@ -341,15 +347,15 @@ impl ArtifactStore {
         )
     }
 
-    /// Bir eserin durumunu ölçer. **Ağa çıkmaz.**
+    /// Measures an artifact's state. **Does not go online.**
     ///
-    /// Dosya varsa karması hesaplanır: "var" ile "doğru" ayrı şeylerdir ve
-    /// yarım inmiş bir dosya `Missing`'den daha kötü bir durumdur çünkü
-    /// varlığı işin bittiğini düşündürür.
+    /// If the file exists its hash is computed: "exists" and "correct" are
+    /// different things, and a half-downloaded file is worse than `Missing`,
+    /// because its presence suggests the job is done.
     ///
     /// # Errors
-    /// Dosya var ama okunamıyorsa (izin gibi). Dosyanın **yokluğu** hata
-    /// değil: [`RequirementState::Missing`].
+    /// If the file exists but cannot be read (permissions, say). The file's
+    /// **absence** is not an error: [`RequirementState::Missing`].
     pub fn state_of(&self, requirement: &Requirement) -> Result<RequirementState> {
         let Some(asset) = requirement.asset_for(&self.platform) else {
             let (platform, available) = self.unsupported(requirement);
@@ -374,10 +380,10 @@ impl ArtifactStore {
         }
     }
 
-    /// Bir eklentinin bütün eserlerinin durumu. Ağa çıkmaz.
+    /// The state of all of a plugin's artifacts. Does not go online.
     ///
     /// # Errors
-    /// Bir eserin dosyası var ama okunamıyorsa.
+    /// If an artifact's file exists but cannot be read.
     pub fn statuses(&self, requires: &[Requirement]) -> Result<Vec<RequirementStatus>> {
         requires
             .iter()
@@ -392,14 +398,14 @@ impl ArtifactStore {
             .collect()
     }
 
-    /// Hazır eserlerin `ad → yol` haritası — `host.tools.run` bunu kullanır.
+    /// The `name → path` map of ready artifacts — `host.tools.run` uses it.
     ///
-    /// Hazır olmayanlar haritaya **girmez**: eklenti eksik bir aracı
-    /// çağırırsa motor "kurulu değil" der, boş bir yolu çalıştırmaya
-    /// kalkmaz.
+    /// Artifacts that are not ready **are not in** the map: if the plugin calls a
+    /// missing tool the engine says "not installed", it does not try to run an
+    /// empty path.
     ///
     /// # Errors
-    /// Bir eserin dosyası var ama okunamıyorsa.
+    /// If an artifact's file exists but cannot be read.
     pub fn ready_paths(&self, requires: &[Requirement]) -> Result<BTreeMap<String, PathBuf>> {
         let mut map = BTreeMap::new();
         for requirement in requires {
@@ -410,20 +416,22 @@ impl ArtifactStore {
         Ok(map)
     }
 
-    /// Bir eseri kurar: indirir, karmasını doğrular, yerine koyar.
+    /// Installs an artifact: downloads it, verifies its hash, puts it in place.
     ///
-    /// Zaten kuruluysa **ağa çıkmaz** — bir kurulum komutunun ikinci kez
-    /// koşması ücretsiz olmalı. Bozuk bir dosya varsa yeniden indirilir.
+    /// If it is already installed it **does not go online** — running an install
+    /// command a second time should be free. If a corrupt file is there, it is
+    /// downloaded again.
     ///
-    /// Gövde diske **akar** ve karma akarken hesaplanır; dosya önce koşuma
-    /// özgü `.indiriliyor` uzantılı geçici bir ada yazılır (D-060), karma
-    /// tutarsa yerine taşınır. Yarıda kesilen bir indirme geçerli bir eser
-    /// gibi görünmemeli.
+    /// The body **streams** to disk and the hash is computed as it streams; the
+    /// file is first written under a run-specific temporary name with a
+    /// `.downloading` extension (D-060), and moved into place if the hash
+    /// matches. An interrupted download must not look like a valid artifact.
     ///
     /// # Errors
-    /// Dizin açılamazsa ya da dosya yazılamazsa. **Ağ hatası `Err` değil**:
-    /// [`InstallOutcome`] içinde döner, çünkü "ulaşılamadı" ile "yetim" ile
-    /// "karma tutmadı" ayrı ayrı raporlanması gereken sonuçlardır.
+    /// If the directory cannot be created or the file cannot be written. **A
+    /// network error is not an `Err`**: it comes back in [`InstallOutcome`],
+    /// because "unreachable", "orphaned" and "hash mismatch" are outcomes that
+    /// must each be reported separately.
     pub fn install(
         &self,
         source: &dyn ArtifactSource,
@@ -449,7 +457,8 @@ impl ArtifactStore {
                 });
             }
         };
-        // 404/410 "yok" der ve yarın da yok olacaktır; 5xx "şu an olmadı" der.
+        // 404/410 say "gone" and it will be gone tomorrow too; 5xx says "didn't
+        // work just now".
         if response.status == 404 || response.status == 410 {
             return Ok(InstallOutcome::Orphaned {
                 status: response.status,
@@ -457,7 +466,7 @@ impl ArtifactStore {
         }
         if !(200..300).contains(&response.status) {
             return Ok(InstallOutcome::Unreachable {
-                detail: format!("kaynak {} durum kodu döndürdü", response.status),
+                detail: format!("the source returned status code {}", response.status),
             });
         }
         if let Some(length) = response.length
@@ -471,7 +480,7 @@ impl ArtifactStore {
         std::fs::create_dir_all(&self.runtime_dir)
             .map_err(|err| io_err(Stage::PluginRuntime, &self.runtime_dir, err))?;
         let temp = self.runtime_dir.join(format!(
-            "{}.{}-{}.indiriliyor",
+            "{}.{}-{}.downloading",
             requirement.file_name(&self.platform),
             std::process::id(),
             jiff::Timestamp::now().as_nanosecond()
@@ -494,8 +503,8 @@ impl ArtifactStore {
             return Ok(InstallOutcome::HashMismatch { expected, found });
         }
 
-        // Bundan sonraki her hata yolunda geçici dosya siliniyor: yarıda
-        // kalan bir kurulum ortalıkta dosya bırakmamalı.
+        // Every error path from here on deletes the temporary file: an
+        // interrupted install must not leave files lying around.
         if let Err(err) = make_executable(&temp) {
             let _ = std::fs::remove_file(&temp);
             return Err(err);
@@ -506,11 +515,11 @@ impl ArtifactStore {
         }
 
         tracing::info!(
-            eser = %requirement.name,
-            surum = %requirement.version,
+            artifact = %requirement.name,
+            version = %requirement.version,
             platform = %self.platform,
-            yol = %path.display(),
-            "eser kuruldu"
+            path = %path.display(),
+            "artifact installed"
         );
         Ok(InstallOutcome::Installed { path })
     }
@@ -518,19 +527,21 @@ impl ArtifactStore {
 
 fn too_big(bytes: u64) -> String {
     format!(
-        "gövde {bytes} bayt, sınır {MAX_ARTIFACT_BYTES} bayt — bu bir eser değil, adres \
-         yanlış olabilir"
+        "the body is {bytes} bytes, the limit is {MAX_ARTIFACT_BYTES} bytes — this is not an artifact, the \
+         address may be wrong"
     )
 }
 
 enum StreamError {
-    /// Kaynaktan okunamadı — ağ tarafı, `Unreachable` olarak raporlanır.
+    /// Could not read from the source — the network side, reported as
+    /// `Unreachable`.
     Read(String),
-    /// Diske yazılamadı — bizim tarafımız, hata olarak döner.
+    /// Could not write to disk — our side, returned as an error.
     Write(std::io::Error),
 }
 
-/// Okuyucuyu dosyaya akıtır ve yazılanın sha256'sını döndürür.
+/// Streams the reader into the file and returns the sha256 of what was
+/// written.
 fn stream_to_file(
     mut body: Box<dyn Read + Send>,
     temp: &Path,
@@ -546,7 +557,7 @@ fn stream_to_file(
             Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(err) => {
                 return Err(StreamError::Read(format!(
-                    "indirme {total} baytta kesildi: {err}"
+                    "the download broke off at {total} bytes: {err}"
                 )));
             }
         };
@@ -562,8 +573,8 @@ fn stream_to_file(
     Ok(hex(&hasher.finalize()))
 }
 
-/// Bir dosyanın sha256'sı — belleğe tamamen almadan. Katalog da yerel
-/// değişikliği bununla yakalıyor (D-071).
+/// A file's sha256 — without loading it all into memory. The catalog catches
+/// local changes with this too (D-071).
 pub(crate) fn hash_file(path: &Path) -> std::io::Result<String> {
     let mut file = std::fs::File::open(path)?;
     let mut hasher = Sha256::new();
@@ -580,8 +591,8 @@ pub(crate) fn hash_file(path: &Path) -> std::io::Result<String> {
     Ok(hex(&hasher.finalize()))
 }
 
-/// İndirilen dosyaya çalıştırma biti verir (unix). Windows'ta kavram yok;
-/// orada çalıştırılabilirliği `.exe` uzantısı taşıyor
+/// Gives the downloaded file the execute bit (unix). Windows has no such
+/// concept; there the `.exe` extension carries executability
 /// ([`Requirement::file_name`]).
 #[cfg(unix)]
 fn make_executable(path: &Path) -> Result<()> {
@@ -598,7 +609,7 @@ fn make_executable(_path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Baytların sha256'sı, küçük harf onaltılık.
+/// The sha256 of some bytes, lower-case hex.
 #[must_use]
 pub fn sha256_hex(bytes: &[u8]) -> String {
     hex(&Sha256::digest(bytes))
@@ -608,13 +619,13 @@ fn hex(digest: &[u8]) -> String {
     let mut out = String::with_capacity(digest.len() * 2);
     for byte in digest {
         use std::fmt::Write as _;
-        // Biçimlendirme `String`'e yazarken hata döndüremez.
+        // Formatting into a `String` cannot return an error.
         let _ = write!(out, "{byte:02x}");
     }
     out
 }
 
-/// Karmanın ilk 12 hanesi — mesajda 64 hane okunmaz.
+/// The first 12 digits of a hash — 64 digits are unreadable in a message.
 pub(crate) fn short_hash(hash: &str) -> &str {
     let end = hash.len().min(12);
     hash.get(..end).unwrap_or(hash)
@@ -636,14 +647,14 @@ mod tests {
         assets.insert(
             PLATFORM.to_owned(),
             Asset {
-                url: "https://ornek.gecersiz/yt-dlp_linux".to_owned(),
+                url: "https://example.invalid/yt-dlp_linux".to_owned(),
                 sha256: sha256.to_owned(),
             },
         );
         assets.insert(
             "windows-x86_64".to_owned(),
             Asset {
-                url: "https://ornek.gecersiz/yt-dlp.exe".to_owned(),
+                url: "https://example.invalid/yt-dlp.exe".to_owned(),
                 sha256: "b".repeat(64),
             },
         );
@@ -666,18 +677,19 @@ mod tests {
 
     #[test]
     fn the_current_platform_is_one_the_manifest_can_name() {
-        // Geliştirme ve yayın makinelerinin hepsi listede olmalı; olmayan
-        // bir platform "yayın yok" der ve bu testin işi o değil.
+        // Every development and release machine must be in the list; a platform
+        // that is missing says "no release", and that is not what this test is
+        // about.
         let platform = current_platform();
         assert!(
             PLATFORMS.contains(&platform.as_str()),
-            "bu makinenin platformu ({platform}) listede yok"
+            "this machine's platform ({platform}) is not in the list"
         );
     }
 
     #[test]
     fn sha256_matches_the_published_vector() {
-        // NIST FIPS 180-2, ek B.1: "abc".
+        // NIST FIPS 180-2, appendix B.1: "abc".
         assert_eq!(
             sha256_hex(b"abc"),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
@@ -690,14 +702,15 @@ mod tests {
 
     #[test]
     fn a_requirement_with_no_file_is_missing_not_an_error() {
-        let config = temp_config("bos");
+        let config = temp_config("empty");
         let state = store(&config)
             .state_of(&requirement(&"a".repeat(64)))
             .unwrap();
         assert_eq!(state, RequirementState::Missing);
     }
 
-    /// Bu platform için yayın yoksa **kurulum düzeltmez** — ve bunu söyler.
+    /// If there is no release for this platform, **installing does not fix it** —
+    /// and it says so.
     #[test]
     fn a_platform_without_an_asset_is_unsupported_and_install_does_not_go_online() {
         let config = temp_config("platform");
@@ -712,7 +725,7 @@ mod tests {
                 assert_eq!(platform, "linux-arm");
                 assert_eq!(available, vec!["linux-x86_64", "windows-x86_64"]);
             }
-            other => panic!("beklenmeyen durum: {other:?}"),
+            other => panic!("unexpected state: {other:?}"),
         }
 
         let http = Arc::new(crate::net::fake::FakeHttp::new().route("yt-dlp", "x"));
@@ -720,40 +733,43 @@ mod tests {
         let outcome = store.install(&source, &requirement).unwrap();
         assert!(matches!(outcome, InstallOutcome::Unsupported { .. }));
         assert!(
-            outcome.describe().contains("yayın yok"),
+            outcome.describe().contains("no release"),
             "{}",
             outcome.describe()
         );
         assert!(
             http.requests().is_empty(),
-            "desteklenmeyen platform için ağa çıkıldı"
+            "went online for an unsupported platform"
         );
     }
 
     #[test]
     fn a_file_whose_hash_disagrees_is_corrupt_not_installed() {
-        let config = temp_config("bozuk");
+        let config = temp_config("corrupt");
         let store = store(&config);
         let requirement = requirement(&"a".repeat(64));
         std::fs::create_dir_all(store.runtime_dir()).unwrap();
-        std::fs::write(store.artifact_path(&requirement), b"yarim inmis").unwrap();
+        std::fs::write(store.artifact_path(&requirement), b"half downloaded").unwrap();
 
         match store.state_of(&requirement).unwrap() {
             RequirementState::Corrupt { expected, found } => {
                 assert_eq!(expected, "a".repeat(64));
-                assert_eq!(found, sha256_hex(b"yarim inmis"));
+                assert_eq!(found, sha256_hex(b"half downloaded"));
             }
-            other => panic!("bozuk dosya {other:?} diye raporlandı"),
+            other => panic!("a corrupt file was reported as {other:?}"),
         }
         let paths = store
             .ready_paths(std::slice::from_ref(&requirement))
             .unwrap();
-        assert!(paths.is_empty(), "bozuk eser hazır sayıldı: {paths:?}");
+        assert!(
+            paths.is_empty(),
+            "a corrupt artifact counted as ready: {paths:?}"
+        );
     }
 
     #[test]
     fn two_platforms_never_share_a_file() {
-        let config = temp_config("iki");
+        let config = temp_config("two");
         let requirement = requirement(&"a".repeat(64));
         let linux = ArtifactStore::with_platform(&config, "linux-x86_64");
         let arm = ArtifactStore::with_platform(&config, "linux-aarch64");
@@ -763,12 +779,13 @@ mod tests {
         );
     }
 
-    /// Kurulumun mutlu yolu: akar, doğrulanır, yerine konur, çalıştırılabilir olur.
+    /// The install's happy path: streams, is verified, put in place, made
+    /// executable.
     #[test]
     fn a_verified_artifact_lands_on_disk_and_is_executable() {
-        let config = temp_config("kurulum");
+        let config = temp_config("install");
         let store = store(&config);
-        let body = "#!/bin/sh\necho merhaba\n";
+        let body = "#!/bin/sh\necho hello\n";
         let requirement = requirement(&sha256_hex(body.as_bytes()));
 
         let outcome = store
@@ -776,7 +793,7 @@ mod tests {
             .unwrap();
         let path = match outcome {
             InstallOutcome::Installed { path } => path,
-            other => panic!("kurulmadı: {other:?}"),
+            other => panic!("not installed: {other:?}"),
         };
         assert_eq!(std::fs::read_to_string(&path).unwrap(), body);
         assert!(store.state_of(&requirement).unwrap().is_ready());
@@ -792,23 +809,27 @@ mod tests {
             .unwrap()
             .filter_map(|entry| entry.ok())
             .map(|entry| entry.file_name().to_string_lossy().into_owned())
-            .filter(|name| name.ends_with(".indiriliyor"))
+            .filter(|name| name.ends_with(".downloading"))
             .collect();
-        assert!(leftovers.is_empty(), "geçici dosya kaldı: {leftovers:?}");
+        assert!(
+            leftovers.is_empty(),
+            "a temporary file was left behind: {leftovers:?}"
+        );
 
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;
             let mode = std::fs::metadata(&path).unwrap().permissions().mode();
-            assert_eq!(mode & 0o111, 0o111, "çalıştırma biti verilmemiş");
+            assert_eq!(mode & 0o111, 0o111, "the execute bit was not set");
         }
     }
 
-    /// Aynı eseri aynı anda kuran koşumlar birbirinin dosyasını çekmemeli (D-060).
+    /// Runs installing the same artifact at the same time must not pull each
+    /// other's file away (D-060).
     #[test]
     fn installing_the_same_artifact_concurrently_does_not_collide() {
-        let config = temp_config("yaris");
-        let body = "eser";
+        let config = temp_config("race");
+        let body = "artifact";
         let requirement = requirement(&sha256_hex(body.as_bytes()));
 
         let results: Vec<_> = std::thread::scope(|scope| {
@@ -828,18 +849,18 @@ mod tests {
         });
         for result in &results {
             let outcome = result.as_ref().unwrap_or_else(|err| {
-                panic!("paralel kurulum düştü:\n{}", err.chain_text());
+                panic!("a parallel install failed:\n{}", err.chain_text());
             });
-            assert!(outcome.is_ready(), "kurulum hazır değil: {outcome:?}");
+            assert!(outcome.is_ready(), "the install is not ready: {outcome:?}");
         }
     }
 
-    /// İkinci kurulum ağa **hiç** çıkmamalı.
+    /// The second install must **not** go online at all.
     #[test]
     fn installing_twice_does_not_go_to_the_network_again() {
-        let config = temp_config("ikinci");
+        let config = temp_config("second");
         let store = store(&config);
-        let body = "eser";
+        let body = "artifact";
         let requirement = requirement(&sha256_hex(body.as_bytes()));
 
         let http = Arc::new(crate::net::fake::FakeHttp::new().route("yt-dlp_linux", body));
@@ -855,14 +876,15 @@ mod tests {
         assert_eq!(
             http.requests().len(),
             1,
-            "kurulu eser için yeniden istek atıldı"
+            "a request was sent again for an installed artifact"
         );
     }
 
-    /// 404 **yetim**, 503 **ulaşılamadı** — ikisi bir cümleye toplanmamalı.
+    /// 404 is **orphaned**, 503 is **unreachable** — the two must not be merged
+    /// into one sentence.
     #[test]
     fn a_dead_source_is_orphaned_but_a_flaky_one_is_only_unreachable() {
-        let config = temp_config("yetim");
+        let config = temp_config("orphaned");
         let store = store(&config);
         let requirement = requirement(&"a".repeat(64));
 
@@ -883,35 +905,35 @@ mod tests {
         )));
         match store.install(&flaky, &requirement).unwrap() {
             InstallOutcome::Unreachable { detail } => assert!(detail.contains("503"), "{detail}"),
-            other => panic!("geçici hata yetim sayıldı: {other:?}"),
+            other => panic!("a temporary error counted as orphaned: {other:?}"),
         }
     }
 
-    /// Karma tutmazsa dosya **yerine konmaz**.
+    /// If the hash does not match, the file **is not put in place**.
     #[test]
     fn a_body_whose_hash_disagrees_is_never_written_to_disk() {
-        let config = temp_config("karma");
+        let config = temp_config("hash-mismatch");
         let store = store(&config);
         let requirement = requirement(&"a".repeat(64));
 
         match store
-            .install(&fake("yt-dlp_linux", "baska bir sey"), &requirement)
+            .install(&fake("yt-dlp_linux", "something else"), &requirement)
             .unwrap()
         {
             InstallOutcome::HashMismatch { expected, found } => {
                 assert_eq!(expected, "a".repeat(64));
-                assert_eq!(found, sha256_hex(b"baska bir sey"));
+                assert_eq!(found, sha256_hex(b"something else"));
             }
-            other => panic!("uyumsuz karma kabul edildi: {other:?}"),
+            other => panic!("a mismatched hash was accepted: {other:?}"),
         }
         assert!(
             !store.artifact_path(&requirement).exists(),
-            "doğrulanmamış dosya diske yazıldı"
+            "an unverified file was written to disk"
         );
         let leftovers = std::fs::read_dir(store.runtime_dir())
             .map(|entries| entries.count())
             .unwrap_or(0);
-        assert_eq!(leftovers, 0, "geçici dosya kaldı");
+        assert_eq!(leftovers, 0, "a temporary file was left behind");
     }
 
     #[test]

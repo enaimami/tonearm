@@ -1,15 +1,16 @@
-//! Paylaşılabilir Sleeve kartı üretimi (Faz 0.5).
+//! Producing the shareable Sleeve card (Phase 0.5).
 //!
-//! Çekirdekte yaşar; CLI yalnızca sürer. GUI ve mobil aynı
-//! üreticiyi çağırır — burada yazılan kod üç kez yazılmaz (Altın Kural).
+//! It lives in the core; the CLI only drives it. The GUI and mobile call the
+//! same generator — code written here is not written three times (the Golden
+//! Rule).
 //!
-//! ## Katmanlar
+//! ## Layers
 //!
-//! - [`data`] — ham dinlemelerden ve istatistiklerden kart verisi üretir.
-//! - [`svg`] — veriyi SVG olarak çizer. Koşulsuz derlenir.
-//! - [`png`] — *opsiyonel* PNG rasterizasyonu (`render-png` feature'ı).
+//! - [`data`] — produces the card data from raw listens and statistics.
+//! - [`svg`] — draws the data as SVG. Always compiled.
+//! - [`png`] — *optional* PNG rasterisation (the `render-png` feature).
 //!
-//! ## Kullanım
+//! ## Usage
 //!
 //! ```ignore
 //! let report = stats::compute(&listens, query);
@@ -35,23 +36,24 @@ use std::path::Path;
 use crate::diag::Stage;
 use crate::error::{Error, ErrorKind, Result};
 
-/// Kartın boyutları. PLAN 0.5.2: ölçüler parametre, gömülü sabit değil.
+/// The card's dimensions. PLAN 0.5.2: sizes are parameters, not embedded
+/// constants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CardSize {
-    /// Piksel cinsinden genişlik.
+    /// The width in pixels.
     pub width: u32,
-    /// Piksel cinsinden yükseklik.
+    /// The height in pixels.
     pub height: u32,
 }
 
 impl CardSize {
-    /// Yeni boyut oluşturur.
+    /// Creates a new size.
     #[must_use]
     pub const fn new(width: u32, height: u32) -> Self {
         Self { width, height }
     }
 
-    /// Kare biçim (feed) — 1080×1080.
+    /// The square format (feed) — 1080×1080.
     #[must_use]
     pub const fn square() -> Self {
         Self {
@@ -60,7 +62,7 @@ impl CardSize {
         }
     }
 
-    /// Dikey biçim (story) — 1080×1920.
+    /// The vertical format (story) — 1080×1920.
     #[must_use]
     pub const fn story() -> Self {
         Self {
@@ -70,7 +72,7 @@ impl CardSize {
     }
 }
 
-/// Hazır biçim seçenekleri (CLI argümanı için).
+/// The ready-made format options (for the CLI argument).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CardPreset {
     Square,
@@ -78,7 +80,7 @@ pub enum CardPreset {
 }
 
 impl CardPreset {
-    /// Seçeneğe karşılık gelen boyutu döndürür.
+    /// Returns the size matching the option.
     #[must_use]
     pub fn size(self) -> CardSize {
         match self {
@@ -106,7 +108,7 @@ impl std::fmt::Display for CardPreset {
     }
 }
 
-/// Yazılan kart dosyasının biçimi.
+/// The format of the card file written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CardFileKind {
@@ -114,14 +116,14 @@ pub enum CardFileKind {
     Png,
 }
 
-/// Kartı dosyaya yazar.
+/// Writes the card to a file.
 ///
-/// Uzantıya göre biçim kararı verir: `.svg` → SVG (koşulsuz),
-/// `.png` → PNG (`render-png` feature'ı açık olmalı).
+/// Decides the format from the extension: `.svg` → SVG (always), `.png` →
+/// PNG (the `render-png` feature must be on).
 ///
 /// # Errors
-/// Biçim tanınamazsa, PNG istenip feature kapalıysa, rasterizasyon başarısız
-/// olursa veya dosya yazılamazsa.
+/// If the format is not recognised, PNG is asked for with the feature off,
+/// rasterisation fails or the file cannot be written.
 pub fn write_card(data: &SleeveData, size: CardSize, path: &Path) -> Result<(CardFileKind, u64)> {
     let ext = path
         .extension()
@@ -164,7 +166,7 @@ pub fn write_card(data: &SleeveData, size: CardSize, path: &Path) -> Result<(Car
                 Err(Error::new(
                     Stage::SleeveRender,
                     ErrorKind::InvalidInput {
-                        detail: "PNG çıktısı bu derlemede yok (render-png feature'ı kapalı); SVG kullanın".to_owned(),
+                        detail: "PNG output is not in this build (the render-png feature is off); use SVG".to_owned(),
                     },
                 ))
             }
@@ -172,13 +174,13 @@ pub fn write_card(data: &SleeveData, size: CardSize, path: &Path) -> Result<(Car
         Some(ext) => Err(Error::new(
             Stage::SleeveRender,
             ErrorKind::InvalidInput {
-                detail: format!("desteklenmeyen uzantı: .{ext} (svg veya png kullanın)"),
+                detail: format!("unsupported extension: .{ext} (use svg or png)"),
             },
         )),
         None => Err(Error::new(
             Stage::SleeveRender,
             ErrorKind::InvalidInput {
-                detail: "çıktı dosyasının uzantısı yok (svg veya png kullanın)".to_owned(),
+                detail: "the output file has no extension (use svg or png)".to_owned(),
             },
         )),
     }

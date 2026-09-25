@@ -1,16 +1,18 @@
-//! Ad alanlı sır deposu (D-042).
+//! The namespaced secret store (D-042).
 //!
-//! Tek bir kavram: `<data_dir>/secrets.json`, unix'te `0600`, anahtarlar ad
-//! alanına bölünmüş — `plugin:soundcloud`, `provider:navidrome`. Bir eklenti
-//! el sıkışmada **yalnızca kendi ad alanını** görür.
+//! A single concept: `<data_dir>/secrets.json`, `0600` on unix, the keys split
+//! into namespaces — `plugin:soundcloud`, `provider:navidrome`. A plugin sees
+//! **only its own namespace**.
 //!
-//! `keyring` bağımlılığı yok ve bu bilinçli (D-021 → D-042): yeni bir bağımlılık
-//! ve başsız Linux'ta kırılgan. Okuma tek bir yerden geçtiği için arkasına
-//! sonradan bir anahtarlık koymak bu dosyayı değiştirmekle sınırlı bir iş.
+//! There is no `keyring` dependency, and that is deliberate (D-021 → D-042):
+//! a new dependency, and fragile on headless Linux. Since reading goes through
+//! a single place, putting a keyring behind it later is a job limited to
+//! changing this file.
 //!
-//! **Değerler log'a ve `headshell diag`'a girmez.** Tanı raporu kopyalanıp
-//! yapıştırılan bir metin (K9); içinde token taşıyamaz. Dışarı verilen tek
-//! şey anahtar **adları** ve sayıları ([`Secrets::describe`]).
+//! **Values do not go into the log or into `headshell diag`.** The
+//! diagnostics report is text that gets copied and pasted (K9); it cannot
+//! carry tokens. The only things handed out are key **names** and counts
+//! ([`Secrets::describe`]).
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -20,13 +22,13 @@ use serde::{Deserialize, Serialize};
 use crate::diag::Stage;
 use crate::error::{Error, ErrorKind, Result, io_err};
 
-/// Bir eklentinin ad alanı: `plugin:<ad>`.
+/// A plugin's namespace: `plugin:<name>`.
 #[must_use]
 pub fn plugin_namespace(plugin: &str) -> String {
     format!("plugin:{plugin}")
 }
 
-/// Ad alanı → (anahtar → değer).
+/// Namespace → (key → value).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Secrets {
@@ -34,12 +36,13 @@ pub struct Secrets {
 }
 
 impl Secrets {
-    /// Dosyadan okur. Dosya yoksa **boş depo** — bu bir hata değil, henüz sır
-    /// yazılmamış demek. Bozuksa hata: sessizce boş dönmek, kullanıcının
-    /// kimlik bilgisini "yok" sanıp yeniden sormak olurdu.
+    /// Reads from the file. If there is no file, an **empty store** — that is not
+    /// an error, it means no secret has been written yet. If it is corrupt, an
+    /// error: silently returning empty would mean taking the user's credentials
+    /// for "none" and asking for them again.
     ///
     /// # Errors
-    /// Dosya okunamaz ya da JSON bozuksa.
+    /// If the file cannot be read or the JSON is corrupt.
     pub fn load(path: &Path) -> Result<Self> {
         let raw = match std::fs::read_to_string(path) {
             Ok(raw) => raw,
@@ -57,10 +60,10 @@ impl Secrets {
         })
     }
 
-    /// Dosyaya yazar. Unix'te izinler `0600`.
+    /// Writes to the file. Permissions `0600` on Unix.
     ///
     /// # Errors
-    /// Dizin oluşturulamaz ya da dosya yazılamazsa.
+    /// If the directory cannot be created or the file cannot be written.
     pub fn save(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
@@ -79,13 +82,14 @@ impl Secrets {
         restrict_permissions(path)
     }
 
-    /// Bir ad alanının bütün sırları. Ad alanı yoksa boş harita.
+    /// All the secrets of a namespace. An empty map if the namespace does not
+    /// exist.
     #[must_use]
     pub fn namespace(&self, namespace: &str) -> BTreeMap<String, String> {
         self.namespaces.get(namespace).cloned().unwrap_or_default()
     }
 
-    /// Tek bir sır yazar.
+    /// Writes a single secret.
     pub fn set(&mut self, namespace: &str, key: impl Into<String>, value: impl Into<String>) {
         self.namespaces
             .entry(namespace.to_owned())
@@ -93,9 +97,10 @@ impl Secrets {
             .insert(key.into(), value.into());
     }
 
-    /// Tek bir sırrı siler. Ad alanı boşalırsa o da silinir.
+    /// Deletes a single secret. If the namespace becomes empty, it is deleted
+    /// too.
     ///
-    /// Dönüş: gerçekten bir şey silindi mi.
+    /// Returns: whether anything was really deleted.
     pub fn remove(&mut self, namespace: &str, key: &str) -> bool {
         let Some(entries) = self.namespaces.get_mut(namespace) else {
             return false;
@@ -107,14 +112,14 @@ impl Secrets {
         removed
     }
 
-    /// Bir ad alanının tamamını siler. Dönüş: ad alanı var mıydı.
+    /// Deletes a whole namespace. Returns: whether the namespace existed.
     pub fn remove_namespace(&mut self, namespace: &str) -> bool {
         self.namespaces.remove(namespace).is_some()
     }
 
-    /// Tanı ve `--json` için güvenli özet: ad alanı → **anahtar adları**.
+    /// A safe summary for diagnostics and `--json`: namespace → **key names**.
     ///
-    /// Değerler bilerek yok (K9 raporu kopyalanabilir olmalı).
+    /// The values are left out on purpose (the K9 report must be copyable).
     #[must_use]
     pub fn describe(&self) -> BTreeMap<String, Vec<String>> {
         self.namespaces
@@ -133,9 +138,10 @@ fn restrict_permissions(path: &Path) -> Result<()> {
 
 #[cfg(not(unix))]
 fn restrict_permissions(_path: &Path) -> Result<()> {
-    // Windows'ta karşılığı ACL; oraya geldiğimizde yazılacak. Sessiz
-    // geçmiyoruz: çağıran bir şey yapılmadığını bilsin.
-    tracing::warn!("bu platformda sır dosyası izinleri kısıtlanmadı");
+    // On Windows the counterpart is an ACL; it will be written when we get
+    // there. We do not pass over it silently: the caller should know that
+    // something was not done.
+    tracing::warn!("secret file permissions were not restricted on this platform");
     Ok(())
 }
 
@@ -143,7 +149,8 @@ fn restrict_permissions(_path: &Path) -> Result<()> {
 mod tests {
     use super::*;
 
-    /// Dizin, dosya yolu kadar yaşamalı: ikisi birlikte döner.
+    /// The directory must live as long as the file path: the two are returned
+    /// together.
     fn temp_path(name: &str) -> (crate::test_support::TempDir, std::path::PathBuf) {
         let dir = crate::test_support::TempDir::new("secrets");
         let path = dir.join(name);
@@ -169,7 +176,11 @@ mod tests {
         {
             use std::os::unix::fs::PermissionsExt;
             let mode = std::fs::metadata(&path).unwrap().permissions().mode();
-            assert_eq!(mode & 0o777, 0o600, "sır dosyası yalnızca sahibine okunur");
+            assert_eq!(
+                mode & 0o777,
+                0o600,
+                "the secret file must be readable only by its owner"
+            );
         }
     }
 
@@ -177,24 +188,24 @@ mod tests {
     fn a_plugin_sees_only_its_own_namespace() {
         let mut secrets = Secrets::default();
         secrets.set("plugin:soundcloud", "client_id", "abc");
-        secrets.set("plugin:other", "client_id", "gizli");
+        secrets.set("plugin:other", "client_id", "hidden");
 
         let mine = secrets.namespace("plugin:soundcloud");
         assert_eq!(mine.len(), 1);
         assert_eq!(mine.get("client_id"), Some(&"abc".to_owned()));
-        assert!(secrets.namespace("plugin:yok").is_empty());
+        assert!(secrets.namespace("plugin:missing").is_empty());
     }
 
     #[test]
     fn describe_lists_key_names_but_never_values() {
         let mut secrets = Secrets::default();
-        secrets.set("plugin:soundcloud", "client_id", "cok-gizli-deger");
+        secrets.set("plugin:soundcloud", "client_id", "very-secret-value");
         let described = secrets.describe();
         let text = serde_json::to_string(&described).unwrap();
         assert!(text.contains("client_id"), "{text}");
         assert!(
-            !text.contains("cok-gizli-deger"),
-            "özet değerleri sızdırmamalı: {text}"
+            !text.contains("very-secret-value"),
+            "the summary must not leak values: {text}"
         );
     }
 
@@ -206,7 +217,7 @@ mod tests {
         assert!(secrets.describe().is_empty());
         assert!(
             !secrets.remove("plugin:a", "k"),
-            "ikinci silme yalan söylememeli"
+            "a second removal must not lie"
         );
     }
 
@@ -215,7 +226,7 @@ mod tests {
         let (_dir, path) = temp_path("secrets.json");
         assert_eq!(Secrets::load(&path).unwrap(), Secrets::default());
 
-        std::fs::write(&path, "{ bozuk").unwrap();
+        std::fs::write(&path, "{ broken").unwrap();
         let err = Secrets::load(&path).unwrap_err();
         assert_eq!(err.stage(), Stage::ConfigLoad);
     }

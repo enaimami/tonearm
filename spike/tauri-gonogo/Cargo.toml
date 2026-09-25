@@ -1,7 +1,7 @@
-# PLAN §3.1 GO/NO-GO ölçümü — ATILABILIR.
-# `spike/` workspace dışıdır (kök Cargo.toml `exclude`); buradaki hiçbir
-# bağımlılık headshell-core'un ağacına girmez. Ölçüm bitince bu dizin silinebilir,
-# kalan tek şey DECISIONS.md'deki sayılar olmalı.
+# The PLAN §3.1 GO/NO-GO measurement — THROWAWAY.
+# `spike/` is outside the workspace (the root Cargo.toml's `exclude`); no dependency
+# here enters headshell-core's tree. Once the measurement is done this directory can
+# be deleted; the only thing left should be the numbers in DECISIONS.md.
 [package]
 name = "tauri-gonogo"
 version = "0.0.0"
@@ -17,5 +17,5 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [profile.release]
-# Ölçümü gerçek yayın koşullarında yap: debug build'in IPC sayıları yalan söyler.
+# Measure under real release conditions: a debug build's IPC numbers lie.
 opt-level = 2

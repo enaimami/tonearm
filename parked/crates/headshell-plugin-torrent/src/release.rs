@@ -1,18 +1,18 @@
-//! Yayım ve dosya adlarından sanatçı/başlık çıkarma.
+//! Extracting artist/title from release and file names.
 //!
-//! Bu bir **tahmin katmanıdır** ve öyle olduğunu saklamıyor. Torrent
-//! adlarının şeması yok; buradan çıkan sanatçı/başlık kanonik kimlik değil,
-//! kimlik zincirine (K6) verilecek girdidir. Zincir bunu MusicBrainz'e
-//! sorar ve gerekirse parmak iziyle düzeltir — yani burada yanlış tahmin
-//! etmek, zincirin düzeltemeyeceği bir hata değil.
+//! This is a **guessing layer**, and it does not hide it. Torrent names have
+//! no schema; the artist/title that comes out of here is not a canonical
+//! identity but input for the identity chain (K6). The chain asks MusicBrainz
+//! about it and corrects it with the fingerprint if needed — so a wrong guess
+//! here is not an error the chain cannot fix.
 //!
-//! Emin olamadığımızda **uydurmuyoruz**: sanatçı boş kalır. Boş bir alan
-//! "bilmiyorum" demektir; yanlış bir sanatçı adı ise zinciri yanlış kayda
-//! bağlar (D-046'nın süre kusurunun aynısı).
+//! When we are not sure we **do not make things up**: the artist stays empty.
+//! An empty field means "I don't know"; a wrong artist name ties the chain to
+//! the wrong recording (the same as D-046's duration flaw).
 
-/// Adlarda geçen ve müzikle ilgisi olmayan etiketler. Yalnızca **sondaki**
-/// parantez/köşeli parantez grupları için kullanılıyor, adın ortasındaki bir
-/// kelimeyi silmiyoruz — "Blur - 13" gibi adlar bozulmasın.
+/// Labels found in names that have nothing to do with the music. Only used for
+/// the **trailing** parenthesis/bracket groups; we do not delete a word in the
+/// middle of a name — so names like "Blur - 13" are not mangled.
 const NOISE: &[&str] = &[
     "flac",
     "mp3",
@@ -45,8 +45,8 @@ const NOISE: &[&str] = &[
     "256",
 ];
 
-/// Ses dosyası uzantıları. Bir torrent'in içindeki hangi dosyaların parça
-/// olduğunu bu belirliyor.
+/// Audio file extensions. These decide which files inside a torrent are
+/// tracks.
 pub const AUDIO_EXTENSIONS: &[&str] = &[
     "flac", "mp3", "ogg", "opus", "m4a", "aac", "wav", "wv", "ape", "alac", "aiff", "aif", "mpc",
     "dsf",
@@ -54,13 +54,13 @@ pub const AUDIO_EXTENSIONS: &[&str] = &[
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedName {
-    /// Boş dize "bilmiyorum" demektir — uydurulmuş bir ad değil.
+    /// An empty string means "I don't know" — not a made-up name.
     pub artist: String,
     pub title: String,
     pub year: Option<u16>,
 }
 
-/// Dosya yolunun uzantısı ses uzantısı mı.
+/// Is the file path's extension an audio extension.
 pub fn is_audio(path: &std::path::Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
@@ -68,17 +68,17 @@ pub fn is_audio(path: &std::path::Path) -> bool {
         .is_some_and(|ext| AUDIO_EXTENSIONS.contains(&ext.as_str()))
 }
 
-/// Bir yayım adını sanatçı + albüm + yıl'a ayırır.
+/// Splits a release name into artist + album + year.
 pub fn parse_release_name(raw: &str) -> ParsedName {
     let raw = raw.trim();
-    // Boşluksuz ad = "scene" yazımı. Yalnızca o durumda sondaki çıplak
-    // kelimeleri (FLAC, WEB…) atıyoruz: boşluklu bir adda "Web" gerçekten
-    // albüm adının parçası olabilir.
+    // A name without spaces = "scene" spelling. Only then do we drop the bare
+    // trailing words (FLAC, WEB…): in a name with spaces, "Web" may really be
+    // part of the album name.
     let scene_style = !raw.contains(' ');
     let text = normalize_separators(raw);
 
-    // **Sıra önemli.** Önce sanatçı ayrılıyor: "Van Halen - 1984"te yılı önce
-    // almak başlığı boşaltıp sanatçıyı da kaybettiriyordu.
+    // **The order matters.** The artist is split off first: taking the year
+    // first in "Van Halen - 1984" emptied the title and lost the artist too.
     let (artist, mut title) = split_artist(&text).unwrap_or((String::new(), text));
 
     if scene_style {
@@ -99,17 +99,17 @@ pub fn parse_release_name(raw: &str) -> ParsedName {
     }
 }
 
-/// Torrent içindeki bir dosya adından parça başlığı ve sıra numarası.
+/// The track title and track number from a file name inside a torrent.
 ///
-/// Dönüş `(başlık, parça no)`. Başlık hiçbir zaman boş dönmez: hiçbir şey
-/// ayıklanamazsa uzantısız dosya adının kendisidir.
+/// Returns `(title, track no)`. The title never comes back empty: if nothing
+/// can be extracted it is the file name itself without its extension.
 pub fn parse_file_name(file_name: &str) -> (String, Option<u32>) {
     let stem = file_name
         .rsplit_once('.')
         .map_or(file_name, |(stem, _)| stem);
     let mut text = normalize_separators(stem).trim().to_owned();
 
-    // Baştaki "01", "01 -", "1." gibi sıra numaraları.
+    // Leading track numbers like "01", "01 -", "1.".
     let digits: String = text.chars().take_while(char::is_ascii_digit).collect();
     let mut track_no = None;
     if !digits.is_empty() && digits.len() <= 3 {
@@ -121,8 +121,8 @@ pub fn parse_file_name(file_name: &str) -> (String, Option<u32>) {
                 .or_else(|| rest.strip_prefix(')'))
                 .unwrap_or(rest)
                 .trim_start();
-            // "13" tek başına bir başlık olabilir; yalnızca arkasında bir şey
-            // varsa sıra numarası sayıyoruz.
+            // "13" alone can be a title; we only count it as a track number if
+            // something follows it.
             if !rest.is_empty() {
                 track_no = Some(parsed);
                 text = rest.to_owned();
@@ -138,10 +138,11 @@ pub fn parse_file_name(file_name: &str) -> (String, Option<u32>) {
     (title, track_no)
 }
 
-/// Nokta/alt çizgi ile yazılmış adları boşluklu hâle getirir.
+/// Turns names written with dots/underscores into names with spaces.
 ///
-/// Yalnızca adda hiç boşluk yoksa: "Artist.Name-Album.2007" böyle yazılır ama
-/// "Godspeed You! Black Emperor - F♯A♯∞" içindeki noktaya dokunmamalıyız.
+/// Only if the name has no spaces at all: "Artist.Name-Album.2007" is written
+/// that way, but we must not touch the dot in "Godspeed You! Black Emperor -
+/// F♯A♯∞".
 fn normalize_separators(raw: &str) -> String {
     if raw.contains(' ') {
         return raw.to_owned();
@@ -152,7 +153,8 @@ fn normalize_separators(raw: &str) -> String {
         .join(" ")
 }
 
-/// Sondaki `(1997)` / `[1997]` / ` 1997` yılını alır ve metinden siler.
+/// Takes a trailing `(1997)` / `[1997]` / ` 1997` year and deletes it from the
+/// text.
 fn take_year(text: &mut String) -> Option<u16> {
     let mut found = None;
     let mut out = String::with_capacity(text.len());
@@ -177,7 +179,7 @@ fn take_year(text: &mut String) -> Option<u16> {
     *text = out.split_whitespace().collect::<Vec<_>>().join(" ");
 
     if found.is_none() {
-        // Parantezsiz sondaki yıl: "Artist - Album 1997".
+        // A trailing year without parentheses: "Artist - Album 1997".
         if let Some((head, tail)) = text.rsplit_once(' ') {
             if let Some(year) = as_year(tail) {
                 found = Some(year);
@@ -197,7 +199,7 @@ fn as_year(candidate: &str) -> Option<u16> {
     (1900..=2100).contains(&year).then_some(year)
 }
 
-/// Sondaki `[FLAC]`, `(WEB)`, `-GRUP` gibi kalıntıları temizler.
+/// Cleans up trailing leftovers like `[FLAC]`, `(WEB)`, `-GROUP`.
 fn strip_trailing_noise(text: &mut String) {
     loop {
         let trimmed = text.trim_end();
@@ -217,8 +219,9 @@ fn strip_trailing_noise(text: &mut String) {
             .split(|c: char| !c.is_ascii_alphanumeric())
             .filter(|word| !word.is_empty())
             .collect();
-        // Boş bir grup (`( )`) gürültü **değil**: Sigur Rós'un albümü öyle.
-        // "Hepsi gürültü" iddiası, en az bir kelime varsa anlamlı.
+        // An empty group (`( )`) is **not** noise: Sigur Rós's album is called that.
+        // The claim "all of it is noise" only means something if there is at least
+        // one word.
         if words.is_empty() || !words.iter().all(|word| NOISE.contains(word)) {
             break;
         }
@@ -227,7 +230,7 @@ fn strip_trailing_noise(text: &mut String) {
     *text = text.trim().to_owned();
 }
 
-/// Scene yazımında sondaki çıplak gürültü kelimeleri: "… 1994 FLAC" → "… 1994".
+/// The bare trailing noise words of scene spelling: "… 1994 FLAC" → "… 1994".
 fn strip_trailing_bare_noise(text: &mut String) {
     loop {
         let Some((head, tail)) = text.trim_end().rsplit_once(' ') else {
@@ -240,7 +243,8 @@ fn strip_trailing_bare_noise(text: &mut String) {
     }
 }
 
-/// "Sanatçı - Albüm" ayrımı. Ayıraç yoksa `None` — sanatçı **uydurulmaz**.
+/// The "Artist - Album" split. `None` without a separator — the artist **is
+/// not made up**.
 fn split_artist(text: &str) -> Option<(String, String)> {
     for separator in [" - ", " – ", " — "] {
         if let Some((artist, title)) = text.split_once(separator) {
@@ -251,8 +255,8 @@ fn split_artist(text: &str) -> Option<(String, String)> {
             }
         }
     }
-    // Boşluksuz scene adı: "Artist-Album-2007-GRUP" normalize sonrası zaten
-    // boşluklu; kalan tek tireli hâl için son bir deneme.
+    // A scene name without spaces: "Artist-Album-2007-GROUP" already has spaces
+    // after normalising; one last attempt for what is left with a single dash.
     let (artist, title) = text.split_once('-')?;
     let (artist, title) = (artist.trim(), title.trim());
     (!artist.is_empty() && !title.is_empty() && artist.contains(' '))
@@ -282,7 +286,7 @@ mod tests {
     #[test]
     fn an_unparseable_name_leaves_the_artist_empty_instead_of_guessing() {
         let parsed = parse_release_name("VA Turkish Psych Compilation");
-        assert_eq!(parsed.artist, "", "bilinmeyen sanatçı uydurulmamalı");
+        assert_eq!(parsed.artist, "", "an unknown artist must not be made up");
         assert_eq!(parsed.title, "VA Turkish Psych Compilation");
     }
 
@@ -291,17 +295,18 @@ mod tests {
         let parsed = parse_release_name("Blur - 13");
         assert_eq!(parsed.artist, "Blur");
         assert_eq!(parsed.title, "13");
-        assert_eq!(parsed.year, None, "13 bir yıl değil");
+        assert_eq!(parsed.year, None, "13 is not a year");
     }
 
     #[test]
     fn a_year_that_is_actually_the_album_title_is_still_taken_but_the_title_survives() {
-        // "1984" bir albüm adı olabilir; yılı alsak bile başlık boş kalmamalı.
+        // "1984" can be an album name; even if we take the year, the title must not
+        // be left empty.
         let parsed = parse_release_name("Van Halen - 1984");
         assert_eq!(parsed.artist, "Van Halen");
         assert!(
             !parsed.title.is_empty(),
-            "başlık boş bırakılmamalı: {parsed:?}"
+            "the title must not be left empty: {parsed:?}"
         );
     }
 

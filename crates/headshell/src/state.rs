@@ -1,27 +1,28 @@
-//! Çekirdeğin sahibi olan iş parçacığı ve ona iş gönderme yolu.
+//! The thread that owns the core, and the way to send it work.
 //!
-//! **Altın Kural:** burada iş mantığı yok. Bu dosya bir kanal, bir kurucu ve
-//! bir hata zarfından ibaret.
+//! **The Golden Rule:** no business logic here. This file is only a channel,
+//! a constructor and an error envelope.
 //!
-//! ## Neden kilit değil de kendi iş parçacığı
+//! ## Why its own thread and not a lock
 //!
-//! Ölçülen kısıt: `Session` **`Send` ama `Sync` değil** — SQLite bağlantısı
-//! `RefCell` taşıyor — ve `import_archive`'ın döndürdüğü future `Send`
-//! değil (`Box<dyn ExportArchive>` iş parçacıkları arası geçmiyor). Tauri
-//! ise her async komutun future'ının `Send` olmasını istiyor.
+//! The measured constraint: `Session` is **`Send` but not `Sync`** — the
+//! SQLite connection carries a `RefCell` — and the future `import_archive`
+//! returns is not `Send` (`Box<dyn ExportArchive>` does not cross threads).
+//! Tauri, on the other hand, wants every async command's future to be
+//! `Send`.
 //!
-//! `Mutex<Core>` bunu çözmüyor: kilidi bir `.await` üzerinden taşımak
-//! `Core: Sync` ister ve `Core` `Sync` değil. Çözüm çekirdeği tek bir iş
-//! parçacığına yerleştirmek: **hiçbir çekirdek tipi iş parçacığı sınırını
-//! geçmiyor**, yalnızca iş kapanışları ve seri hâle getirilebilir sonuçlar
-//! geçiyor.
+//! `Mutex<Core>` does not solve this: carrying the lock across an `.await`
+//! needs `Core: Sync`, and `Core` is not `Sync`. The solution is to put the
+//! core on a single thread: **no core type crosses the thread boundary**, only
+//! job closures and serialisable results do.
 //!
-//! Yan faydası: tik döngüsü de aynı iş parçacığında yaşıyor, yani komutlarla
-//! `tick()` arasında kilit yarışı yok — sıraya kanal koyuyor.
+//! A side benefit: the tick loop lives on the same thread too, so there is
+//! no lock race between commands and `tick()` — the channel puts them in
+//! order.
 //!
-//! **Bedeli görünür:** uzun bir `import` sürerken oynatma kumandaları da
-//! sırada bekler. Sessiz kalmasın diye uzun komutlar `headshell://busy` olayı
-//! gönderiyor (K9).
+//! **The price is visible:** while a long `import` runs, the playback
+//! controls wait in line too. So it does not stay silent, long commands send
+//! a `headshell://busy` event (K9).
 
 use std::future::Future;
 use std::pin::Pin;
@@ -37,24 +38,26 @@ use headshell_core::session::Session;
 
 use crate::theme::ThemeStore;
 
-/// Çekirdek iş parçacığının sahip olduğu her şey.
+/// Everything the core thread owns.
 pub struct Core {
     pub live: LiveSession,
-    /// Sağlayıcı kaydı. Sunucu eklenip silindiğinde [`Core::refresh_registry`]
-    /// ile yenileniyor: yoksa yeni sunucu uygulama kapanana kadar görünmezdi.
+    /// The provider registry. It is refreshed with [`Core::refresh_registry`]
+    /// when a server is added or removed: otherwise a new server would stay
+    /// invisible until the app was closed.
     pub registry: ProviderRegistry,
 }
 
 impl Core {
-    /// Kütüphaneyi açar, sağlayıcıları kurar ve **boş** bir oynatıcıyla başlar.
+    /// Opens the library, sets up the providers and starts with an **empty**
+    /// player.
     ///
-    /// Boş oynatıcı bir yer tutucu değil: `LiveSession` hep var olsun ki
-    /// komutlar "oturum açık mı" diye sormak zorunda kalmasın. Çalan bir şey
-    /// yokken `anchor` zaten `Stopped` döner.
+    /// The empty player is not a placeholder: a `LiveSession` should always
+    /// exist so commands do not have to ask "is a session open". With nothing
+    /// playing, `anchor` returns `Stopped` anyway.
     ///
     /// # Errors
-    /// Veri dizini açılamazsa, veritabanı kurulamazsa ya da kayıtlı sunucu
-    /// dosyası bozuksa.
+    /// If the data directory cannot be opened, the database cannot be set up or
+    /// the registered server file is corrupt.
     pub fn open(config: Config) -> headshell_core::Result<Self> {
         let session = Session::open(config)?;
         let registry = headshell_core::provider::default_registry(session.config())?;
@@ -65,32 +68,32 @@ impl Core {
         })
     }
 
-    /// Sunucu listesi değiştikten sonra kaydı yeniden kurar.
+    /// Rebuilds the registry after the server list changed.
     ///
     /// # Errors
-    /// Kayıtlı sunucu dosyası okunamazsa.
+    /// If the registered server file cannot be read.
     pub fn refresh_registry(&mut self) -> headshell_core::Result<()> {
         self.registry = headshell_core::provider::default_registry(self.live.session().config())?;
         Ok(())
     }
 }
 
-/// Çekirdek iş parçacığına gönderilen bir iş.
+/// A job sent to the core thread.
 ///
-/// Kapanış `&mut Core` ödünç alıyor ve kendi sonucunu kendi `oneshot`'ına
-/// yazıyor. Böylece komut başına bir enum varyantı yazmaya gerek kalmıyor —
-/// 23 varyantlık bir mesaj tipi, D-033'ün reddettiği çevirmen katmanının
-/// başka bir kılığı olurdu.
+/// The closure borrows `&mut Core` and writes its own result to its own
+/// `oneshot`. So there is no need to write an enum variant per command — a
+/// message type with 23 variants would be another guise of the translating
+/// layer D-033 rejected.
 pub type Job = Box<
     dyn for<'a> FnOnce(&'a mut Core) -> Pin<Box<dyn Future<Output = ()> + 'a>> + Send + 'static,
 >;
 
-/// Tauri'nin yönettiği durum: çekirdeğe giden kanalın ucu.
+/// The state Tauri manages: the end of the channel going to the core.
 pub struct AppState {
     jobs: mpsc::UnboundedSender<Job>,
-    /// Tema deposu (§3.3). Çekirdek iş parçacığına **girmiyor**: tema bir
-    /// çekirdek kavramı değil (bkz. [`crate::theme`]) ve uzun bir `import`
-    /// sürerken arayüzün temasını değiştirememek için bir sebep yok.
+    /// The theme store (§3.3). It **does not enter** the core thread: a theme is
+    /// not a core concept (see [`crate::theme`]), and there is no reason the
+    /// interface's theme should not be changeable while a long `import` runs.
     themes: ThemeStore,
 }
 
@@ -105,11 +108,11 @@ impl AppState {
         &self.themes
     }
 
-    /// Bir işi çekirdek iş parçacığında çalıştırır ve sonucunu bekler.
+    /// Runs a job on the core thread and waits for its result.
     ///
     /// # Errors
-    /// Çekirdek hata döndürürse, iş parçacığı düşmüşse ya da iş cevap
-    /// vermeden bitmişse.
+    /// If the core returns an error, the thread has died or the job finished
+    /// without answering.
     pub async fn run_on_core<T, F>(&self, task: F) -> CommandResult<T>
     where
         T: Send + 'static,
@@ -124,8 +127,8 @@ impl AppState {
         let job: Job = Box::new(move |core| {
             Box::pin(async move {
                 let result = task(core).await;
-                // Alıcı gitmişse komut iptal edilmiş demektir; iş yine de
-                // yapıldı ve çekirdeğin durumu tutarlı.
+                // If the receiver is gone the command was cancelled; the job was
+                // done anyway and the core's state is consistent.
                 let _ = tx.send(result);
             })
         });
@@ -136,33 +139,35 @@ impl AppState {
     }
 }
 
-/// Çekirdek iş parçacığı kaybolduysa. Sessizce boş sonuç dönmüyoruz (K9).
+/// If the core thread is gone. We do not silently return an empty result
+/// (K9).
 fn core_thread_gone() -> CommandError {
-    CommandError::new(Stage::ConfigLoad, "çekirdek iş parçacığı yanıt vermiyor")
+    CommandError::new(Stage::ConfigLoad, "the core thread is not responding")
 }
 
-/// Webview'e giden hata.
+/// The error that goes to the webview.
 ///
-/// D-033 **veri** için ayrı bir IPC tipi yasakladı; bu bir veri tipi değil,
-/// hata zarfı. `headshell_core::Error` seri hâle getirilemiyor (kaynak zinciri
-/// `dyn Error` taşıyor), ama kaybedilen bir şey yok: aşama ve tam zincir
-/// metni geçiyor — CLI'nin `stderr`'e bastığının aynısı.
+/// D-033 forbade a separate IPC type for **data**; this is not a data type
+/// but an error envelope. `headshell_core::Error` cannot be serialised (its
+/// source chain carries `dyn Error`), but nothing is lost: the stage and the
+/// full chain text go across — the same thing the CLI prints to `stderr`.
 #[derive(Debug, Clone, Serialize)]
 pub struct CommandError {
-    /// `IDENTITY_RESOLVE` gibi sabit aşama adı. Arayüz buna göre yönlendirir.
+    /// A fixed stage name like `IDENTITY_RESOLVE`. The interface routes by it.
     pub stage: Stage,
-    /// `ADIM: ...` ile başlayan, kopyalanıp yapıştırılabilir tam zincir.
+    /// The full chain, starting with `STEP: ...`, that can be copied and pasted.
     pub chain: String,
 }
 
 impl CommandError {
-    /// Çekirdekten gelmeyen bir hata için zarf üretir — biçim çekirdeğinkiyle
-    /// aynı olsun diye tek yerden (`ADIM: <aşama>` + girintili sebep).
+    /// Builds an envelope for an error that did not come from the core — from a
+    /// single place, so the format is the same as the core's (`STEP: <stage>` +
+    /// the indented reason).
     #[must_use]
     pub fn new(stage: Stage, text: &str) -> Self {
         Self {
             stage,
-            chain: format!("ADIM: {stage}\n  {text}"),
+            chain: format!("STEP: {stage}\n  {text}"),
         }
     }
 }
@@ -176,5 +181,5 @@ impl From<headshell_core::Error> for CommandError {
     }
 }
 
-/// Komutların dönüş tipi.
+/// The return type of the commands.
 pub type CommandResult<T> = std::result::Result<T, CommandError>;

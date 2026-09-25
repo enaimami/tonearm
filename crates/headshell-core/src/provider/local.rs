@@ -1,12 +1,13 @@
-//! Yerel dosya sağlayıcı (PLAN §1.2, D-017).
+//! The local file provider (PLAN §1.2, D-017).
 //!
-//! Bir dizini tarar, ses dosyalarının etiketlerini okur ve bellekte bir
-//! indeks tutar. `SEARCH | BROWSE | STREAM` yeteneklerine sahiptir;
-//! `CONTROL` yoktur — yerel disk uzaktan kumanda edilmez.
+//! Scans a directory, reads the tags of audio files and keeps an index in
+//! memory. It has the `SEARCH | BROWSE | STREAM` capabilities; there is no
+//! `CONTROL` — the local disk is not remote-controlled.
 //!
-//! Etiket okuma `audio` feature'ı gerektirir (symphonia). Feature kapalıyken
-//! sağlayıcı yine derlenir ama dosya adından üstveri türetir — böylece
-//! `provider list`/`search` yüzeyi ses hattı olmayan derlemelerde de çalışır.
+//! Reading tags needs the `audio` feature (symphonia). With the feature off
+//! the provider still compiles but derives metadata from file names — so the
+//! `provider list`/`search` surface works in builds without an audio pipeline
+//! too.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -25,40 +26,42 @@ use super::{
     ProviderTrack,
 };
 
-/// Tanınan ses dosyası uzantıları.
+/// The recognised audio file extensions.
 ///
-/// Liste kasıtlı olarak dar: symphonia'nın açtığımız feature'larıyla
-/// çözebildikleri. Tanımadığımız uzantıyı taramaya almak, "neden çalmıyor?"
-/// sorusunu tarama anından çalma anına erteler.
+/// The list is deliberately narrow: what symphonia can decode with the
+/// features we turned on. Scanning an extension we do not recognise only
+/// postpones the question "why won't it play?" from scan time to play time.
 pub const AUDIO_EXTENSIONS: &[&str] = &["flac", "mp3", "ogg", "oga", "m4a", "mp4", "aac", "wav"];
 
-/// Taramanın sonucu — kaç dosya görüldü, kaçı alındı, kaçı neden atlandı.
+/// The result of a scan — how many files were seen, how many were taken, how
+/// many were skipped and why.
 ///
-/// K9: kısmi başarı üreten işlem özet döndürür. "12 parça bulundu" demek
-/// yetmez; 300 dosyalık dizinde 288'inin neden atlandığı görünmeli.
+/// K9: an operation that can partly succeed returns a summary. "Found 12
+/// tracks" is not enough; in a directory of 300 files, why 288 were skipped
+/// must be visible.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ScanSummary {
-    /// Gezilen dosya sayısı (dizinler hariç).
+    /// The number of files visited (directories excluded).
     pub files_seen: usize,
-    /// Ses uzantısı taşıyanlar.
+    /// Those carrying an audio extension.
     pub audio_files: usize,
-    /// İndekse giren parça sayısı.
+    /// The number of tracks that went into the index.
     pub indexed: usize,
-    /// Etiketi okunamadığı için dosya adından türetilenler.
+    /// Those derived from the file name because their tags could not be read.
     pub tag_fallback: usize,
-    /// Okunamayan/bozuk dosyalar.
+    /// Unreadable/corrupt files.
     pub failed: usize,
-    /// Erişilemeyen alt dizinler (izin vb.).
+    /// Inaccessible subdirectories (permissions etc.).
     pub unreadable_dirs: usize,
-    /// Damgası değişmediği için yeniden okunmayan dosyalar.
+    /// Files not read again because their stamp did not change.
     ///
-    /// Taramanın hızlı olmasının sebebi bu sayıdır: ikinci taramada
-    /// neredeyse her dosya buraya düşer.
+    /// This number is why scanning is fast: on the second scan almost every file
+    /// lands here.
     pub unchanged: usize,
 }
 
 impl ScanSummary {
-    /// Sayaçları tanı kaydediciye aktarır.
+    /// Copies the counters into the diagnostics recorder.
     pub fn record_into(&self, recorder: &mut crate::diag::Recorder) {
         let n = |v: usize| i64::try_from(v).unwrap_or(i64::MAX);
         recorder.set("scan.files_seen", n(self.files_seen));
@@ -71,27 +74,27 @@ impl ScanSummary {
     }
 }
 
-/// İndekslenmiş bir yerel dosya.
+/// An indexed local file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct IndexedFile {
     path: PathBuf,
     track: TrackRef,
 }
 
-/// Taramada görülen bir dosya — kalıcı kataloğa yazılmaya hazır.
+/// A file seen in a scan — ready to be written to the persistent catalog.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScannedFile {
     pub path: PathBuf,
-    /// Dosyanın son değişme zamanı (ms).
+    /// The file's last modification time (ms).
     pub mtime_ms: Option<i64>,
-    /// Okunan üstveri. `None` ise dosya değişmemiş — çağıran katalogdaki
-    /// satırı olduğu gibi bırakmalı, yeniden okumaya gerek yok.
+    /// The metadata read. If `None` the file has not changed — the caller should
+    /// leave the row in the catalog as it is; there is no need to read it again.
     pub track: Option<TrackRef>,
-    /// Üstveri etiketlerden mi geldi (dosya adından değil).
+    /// Whether the metadata came from the tags (not from the file name).
     pub from_tags: bool,
 }
 
-/// Yerel dosya sağlayıcı.
+/// The local file provider.
 pub struct LocalProvider {
     id: ProviderId,
     roots: Vec<PathBuf>,
@@ -109,7 +112,8 @@ impl std::fmt::Debug for LocalProvider {
 }
 
 impl LocalProvider {
-    /// Verilen kök dizinleri tarayan bir sağlayıcı kurar (henüz taramaz).
+    /// Sets up a provider that scans the given root directories (it does not
+    /// scan yet).
     #[must_use]
     pub fn new(roots: Vec<PathBuf>) -> Self {
         Self {
@@ -120,11 +124,11 @@ impl LocalProvider {
         }
     }
 
-    /// Kök dizinleri yeniden tarar ve indeksi değiştirir.
+    /// Rescans the root directories and replaces the index.
     ///
     /// # Errors
-    /// Hiçbir kök okunamazsa. Tek tek dosya hataları **hata değildir** —
-    /// sayılır ve özette raporlanır (K9).
+    /// If no root can be read. Errors in individual files **are not errors** —
+    /// they are counted and reported in the summary (K9).
     pub fn rescan_now(&self) -> Result<ScanSummary> {
         let mut summary = ScanSummary::default();
         let mut found = Vec::new();
@@ -133,7 +137,8 @@ impl LocalProvider {
             scan_dir(root, &mut found, &mut summary)?;
         }
 
-        // Sıra deterministik olsun; aynı dizin iki çalıştırmada aynı sonucu versin.
+        // The order must be deterministic; the same directory must give the same
+        // result in two runs.
         found.sort_by(|a, b| a.path.cmp(&b.path));
         summary.indexed = found.len();
 
@@ -144,33 +149,33 @@ impl LocalProvider {
         Ok(summary)
     }
 
-    /// Son taramanın özeti.
+    /// The summary of the last scan.
     ///
     /// # Errors
-    /// İç kilit bozulmuşsa.
+    /// If the internal lock is broken.
     pub fn last_scan(&self) -> Result<ScanSummary> {
         Ok(self.last_scan.read().map_err(|_| poisoned())?.clone())
     }
 
-    /// Kök ağacındaki **en yeni dizin damgası** (D-025).
+    /// The **newest directory stamp** in the root tree (D-025).
     ///
-    /// Yalnızca dizinler geziliyor, dosyalar `stat` edilmiyor: soru "taramaya
-    /// değer mi", "ne değişti" değil. Bir dosya eklendiğinde/silindiğinde
-    /// bulunduğu dizinin mtime'ı değişir, bu yüzden ekleme ve silme buradan
-    /// görünür.
+    /// Only directories are visited; files are not `stat`ed: the question is "is
+    /// a scan worth it", not "what changed". When a file is added/deleted the
+    /// mtime of its directory changes, so additions and deletions show up here.
     ///
-    /// **Görünmeyen:** dosyanın yerinde düzenlenmesi (yeniden etiketleme).
-    /// Dosya değişir ama dizin damgası değişmez. Bunu yakalamak her dosyayı
-    /// `stat` etmek demekti — yani zaten artımlı taramanın kendisi. Kullanıcı
-    /// etiketleri değiştirdiyse `headshell provider scan` demeli; bunu bilmek,
-    /// bilmiyormuş gibi "değişmedi" demekten iyidir (K9).
+    /// **What does not show:** a file edited in place (re-tagging). The file
+    /// changes but the directory stamp does not. Catching that would mean
+    /// `stat`ing every file — that is, the incremental scan itself. If the user
+    /// changed tags they should run `headshell provider scan`; knowing this is
+    /// better than saying "unchanged" as if we did not know it (K9).
     ///
-    /// Okunamayan dizin **sessizce atlanmıyor**: sayılıyor ve okunamayan bir
-    /// dizin varsa "bilmiyorum" (`None`) dönülüyor — orada bir değişiklik
-    /// olabilir ve "değişmedi" demek onu gizlerdi.
+    /// An unreadable directory **is not skipped silently**: it is counted, and
+    /// if there is an unreadable directory "I don't know" (`None`) is returned —
+    /// there might be a change there, and saying "unchanged" would hide it.
     ///
     /// # Errors
-    /// Şu an hata üretmiyor; imza ileride değişmesin diye `Result`.
+    /// It produces no errors right now; it is a `Result` so the signature does
+    /// not have to change later.
     pub fn newest_dir_mtime_ms(&self) -> Result<Option<i64>> {
         let mut newest: Option<i64> = None;
         let mut unreadable = 0usize;
@@ -180,25 +185,27 @@ impl LocalProvider {
         if unreadable > 0 {
             tracing::debug!(
                 unreadable,
-                "okunamayan dizin var; bayatlık sorusu cevaplanamadı"
+                "there is an unreadable directory; the staleness question could not be answered"
             );
             return Ok(None);
         }
         Ok(newest)
     }
 
-    /// Kök dizinleri tarar ve **kalıcı kataloğa yazılmaya hazır** satırlar üretir.
+    /// Scans the root directories and produces rows **ready to be written to the
+    /// persistent catalog**.
     ///
-    /// `known` daha önce görülmüş `yol → mtime_ms` eşlemesi; damgası değişmemiş
-    /// dosyanın etiketleri **yeniden okunmaz**. Taramanın pahalı kısmı budur:
-    /// 10.000 dosyalık bir kütüphanede her seferinde hepsini çözmek dakikalar
-    /// alır, damga karşılaştırması saniyeler.
+    /// `known` is the previously seen `path → mtime_ms` map; the tags of a file
+    /// whose stamp has not changed are **not read again**. This is the expensive
+    /// part of a scan: in a library of 10,000 files decoding them all every time
+    /// takes minutes, comparing stamps takes seconds.
     ///
-    /// Değişmemiş dosyalar için üstveri döndürülmez; çağıran o satırları
-    /// katalogda olduğu gibi bırakır. Bu yüzden dönüş `Option<TrackRef>`.
+    /// No metadata is returned for unchanged files; the caller leaves those rows
+    /// in the catalog as they are. That is why it returns `Option<TrackRef>`.
     ///
     /// # Errors
-    /// Kök dizin okunamazsa. Tek tek dosya hataları özette sayılır (K9).
+    /// If a root directory cannot be read. Errors in individual files are
+    /// counted in the summary (K9).
     pub fn scan_for_catalog(
         &self,
         known: &std::collections::HashMap<String, i64>,
@@ -217,17 +224,17 @@ impl LocalProvider {
         Ok((out, summary))
     }
 
-    /// Bir dosya yolundan sağlayıcı kimliği üretir.
+    /// Produces a provider id from a file path.
     fn track_id(&self, path: &Path) -> ProviderTrackId {
         ProviderTrackId::new(self.id.clone(), path.to_string_lossy().into_owned())
     }
 
-    /// Yol, taranan köklerden birinin altında mı?
+    /// Is the path under one of the scanned roots?
     ///
-    /// `canonicalize` ile sembolik bağ ve `..` çözülür; aksi halde
-    /// `~/Müzik/../../etc/passwd` gibi bir yol kontrolü atlatırdı.
-    /// Yol çözülemiyorsa (dosya yok) **reddedilir** — şüpheliyi kabul etmek
-    /// bir dosya okuma açığıdır.
+    /// `canonicalize` resolves symbolic links and `..`; otherwise a path like
+    /// `~/Music/../../etc/passwd` would slip past the check. If the path cannot
+    /// be resolved (the file does not exist) it **is rejected** — accepting the
+    /// suspicious is a file-read vulnerability.
     fn is_within_roots(&self, path: &Path) -> bool {
         let Ok(target) = path.canonicalize() else {
             return false;
@@ -243,19 +250,21 @@ fn poisoned() -> Error {
     Error::new(
         Stage::ProviderCall,
         ErrorKind::InvalidInput {
-            detail: "yerel sağlayıcı indeksi bozuldu (kilit zehirlendi)".to_owned(),
+            detail: "the local provider index is broken (the lock was poisoned)".to_owned(),
         },
     )
 }
 
-/// Bir dizini özyinelemeli tarar.
+/// Scans a directory recursively.
 ///
-/// Alt dizin okunamazsa **durmaz**: sayar ve devam eder. Tek bir izin hatası
-/// yüzünden 10.000 dosyalık bir kütüphaneyi kaybetmek kabul edilemez.
-/// Dizin ağacını gezip en yeni dizin damgasını bulur (yalnızca dizinler).
+/// If a subdirectory cannot be read it **does not stop**: it counts and
+/// carries on. Losing a library of 10,000 files over a single permission
+/// error is unacceptable.
+/// Walks the directory tree and finds the newest directory stamp (directories
+/// only).
 ///
-/// Hata **yutulmuyor**: okunamayan her dizin sayılıyor ve çağıran bunu
-/// "bilmiyorum"a çeviriyor.
+/// The error **is not swallowed**: every unreadable directory is counted and
+/// the caller turns it into "I don't know".
 fn walk_dir_stamps(dir: &Path, newest: &mut Option<i64>, unreadable: &mut usize) {
     let stamp = std::fs::metadata(dir)
         .and_then(|meta| meta.modified())
@@ -276,7 +285,8 @@ fn walk_dir_stamps(dir: &Path, newest: &mut Option<i64>, unreadable: &mut usize)
         return;
     };
     for entry in entries.flatten() {
-        // `file_type` sembolik bağı izlemiyor: bağ döngüsü taramayı asmasın.
+        // `file_type` does not follow symbolic links: a link loop must not hang the
+        // scan.
         if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
             walk_dir_stamps(&entry.path(), newest, unreadable);
         }
@@ -287,12 +297,13 @@ fn scan_dir(dir: &Path, out: &mut Vec<IndexedFile>, summary: &mut ScanSummary) -
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(source) => {
-            // Kök dizin okunamıyorsa bu gerçek bir hata: kullanıcı yanlış yol verdi.
+            // If the root directory cannot be read, that is a real error: the user gave
+            // a wrong path.
             if out.is_empty() && summary.files_seen == 0 {
                 return Err(crate::error::io_err(Stage::ProviderCall, dir, source));
             }
             summary.unreadable_dirs += 1;
-            tracing::warn!(dizin = %dir.display(), hata = %source, "dizin okunamadı, atlanıyor");
+            tracing::warn!(dir = %dir.display(), error = %source, "could not read the directory, skipping it");
             return Ok(());
         }
     };
@@ -329,9 +340,9 @@ fn scan_dir(dir: &Path, out: &mut Vec<IndexedFile>, summary: &mut ScanSummary) -
             Err(err) => {
                 summary.failed += 1;
                 tracing::warn!(
-                    dosya = %path.display(),
-                    hata = %err.chain_text(),
-                    "dosya okunamadı, atlanıyor"
+                    file = %path.display(),
+                    error = %err.chain_text(),
+                    "could not read the file, skipping it"
                 );
             }
         }
@@ -339,7 +350,8 @@ fn scan_dir(dir: &Path, out: &mut Vec<IndexedFile>, summary: &mut ScanSummary) -
     Ok(())
 }
 
-/// Kalıcı katalog için tarar: değişmemiş dosyaların etiketlerini okumaz.
+/// Scans for the persistent catalog: does not read the tags of unchanged
+/// files.
 fn scan_dir_for_catalog(
     dir: &Path,
     known: &std::collections::HashMap<String, i64>,
@@ -353,7 +365,7 @@ fn scan_dir_for_catalog(
                 return Err(crate::error::io_err(Stage::ProviderCall, dir, source));
             }
             summary.unreadable_dirs += 1;
-            tracing::warn!(dizin = %dir.display(), hata = %source, "dizin okunamadı, atlanıyor");
+            tracing::warn!(dir = %dir.display(), error = %source, "could not read the directory, skipping it");
             return Ok(());
         }
     };
@@ -387,7 +399,8 @@ fn scan_dir_for_catalog(
             .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
             .and_then(|since| i64::try_from(since.as_millis()).ok());
 
-        // Damga değişmediyse etiketi yeniden okuma — taramanın pahalı kısmı bu.
+        // If the stamp did not change, do not read the tags again — this is the
+        // expensive part of a scan.
         let reference = path.to_string_lossy().into_owned();
         if let (Some(mtime), Some(previous)) = (mtime_ms, known.get(&reference)) {
             if mtime == *previous {
@@ -417,9 +430,9 @@ fn scan_dir_for_catalog(
             Err(err) => {
                 summary.failed += 1;
                 tracing::warn!(
-                    dosya = %path.display(),
-                    hata = %err.chain_text(),
-                    "dosya okunamadı, atlanıyor"
+                    file = %path.display(),
+                    error = %err.chain_text(),
+                    "could not read the file, skipping it"
                 );
             }
         }
@@ -434,10 +447,11 @@ fn has_audio_extension(path: &Path) -> bool {
         .is_some_and(|ext| AUDIO_EXTENSIONS.contains(&ext.as_str()))
 }
 
-/// Dosyadan parça üstverisi okur.
+/// Reads a track's metadata from the file.
 ///
-/// Dönüş: `(track, etiketlerden_mi)`. İkinci alan `false` ise üstveri dosya
-/// adından türetildi — bu bir kayıp değil ama sayılması gereken bir düşüş (K9).
+/// Returns `(track, from_tags)`. If the second field is `false`, the metadata
+/// was derived from the file name — not a loss, but a drop that must be
+/// counted (K9).
 pub(crate) fn read_track(path: &Path) -> Result<(TrackRef, bool)> {
     #[cfg(feature = "audio")]
     {
@@ -450,15 +464,16 @@ pub(crate) fn read_track(path: &Path) -> Result<(TrackRef, bool)> {
     Ok((track_from_filename(path), false))
 }
 
-/// Etiket yoksa dosya adından üstveri türetir.
+/// Derives metadata from the file name if there are no tags.
 ///
-/// `Sanatçı - Başlık.flac` biçimini tanır; tanımazsa başlık dosya adı,
-/// sanatçı üst dizin olur. Uydurmuyoruz — ne bulduysak onu söylüyoruz.
+/// Recognises the `Artist - Title.flac` form; if it does not, the title is
+/// the file name and the artist the parent directory. We do not make things
+/// up — we say what we found.
 fn track_from_filename(path: &Path) -> TrackRef {
     let stem = path
         .file_stem()
         .and_then(|s| s.to_str())
-        .unwrap_or("bilinmeyen");
+        .unwrap_or("unknown");
 
     let parent_name = path
         .parent()
@@ -473,11 +488,11 @@ fn track_from_filename(path: &Path) -> TrackRef {
         }
     }
 
-    TrackRef::new(parent_name.unwrap_or("Bilinmeyen Sanatçı"), stem)
+    TrackRef::new(parent_name.unwrap_or("Unknown Artist"), stem)
         .with_album(parent_name.map(str::to_owned))
 }
 
-/// Etiket okuma — yalnızca `audio` feature'ıyla.
+/// Reading tags — only with the `audio` feature.
 #[cfg(feature = "audio")]
 mod tags {
     use super::{Isrc, Path, Result, TrackRef};
@@ -488,10 +503,11 @@ mod tags {
     use symphonia::core::io::MediaSourceStream;
     use symphonia::core::meta::{MetadataOptions, StandardTag};
 
-    /// Dosyanın etiketlerini okur.
+    /// Reads the file's tags.
     ///
-    /// `Ok(None)`: dosya açıldı ama kullanılabilir etiket yok — çağıran
-    /// dosya adına düşer. `Err`: dosya açılamadı/bozuk.
+    /// `Ok(None)`: the file opened but there are no usable tags — the caller
+    /// falls back to the file name. `Err`: the file could not be opened/is
+    /// corrupt.
     pub(super) fn read(path: &Path) -> Result<Option<TrackRef>> {
         let file = std::fs::File::open(path)
             .map_err(|source| crate::error::io_err(Stage::PlaybackDecode, path, source))?;
@@ -508,12 +524,13 @@ mod tags {
                 Error::new(
                     Stage::PlaybackDecode,
                     ErrorKind::Audio {
-                        detail: format!("{} açılamadı: {source}", path.display()),
+                        detail: format!("could not open {}: {source}", path.display()),
                     },
                 )
             })?;
 
-        // Süreyi kaptan al: bulanık eşleşmenin ayırt edici alanı (K6).
+        // Take the duration from the container: the distinguishing field of fuzzy
+        // matching (K6).
         let duration_ms = reader.tracks().iter().find_map(|track| {
             let time_base = track.time_base?;
             let duration = track.duration?;
@@ -554,7 +571,7 @@ mod tags {
             collect(&revision.media.tags);
         }
 
-        // Başlık ve sanatçıdan biri yoksa etiket kullanışsız sayılır.
+        // If either the title or the artist is missing the tags count as unusable.
         let (Some(title), Some(artist)) = (title, artist.or(album_artist)) else {
             return Ok(None);
         };
@@ -572,8 +589,8 @@ impl Provider for LocalProvider {
     fn info(&self) -> ProviderInfo {
         ProviderInfo {
             id: self.id.clone(),
-            display_name: "Yerel dosyalar".to_owned(),
-            // CONTROL yok: yerel disk uzaktan kumanda edilmez.
+            display_name: "Local files".to_owned(),
+            // No CONTROL: the local disk is not remote-controlled.
             capabilities: Capabilities::SEARCH | Capabilities::BROWSE | Capabilities::STREAM,
         }
     }
@@ -594,16 +611,17 @@ impl Provider for LocalProvider {
                 track_count: Some(count),
                 detail: if missing.is_empty() {
                     (count == 0).then(|| {
-                        "indeks boş — `headshell provider scan` çalıştırılmamış olabilir".to_owned()
+                        "the index is empty — `headshell provider scan` may not have been run"
+                            .to_owned()
                     })
                 } else {
-                    Some(format!("erişilemeyen dizin: {}", missing.join(", ")))
+                    Some(format!("unreachable directory: {}", missing.join(", ")))
                 },
             })
         })
     }
 
-    /// Dizin damgalarına bakarak cevaplıyor (D-025) — tam tarama yapmadan.
+    /// It answers by looking at directory stamps (D-025) — without a full scan.
     fn catalog_changed_since(&self, since_ms: i64) -> ProviderFuture<'_, Option<bool>> {
         Box::pin(async move { Ok(self.newest_dir_mtime_ms()?.map(|newest| newest > since_ms)) })
     }
@@ -670,21 +688,21 @@ impl Provider for LocalProvider {
                 return Ok(None);
             }
             let path = PathBuf::from(&id.id);
-            // Yolun taranan köklerin **altında** olduğunu doğrula.
+            // Verify that the path is **under** the scanned roots.
             //
-            // Eskiden bellek indeksine bakılıyordu; indeks artık kalıcı
-            // katalogda ve sağlayıcı onu görmüyor. Kök kontrolü aynı işi
-            // görür ve daha sağlamdır: `resolve_source` rastgele dosya
-            // okuma yüzeyi değil, `/etc/passwd` buradan çalınamaz.
+            // This used to look at the memory index; the index now lives in the
+            // persistent catalog, and the provider does not see it. The root check
+            // does the same job and is sturdier: `resolve_source` is not an
+            // arbitrary file-read surface, `/etc/passwd` cannot be played from here.
             if !self.is_within_roots(&path) {
                 return Ok(None);
             }
             if !path.is_file() {
-                // İndekslendikten sonra silinmiş: sessiz None değil, açık hata.
+                // Deleted after it was indexed: not a silent None but an explicit error.
                 return Err(Error::new(
                     Stage::PlaybackResolve,
                     ErrorKind::NotFound {
-                        what: format!("{} (indeksten beri silinmiş)", path.display()),
+                        what: format!("{} (deleted since it was indexed)", path.display()),
                     },
                 ));
             }
@@ -693,9 +711,9 @@ impl Provider for LocalProvider {
     }
 }
 
-/// Kayıt defterine eklenebilir hâle getirir.
+/// Makes it registrable in the registry.
 impl LocalProvider {
-    /// `Arc`'a sararak kayıt defterine hazırlar.
+    /// Wraps it in an `Arc`, ready for the registry.
     #[must_use]
     pub fn shared(self) -> Arc<dyn Provider> {
         Arc::new(self)
@@ -710,27 +728,28 @@ mod tests {
         crate::test_support::TempDir::new(&format!("local-{label}"))
     }
 
-    /// Gerçek ses fixture'larının dizini (`ffmpeg` üretimi sinüs tonları, adları İngilizce — D-036).
+    /// The directory of the real audio fixtures (sine tones produced with
+    /// `ffmpeg`, names in English — D-036).
     fn audio_fixtures() -> PathBuf {
         PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/audio"))
     }
 
-    /// Bir fixture'ı geçici dizine kopyalar.
+    /// Copies a fixture into the temporary directory.
     fn copy_fixture(dir: &Path, name: &str, to: &str) {
         let target = dir.join(to);
         if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent).expect("alt dizin");
+            std::fs::create_dir_all(parent).expect("subdirectory");
         }
         std::fs::copy(audio_fixtures().join(name), &target)
-            .unwrap_or_else(|e| panic!("{name} kopyalanmalı: {e}"));
+            .unwrap_or_else(|e| panic!("{name} must be copied: {e}"));
     }
 
     fn write(dir: &Path, name: &str, body: &[u8]) {
         let path = dir.join(name);
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).expect("alt dizin");
+            std::fs::create_dir_all(parent).expect("subdirectory");
         }
-        std::fs::write(&path, body).expect("dosya yazılmalı");
+        std::fs::write(&path, body).expect("the file must be written");
     }
 
     #[test]
@@ -742,36 +761,37 @@ mod tests {
         write(&dir, "notes.txt", b"note");
 
         let provider = LocalProvider::new(vec![dir.to_path_buf()]);
-        let summary = provider.rescan_now().expect("tarama");
+        let summary = provider.rescan_now().expect("scan");
 
         assert_eq!(summary.files_seen, 4);
-        assert_eq!(summary.audio_files, 2, "yalnızca flac ve mp3");
+        assert_eq!(summary.audio_files, 2, "only flac and mp3");
         assert_eq!(summary.indexed, 2);
-        assert_eq!(summary.failed, 0, "geçerli dosyalar başarısız olmamalı");
-        // K9: sayılar birbirini tutmalı — kayıp dosya sessizce yutulmasın.
+        assert_eq!(summary.failed, 0, "valid files must not fail");
+        // K9: the numbers must add up — a lost file must not be swallowed silently.
         assert_eq!(summary.indexed + summary.failed, summary.audio_files);
     }
 
     #[cfg(feature = "audio")]
     #[test]
     fn a_corrupt_file_is_counted_not_swallowed() {
-        // Bozuk dosya taramayı düşürmemeli ama görünmez de olmamalı (K9).
-        // Yalnızca `audio` açıkken anlamlı: bozukluğu çözücü fark eder.
+        // A corrupt file must not bring the scan down, but it must not be invisible
+        // either (K9). Only meaningful with `audio` on: the decoder notices the
+        // corruption.
         let dir = temp_dir("corrupt");
         copy_fixture(&dir, "tagged.flac", "sound.flac");
         write(&dir, "corrupt.flac", b"this is not an audio file");
 
         let provider = LocalProvider::new(vec![dir.to_path_buf()]);
-        let summary = provider.rescan_now().expect("tarama sürmeli");
+        let summary = provider.rescan_now().expect("the scan must carry on");
 
         assert_eq!(summary.audio_files, 2);
-        assert_eq!(summary.indexed, 1, "yalnızca sağlam dosya indekslenmeli");
-        assert_eq!(summary.failed, 1, "bozuk dosya sayılmalı");
+        assert_eq!(summary.indexed, 1, "only the sound file must be indexed");
+        assert_eq!(summary.failed, 1, "the corrupt file must be counted");
     }
 
-    /// `audio` kapalıyken üstveri dosya adından gelir; bu kipte tarama yine
-    /// çalışmalı ve her dosya indekse girmeli (çözücü olmadığı için hiçbir
-    /// dosya "bozuk" sayılmaz).
+    /// With `audio` off the metadata comes from the file name; in this mode the
+    /// scan must still work and every file must go into the index (with no
+    /// decoder, no file counts as "corrupt").
     #[cfg(not(feature = "audio"))]
     #[test]
     fn without_the_audio_feature_metadata_comes_from_filenames() {
@@ -780,13 +800,16 @@ mod tests {
         write(&dir, "corrupt.flac", b"this is not an audio file");
 
         let provider = LocalProvider::new(vec![dir.to_path_buf()]);
-        let summary = provider.rescan_now().expect("tarama");
+        let summary = provider.rescan_now().expect("scan");
 
         assert_eq!(summary.audio_files, 2);
-        assert_eq!(summary.indexed, 2, "çözücü yokken hiçbir dosya elenmez");
+        assert_eq!(
+            summary.indexed, 2,
+            "without a decoder no file is filtered out"
+        );
         assert_eq!(
             summary.tag_fallback, 2,
-            "hepsi dosya adına düşmeli ve sayılmalı"
+            "all of them must fall back to the file name and be counted"
         );
     }
 
@@ -794,26 +817,28 @@ mod tests {
     #[test]
     fn tags_are_read_from_the_file_not_guessed_from_its_name() {
         let dir = temp_dir("tags");
-        // Dosya adı kasten yanıltıcı: etiketler kazanmalı.
+        // The file name is deliberately misleading: the tags must win.
         copy_fixture(&dir, "tagged.flac", "wrong-name.flac");
 
         let provider = LocalProvider::new(vec![dir.to_path_buf()]);
-        let summary = provider.rescan_now().expect("tarama");
-        assert_eq!(summary.tag_fallback, 0, "etiket okunabilmeli");
+        let summary = provider.rescan_now().expect("scan");
+        assert_eq!(summary.tag_fallback, 0, "the tags must be readable");
 
         let index = provider.index.read().unwrap();
         let track = &index[0].track;
         assert_eq!(track.artist, "Test Artist");
-        // Başlıktaki aksanlar **bilerek** duruyor: etiketler UTF-8 ve bu, o
-        // yolun tek kanıtı. Fixture'ın kendisi İngilizce (D-036), aksan bir
-        // dil kalıntısı değil, sınanan şeyin ta kendisi.
+        // The diacritics in the title are there **on purpose**: the tags are UTF-8
+        // and this is the only proof of that path. The fixture itself is in English
+        // (D-036); the diacritics are not a leftover of another language but the
+        // very thing being tested.
         assert_eq!(track.title, "Sine 440 ünïcode");
         assert_eq!(track.album.as_deref(), Some("Fixture Album"));
-        // Süre kaptan okunmalı — bulanık eşleşmenin ayırt edici alanı (K6).
-        let duration = track.duration_ms.expect("süre okunmalı");
+        // The duration must be read from the container — the distinguishing field
+        // of fuzzy matching (K6).
+        let duration = track.duration_ms.expect("the duration must be read");
         assert!(
             (900..=1100).contains(&duration),
-            "1 saniyelik fixture, okunan: {duration}ms"
+            "a 1-second fixture, read: {duration}ms"
         );
 
         drop(index);
@@ -830,11 +855,11 @@ mod tests {
         );
 
         let provider = LocalProvider::new(vec![dir.to_path_buf()]);
-        let summary = provider.rescan_now().expect("tarama");
+        let summary = provider.rescan_now().expect("scan");
         assert_eq!(summary.indexed, 1);
         assert_eq!(
             summary.tag_fallback, 1,
-            "etiketsiz dosya düşüş olarak sayılmalı"
+            "an untagged file must count as a drop"
         );
 
         let index = provider.index.read().unwrap();
@@ -846,23 +871,26 @@ mod tests {
 
     #[test]
     fn filename_fallback_parses_artist_and_title() {
-        let track = track_from_filename(Path::new("/muzik/Albüm/Radiohead - Creep.flac"));
+        let track = track_from_filename(Path::new("/music/Album/Radiohead - Creep.flac"));
         assert_eq!(track.artist, "Radiohead");
         assert_eq!(track.title, "Creep");
-        assert_eq!(track.album.as_deref(), Some("Albüm"));
+        assert_eq!(track.album.as_deref(), Some("Album"));
     }
 
     #[test]
     fn filename_fallback_uses_the_parent_dir_when_there_is_no_dash() {
-        let track = track_from_filename(Path::new("/muzik/Portishead/Roads.mp3"));
-        assert_eq!(track.artist, "Portishead", "üst dizin sanatçı sayılır");
+        let track = track_from_filename(Path::new("/music/Portishead/Roads.mp3"));
+        assert_eq!(
+            track.artist, "Portishead",
+            "the parent directory counts as the artist"
+        );
         assert_eq!(track.title, "Roads");
     }
 
     #[test]
     fn filename_fallback_never_invents_an_empty_field() {
-        // " - Creep.flac" gibi bozuk adlar boş sanatçı üretmemeli.
-        let track = track_from_filename(Path::new("/muzik/ - Creep.flac"));
+        // Broken names like " - Creep.flac" must not produce an empty artist.
+        let track = track_from_filename(Path::new("/music/ - Creep.flac"));
         assert!(!track.artist.is_empty());
         assert!(!track.title.is_empty());
     }
@@ -875,7 +903,7 @@ mod tests {
         assert!(caps.contains(Capabilities::SEARCH));
         assert!(
             !caps.contains(Capabilities::CONTROL),
-            "yerel disk uzaktan kumanda edilmez"
+            "the local disk is not remote-controlled"
         );
     }
 
@@ -891,22 +919,23 @@ mod tests {
         );
 
         let provider = LocalProvider::new(vec![dir.to_path_buf()]);
-        provider.rescan_now().expect("tarama");
+        provider.rescan_now().expect("scan");
 
-        // Etiketten gelen sanatçı.
-        let hits = provider.search("test artist", 10).await.expect("arama");
+        // The artist from the tags.
+        let hits = provider.search("test artist", 10).await.expect("search");
         assert_eq!(hits.len(), 1, "{hits:?}");
 
-        // Dosya adından gelen sanatçı (ogg'de etiket yok).
-        let other = provider.search("other", 10).await.expect("arama");
+        // The artist from the file name (the ogg has no tags).
+        let other = provider.search("other", 10).await.expect("search");
         assert_eq!(other.len(), 1, "{other:?}");
 
-        let none = provider.search("nonexistent", 10).await.expect("arama");
+        let none = provider.search("nonexistent", 10).await.expect("search");
         assert!(none.is_empty());
     }
 
-    /// Arama, üstveri hangi yoldan gelirse gelsin dosya adı alanlarını bulmalı.
-    /// Bu test iki kipte de aynı: ad `Common Artist - Common Track`.
+    /// Search must find the file name fields whichever way the metadata came.
+    /// This test is the same in both modes: the name is `Common Artist - Common
+    /// Track`.
     #[tokio::test]
     async fn search_finds_filename_derived_tracks_in_both_modes() {
         let dir = temp_dir("search-common");
@@ -917,9 +946,9 @@ mod tests {
         );
 
         let provider = LocalProvider::new(vec![dir.to_path_buf()]);
-        provider.rescan_now().expect("tarama");
+        provider.rescan_now().expect("scan");
 
-        let hits = provider.search("common artist", 10).await.expect("arama");
+        let hits = provider.search("common artist", 10).await.expect("search");
         assert_eq!(hits.len(), 1, "{hits:?}");
         assert!(provider.search("nothing", 10).await.unwrap().is_empty());
     }
@@ -935,10 +964,10 @@ mod tests {
             );
         }
         let provider = LocalProvider::new(vec![dir.to_path_buf()]);
-        provider.rescan_now().expect("tarama");
+        provider.rescan_now().expect("scan");
 
-        let hits = provider.search("common", 2).await.expect("arama");
-        assert_eq!(hits.len(), 2, "limit aşılmamalı");
+        let hits = provider.search("common", 2).await.expect("search");
+        assert_eq!(hits.len(), 2, "the limit must not be exceeded");
     }
 
     #[tokio::test]
@@ -951,17 +980,17 @@ mod tests {
         );
 
         let provider = LocalProvider::new(vec![dir.to_path_buf()]);
-        provider.rescan_now().expect("tarama");
+        provider.rescan_now().expect("scan");
 
-        // İndeksteki dosya çalınabilir.
+        // A file in the index can be played.
         let indexed = provider.search("common", 1).await.unwrap();
         let source = provider
             .resolve_source(&indexed[0].id)
             .await
-            .expect("çözümleme");
+            .expect("resolution");
         assert!(matches!(source, Some(AudioSource::LocalFile { .. })));
 
-        // Rastgele bir yol reddedilmeli — bu bir dosya okuma yüzeyi değil.
+        // An arbitrary path must be rejected — this is not a file-read surface.
         let outside = ProviderTrackId::new(ProviderId::new("local"), "/etc/passwd");
         assert_eq!(provider.resolve_source(&outside).await.unwrap(), None);
     }
@@ -976,26 +1005,28 @@ mod tests {
         );
 
         let provider = LocalProvider::new(vec![dir.to_path_buf()]);
-        provider.rescan_now().expect("tarama");
+        provider.rescan_now().expect("scan");
         let indexed = provider.search("common", 1).await.unwrap();
 
-        std::fs::remove_file(dir.join("Common Artist - Common Track.ogg")).expect("silinmeli");
+        std::fs::remove_file(dir.join("Common Artist - Common Track.ogg"))
+            .expect("must be deleted");
 
-        // Silinmiş dosya `None` döner. Kök kontrolü `canonicalize`'a dayanıyor
-        // ve var olmayan yol çözülemez — şüpheliyi kabul etmemek, "hata
-        // mesajı daha güzel olsun" diye kontrolü gevşetmekten iyidir.
-        // Kullanıcıya durumu Session anlatır: "çalınabilir kaynak bulunamadı".
+        // A deleted file returns `None`. The root check rests on
+        // `canonicalize`, and a path that does not exist cannot be resolved —
+        // not accepting the suspicious is better than loosening the check "so
+        // the error message is nicer". Session explains the situation to the
+        // user: "no playable source found".
         assert_eq!(
             provider.resolve_source(&indexed[0].id).await.unwrap(),
             None,
-            "silinmiş dosya çalınabilir görünmemeli"
+            "a deleted file must not look playable"
         );
     }
 
     #[tokio::test]
     async fn resolve_source_rejects_traversal_out_of_the_roots() {
-        // `<kök>/../../etc/passwd` gibi yollar kökün altında başlayıp dışına
-        // çıkar; `canonicalize` bunu çözer.
+        // Paths like `<root>/../../etc/passwd` start under the root and leave it;
+        // `canonicalize` resolves that.
         let dir = temp_dir("escape");
         copy_fixture(&dir, "tagged.flac", "song.flac");
         let provider = LocalProvider::new(vec![dir.to_path_buf()]);
@@ -1008,31 +1039,31 @@ mod tests {
         assert_eq!(
             provider.resolve_source(&id).await.unwrap(),
             None,
-            "kök dışına çıkan yol reddedilmeli"
+            "a path leaving the root must be rejected"
         );
 
-        // Kökün altındaki gerçek dosya ise çalınabilir kalmalı.
+        // A real file under the root, on the other hand, must stay playable.
         let ok_id = ProviderTrackId::new(
             ProviderId::new("local"),
             dir.join("song.flac").to_string_lossy().into_owned(),
         );
         assert!(
             provider.resolve_source(&ok_id).await.unwrap().is_some(),
-            "kökün altındaki dosya çalınabilmeli"
+            "a file under the root must be playable"
         );
     }
 
     #[tokio::test]
     async fn health_reports_a_missing_root() {
-        let provider = LocalProvider::new(vec![PathBuf::from("/olmayan/dizin")]);
-        let health = provider.health().await.expect("sağlık");
+        let provider = LocalProvider::new(vec![PathBuf::from("/nonexistent/dir")]);
+        let health = provider.health().await.expect("health");
         assert!(!health.reachable);
         assert!(
             health
                 .detail
                 .as_deref()
                 .unwrap_or("")
-                .contains("erişilemeyen"),
+                .contains("unreachable"),
             "{health:?}"
         );
     }

@@ -1,51 +1,55 @@
-//! Tema yükleyici (PLAN §3.3, D-037/D-038).
+//! The theme loader (PLAN §3.3, D-037/D-038).
 //!
-//! **Neden burada, `headshell-core`'da değil.** Altın Kural'ın testi "bunu GUI de
-//! isteyecek mi" değil, "çekirdek bunu sunabilir mi". Tema bir CSS custom
-//! property mekanizması; mobil bağlamalar (K7) CSS kullanmayacak, CLI'nin
-//! `--json` çıktısının teması yok. Yani bu bir çekirdek kavramı değil,
-//! webview'e özgü bir kabuk işi — ve kabukta kalması gereken tek şey de bu
-//! tür şeyler.
+//! **Why here and not in `headshell-core`.** The Golden Rule's test is not
+//! "will the GUI want this" but "can the core offer this". A theme is a CSS
+//! custom property mechanism; the mobile bindings (K7) will not use CSS, and
+//! the CLI's `--json` output has no theme. So this is not a core concept but
+//! a shell job specific to the webview — and things of this kind are exactly
+//! what should stay in the shell.
 //!
-//! ## Sözleşme
+//! ## The contract
 //!
-//! Bir tema iki dosyalı bir dizin:
+//! A theme is a directory with two files:
 //!
 //! ```text
 //! <data_dir>/themes/<id>/
 //!   theme.json   # { "name": ..., "author": ..., "api": 1 }
-//!   theme.css    # yalnızca :root { --headshell-*: ...; }
+//!   theme.css    # only :root { --headshell-*: ...; }
 //! ```
 //!
-//! Dizin adı **kimliktir**; manifestteki `name` yalnızca gösterim içindir.
+//! The directory name **is the identity**; the `name` in the manifest is only
+//! for display.
 //!
-//! ## Üç kural, üçü de K9
+//! ## Three rules, all three K9
 //!
-//! 1. **`api` uyuşmazlığı sessizce yok sayılmaz.** Tema reddedilir ve hangi
-//!    sürümü beklediği yazılır. "Temam görünmüyor" bir tanı sorusu olmamalı.
-//! 2. **`:root` dışına taşan tema reddedilmez, işaretlenir** (D-038).
-//!    Garanti her zaman yalnızca `:root`'taki token'lar için geçerli;
-//!    genişletilmiş tema yüklenir ama listede öyle etiketlenir.
-//! 3. **Kayıp seçim yutulmaz.** Seçili tema diskten silinmişse varsayılana
-//!    dönülür, ama dönüldüğü söylenir ([`ActiveTheme::problem`]).
+//! 1. **An `api` mismatch is not silently ignored.** The theme is rejected and
+//!    the version it expects is written. "My theme does not show up" should
+//!    not be a diagnostic question.
+//! 2. **A theme spilling outside `:root` is not rejected, it is flagged**
+//!    (D-038). The guarantee only ever holds for the tokens in `:root`; an
+//!    extended theme is loaded, but labelled as such in the list.
+//! 3. **A lost selection is not swallowed.** If the selected theme was
+//!    deleted from disk, it goes back to the default, but says that it did
+//!    ([`ActiveTheme::problem`]).
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-/// Bu yapının desteklediği tema sözleşmesi sürümü.
+/// The theme contract version this build supports.
 ///
-/// Token adları ya da vaat edilen sınıf adları kaldırıldığında/anlamı
-/// değiştiğinde artar. Yeni token eklemek artırmaz — eski temalar çalışmaya
-/// devam eder, yalnızca yeni token'ın varsayılanını alırlar.
+/// It goes up when token names or promised class names are removed or change
+/// meaning. Adding a new token does not bump it — old themes keep working,
+/// they just get the new token's default.
 pub const THEME_API: u32 = 1;
 
-/// Yerleşik referans temalar (PLAN §3.4).
+/// The built-in reference themes (PLAN §3.4).
 ///
-/// Derleme zamanında gömülüyorlar ama **ayrıcalıkları yok**: diskteki bir
-/// tema gibi aynı doğrulamadan geçiyorlar. Ayrıcalıklı olsalardı sözleşmenin
-/// yeterli olduğunu kanıtlamazlardı, yalnızca kendi kendini kanıtlarlardı.
+/// They are embedded at compile time but **have no privileges**: they go
+/// through the same validation as a theme on disk. If they were privileged
+/// they would not prove the contract is enough, they would only prove
+/// themselves.
 const BUILTIN: &[Builtin] = &[
     Builtin {
         id: "daylight",
@@ -65,13 +69,13 @@ struct Builtin {
     css: &'static str,
 }
 
-/// Varsayılan temanın kendisi: `style.css`'in `:root` bloğu (D-037).
-/// Önizleme, bir temanın yazmadığı token'ı buradan alır — uygulandığında da
-/// öyle olur.
+/// The default theme itself: the `:root` block of `style.css` (D-037).
+/// The preview takes a token a theme does not write from here — and so does
+/// the theme when applied.
 const DEFAULT_CSS: &str = include_str!("../ui/style.css");
 
-/// `theme.json`'ın şekli. Bilinmeyen alanlar hata değil: ileri bir sürümün
-/// eklediği alan yüzünden tema düşmesin.
+/// The shape of `theme.json`. Unknown fields are not an error: a theme must
+/// not fall over because of a field a later version added.
 #[derive(Debug, Deserialize)]
 struct Manifest {
     name: String,
@@ -80,32 +84,32 @@ struct Manifest {
     api: u32,
 }
 
-/// Yüklenebilir bir tema — listede gösterilen hâli.
+/// A loadable theme — the form shown in the list.
 #[derive(Debug, Clone, Serialize)]
 pub struct ThemeInfo {
-    /// Dizin adı. Seçim bununla saklanıyor.
+    /// The directory name. The selection is stored with this.
     pub id: String,
     pub name: String,
     pub author: Option<String>,
-    /// `:root` dışına taşıyor mu (D-038). `true` ise garanti yok.
+    /// Does it spill outside `:root` (D-038). If `true`, there is no guarantee.
     pub extended: bool,
-    /// Uygulamayla gelen mi, kullanıcının koyduğu mu.
+    /// Did it ship with the app, or did the user put it there.
     pub builtin: bool,
-    /// Tema listesinde çizilen renk örnekleri (D-072).
+    /// The colour swatches drawn in the theme list (D-072).
     pub preview: ThemePreview,
 }
 
-/// Bir temanın listede gösterilen renkleri.
+/// The colours a theme shows in the list.
 ///
-/// Değerler temanın **kendi** `:root` token'larından; yazmadığı token
-/// varsayılan temanınkini alır — uygulandığında göreceğinin aynısı. Bir
-/// `@media` içindeki koşullu değer sayılmaz: önizleme her koşulda geçerli
-/// olanı gösterir.
+/// The values come from the theme's **own** `:root` tokens; a token it does
+/// not write takes the default theme's — the same as what it will look like
+/// when applied. A conditional value inside an `@media` does not count: the
+/// preview shows the one valid in every condition.
 ///
-/// Değer ham CSS metni ve doğrulanmıyor: webview onu `style` üzerinden
-/// uyguluyor, geçersizse örnek boş kalır, tema düşmez. `None` "bu token hiçbir
-/// yerde yazılı değil" demek — varsayılan temada olmaması bir hatadır ve
-/// testle kilitli.
+/// The value is raw CSS text and is not validated: the webview applies it
+/// through `style`; if it is invalid the swatch stays empty, the theme does
+/// not fall over. `None` means "this token is written nowhere" — its absence
+/// from the default theme is a bug, and it is locked down by a test.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ThemePreview {
     pub bg: Option<String>,
@@ -115,7 +119,7 @@ pub struct ThemePreview {
 }
 
 impl ThemePreview {
-    /// `css`'in token'ları, eksikleri varsayılan temadan.
+    /// The tokens of `css`, the missing ones from the default theme.
     fn of(css: &str) -> Self {
         let defaults = root_tokens(DEFAULT_CSS);
         let own = root_tokens(css);
@@ -132,59 +136,62 @@ impl ThemePreview {
     }
 }
 
-/// Reddedilen tema ve **sebebi**. Sessiz atlama yok (K9).
+/// A rejected theme and **its reason**. No silent skipping (K9).
 #[derive(Debug, Clone, Serialize)]
 pub struct RejectedTheme {
     pub id: String,
     pub reason: String,
 }
 
-/// `themes_list` cevabı.
+/// The answer of `themes_list`.
 #[derive(Debug, Clone, Serialize)]
 pub struct ThemeList {
-    /// Kullanıcının tema koyacağı dizin. Yoksa da gösteriliyor — "nereye
-    /// koyayım" sorusu arayüzde cevaplanmalı.
+    /// The directory the user puts themes in. Shown even if it does not exist —
+    /// the question "where do I put it" should be answered in the interface.
     pub dir: PathBuf,
-    /// Bu yapının desteklediği sözleşme sürümü.
+    /// The contract version this build supports.
     pub api: u32,
-    /// Seçili tema; `None` ise varsayılan (gömülü `style.css`).
+    /// The selected theme; the default (the embedded `style.css`) if `None`.
     pub active: Option<String>,
-    /// Varsayılan temanın renk örnekleri — listede o da bir seçenek.
+    /// The default theme's colour swatches — it is an option in the list too.
     pub default_preview: ThemePreview,
     pub themes: Vec<ThemeInfo>,
     pub rejected: Vec<RejectedTheme>,
 }
 
-/// Uygulanacak tema: webview'in `<style>` etiketine koyacağı CSS.
+/// The theme to apply: the CSS the webview will put in its `<style>` tag.
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct ActiveTheme {
     pub id: Option<String>,
     pub name: Option<String>,
-    /// Boş dize = varsayılan tema (hiçbir token geçersiz kılınmıyor).
+    /// An empty string = the default theme (no token is overridden).
     pub css: String,
     pub extended: bool,
-    /// Seçim uygulanamadıysa sebebi. Varsayılana **sessizce** dönülmüyor.
+    /// If the selection could not be applied, the reason. It does not go back
+    /// to the default **silently**.
     pub problem: Option<String>,
 }
 
-/// Seçimin saklandığı dosyanın şekli.
+/// The shape of the file the selection is stored in.
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct UiSettings {
     #[serde(default)]
     theme: Option<String>,
 }
 
-/// Tema dizini + seçim dosyası. Durum tutmuyor: her çağrı diski okur.
+/// The theme directory + the selection file. Holds no state: every call
+/// reads the disk.
 ///
-/// Bilerek: tema yazarı dosyayı düzenleyip listeyi yenilediğinde değişikliği
-/// görmeli. Belleğe alınmış bir liste, "neden değişmiyor" sorusunu doğururdu.
+/// On purpose: when a theme author edits the file and refreshes the list, they
+/// should see the change. A list held in memory would raise the question "why
+/// doesn't it change".
 pub struct ThemeStore {
     dir: PathBuf,
     settings: PathBuf,
 }
 
 impl ThemeStore {
-    /// Veri dizinine göre kurar.
+    /// Sets it up from the data directory.
     #[must_use]
     pub fn new(data_dir: &Path) -> Self {
         Self {
@@ -193,11 +200,12 @@ impl ThemeStore {
         }
     }
 
-    /// Yüklenebilir ve reddedilen temaların tamamı.
+    /// All of the loadable and rejected themes.
     ///
     /// # Errors
-    /// Tema dizini var ama okunamıyorsa. Dizin **yoksa** hata değil: henüz
-    /// tema koymamış olmak bir arıza değil.
+    /// If the theme directory exists but cannot be read. If the directory **does
+    /// not exist** that is not an error: not having put a theme there yet is not
+    /// a fault.
     pub fn list(&self) -> Result<ThemeList, String> {
         let mut themes = Vec::new();
         let mut rejected = Vec::new();
@@ -214,12 +222,12 @@ impl ThemeStore {
 
         for id in self.disk_ids()? {
             if BUILTIN.iter().any(|entry| entry.id == id) {
-                // Sessizce gölgelemek yerine söylüyoruz: kullanıcı hangi
-                // dosyanın kazandığını tahmin etmek zorunda kalmasın.
+                // We say it rather than silently shadowing: the user should not
+                // have to guess which file won.
                 rejected.push(RejectedTheme {
                     id: id.clone(),
                     reason: format!(
-                        "yerleşik bir temayla aynı ad ({id}); dizini başka bir adla yeniden adlandırın"
+                        "the same name as a built-in theme ({id}); rename the directory to something else"
                     ),
                 });
                 continue;
@@ -243,34 +251,38 @@ impl ThemeStore {
         })
     }
 
-    /// Kayıtlı seçimi yükler. Açılışta bir kez çağrılıyor.
+    /// Loads the saved selection. Called once at startup.
     ///
     /// # Errors
-    /// Seçim dosyası okunamıyorsa (bozuk JSON dahil) — o durumda hangi
-    /// dosyanın bozuk olduğu söylenmeli, varsayılana kaçılmamalı.
+    /// If the selection file cannot be read (a corrupt JSON included) — then
+    /// which file is corrupt must be said, not run away from to the default.
     pub fn active(&self) -> Result<ActiveTheme, String> {
         let Some(id) = self.selection()? else {
             return Ok(ActiveTheme::default());
         };
         match self.load(&id) {
             Ok(theme) => Ok(theme),
-            // Tema silinmiş ya da bozulmuş olabilir: varsayılana dönüyoruz
-            // ama **sebebiyle**. Sessiz dönüş, kullanıcının temasının neden
-            // kaybolduğunu hiç öğrenememesi olurdu.
+            // The theme may have been deleted or broken: we go back to the
+            // default, but **with the reason**. A silent return would mean the
+            // user never learning why their theme disappeared.
             Err(reason) => Ok(ActiveTheme {
-                problem: Some(format!("seçili tema \"{id}\" uygulanamadı: {reason}")),
+                problem: Some(format!(
+                    "the selected theme \"{id}\" could not be applied: {reason}"
+                )),
                 ..ActiveTheme::default()
             }),
         }
     }
 
-    /// Temayı seçer ve seçimi kalıcı yazar. `None` = varsayılana dön.
+    /// Picks a theme and writes the selection persistently. `None` = go back to
+    /// the default.
     ///
-    /// Sıra kasıtlı: **önce doğrula, sonra yaz.** Yüklenemeyen bir temayı
-    /// kaydetmek, uygulamayı bir dahaki açılışta bozuk bir seçimle başlatırdı.
+    /// The order is deliberate: **validate first, then write.** Saving a theme
+    /// that cannot be loaded would start the app with a broken selection next
+    /// time.
     ///
     /// # Errors
-    /// Tema yüklenemezse ya da seçim dosyası yazılamazsa.
+    /// If the theme cannot be loaded or the selection file cannot be written.
     pub fn select(&self, id: Option<String>) -> Result<ActiveTheme, String> {
         let theme = match &id {
             Some(id) => self.load(id)?,
@@ -280,7 +292,7 @@ impl ThemeStore {
         Ok(theme)
     }
 
-    /// Tek bir temayı yükler (yerleşik ya da diskten).
+    /// Loads a single theme (built-in or from disk).
     fn load(&self, id: &str) -> Result<ActiveTheme, String> {
         let (info, css) = match BUILTIN.iter().find(|entry| entry.id == id) {
             Some(entry) => load_builtin(entry)?,
@@ -302,27 +314,30 @@ impl ThemeStore {
         parse(id, &manifest, &css, false)
     }
 
-    /// Tema dizinindeki alt dizin adları. Dizin yoksa boş liste.
+    /// The names of the subdirectories in the theme directory. An empty list if
+    /// the directory does not exist.
     fn disk_ids(&self) -> Result<Vec<String>, String> {
         let entries = match fs::read_dir(&self.dir) {
             Ok(entries) => entries,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(err) => return Err(format!("{} okunamadı: {err}", self.dir.display())),
+            Err(err) => return Err(format!("could not read {}: {err}", self.dir.display())),
         };
 
         let mut ids = Vec::new();
         for entry in entries {
-            let entry = entry.map_err(|err| format!("{} okunamadı: {err}", self.dir.display()))?;
+            let entry =
+                entry.map_err(|err| format!("could not read {}: {err}", self.dir.display()))?;
             if !entry.path().is_dir() {
                 continue;
             }
             match entry.file_name().into_string() {
                 Ok(name) => ids.push(name),
-                // UTF-8 olmayan dizin adı: yutmuyoruz, ama kimliği yazamadığımız
-                // için de listeye koyamıyoruz — hata dizinin tamamını düşürür.
+                // A directory name that is not UTF-8: we do not swallow it, but
+                // since we cannot write its identity we cannot list it either — the
+                // error drops the whole directory.
                 Err(name) => {
                     return Err(format!(
-                        "{} içinde UTF-8 olmayan bir dizin adı var: {name:?}",
+                        "there is a directory name in {} that is not UTF-8: {name:?}",
                         self.dir.display()
                     ));
                 }
@@ -336,25 +351,25 @@ impl ThemeStore {
         let text = match fs::read_to_string(&self.settings) {
             Ok(text) => text,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(err) => return Err(format!("{} okunamadı: {err}", self.settings.display())),
+            Err(err) => return Err(format!("could not read {}: {err}", self.settings.display())),
         };
         let settings: UiSettings = serde_json::from_str(&text)
-            .map_err(|err| format!("{} bozuk: {err}", self.settings.display()))?;
+            .map_err(|err| format!("{} is corrupt: {err}", self.settings.display()))?;
         Ok(settings.theme)
     }
 
     fn write_selection(&self, id: Option<&str>) -> Result<(), String> {
         if let Some(parent) = self.settings.parent() {
             fs::create_dir_all(parent)
-                .map_err(|err| format!("{} oluşturulamadı: {err}", parent.display()))?;
+                .map_err(|err| format!("could not create {}: {err}", parent.display()))?;
         }
         let settings = UiSettings {
             theme: id.map(str::to_owned),
         };
         let text = serde_json::to_string_pretty(&settings)
-            .map_err(|err| format!("tema seçimi yazıya çevrilemedi: {err}"))?;
+            .map_err(|err| format!("could not serialise the theme selection: {err}"))?;
         fs::write(&self.settings, text)
-            .map_err(|err| format!("{} yazılamadı: {err}", self.settings.display()))
+            .map_err(|err| format!("could not write {}: {err}", self.settings.display()))
     }
 }
 
@@ -363,10 +378,10 @@ fn load_builtin(entry: &Builtin) -> Result<(ThemeInfo, String), String> {
 }
 
 fn read_file(path: &Path) -> Result<String, String> {
-    fs::read_to_string(path).map_err(|err| format!("{} okunamadı: {err}", path.display()))
+    fs::read_to_string(path).map_err(|err| format!("could not read {}: {err}", path.display()))
 }
 
-/// Manifest + CSS → tema. Doğrulamanın tamamı burada.
+/// Manifest + CSS → a theme. All of the validation is here.
 fn parse(
     id: &str,
     manifest: &str,
@@ -374,12 +389,13 @@ fn parse(
     builtin: bool,
 ) -> Result<(ThemeInfo, String), String> {
     let manifest: Manifest =
-        serde_json::from_str(manifest).map_err(|err| format!("theme.json bozuk: {err}"))?;
+        serde_json::from_str(manifest).map_err(|err| format!("theme.json is corrupt: {err}"))?;
 
     if manifest.api != THEME_API {
-        // K9: reddediyoruz ama **hangi sürüm** sorusunu cevapsız bırakmıyoruz.
+        // K9: we reject it, but we do not leave the question **which version**
+        // unanswered.
         return Err(format!(
-            "tema sürüm {} istiyor, bu yapı sürüm {THEME_API} sunuyor",
+            "the theme wants version {}, this build offers version {THEME_API}",
             manifest.api
         ));
     }
@@ -397,12 +413,12 @@ fn parse(
     ))
 }
 
-/// En dış seviyedeki `:root` bloklarında yazılı `--headshell-*` token'ları.
+/// The `--headshell-*` tokens written in the outermost `:root` blocks.
 ///
-/// `targets_only_root` ile aynı süslü parantez sayımı: CSS ayrıştırılmıyor
-/// (D-038). Sonraki blok öncekini ezer — tarayıcının sırası. Başka bir
-/// seçicinin ya da bir `@media`'nın içi okunmaz; önizleme koşulsuz değeri
-/// gösterir.
+/// The same brace counting as `targets_only_root`: the CSS is not parsed
+/// (D-038). A later block overrides an earlier one — the browser's order. The
+/// inside of another selector or of an `@media` is not read; the preview
+/// shows the unconditional value.
 fn root_tokens(css: &str) -> std::collections::BTreeMap<String, String> {
     let css = strip_comments(css);
     let mut tokens = std::collections::BTreeMap::new();
@@ -433,7 +449,8 @@ fn root_tokens(css: &str) -> std::collections::BTreeMap<String, String> {
                     declaration.push(ch);
                 }
             }
-            // `@import url(…);` gibi blok dışı bir kural seçiciye karışmasın.
+            // A rule outside any block, like `@import url(…);`, must not get mixed into
+            // the selector.
             ';' if depth == 0 => selector.clear(),
             ';' if depth == 1 && in_root => take_declaration(&mut declaration, &mut tokens),
             _ if depth == 0 => selector.push(ch),
@@ -444,7 +461,8 @@ fn root_tokens(css: &str) -> std::collections::BTreeMap<String, String> {
     tokens
 }
 
-/// `--headshell-ad: değer` bildirimini okur; token değilse atlar.
+/// Reads a `--headshell-name: value` declaration; skips it if it is not a
+/// token.
 fn take_declaration(
     declaration: &mut String,
     tokens: &mut std::collections::BTreeMap<String, String>,
@@ -462,17 +480,17 @@ fn take_declaration(
     declaration.clear();
 }
 
-/// CSS yalnızca `:root` bloğuna mı yazıyor?
+/// Does the CSS only write into the `:root` block?
 ///
-/// D-038: "CSS ayrıştırmadan, yalnızca `:root { ... }` bloğu dışında başka
-/// bir seçici var mı diye bakan basit bir kontrol yeter." Burada yapılan tam
-/// olarak o — süslü parantez derinliği sayılıyor, en dış seviyedeki her
-/// seçici `:root` olmalı. `@media` gibi bir sarmalayıcı da "genişletilmiş"
-/// sayılıyor: token'ları koşullu değiştirmek de garantinin dışında.
+/// D-038: "A simple check that, without parsing CSS, only looks for any
+/// selector other than the `:root { ... }` block is enough." That is exactly
+/// what is done here — the brace depth is counted, and every selector at the
+/// outermost level must be `:root`. A wrapper like `@media` also counts as
+/// "extended": changing tokens conditionally is outside the guarantee too.
 ///
-/// Yanlış pozitif ihtimali kabul edilmiş bir takas: bir dizede geçen `{`
-/// karakteri sayımı bozabilir. Bedeli yanlış bir **etiket**, kırılan bir tema
-/// değil — reddetmiyoruz (D-038), yalnızca işaretliyoruz.
+/// The chance of a false positive is an accepted trade-off: a `{` character
+/// inside a string can throw the count off. The price is a wrong **label**,
+/// not a broken theme — we do not reject (D-038), we only flag.
 fn targets_only_root(css: &str) -> bool {
     let css = strip_comments(css);
     let mut depth = 0_u32;
@@ -496,12 +514,13 @@ fn targets_only_root(css: &str) -> bool {
         }
     }
 
-    // Blok dışında kalan sarkıntı: `@import url(...)` gibi noktalı virgülle
-    // biten at-kuralları da sözleşmenin dışında.
+    // A leftover outside any block: at-rules ending with a semicolon, like
+    // `@import url(...)`, are outside the contract too.
     selector.trim().is_empty()
 }
 
-/// `/* ... */` yorumlarını çıkarır. Yorumdaki bir `{` sayımı bozmasın diye.
+/// Removes `/* ... */` comments. So a `{` in a comment does not throw the
+/// count off.
 fn strip_comments(css: &str) -> String {
     let mut out = String::with_capacity(css.len());
     let mut rest = css;
@@ -509,7 +528,7 @@ fn strip_comments(css: &str) -> String {
         out.push_str(&rest[..start]);
         match rest[start + 2..].find("*/") {
             Some(end) => rest = &rest[start + 2 + end + 2..],
-            // Kapanmamış yorum: geri kalanın tamamı yorumdur.
+            // An unclosed comment: all the rest is a comment.
             None => return out,
         }
     }
@@ -519,7 +538,7 @@ fn strip_comments(css: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    // Testlerde `expect` serbest (CLAUDE.md); üretim yolunda değil.
+    // `expect` is free in tests (CLAUDE.md); not on the production path.
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
@@ -528,8 +547,9 @@ mod tests {
         ThemeStore::new(dir)
     }
 
-    /// Kendini silen geçici dizin (D-070). Ad süreç kimliği taşıyor: iki
-    /// koşum aynı anda aynı dizini silip yeniden açmasın.
+    /// A temporary directory that deletes itself (D-070). The name carries the
+    /// process id: two runs at the same time must not delete and reopen the same
+    /// directory.
     struct TempDir(PathBuf);
 
     impl std::ops::Deref for TempDir {
@@ -552,24 +572,24 @@ mod tests {
             std::process::id()
         ));
         let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).expect("geçici dizin");
+        fs::create_dir_all(&dir).expect("temporary directory");
         TempDir(dir)
     }
 
     fn write_theme(root: &Path, id: &str, manifest: &str, css: &str) {
         let dir = root.join("themes").join(id);
-        fs::create_dir_all(&dir).expect("tema dizini");
+        fs::create_dir_all(&dir).expect("theme directory");
         fs::write(dir.join("theme.json"), manifest).expect("manifest");
         fs::write(dir.join("theme.css"), css).expect("css");
     }
 
-    // ————————————————— kapsam taraması (D-038)
+    // ————————————————— scope scan (D-038)
 
     #[test]
     fn a_root_only_theme_is_not_marked_extended() {
         assert!(targets_only_root(":root { --headshell-bg: #fff; }"));
         assert!(targets_only_root(
-            "/* yorum { } */\n:root {\n  --headshell-bg: #fff;\n}\n"
+            "/* comment { } */\n:root {\n  --headshell-bg: #fff;\n}\n"
         ));
     }
 
@@ -582,8 +602,8 @@ mod tests {
 
     #[test]
     fn a_media_query_counts_as_extended() {
-        // Token'ları koşullu değiştirmek de garantinin dışında: sözleşme
-        // "bu token'lar şu değerlerdedir" diyor, "duruma göre değişir" demiyor.
+        // Changing tokens conditionally is outside the guarantee too: the
+        // contract says "these tokens have these values", not "it depends".
         assert!(!targets_only_root(
             "@media (prefers-color-scheme: light) { :root { --headshell-bg: #fff; } }"
         ));
@@ -592,50 +612,55 @@ mod tests {
     #[test]
     fn a_dangling_at_rule_counts_as_extended() {
         assert!(!targets_only_root(
-            "@import url(baska.css);\n:root { --headshell-bg: #fff; }"
+            "@import url(other.css);\n:root { --headshell-bg: #fff; }"
         ));
     }
 
-    // ————————————————— manifest doğrulama
+    // ————————————————— manifest validation
 
     #[test]
     fn a_theme_from_a_future_api_is_rejected_with_both_versions() {
-        let manifest = format!(r#"{{"name":"Gelecek","api":{}}}"#, THEME_API + 1);
-        let err = parse("future", &manifest, ":root {}", false).expect_err("reddedilmeli");
-        // Hangi sürümü istediği **ve** neyi sunduğumuz yazmalı (K9).
+        let manifest = format!(r#"{{"name":"Future","api":{}}}"#, THEME_API + 1);
+        let err = parse("future", &manifest, ":root {}", false).expect_err("must be rejected");
+        // It must say which version it wants **and** what we offer (K9).
         assert!(err.contains(&(THEME_API + 1).to_string()), "{err}");
         assert!(err.contains(&THEME_API.to_string()), "{err}");
     }
 
     #[test]
     fn a_broken_manifest_is_rejected_not_ignored() {
-        let err = parse("broken", "{ bu json değil", ":root {}", false).expect_err("reddedilmeli");
+        let err =
+            parse("broken", "{ this is not json", ":root {}", false).expect_err("must be rejected");
         assert!(err.contains("theme.json"), "{err}");
     }
 
     #[test]
     fn an_unknown_manifest_field_does_not_break_a_theme() {
-        // İleri bir sürümün eklediği alan yüzünden tema düşmemeli.
-        let manifest = r#"{"name":"Örnek","api":1,"homepage":"https://ornek"}"#;
-        let (info, _) = parse("example", manifest, ":root {}", false).expect("yüklenmeli");
-        assert_eq!(info.name, "Örnek");
+        // A theme must not fall over because of a field a later version added.
+        let manifest = r#"{"name":"Example","api":1,"homepage":"https://example"}"#;
+        let (info, _) = parse("example", manifest, ":root {}", false).expect("must load");
+        assert_eq!(info.name, "Example");
     }
 
-    // ————————————————— referans temalar (PLAN §3.4)
+    // ————————————————— reference themes (PLAN §3.4)
 
     #[test]
     fn both_reference_themes_load_and_stay_inside_the_contract() {
-        assert_eq!(BUILTIN.len(), 2, "§3.4 en az iki referans teması istiyor");
+        assert_eq!(
+            BUILTIN.len(),
+            2,
+            "§3.4 asks for at least two reference themes"
+        );
         for entry in BUILTIN {
-            let (info, css) = load_builtin(entry).expect("referans tema yüklenmeli");
+            let (info, css) = load_builtin(entry).expect("a reference theme must load");
             assert_eq!(info.id, entry.id);
             assert!(info.builtin);
-            // Referans tema genişletilmiş olamaz: sözleşmenin **yettiğini**
-            // kanıtlaması gerekiyor, aştığını değil.
-            assert!(!info.extended, "{} :root dışına taşıyor", entry.id);
+            // A reference theme cannot be extended: it has to prove the contract
+            // **is enough**, not that it gets exceeded.
+            assert!(!info.extended, "{} spills outside :root", entry.id);
             assert!(
                 css.contains("--headshell-bg"),
-                "{} token yazmıyor",
+                "{} writes no tokens",
                 entry.id
             );
         }
@@ -643,24 +668,24 @@ mod tests {
 
     #[test]
     fn the_two_reference_themes_differ_on_more_than_color() {
-        // "İki tema" ölçütü iki paletle karşılanmaz; token setinin renk
-        // dışındaki ekseni de sınanmalı (yarıçap, süre).
+        // "Two themes" is not met by two palettes; the token set's axis other
+        // than colour must be tested too (radius, duration).
         let contrast = BUILTIN
             .iter()
             .find(|entry| entry.id == "contrast")
-            .expect("contrast teması");
+            .expect("the contrast theme");
         assert!(contrast.css.contains("--headshell-radius-sm: 0"));
         assert!(contrast.css.contains("--headshell-duration: 0ms"));
     }
 
-    // ————————————————— dizin taraması ve seçim
+    // ————————————————— directory scan and selection
 
     #[test]
     fn an_absent_theme_directory_is_not_an_error() {
         let root = temp_dir("no-dir");
-        let list = store(&root).list().expect("liste");
+        let list = store(&root).list().expect("list");
         assert_eq!(list.active, None);
-        // Yerleşikler yine de görünüyor.
+        // The built-in ones still show up.
         assert_eq!(list.themes.len(), BUILTIN.len());
         assert!(list.rejected.is_empty());
     }
@@ -668,28 +693,24 @@ mod tests {
     #[test]
     fn a_rejected_theme_appears_in_the_list_with_its_reason() {
         let root = temp_dir("rejected");
-        write_theme(
-            &root,
-            "future",
-            r#"{"name":"Gelecek","api":99}"#,
-            ":root {}",
-        );
-        let list = store(&root).list().expect("liste");
+        write_theme(&root, "future", r#"{"name":"Future","api":99}"#, ":root {}");
+        let list = store(&root).list().expect("list");
         assert!(!list.themes.iter().any(|t| t.id == "future"));
         let rejected = list
             .rejected
             .iter()
             .find(|t| t.id == "future")
-            .expect("sebebiyle listelenmeli");
+            .expect("must be listed with its reason");
         assert!(rejected.reason.contains("99"), "{}", rejected.reason);
     }
 
     #[test]
     fn a_disk_theme_that_shadows_a_builtin_is_rejected_by_name() {
         let root = temp_dir("shadow");
-        write_theme(&root, "daylight", r#"{"name":"Sahte","api":1}"#, ":root {}");
-        let list = store(&root).list().expect("liste");
-        // Yerleşik olan hâlâ yüklenebilir; gölgeleyen sessizce kazanmıyor.
+        write_theme(&root, "daylight", r#"{"name":"Fake","api":1}"#, ":root {}");
+        let list = store(&root).list().expect("list");
+        // The built-in one can still be loaded; the one shadowing it does not
+        // silently win.
         assert_eq!(list.themes.iter().filter(|t| t.id == "daylight").count(), 1);
         assert!(list.themes.iter().any(|t| t.id == "daylight" && t.builtin));
         assert!(list.rejected.iter().any(|t| t.id == "daylight"));
@@ -697,20 +718,20 @@ mod tests {
 
     #[test]
     fn an_extended_theme_loads_but_is_flagged() {
-        // D-038: ne reddet ne serbest — işaretle.
+        // D-038: neither reject nor let it pass — flag it.
         let root = temp_dir("extended");
         write_theme(
             &root,
             "wide",
-            r#"{"name":"Geniş","api":1}"#,
+            r#"{"name":"Wide","api":1}"#,
             ":root { --headshell-bg: #000; }\n.topbar { border: 0; }",
         );
-        let list = store(&root).list().expect("liste");
+        let list = store(&root).list().expect("list");
         let info = list
             .themes
             .iter()
             .find(|t| t.id == "wide")
-            .expect("yüklenmeli");
+            .expect("must load");
         assert!(info.extended);
     }
 
@@ -719,9 +740,9 @@ mod tests {
         let root = temp_dir("select");
         store(&root)
             .select(Some("daylight".to_owned()))
-            .expect("seçilmeli");
-        // Yeni bir depo = yeni bir açılış: seçim diskten okunuyor.
-        let active = store(&root).active().expect("okunmalı");
+            .expect("must be selected");
+        // A new store = a new startup: the selection is read from disk.
+        let active = store(&root).active().expect("must be read");
         assert_eq!(active.id.as_deref(), Some("daylight"));
         assert!(active.css.contains("--headshell-bg"));
         assert_eq!(active.problem, None);
@@ -733,11 +754,11 @@ mod tests {
         let store = store(&root);
         store
             .select(Some("contrast".to_owned()))
-            .expect("seçilmeli");
-        let active = store.select(None).expect("varsayılana dönmeli");
+            .expect("must be selected");
+        let active = store.select(None).expect("must go back to the default");
         assert_eq!(active.id, None);
         assert!(active.css.is_empty());
-        assert_eq!(store.list().expect("liste").active, None);
+        assert_eq!(store.list().expect("list").active, None);
     }
 
     #[test]
@@ -746,11 +767,14 @@ mod tests {
         let store = store(&root);
         store
             .select(Some("daylight".to_owned()))
-            .expect("seçilmeli");
-        store.select(Some("yok".to_owned())).expect_err("düşmeli");
-        // Önce doğrula, sonra yaz: başarısız seçim eskisini bozmadı.
+            .expect("must be selected");
+        store
+            .select(Some("missing".to_owned()))
+            .expect_err("must fail");
+        // Validate first, then write: the failed selection did not break the old
+        // one.
         assert_eq!(
-            store.active().expect("okunmalı").id.as_deref(),
+            store.active().expect("must be read").id.as_deref(),
             Some("daylight")
         );
     }
@@ -758,34 +782,36 @@ mod tests {
     #[test]
     fn a_selection_pointing_at_a_missing_theme_falls_back_out_loud() {
         let root = temp_dir("missing");
-        write_theme(&root, "gone", r#"{"name":"Giden","api":1}"#, ":root {}");
+        write_theme(&root, "gone", r#"{"name":"Gone","api":1}"#, ":root {}");
         let store = store(&root);
-        store.select(Some("gone".to_owned())).expect("seçilmeli");
-        fs::remove_dir_all(root.join("themes").join("gone")).expect("silinmeli");
+        store
+            .select(Some("gone".to_owned()))
+            .expect("must be selected");
+        fs::remove_dir_all(root.join("themes").join("gone")).expect("must be deleted");
 
-        let active = store.active().expect("varsayılana dönmeli");
+        let active = store.active().expect("must go back to the default");
         assert_eq!(active.id, None);
-        // Sessiz dönüş olsaydı kullanıcı temasının neden kaybolduğunu
-        // hiç öğrenemezdi (K9).
-        let problem = active.problem.expect("sebebi söylenmeli");
+        // Had the return been silent, the user would never have learned why their
+        // theme disappeared (K9).
+        let problem = active.problem.expect("the reason must be given");
         assert!(problem.contains("gone"), "{problem}");
     }
 
     #[test]
     fn a_broken_settings_file_is_reported_not_swallowed() {
         let root = temp_dir("broken-settings");
-        fs::write(root.join("ui.json"), "{ bozuk").expect("yazılmalı");
-        let err = store(&root).active().expect_err("düşmeli");
+        fs::write(root.join("ui.json"), "{ broken").expect("must be written");
+        let err = store(&root).active().expect_err("must fail");
         assert!(err.contains("ui.json"), "{err}");
     }
 
-    // ————————————————— önizleme renkleri (D-072)
+    // ————————————————— preview colours (D-072)
 
     #[test]
     fn the_default_preview_reads_every_color_it_draws_from_the_stylesheet() {
-        // `style.css`'in `:root`'u gerçekten okunuyor: on dört token'ın
-        // hepsi görünmeli. Bir token yeniden adlandırılırsa ya da blok
-        // okunamaz hâle gelirse varsayılan temanın örneği boş kalırdı.
+        // The `:root` of `style.css` is really read: all fourteen tokens
+        // must show up. If a token were renamed or the block became
+        // unreadable, the default theme's swatch would stay empty.
         let tokens = root_tokens(DEFAULT_CSS);
         assert!(tokens.len() >= 14, "{tokens:?}");
         let preview = ThemePreview::of("");
@@ -800,15 +826,15 @@ mod tests {
                 tokens.get(&format!("--headshell-{token}")),
                 "{token}"
             );
-            assert!(value.is_some(), "varsayılan temada `{token}` yok");
+            assert!(value.is_some(), "the default theme has no `{token}`");
         }
     }
 
     #[test]
     fn a_theme_inherits_the_tokens_it_does_not_write() {
-        // README'nin "en kısa çalışan tema"sı: yalnızca vurgu. Önizleme,
-        // uygulandığında göreceğini göstermeli — varsayılan zemin üstünde
-        // yeni vurgu.
+        // The README's "shortest working theme": the accent only. The preview
+        // must show what it will look like when applied — the new accent on the
+        // default background.
         let preview = ThemePreview::of(":root {\n  --headshell-accent: #7aa2f7;\n}\n");
         let defaults = ThemePreview::of("");
         assert_eq!(preview.accent.as_deref(), Some("#7aa2f7"));
@@ -818,8 +844,8 @@ mod tests {
 
     #[test]
     fn conditional_and_foreign_rules_do_not_reach_the_preview() {
-        // `@media` içindeki değer koşullu, `.topbar` içindeki değer yalnızca
-        // o öğe için: ikisi de temanın "rengi" değil.
+        // A value inside `@media` is conditional, a value inside `.topbar` is only
+        // for that element: neither is the theme's "colour".
         let css = "@media (prefers-color-scheme: light) { :root { --headshell-bg: #ffffff; } }\n\
                    .topbar { --headshell-accent: red; }\n\
                    :root { --headshell-text: #111111; }";
@@ -832,30 +858,30 @@ mod tests {
 
     #[test]
     fn comments_imports_and_important_do_not_confuse_the_preview() {
-        let css = "@import url(baska.css);\n\
+        let css = "@import url(other.css);\n\
                    :root {\n  /* --headshell-bg: #000000; */\n  --headshell-surface: #abcdef !important;\n}\n\
                    :root { --headshell-accent: #010203; }";
         let preview = ThemePreview::of(css);
-        // Yorumdaki değer okunmadı…
+        // The value in the comment was not read…
         assert_eq!(preview.bg, ThemePreview::of("").bg);
-        // …`!important` değere karışmadı (webview onu `style`'a yazıyor ve
-        // `!important` orada geçersiz olurdu)…
+        // …`!important` did not get mixed into the value (the webview writes it
+        // into `style`, and `!important` would be invalid there)…
         assert_eq!(preview.surface.as_deref(), Some("#abcdef"));
-        // …ve blok dışı bir kural sonraki `:root`'u gizlemedi.
+        // …and a rule outside any block did not hide the following `:root`.
         assert_eq!(preview.accent.as_deref(), Some("#010203"));
     }
 
     #[test]
     fn the_list_carries_each_themes_own_colors() {
         let root = temp_dir("preview");
-        let list = store(&root).list().expect("liste");
+        let list = store(&root).list().expect("list");
         assert_eq!(list.default_preview, ThemePreview::of(""));
         let daylight = list
             .themes
             .iter()
             .find(|t| t.id == "daylight")
-            .expect("yerleşik tema");
-        // Açık tema kendi zeminini gösteriyor, varsayılanın koyusunu değil.
+            .expect("built-in theme");
+        // The light theme shows its own background, not the default's dark one.
         assert_ne!(daylight.preview.bg, list.default_preview.bg);
         assert!(daylight.preview.bg.is_some());
     }

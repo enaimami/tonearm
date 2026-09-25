@@ -1,23 +1,24 @@
-//! Sağlayıcılar: sesin geldiği yer.
+//! Providers: where the audio comes from.
 //!
-//! Bir sağlayıcı yerel disk, Subsonic sunucusu, SoundCloud ya da (Faz 2'de)
-//! alt süreç olarak çalışan bir eklenti olabilir. Çekirdek hangisi olduğunu
-//! bilmez; yalnızca [`Provider`] trait'ini görür.
+//! A provider can be the local disk, a Subsonic server, SoundCloud or (from
+//! Phase 2) a plugin. The core does not know which one it is; it only sees
+//! the [`Provider`] trait.
 //!
-//! ## Yetenek bayrakları neden şart
+//! ## Why capability flags are a must
 //!
-//! Sağlayıcılar aynı şeyleri yapamaz. Yerel disk arama ve akış verir ama
-//! uzaktan kumanda edilemez; Spotify (Faz 2, ayrı paket) yalnızca `CONTROL`
-//! olacak — metadata vermez, ses akıtmaz, sadece "şunu çal" der. Trait'i tek
-//! tip varsayarsak soyutlama ilk uzak oynatıcıda çöker. Bu yüzden yetenek
-//! **çalışma zamanında sorulur**, derleme zamanında varsayılmaz.
+//! Providers cannot all do the same things. The local disk offers search and
+//! streaming but cannot be remote-controlled; Spotify (Phase 2, a separate
+//! package) will be `CONTROL` only — it gives no metadata and streams no
+//! audio, it only says "play this". If we assumed the trait were uniform, the
+//! abstraction would collapse at the first remote player. That is why
+//! capabilities are **asked at runtime**, not assumed at compile time.
 //!
-//! ## `uniffi` kısıtı (K7)
+//! ## The `uniffi` constraint (K7)
 //!
-//! Dışa açık imzalarda generic parametre, lifetime ve closure yok.
-//! `Arc<dyn Provider>` callback interface olarak modellenebilir; async
-//! fonksiyonlar `LookupFuture` gibi kutulanmış future döndürür ki trait
-//! `dyn` uyumlu kalsın (D-006'daki `MetadataLookup` ile aynı yol).
+//! No generic parameters, lifetimes or closures in public signatures.
+//! `Arc<dyn Provider>` can be modelled as a callback interface; async
+//! functions return boxed futures like `LookupFuture` so the trait stays
+//! `dyn` compatible (the same route as `MetadataLookup` in D-006).
 
 pub mod local;
 pub mod remote;
@@ -32,32 +33,33 @@ use crate::Result;
 use crate::ids::{ProviderId, ProviderTrackId};
 use crate::model::TrackRef;
 
-/// Bir sağlayıcı çağrısının dönüşü.
+/// The return value of a provider call.
 ///
-/// `async fn` yerine kutulanmış future: trait'in `dyn` uyumlu olması gerekiyor
-/// (K7 / D-006). `MetadataLookup` ile aynı gerekçe.
+/// A boxed future instead of `async fn`: the trait has to be `dyn`
+/// compatible (K7 / D-006). The same reasoning as `MetadataLookup`.
 pub type ProviderFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
 
-/// Bir sağlayıcının ne yapabildiği.
+/// What a provider can do.
 ///
-/// Bit maskesi; `uniffi` bunu `u32` olarak taşır. Bayrak sormadan çağrılan
-/// yetenek [`crate::ErrorKind::Unsupported`] döndürür — sessizce boş sonuç
-/// dönmez, çünkü "yapamıyorum" ile "sonuç yok" farklı şeylerdir (K9).
+/// A bit mask; `uniffi` carries it as a `u32`. A capability called without
+/// asking for the flag returns [`crate::ErrorKind::Unsupported`] — not a
+/// silent empty result, because "I can't" and "no results" are different
+/// things (K9).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Capabilities(u32);
 
 impl Capabilities {
-    /// Metinle parça arayabilir.
+    /// Can search for tracks by text.
     pub const SEARCH: Self = Self(1 << 0);
-    /// Katalogda gezinebilir (sanatçı → albüm → parça).
+    /// Can browse the catalog (artist → album → track).
     pub const BROWSE: Self = Self(1 << 1);
-    /// Çalınabilir bir ses kaynağı verebilir.
+    /// Can provide a playable audio source.
     pub const STREAM: Self = Self(1 << 2);
-    /// Uzaktaki bir oynatıcıyı kumanda edebilir (Spotify Connect gibi).
+    /// Can control a remote player (like Spotify Connect).
     pub const CONTROL: Self = Self(1 << 3);
 
-    /// Hiçbir yetenek.
+    /// No capability at all.
     pub const NONE: Self = Self(0);
 
     #[must_use]
@@ -70,19 +72,19 @@ impl Capabilities {
         Self(bits)
     }
 
-    /// İki yeteneği birleştirir.
+    /// Combines two capabilities.
     #[must_use]
     pub const fn union(self, other: Self) -> Self {
         Self(self.0 | other.0)
     }
 
-    /// `wanted`'ın tamamını içeriyor mu?
+    /// Does it contain all of `wanted`?
     #[must_use]
     pub const fn contains(self, wanted: Self) -> bool {
         (self.0 & wanted.0) == wanted.0
     }
 
-    /// İnsan okunur liste: `SEARCH|STREAM`.
+    /// A human-readable list: `SEARCH|STREAM`.
     #[must_use]
     pub fn describe(self) -> String {
         let all = [
@@ -117,95 +119,99 @@ impl std::fmt::Display for Capabilities {
     }
 }
 
-/// Çalınabilir bir ses kaynağı.
+/// A playable audio source.
 ///
-/// Faz 1'de yalnızca yerel dosya var. Uzak akış (Faz 1.3) ve eklenti
-/// akışı (Faz 2) buraya varyant ekler — **K3: hiçbir varyant sunucudan
-/// ses röle etmez**, hepsi istemcinin kendi çektiği kaynaktır.
+/// In Phase 1 there is only the local file. Remote streaming (Phase 1.3) and
+/// plugin streaming (Phase 2) add variants here — **K3: no variant relays
+/// audio through a server**, every one is a source the client fetches
+/// itself.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AudioSource {
-    /// Yerel dosya sistemi yolu.
+    /// A local file system path.
     LocalFile { path: std::path::PathBuf },
-    /// HTTP(S) üzerinden çekilecek akış (Subsonic/Jellyfin).
+    /// A stream to be fetched over HTTP(S) (Subsonic/Jellyfin).
     ///
-    /// İstemci bunu **kendisi** çeker; `headshell` sunucusu araya girmez.
+    /// The client fetches it **itself**; no `headshell` server steps in between.
     HttpStream {
         url: String,
-        /// İsteğe eklenmesi gereken başlıklar (kimlik doğrulama).
+        /// Headers that must be added to the request (authentication).
         headers: Vec<HttpHeader>,
     },
 }
 
-/// Tek bir HTTP başlığı. Tanımı taşıma katmanında (`net`), burada yeniden
-/// dışa açılıyor: `AudioSource` onu taşıyor ve çağıranlar iki yol
-/// öğrenmek zorunda kalmasın.
+/// A single HTTP header. It is defined in the transport layer (`net`) and
+/// re-exported here: `AudioSource` carries it, and callers should not have to
+/// learn two paths.
 pub use crate::net::HttpHeader;
 
-/// Sağlayıcıdan dönen bir parça.
+/// A track returned by a provider.
 ///
-/// [`TrackRef`] üstverisi + sağlayıcının kendi kimliği. Kanonik kimlik
-/// **burada yok**: onu kimlik zinciri üretir (K6), sağlayıcı iddia edemez.
+/// [`TrackRef`] metadata + the provider's own id. The canonical identity is
+/// **not here**: the identity chain produces it (K6); a provider cannot claim
+/// it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderTrack {
     pub id: ProviderTrackId,
     pub track: TrackRef,
 }
 
-/// Bir sağlayıcının kimliği ve yetenekleri.
+/// A provider's identity and capabilities.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderInfo {
     pub id: ProviderId,
-    /// Kullanıcıya gösterilecek ad ("Yerel dosyalar").
+    /// The name shown to the user ("Local files").
     pub display_name: String,
     pub capabilities: Capabilities,
 }
 
-/// Bir sağlayıcının sağlık durumu. `headshell provider test <ad>` bunu basar.
+/// A provider's health. `headshell provider test <name>` prints this.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderHealth {
     pub id: ProviderId,
     pub reachable: bool,
-    /// Kaç parça göründüğü (biliniyorsa). Tanı için — K9.
+    /// How many tracks are visible (if known). For diagnostics — K9.
     pub track_count: Option<usize>,
-    /// Sorun varsa insan okunur açıklama.
+    /// A human-readable explanation if there is a problem.
     pub detail: Option<String>,
 }
 
-/// Ses kaynağı sağlayan her şey.
+/// Anything that provides an audio source.
 ///
-/// Yetenek bayrağı olmayan bir çağrı [`crate::ErrorKind::Unsupported`]
-/// döndürmelidir — sessizce boş sonuç değil.
+/// A call without the capability flag must return
+/// [`crate::ErrorKind::Unsupported`] — not a silent empty result.
 pub trait Provider: Send + Sync {
-    /// Kimlik ve yetenekler. Senkron: çağrı yapmadan bilinmeli.
+    /// Identity and capabilities. Synchronous: it must be known without making a
+    /// call.
     fn info(&self) -> ProviderInfo;
 
-    /// Sağlayıcı ayakta mı, kaç parça görüyor.
+    /// Is the provider up, and how many tracks does it see.
     fn health<'a>(&'a self) -> ProviderFuture<'a, ProviderHealth>;
 
-    /// Metinle arama. `SEARCH` bayrağı gerekir.
+    /// Search by text. Needs the `SEARCH` flag.
     fn search<'a>(&'a self, query: &'a str, limit: usize)
     -> ProviderFuture<'a, Vec<ProviderTrack>>;
 
-    /// Bir parçanın çalınabilir kaynağını verir. `STREAM` bayrağı gerekir.
+    /// Gives a track's playable source. Needs the `STREAM` flag.
     fn resolve_source<'a>(
         &'a self,
         id: &'a ProviderTrackId,
     ) -> ProviderFuture<'a, Option<AudioSource>>;
 
-    /// Kataloğunu tarar ve **kalıcı depoya yazılmaya hazır** satırlar üretir.
+    /// Scans its catalog and produces rows **ready to be written to the
+    /// persistent store**.
     ///
-    /// `known` daha önce görülmüş `referans → damga` eşlemesi. Sağlayıcı
-    /// damgası değişmemiş öğelerin üstverisini yeniden okumaz ve
-    /// [`ScannedItem::track`] alanını `None` bırakır — çağıran o satırı
-    /// katalogda olduğu gibi korur. Büyük kütüphanede taramayı ucuzlatan şey
-    /// budur.
+    /// `known` is the previously seen `reference → stamp` map. The provider does
+    /// not re-read the metadata of items whose stamp has not changed, and leaves
+    /// the [`ScannedItem::track`] field `None` — the caller keeps that row in the
+    /// catalog as it is. That is what makes scanning a large library cheap.
     ///
-    /// Varsayılan uygulama `None` döner: çoğu sağlayıcının (uzak API,
-    /// kumanda) taranacak yerel bir kataloğu yoktur.
+    /// The default implementation returns `None`: most providers (remote APIs,
+    /// remote control) have no local catalog to scan.
     ///
-    /// Downcast yerine trait metodu: `Arc<dyn Provider>` üzerinden çağrılır
-    /// ve eklentiler (Faz 2) bunu kendi yollarıyla uygulayabilir.
+    /// A trait method instead of a downcast: it is called through
+    /// `Arc<dyn Provider>`, and plugins (Phase 2) can implement it in their own
+    /// way.
     fn scan_catalog<'a>(
         &'a self,
         known: &'a std::collections::HashMap<String, i64>,
@@ -214,50 +220,53 @@ pub trait Provider: Send + Sync {
         Box::pin(std::future::ready(Ok(None)))
     }
 
-    /// Katalog `since_ms`'ten beri değişmiş olabilir mi? (D-025)
+    /// Might the catalog have changed since `since_ms`? (D-025)
     ///
-    /// Tam taramadan **çok daha ucuz** olmalı; amacı "taramaya değer mi"
-    /// sorusunu cevaplamak. Üç ayrı cevap var ve üçü de farklı şeydir (K9):
+    /// It must be **much cheaper** than a full scan; its purpose is to answer "is
+    /// a scan worth it". There are three separate answers, and all three mean
+    /// different things (K9):
     ///
-    /// - `Some(true)` — değişmiş, taramaya değer.
-    /// - `Some(false)` — değişmemiş, tarama atlanabilir.
-    /// - `None` — **bilmiyorum.** Varsayılan bu; uzak sağlayıcı ucuz bir
-    ///   değişiklik damgası sunmuyor ve "değişmedi" demek yanlış olurdu.
+    /// - `Some(true)` — it changed, a scan is worth it.
+    /// - `Some(false)` — it did not change, the scan can be skipped.
+    /// - `None` — **I don't know.** This is the default; a remote provider offers
+    ///   no cheap change stamp, and saying "unchanged" would be wrong.
     ///
-    /// Yine downcast yerine trait metodu: eklentiler (Faz 2) kendi ucuz
-    /// damgalarını verebilsin.
+    /// Again a trait method instead of a downcast: plugins (Phase 2) can supply
+    /// their own cheap stamps.
     fn catalog_changed_since(&self, since_ms: i64) -> ProviderFuture<'_, Option<bool>> {
         let _ = since_ms;
         Box::pin(std::future::ready(Ok(None)))
     }
 }
 
-/// Bir taramanın sonucu: satırlar + ne olduğunun özeti.
+/// The result of a scan: rows + a summary of what happened.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CatalogScan {
     pub tracks: Vec<ScannedItem>,
     pub summary: ScanSummary,
 }
 
-/// Taramada görülen tek bir öğe.
+/// A single item seen in a scan.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScannedItem {
-    /// Sağlayıcının bu öğe için kimliği.
+    /// The provider's id for this item.
     pub id: ProviderTrackId,
-    /// Değişiklik damgası (yerel dosyada mtime). Yoksa her tarama yeniden okur.
+    /// The change stamp (mtime for a local file). Without it, every scan reads
+    /// it again.
     pub mtime_ms: Option<i64>,
-    /// Okunan üstveri. `None` ise öğe değişmemiş — katalogdaki hâli korunur.
+    /// The metadata read. If `None` the item has not changed — its state in the
+    /// catalog is kept.
     pub track: Option<TrackRef>,
-    /// Üstveri etiketlerden mi geldi (dosya adından/tahminden değil).
+    /// Whether the metadata came from the tags (not from the file name/a guess).
     pub from_tags: bool,
 }
 
 pub use local::ScanSummary;
 
-/// Kayıtlı sağlayıcılar. `headshell provider list` bunu okur.
+/// The registered providers. `headshell provider list` reads this.
 ///
-/// Faz 2'de eklentiler buraya alt süreç olarak katılacak (K5); kayıt defteri
-/// arayüzü o gün değişmesin diye bugün de aynı yüzeyi kullanıyoruz.
+/// In Phase 2 plugins join here (K5); we use the same surface today so the
+/// registry's interface does not have to change that day.
 #[derive(Default, Clone)]
 pub struct ProviderRegistry {
     providers: Vec<Arc<dyn Provider>>,
@@ -277,24 +286,24 @@ impl ProviderRegistry {
         Self::default()
     }
 
-    /// Bir sağlayıcı ekler.
+    /// Adds a provider.
     pub fn register(&mut self, provider: Arc<dyn Provider>) {
         self.providers.push(provider);
     }
 
-    /// Kayıtlı sağlayıcıların bilgileri.
+    /// The information of the registered providers.
     #[must_use]
     pub fn list(&self) -> Vec<ProviderInfo> {
         self.providers.iter().map(|p| p.info()).collect()
     }
 
-    /// Kayıtlı bütün sağlayıcılar.
+    /// All registered providers.
     #[must_use]
     pub fn all(&self) -> Vec<Arc<dyn Provider>> {
         self.providers.iter().map(Arc::clone).collect()
     }
 
-    /// Ada göre bulur.
+    /// Finds one by name.
     #[must_use]
     pub fn get(&self, id: &ProviderId) -> Option<Arc<dyn Provider>> {
         self.providers
@@ -303,7 +312,7 @@ impl ProviderRegistry {
             .map(Arc::clone)
     }
 
-    /// Belirli bir yeteneğe sahip sağlayıcılar.
+    /// The providers with a given capability.
     #[must_use]
     pub fn with_capability(&self, wanted: Capabilities) -> Vec<Arc<dyn Provider>> {
         self.providers
@@ -324,31 +333,32 @@ impl ProviderRegistry {
     }
 }
 
-/// Yapılandırmadan varsayılan sağlayıcıları kurar.
+/// Sets up the default providers from the configuration.
 ///
-/// Yerel dosya sağlayıcı (D-017) + `servers.json`'daki uzak sunucular
-/// (D-019), bu derlemenin varsayılan HTTP istemcisiyle (D-020). Faz 2'de
-/// eklentiler buraya katılacak; çağıranların (CLI, GUI, mobil) imzası
-/// değişmesin diye kurulum bugünden çekirdekte.
+/// The local file provider (D-017) + the remote servers in `servers.json`
+/// (D-019), with this build's default HTTP client (D-020). Plugins join here
+/// in Phase 2; the setup lives in the core from today so the callers' (CLI,
+/// GUI, mobile) signatures do not change.
 ///
 /// # Errors
-/// Sunucu kayıt dosyası okunamaz ya da bozuksa.
+/// If the server record file cannot be read or is corrupt.
 pub fn default_registry(config: &crate::config::Config) -> crate::Result<ProviderRegistry> {
     let servers = remote::load_servers(&config.servers_path())?;
     let http = if servers.is_empty() {
-        // Kayıtlı sunucu yoksa istemci kurmaya gerek yok: `http-client`
-        // kapalı bir derlemede de `provider list` çalışmalı.
+        // If there are no registered servers there is no need to build a
+        // client: `provider list` must work in a build with `http-client` off
+        // too.
         None
     } else {
         match crate::net::default_http_client() {
             Ok(client) => Some(client),
             Err(err) => {
-                // Sessizce atlamıyoruz: kullanıcının kayıtlı sunucusu var
-                // ama bu derleme ağa çıkamıyor (K9).
+                // We do not skip silently: the user has registered servers, but
+                // this build cannot go online (K9).
                 tracing::warn!(
                     error = %err.chain_text().replace('\n', " "),
                     servers = servers.len(),
-                    "kayıtlı uzak sunucular atlandı"
+                    "registered remote servers were skipped"
                 );
                 None
             }
@@ -357,14 +367,14 @@ pub fn default_registry(config: &crate::config::Config) -> crate::Result<Provide
     registry_with_http(config, http)
 }
 
-/// Sağlayıcıları verilen HTTP taşımasıyla kurar.
+/// Sets up the providers with the given HTTP transport.
 ///
-/// GUI ve mobil bunu çağırır: kendi HTTP yığınlarını `Arc<dyn HttpClient>`
-/// olarak verip TLS ağacını ikinci kez taşımazlar (D-020). `http` `None` ise
-/// yalnızca yerel sağlayıcı kurulur.
+/// The GUI and mobile call this: they supply their own HTTP stacks as
+/// `Arc<dyn HttpClient>` and do not carry a second TLS tree (D-020). If
+/// `http` is `None` only the local provider is set up.
 ///
 /// # Errors
-/// Sunucu kayıt dosyası okunamaz ya da bozuksa.
+/// If the server record file cannot be read or is corrupt.
 pub fn registry_with_http(
     config: &crate::config::Config,
     http: Option<Arc<dyn crate::net::HttpClient>>,
@@ -378,15 +388,16 @@ pub fn registry_with_http(
         }
     }
 
-    // Onaylı eklentiler (Faz 2, §2.1). Hiçbiri burada **başlatılmıyor**:
-    // her eklenti ilk çağrısında kendi sürecini açar, `provider list` süreç
-    // açmadan çalışır.
+    // Approved plugins (Phase 2, §2.1). None of them is **started** here: each
+    // plugin starts its own engine on its first call, and `provider list` works
+    // without starting any.
     let (plugins, summary) = crate::plugin::load(config)?;
     for plugin in plugins {
         registry.register(plugin);
     }
     if summary.discovered > 0 {
-        // Yüklenmeyenler sessiz kalmasın: sebepleri `headshell plugin list`'te.
+        // The ones not loaded must not stay silent: their reasons are in
+        // `headshell plugin list`.
         tracing::debug!(
             discovered = summary.discovered,
             ready = summary.ready,
@@ -394,7 +405,7 @@ pub fn registry_with_http(
             disabled = summary.disabled,
             incompatible = summary.incompatible,
             broken = summary.broken,
-            "eklentiler tarandı"
+            "plugins scanned"
         );
     }
     Ok(registry)
@@ -420,13 +431,13 @@ mod tests {
         let wanted = Capabilities::SEARCH | Capabilities::STREAM;
         assert!(
             !caps.contains(wanted),
-            "eksik bayrak varken contains false olmalı"
+            "contains must be false when a flag is missing"
         );
     }
 
     #[test]
     fn capabilities_survive_a_json_round_trip() {
-        // `uniffi` bunu u32 olarak taşıyacak; serde gösterimi de sayı olmalı.
+        // `uniffi` will carry this as a u32; the serde form must be a number too.
         let caps = Capabilities::SEARCH | Capabilities::CONTROL;
         let json = serde_json::to_string(&caps).unwrap();
         assert_eq!(json, "9", "1 | 8 = 9");
@@ -437,7 +448,7 @@ mod tests {
     #[test]
     fn audio_source_is_tagged_in_json() {
         let source = AudioSource::LocalFile {
-            path: std::path::PathBuf::from("/muzik/a.flac"),
+            path: std::path::PathBuf::from("/music/a.flac"),
         };
         let json = serde_json::to_string(&source).unwrap();
         assert!(json.contains("\"kind\":\"local_file\""), "{json}");

@@ -1,9 +1,10 @@
-//! Eklenti kataloğunun birim testleri (D-071).
+//! Unit tests of the plugin catalog (D-071).
 //!
-//! Katalog deposu testin içinde kuruluyor: geçici bir dizine eklentiler
-//! yazılıyor, indeks [`build_index`] ile — yani bakımcının kullandığı yoldan
-//! — üretiliyor ve sahte HTTP istemcisi indeksle dosyaları sunuyor. Ağa
-//! çıkılmıyor; karma, manifest ve köken kaydı kuralları diskte sınanıyor.
+//! The catalog repository is set up inside the test: plugins are written to a
+//! temporary directory, the index is produced with [`build_index`] — that is,
+//! the same way the maintainer produces it — and a fake HTTP client serves the
+//! index and the files. Nothing goes online; the hash, manifest and origin
+//! record rules are tested on disk.
 
 use std::sync::Arc;
 
@@ -12,8 +13,8 @@ use crate::net::fake::FakeHttp;
 use crate::plugin::consent::ConsentStatus;
 use crate::test_support::{TempDir, TestConfig};
 
-const INDEX: &str = "https://katalog.ornek/refs/heads/main/index.json";
-const TEMPLATE: &str = "https://katalog.ornek/refs/tags/{name}-{version}/{name}/{path}";
+const INDEX: &str = "https://catalog.example/refs/heads/main/index.json";
+const TEMPLATE: &str = "https://catalog.example/refs/tags/{name}-{version}/{name}/{path}";
 const PLATFORM: &str = "linux-x86_64";
 
 fn run<T>(future: impl std::future::Future<Output = T>) -> T {
@@ -26,7 +27,7 @@ fn temp_config(label: &str) -> TestConfig {
 
 fn manifest_json(name: &str, version: &str, net: &[&str]) -> String {
     format!(
-        r#"{{"name":"{name}","display_name":"{name} eklentisi","version":"{version}","api":2,"main":"main.js","capabilities":["search"],"permissions":{{"net":{}}}}}"#,
+        r#"{{"name":"{name}","display_name":"{name} plugin","version":"{version}","api":2,"main":"main.js","capabilities":["search"],"permissions":{{"net":{}}}}}"#,
         serde_json::to_string(net).unwrap()
     )
 }
@@ -37,7 +38,7 @@ fn script(tag: &str) -> String {
     )
 }
 
-/// Testin içinde kurulan bir katalog deposu.
+/// A catalog repository set up inside the test.
 struct Source {
     dir: TempDir,
 }
@@ -45,7 +46,7 @@ struct Source {
 impl Source {
     fn new(label: &str) -> Self {
         Self {
-            dir: TempDir::new(&format!("catalog-kaynak-{label}")),
+            dir: TempDir::new(&format!("catalog-source-{label}")),
         }
     }
 
@@ -61,7 +62,7 @@ impl Source {
         build_index(&self.dir, TEMPLATE).unwrap_or_else(|err| panic!("{}", err.chain_text()))
     }
 
-    /// İndeksi ve bütün dosyaları sunan sahte istemci.
+    /// A fake client that serves the index and every file.
     fn http(&self) -> FakeHttp {
         self.http_with_index(&self.build().json)
     }
@@ -108,54 +109,64 @@ fn state(config: &Config, source: &Source, name: &str) -> InstallState {
         .unwrap()
 }
 
-// --- adres --------------------------------------------------------------
+// --- address ------------------------------------------------------------
 
 #[test]
 fn the_index_url_comes_from_the_environment_or_the_default() {
     assert_eq!(resolve_index_url(&|_| None), DEFAULT_INDEX_URL);
     let mirror =
-        |key: &str| (key == INDEX_ENV).then(|| " https://ayna.ornek/index.json ".to_owned());
-    assert_eq!(resolve_index_url(&mirror), "https://ayna.ornek/index.json");
+        |key: &str| (key == INDEX_ENV).then(|| " https://mirror.example/index.json ".to_owned());
+    assert_eq!(
+        resolve_index_url(&mirror),
+        "https://mirror.example/index.json"
+    );
     let blank = |key: &str| (key == INDEX_ENV).then(|| "   ".to_owned());
     assert_eq!(resolve_index_url(&blank), DEFAULT_INDEX_URL);
 }
 
-/// İndeks güvenin kökü: düz HTTP yalnızca bu makinenin kendisine.
+/// The index is the root of trust: plain HTTP only to this machine itself.
 #[test]
 fn a_catalog_over_plain_http_is_refused_unless_it_is_this_machine() {
     let http = FakeHttp::new().route("index.json", r#"{"schema":1,"plugins":[]}"#);
-    let err = run(fetch(&http, "http://katalog.ornek/index.json")).unwrap_err();
+    let err = run(fetch(&http, "http://catalog.example/index.json")).unwrap_err();
     assert_eq!(err.stage(), Stage::PluginCatalog);
     assert!(
         err.chain_text().contains("https://"),
         "{}",
         err.chain_text()
     );
-    assert!(http.requests().is_empty(), "reddedilen adrese istek gitti");
+    assert!(
+        http.requests().is_empty(),
+        "a request went to the refused address"
+    );
 
     let local = run(fetch(&http, "http://127.0.0.1:8080/index.json")).unwrap();
     assert!(local.names().is_empty());
 }
 
-// --- indeks üretimi -----------------------------------------------------
+// --- building the index -------------------------------------------------
 
 #[test]
 fn a_built_index_lists_every_plugin_with_version_pinned_urls_and_hashes() {
-    let source = Source::new("uret");
+    let source = Source::new("build");
     source
         .plugin("ytmusic", "0.4.0", &["music.youtube.com"], &script("yt"))
-        .plugin("echo", "0.1.0", &["ornek.gecersiz"], &script("echo"));
+        .plugin("echo", "0.1.0", &["example.invalid"], &script("echo"));
     let built = source.build();
 
     let names: Vec<&str> = built.plugins.iter().map(|p| p.name.as_str()).collect();
-    assert_eq!(names, vec!["echo", "ytmusic"], "sıra belirlenimci olmalı");
+    assert_eq!(
+        names,
+        vec!["echo", "ytmusic"],
+        "the order must be deterministic"
+    );
     let echo = &built.plugins[0];
     assert_eq!(echo.version, "0.1.0");
     let paths: Vec<&str> = echo.files.iter().map(|f| f.path.as_str()).collect();
     assert_eq!(paths, vec!["plugin.json", "main.js"]);
     assert_eq!(
         echo.files[1].url,
-        "https://katalog.ornek/refs/tags/echo-0.1.0/echo/main.js"
+        "https://catalog.example/refs/tags/echo-0.1.0/echo/main.js"
     );
     assert_eq!(echo.files[1].sha256, sha256_hex(script("echo").as_bytes()));
 
@@ -163,7 +174,7 @@ fn a_built_index_lists_every_plugin_with_version_pinned_urls_and_hashes() {
     assert_eq!(
         source.build().json,
         built.json,
-        "aynı dizin aynı metni üretmeli"
+        "the same directory must produce the same text"
     );
     assert_eq!(
         read_url_template(&{
@@ -177,44 +188,47 @@ fn a_built_index_lists_every_plugin_with_version_pinned_urls_and_hashes() {
     );
 }
 
-/// Bozuk eklentinin hepsi birden, tek tek sebebiyle söylenir.
+/// All the broken plugins are named at once, each with its own reason.
 #[test]
 fn build_index_refuses_every_invalid_plugin_at_once() {
-    let source = Source::new("bozuk");
+    let source = Source::new("broken");
     source.plugin("echo", "0.1.0", &[], &script("e"));
-    let unversioned = source.dir.join("surumsuz");
+    let unversioned = source.dir.join("unversioned");
     std::fs::create_dir_all(&unversioned).unwrap();
     std::fs::write(
         unversioned.join("plugin.json"),
-        r#"{"name":"surumsuz","display_name":"S","api":2,"main":"main.js"}"#,
+        r#"{"name":"unversioned","display_name":"S","api":2,"main":"main.js"}"#,
     )
     .unwrap();
     std::fs::write(unversioned.join("main.js"), "").unwrap();
-    let upper = source.dir.join("Kotu");
+    let upper = source.dir.join("Evil");
     std::fs::create_dir_all(&upper).unwrap();
     std::fs::write(
         upper.join("plugin.json"),
-        manifest_json("Kotu", "1.0.0", &[]),
+        manifest_json("Evil", "1.0.0", &[]),
     )
     .unwrap();
     std::fs::write(upper.join("main.js"), "").unwrap();
 
     let err = build_index(&source.dir, TEMPLATE).unwrap_err();
     let text = err.chain_text();
-    assert!(text.contains("2 eklenti indekse giremedi"), "{text}");
-    assert!(text.contains("surumsuz: `version` yok"), "{text}");
-    assert!(text.contains("Kotu: katalog adı"), "{text}");
+    assert!(
+        text.contains("2 plugins could not go into the index"),
+        "{text}"
+    );
+    assert!(text.contains("unversioned: no `version`"), "{text}");
+    assert!(text.contains("Evil: catalog name"), "{text}");
 }
 
 #[test]
 fn build_index_skips_hidden_dirs_and_refuses_an_empty_catalog() {
-    let source = Source::new("bos");
+    let source = Source::new("empty");
     let hidden = source.dir.join(".git");
     std::fs::create_dir_all(&hidden).unwrap();
     std::fs::write(hidden.join("plugin.json"), "{}").unwrap();
     let err = build_index(&source.dir, TEMPLATE).unwrap_err();
     assert!(
-        err.chain_text().contains("dizinde eklenti yok"),
+        err.chain_text().contains("no plugins in the directory"),
         "{}",
         err.chain_text()
     );
@@ -222,11 +236,11 @@ fn build_index_skips_hidden_dirs_and_refuses_an_empty_catalog() {
 
 #[test]
 fn a_template_must_pin_the_version_and_use_https() {
-    let source = Source::new("sablon");
+    let source = Source::new("template");
     source.plugin("echo", "0.1.0", &[], &script("e"));
     for (template, expected) in [
-        ("https://k.ornek/main/{name}/{path}", "`{version}` yok"),
-        ("http://k.ornek/{name}-{version}/{path}", "https://"),
+        ("https://k.example/main/{name}/{path}", "has no `{version}`"),
+        ("http://k.example/{name}-{version}/{path}", "https://"),
     ] {
         let err = build_index(&source.dir, template).unwrap_err();
         assert!(
@@ -240,35 +254,35 @@ fn a_template_must_pin_the_version_and_use_https() {
 
 #[test]
 fn index_differences_name_what_changed() {
-    let source = Source::new("fark");
+    let source = Source::new("diff");
     source.plugin("echo", "0.1.0", &[], &script("e"));
     let before = source.build().json;
     source
         .plugin("echo", "0.2.0", &[], &script("e2"))
-        .plugin("yeni", "1.0.0", &[], &script("y"));
+        .plugin("new", "1.0.0", &[], &script("y"));
     let after = source.build().json;
     let differences = index_differences(&before, &after);
     assert!(
-        differences.contains(&"echo: girdisi değişti".to_owned()),
+        differences.contains(&"echo: its entry changed".to_owned()),
         "{differences:?}"
     );
     assert!(
-        differences.contains(&"yeni: indekste yok".to_owned()),
+        differences.contains(&"new: not in the index".to_owned()),
         "{differences:?}"
     );
 }
 
-// --- indeks okuma --------------------------------------------------------
+// --- reading the index --------------------------------------------------
 
 #[test]
 fn a_catalog_reads_back_what_build_index_wrote() {
-    let config = temp_config("oku");
-    let source = Source::new("oku");
+    let config = temp_config("read");
+    let source = Source::new("read");
     source
-        .plugin("echo", "0.1.0", &["ornek.gecersiz"], &script("e"))
-        .plugin("ikinci", "2.0.0", &[], &script("i"));
+        .plugin("echo", "0.1.0", &["example.invalid"], &script("e"))
+        .plugin("second", "2.0.0", &[], &script("i"));
     let catalog = catalog_of(&source);
-    assert_eq!(catalog.names(), vec!["echo", "ikinci"]);
+    assert_eq!(catalog.names(), vec!["echo", "second"]);
 
     let survey = catalog.survey(&config).unwrap();
     assert!(survey.delisted.is_empty());
@@ -284,8 +298,8 @@ fn a_catalog_reads_back_what_build_index_wrote() {
     );
     let echo = &survey.plugins[0];
     assert_eq!(echo.installed, InstallState::NotInstalled);
-    assert_eq!(echo.permissions.net, vec!["ornek.gecersiz".to_owned()]);
-    assert_eq!(echo.display_name.as_deref(), Some("echo eklentisi"));
+    assert_eq!(echo.permissions.net, vec!["example.invalid".to_owned()]);
+    assert_eq!(echo.display_name.as_deref(), Some("echo plugin"));
     assert!(echo.problem.is_none(), "{:?}", echo.problem);
 }
 
@@ -293,7 +307,7 @@ fn a_catalog_reads_back_what_build_index_wrote() {
 fn an_unknown_schema_is_refused_with_what_to_do() {
     let err = Catalog::parse(INDEX, br#"{"schema":2,"plugins":[]}"#).unwrap_err();
     assert!(
-        err.chain_text().contains("güncelleyin"),
+        err.chain_text().contains("update headshell"),
         "{}",
         err.chain_text()
     );
@@ -307,39 +321,39 @@ fn an_unknown_schema_is_refused_with_what_to_do() {
     assert!(err.chain_text().contains("JSON"), "{}", err.chain_text());
 }
 
-/// Bozuk bir girdi ötekileri gizlemez; her biri kendi sebebini taşır.
+/// A broken entry does not hide the others; each carries its own reason.
 #[test]
 fn a_bad_entry_is_reported_without_hiding_the_others() {
-    let source = Source::new("girdi");
+    let source = Source::new("entry");
     source.plugin("echo", "0.1.0", &[], &script("e"));
     let mut index: serde_json::Value = serde_json::from_str(&source.build().json).unwrap();
     let good = index["plugins"][0].clone();
 
     let mut newer = good.clone();
-    newer["manifest"]["name"] = "yeni".into();
+    newer["manifest"]["name"] = "new".into();
     newer["manifest"]["api"] = 3.into();
 
     let mut escaping = good.clone();
-    escaping["manifest"]["name"] = "kacak".into();
+    escaping["manifest"]["name"] = "escaping".into();
     escaping["files"][1]["path"] = "../../main.js".into();
 
     let mut plain = good.clone();
-    plain["manifest"]["name"] = "duz".into();
-    plain["files"][1]["url"] = "http://kotu.ornek/main.js".into();
+    plain["manifest"]["name"] = "plain".into();
+    plain["files"][1]["url"] = "http://evil.example/main.js".into();
 
     let mut extra = good.clone();
-    extra["manifest"]["name"] = "fazla".into();
+    extra["manifest"]["name"] = "extra".into();
     extra["files"].as_array_mut().unwrap().push(
-        serde_json::json!({"path":"state/x.js","url":"https://k.ornek/x","sha256":"a".repeat(64)}),
+        serde_json::json!({"path":"state/x.js","url":"https://k.example/x","sha256":"a".repeat(64)}),
     );
 
     let twin = good.clone();
     let mut other_twin = good.clone();
-    other_twin["manifest"]["display_name"] = "ikiz".into();
+    other_twin["manifest"]["display_name"] = "twin".into();
 
     index["plugins"] = serde_json::json!([newer, escaping, plain, extra, twin, other_twin]);
     let catalog = Catalog::parse(INDEX, index.to_string().as_bytes()).unwrap();
-    let config = temp_config("girdi");
+    let config = temp_config("entry");
     let survey = catalog.survey(&config).unwrap();
     assert_eq!(survey.summary.listed, 6);
     assert_eq!(survey.summary.problems, 6);
@@ -352,27 +366,31 @@ fn a_bad_entry_is_reported_without_hiding_the_others() {
             .and_then(|plugin| plugin.problem.clone())
             .unwrap_or_default()
     };
-    assert!(problem("yeni").contains("api 3"), "{}", problem("yeni"));
+    assert!(problem("new").contains("api 3"), "{}", problem("new"));
     assert!(
-        problem("kacak").contains("geçerli bir eklenti dosyası yolu değil"),
+        problem("escaping").contains("is not a valid plugin file path"),
         "{}",
-        problem("kacak")
-    );
-    assert!(problem("duz").contains("https://"), "{}", problem("duz"));
-    assert!(
-        problem("fazla").contains("motorun eklenti dizininde"),
-        "{}",
-        problem("fazla")
+        problem("escaping")
     );
     assert!(
-        problem("echo").contains("birden çok kez"),
+        problem("plain").contains("https://"),
+        "{}",
+        problem("plain")
+    );
+    assert!(
+        problem("extra").contains("the engine uses in the plugin directory"),
+        "{}",
+        problem("extra")
+    );
+    assert!(
+        problem("echo").contains("more than once"),
         "{}",
         problem("echo")
     );
 
     let err = run(install(&config, &FakeHttp::new(), &catalog, "echo")).unwrap_err();
     assert!(
-        err.chain_text().contains("kurulamıyor"),
+        err.chain_text().contains("cannot be installed"),
         "{}",
         err.chain_text()
     );
@@ -380,22 +398,22 @@ fn a_bad_entry_is_reported_without_hiding_the_others() {
 
 #[test]
 fn a_name_not_in_the_catalog_lists_what_is_there_and_suggests_the_right_case() {
-    let source = Source::new("ad");
+    let source = Source::new("name");
     source.plugin("echo", "0.1.0", &[], &script("e"));
     let catalog = catalog_of(&source);
     let err = catalog.find("Echo").unwrap_err();
     let text = err.chain_text();
-    assert!(text.contains("bunu mu demek istediniz: `echo`"), "{text}");
-    assert!(text.contains("katalogdakiler: echo"), "{text}");
+    assert!(text.contains("did you mean `echo`"), "{text}");
+    assert!(text.contains("in the catalog: echo"), "{text}");
 }
 
-// --- kurulum ------------------------------------------------------------
+// --- installing ---------------------------------------------------------
 
 #[test]
 fn install_puts_the_plugin_in_place_with_its_origin_and_it_awaits_approval() {
-    let config = temp_config("kur");
-    let source = Source::new("kur");
-    source.plugin("echo", "0.1.0", &["ornek.gecersiz"], &script("e"));
+    let config = temp_config("install");
+    let source = Source::new("install");
+    source.plugin("echo", "0.1.0", &["example.invalid"], &script("e"));
 
     let fetched = install_from(&config, &source, "echo");
     assert_eq!(fetched.version, "0.1.0");
@@ -411,7 +429,7 @@ fn install_puts_the_plugin_in_place_with_its_origin_and_it_awaits_approval() {
     assert_eq!(record.index, INDEX);
     assert_eq!(record.files.len(), 2);
 
-    // Katalogdan gelmek onay değildir (D-040).
+    // Coming from the catalog is not consent (D-040).
     let (entries, _) = crate::plugin::discover(&config).unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].consent, Some(ConsentStatus::NotAsked));
@@ -431,26 +449,26 @@ fn assert_no_staging_left(config: &Config) {
         .unwrap()
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.file_name().to_string_lossy().into_owned())
-        .filter(|name| name.ends_with(".kuruluyor"))
+        .filter(|name| name.ends_with(".installing"))
         .collect();
     assert!(
         leftovers.is_empty(),
-        "geçici kurulum dizini kaldı: {leftovers:?}"
+        "a temporary install directory was left behind: {leftovers:?}"
     );
 }
 
-/// Bir dosyanın karması tutmazsa diske **hiçbir şey** yazılmaz.
+/// If one file's hash does not match, **nothing** is written to disk.
 #[test]
 fn a_hash_mismatch_writes_nothing() {
-    let config = temp_config("karma");
-    let source = Source::new("karma");
+    let config = temp_config("hash");
+    let source = Source::new("hash");
     source.plugin("echo", "0.1.0", &[], &script("e"));
     let http = FakeHttp::new()
         .route("index.json", &source.build().json)
         .route("echo/plugin.json", &manifest_json("echo", "0.1.0", &[]))
         .route(
             "echo/main.js",
-            "export function health() { /* değiştirilmiş */ }",
+            "export function health() { /* modified */ }",
         );
 
     let err = run(async {
@@ -460,26 +478,26 @@ fn a_hash_mismatch_writes_nothing() {
     .unwrap_err();
     assert_eq!(err.stage(), Stage::PluginCatalog);
     assert!(
-        err.chain_text().contains("karma tutmuyor"),
+        err.chain_text().contains("hash mismatch"),
         "{}",
         err.chain_text()
     );
     assert!(
-        err.chain_text().contains("hiçbir şey yazılmadı"),
+        err.chain_text().contains("nothing was written"),
         "{}",
         err.chain_text()
     );
     assert!(!config.plugins_dir().join("echo").exists());
 }
 
-/// Katalogda gösterilen izinler kurulanın izinleri olmalı.
+/// The permissions shown in the catalog must be the installed plugin's.
 #[test]
 fn a_manifest_that_differs_from_the_index_is_refused() {
     let config = temp_config("manifest");
     let source = Source::new("manifest");
-    source.plugin("echo", "0.1.0", &["ornek.gecersiz"], &script("e"));
+    source.plugin("echo", "0.1.0", &["example.invalid"], &script("e"));
     let mut index: serde_json::Value = serde_json::from_str(&source.build().json).unwrap();
-    // İndeks daha az izin gösteriyor; inen dosya (karması doğru) daha fazlasını istiyor.
+    // The index shows fewer permissions; the downloaded file (hash correct) asks for more.
     index["plugins"][0]["manifest"]["permissions"]["net"] = serde_json::json!([]);
     let http = source.http_with_index(&index.to_string());
 
@@ -489,18 +507,19 @@ fn a_manifest_that_differs_from_the_index_is_refused() {
     })
     .unwrap_err();
     assert!(
-        err.chain_text().contains("indeksin gösterdiğinden farklı"),
+        err.chain_text()
+            .contains("differs from what the index showed"),
         "{}",
         err.chain_text()
     );
     assert!(!config.plugins_dir().join("echo").exists());
 }
 
-/// Var olmayan bir sürümü gösteren indeks bakımcının kusurudur, ağın değil.
+/// An index pointing at a version that does not exist is the maintainer's fault, not the network's.
 #[test]
 fn a_missing_file_is_the_catalogs_fault_not_the_network() {
-    let config = temp_config("yok");
-    let source = Source::new("yok");
+    let config = temp_config("missing");
+    let source = Source::new("missing");
     source.plugin("echo", "0.1.0", &[], &script("e"));
     let http = FakeHttp::new()
         .route("index.json", &source.build().json)
@@ -514,7 +533,7 @@ fn a_missing_file_is_the_catalogs_fault_not_the_network() {
     .unwrap_err();
     assert_eq!(err.stage(), Stage::PluginCatalog);
     assert!(
-        err.chain_text().contains("dosya bulunamadı (HTTP 404"),
+        err.chain_text().contains("file not found (HTTP 404"),
         "{}",
         err.chain_text()
     );
@@ -522,12 +541,12 @@ fn a_missing_file_is_the_catalogs_fault_not_the_network() {
 
 #[test]
 fn installing_over_an_existing_directory_is_refused() {
-    let config = temp_config("var");
-    let source = Source::new("var");
+    let config = temp_config("present");
+    let source = Source::new("present");
     source.plugin("echo", "0.1.0", &[], &script("e"));
     let dir = config.plugins_dir().join("echo");
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("main.js"), "// geliştiricinin kopyası").unwrap();
+    std::fs::write(dir.join("main.js"), "// the developer's copy").unwrap();
 
     let http = source.http();
     let err = run(async {
@@ -536,17 +555,17 @@ fn installing_over_an_existing_directory_is_refused() {
     })
     .unwrap_err();
     assert!(
-        err.chain_text().contains("zaten kurulu"),
+        err.chain_text().contains("already installed"),
         "{}",
         err.chain_text()
     );
     assert_eq!(
         std::fs::read_to_string(dir.join("main.js")).unwrap(),
-        "// geliştiricinin kopyası"
+        "// the developer's copy"
     );
 }
 
-// --- güncelleme ---------------------------------------------------------
+// --- updating -----------------------------------------------------------
 
 fn update_from(config: &Config, source: &Source, name: &str) -> Result<UpdateOutcome> {
     let http = source.http();
@@ -558,15 +577,15 @@ fn update_from(config: &Config, source: &Source, name: &str) -> Result<UpdateOut
 
 #[test]
 fn update_brings_a_catalog_plugin_to_the_new_version_and_keeps_its_state() {
-    let config = temp_config("guncelle");
-    let source = Source::new("guncelle");
-    source.plugin("echo", "0.1.0", &["a.ornek"], &script("v1"));
+    let config = temp_config("update");
+    let source = Source::new("update");
+    source.plugin("echo", "0.1.0", &["a.example"], &script("v1"));
     install_from(&config, &source, "echo");
     let state_file = config.plugin_state_dir("echo").join("storage.json");
     std::fs::create_dir_all(state_file.parent().unwrap()).unwrap();
-    std::fs::write(&state_file, r#"{"client_id":"sakla"}"#).unwrap();
+    std::fs::write(&state_file, r#"{"client_id":"keep"}"#).unwrap();
 
-    source.plugin("echo", "0.2.0", &["a.ornek", "b.ornek"], &script("v2"));
+    source.plugin("echo", "0.2.0", &["a.example", "b.example"], &script("v2"));
     assert_eq!(
         state(&config, &source, "echo"),
         InstallState::UpdateAvailable {
@@ -583,10 +602,10 @@ fn update_brings_a_catalog_plugin_to_the_new_version_and_keeps_its_state() {
             tools_changed,
         } => {
             assert_eq!((from.as_str(), to.as_str()), ("0.1.0", "0.2.0"));
-            assert_eq!(permissions_added.net, vec!["b.ornek".to_owned()]);
+            assert_eq!(permissions_added.net, vec!["b.example".to_owned()]);
             assert!(tools_changed.is_empty(), "{tools_changed:?}");
         }
-        other => panic!("güncellenmedi: {other:?}"),
+        other => panic!("not updated: {other:?}"),
     }
     let dir = config.plugins_dir().join("echo");
     assert_eq!(
@@ -595,8 +614,8 @@ fn update_brings_a_catalog_plugin_to_the_new_version_and_keeps_its_state() {
     );
     assert_eq!(
         std::fs::read_to_string(&state_file).unwrap(),
-        r#"{"client_id":"sakla"}"#,
-        "eklentinin deposu güncellemede silinmemeli"
+        r#"{"client_id":"keep"}"#,
+        "the plugin's store must not be deleted by an update"
     );
     assert_eq!(read_record(&dir).unwrap().unwrap().version, "0.2.0");
     assert_eq!(
@@ -609,33 +628,33 @@ fn update_brings_a_catalog_plugin_to_the_new_version_and_keeps_its_state() {
         .unwrap()
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.file_name().to_string_lossy().into_owned())
-        .filter(|name| name.ends_with(".indiriliyor"))
+        .filter(|name| name.ends_with(".downloading"))
         .collect();
-    assert!(leftovers.is_empty(), "geçici dosya kaldı: {leftovers:?}");
+    assert!(
+        leftovers.is_empty(),
+        "a temporary file was left behind: {leftovers:?}"
+    );
 }
 
-/// Elle konmuş ya da elle değiştirilmiş eklentinin üstüne yazılmaz.
+/// A plugin put there or changed by hand is not overwritten.
 #[test]
 fn update_leaves_a_manual_or_modified_plugin_alone() {
-    let config = temp_config("dokunma");
-    let source = Source::new("dokunma");
-    source.plugin("elle", "0.1.0", &[], &script("elle")).plugin(
-        "echo",
-        "0.1.0",
-        &[],
-        &script("v1"),
-    );
+    let config = temp_config("hands-off");
+    let source = Source::new("hands-off");
+    source
+        .plugin("manual", "0.1.0", &[], &script("manual"))
+        .plugin("echo", "0.1.0", &[], &script("v1"));
 
-    let manual = config.plugins_dir().join("elle");
+    let manual = config.plugins_dir().join("manual");
     std::fs::create_dir_all(&manual).unwrap();
-    std::fs::write(manual.join("main.js"), "// çalışma kopyası").unwrap();
-    assert_eq!(state(&config, &source, "elle"), InstallState::Manual);
+    std::fs::write(manual.join("main.js"), "// working copy").unwrap();
+    assert_eq!(state(&config, &source, "manual"), InstallState::Manual);
 
     install_from(&config, &source, "echo");
     let main = config.plugins_dir().join("echo").join("main.js");
-    std::fs::write(&main, "// elle düzeltildi").unwrap();
+    std::fs::write(&main, "// fixed by hand").unwrap();
     source
-        .plugin("elle", "0.2.0", &[], &script("elle2"))
+        .plugin("manual", "0.2.0", &[], &script("manual2"))
         .plugin("echo", "0.2.0", &[], &script("v2"));
     assert_eq!(
         state(&config, &source, "echo"),
@@ -645,31 +664,28 @@ fn update_leaves_a_manual_or_modified_plugin_alone() {
         }
     );
 
-    for name in ["elle", "echo"] {
+    for name in ["manual", "echo"] {
         match update_from(&config, &source, name).unwrap() {
             UpdateOutcome::Skipped { reason } => {
-                assert!(reason.contains("üstüne yaz"), "{name}: {reason}");
+                assert!(reason.contains("overwrit"), "{name}: {reason}");
             }
-            other => panic!("{name} güncellenmemeliydi: {other:?}"),
+            other => panic!("{name} should not have been updated: {other:?}"),
         }
     }
-    assert_eq!(
-        std::fs::read_to_string(&main).unwrap(),
-        "// elle düzeltildi"
-    );
+    assert_eq!(std::fs::read_to_string(&main).unwrap(), "// fixed by hand");
     assert_eq!(
         std::fs::read_to_string(manual.join("main.js")).unwrap(),
-        "// çalışma kopyası"
+        "// working copy"
     );
 }
 
-/// Yarıda kalmış bir güncellemenin bıraktığı yeni dosya yerel değişiklik
-/// sayılmaz — yoksa kullanıcı onu yalnızca kaldırıp yeniden kurarak
-/// düzeltebilirdi.
+/// The new file left behind by an update that stopped halfway does not count
+/// as a local change — otherwise the user could only fix it by removing and
+/// reinstalling.
 #[test]
 fn a_half_finished_update_is_not_mistaken_for_a_local_edit() {
-    let config = temp_config("yarim");
-    let source = Source::new("yarim");
+    let config = temp_config("half");
+    let source = Source::new("half");
     source.plugin("echo", "0.1.0", &[], &script("v1"));
     install_from(&config, &source, "echo");
     source.plugin("echo", "0.2.0", &[], &script("v2"));
@@ -689,14 +705,17 @@ fn a_half_finished_update_is_not_mistaken_for_a_local_edit() {
     ));
 }
 
-/// Katalogdan çekilen bir eklenti sessizce "güncel" görünmemeli.
+/// A plugin pulled from the catalog must not silently look "up to date".
 #[test]
 fn a_plugin_delisted_from_its_catalog_is_reported() {
-    let config = temp_config("cekildi");
-    let source = Source::new("cekildi");
-    source
-        .plugin("echo", "0.1.0", &[], &script("e"))
-        .plugin("kalan", "1.0.0", &[], &script("k"));
+    let config = temp_config("pulled");
+    let source = Source::new("pulled");
+    source.plugin("echo", "0.1.0", &[], &script("e")).plugin(
+        "remaining",
+        "1.0.0",
+        &[],
+        &script("k"),
+    );
     install_from(&config, &source, "echo");
     std::fs::remove_dir_all(source.dir.join("echo")).unwrap();
 
@@ -708,15 +727,17 @@ fn a_plugin_delisted_from_its_catalog_is_reported() {
         vec!["echo".to_owned()]
     );
     match update_from(&config, &source, "echo").unwrap() {
-        UpdateOutcome::Skipped { reason } => assert!(reason.contains("katalogda yok"), "{reason}"),
+        UpdateOutcome::Skipped { reason } => {
+            assert!(reason.contains("not in the catalog"), "{reason}")
+        }
         other => panic!("{other:?}"),
     }
 }
 
 #[test]
 fn updating_a_plugin_that_is_not_installed_says_how_to_install_it() {
-    let config = temp_config("kurulu-degil");
-    let source = Source::new("kurulu-degil");
+    let config = temp_config("not-installed");
+    let source = Source::new("not-installed");
     source.plugin("echo", "0.1.0", &[], &script("e"));
     let err = update_from(&config, &source, "echo").unwrap_err();
     assert!(
@@ -726,7 +747,8 @@ fn updating_a_plugin_that_is_not_installed_says_how_to_install_it() {
     );
 }
 
-/// Araç değişikliği onay istemez (kullanıcının kararı, D-071) ama söylenir.
+/// A tool change does not ask for consent (the user's decision, D-071), but
+/// it is said.
 #[test]
 fn tool_changes_are_named_for_this_platform() {
     use crate::plugin::manifest::Asset;
@@ -736,7 +758,7 @@ fn tool_changes_are_named_for_this_platform() {
         assets: [(
             PLATFORM.to_owned(),
             Asset {
-                url: format!("https://ornek/{version}"),
+                url: format!("https://example/{version}"),
                 sha256: sha.to_string().repeat(64),
             },
         )]
@@ -751,30 +773,30 @@ fn tool_changes_are_named_for_this_platform() {
     let rebuilt = tool_changes(&[tool("1", 'a')], &[tool("1", 'b')], PLATFORM);
     assert!(rebuilt[0].binary_changed);
     assert!(
-        rebuilt[0].describe().contains("ikilisi değişti"),
+        rebuilt[0].describe().contains("binary changed"),
         "{}",
         rebuilt[0].describe()
     );
 
     assert_eq!(
         tool_changes(&[], &[tool("1", 'a')], PLATFORM)[0].describe(),
-        "yt-dlp 1 eklendi"
+        "yt-dlp 1 added"
     );
     assert_eq!(
         tool_changes(&[tool("1", 'a')], &[], PLATFORM)[0].describe(),
-        "yt-dlp 1 artık istenmiyor"
+        "yt-dlp 1 no longer requested"
     );
     assert!(tool_changes(&[tool("1", 'a')], &[tool("1", 'a')], PLATFORM).is_empty());
-    // Başka bir platformun ikilisi değişti: bu makine için değişiklik yok.
+    // Another platform's binary changed: no change for this machine.
     assert!(tool_changes(&[tool("1", 'a')], &[tool("1", 'b')], "windows-x86_64").is_empty());
 }
 
-// --- kaldırma -----------------------------------------------------------
+// --- removing -----------------------------------------------------------
 
 #[test]
 fn remove_deletes_the_directory_with_its_state() {
-    let config = temp_config("kaldir");
-    let source = Source::new("kaldir");
+    let config = temp_config("remove");
+    let source = Source::new("remove");
     source.plugin("echo", "0.1.0", &[], &script("e"));
     install_from(&config, &source, "echo");
     std::fs::create_dir_all(config.plugin_state_dir("echo")).unwrap();
@@ -785,53 +807,60 @@ fn remove_deletes_the_directory_with_its_state() {
     assert!(!removed.path.exists());
 }
 
-/// Kaldırma adı yola ekliyor: veri dizininin dışına uzanan ad reddedilir.
+/// Removing appends the name to a path: a name that reaches outside the data
+/// directory is refused.
 #[test]
 fn remove_refuses_a_name_that_leaves_the_plugins_dir() {
-    let config = temp_config("kacis");
-    let outside = config.data_dir().join("kurban");
+    let config = temp_config("escape");
+    let outside = config.data_dir().join("victim");
     std::fs::create_dir_all(&outside).unwrap();
     std::fs::create_dir_all(config.plugins_dir()).unwrap();
 
-    let err = remove(&config, "../kurban").unwrap_err();
+    let err = remove(&config, "../victim").unwrap_err();
     assert!(
         matches!(err.kind(), ErrorKind::InvalidInput { .. }),
         "{err:?}"
     );
-    assert!(outside.exists(), "eklenti dizininin dışı silindi");
+    assert!(
+        outside.exists(),
+        "something outside the plugin directory was deleted"
+    );
 
-    let err = remove(&config, "yok").unwrap_err();
+    let err = remove(&config, "missing").unwrap_err();
     assert!(matches!(err.kind(), ErrorKind::NotFound { .. }), "{err:?}");
 }
 
-/// Geliştiricinin çalışma kopyasına bağlantı: bağlantı gider, kopya kalır.
+/// A link to the developer's working copy: the link goes, the copy stays.
 #[cfg(unix)]
 #[test]
 fn remove_takes_away_only_the_link_of_a_symlinked_plugin() {
-    let config = temp_config("baglanti");
-    let work = TempDir::new("catalog-calisma-kopyasi");
-    std::fs::write(work.join("main.js"), "// kaynak").unwrap();
+    let config = temp_config("link");
+    let work = TempDir::new("catalog-working-copy");
+    std::fs::write(work.join("main.js"), "// source").unwrap();
     std::fs::create_dir_all(config.plugins_dir()).unwrap();
-    let link = config.plugins_dir().join("gelistirme");
+    let link = config.plugins_dir().join("dev");
     std::os::unix::fs::symlink(work.path(), &link).unwrap();
 
-    let removed = remove(&config, "gelistirme").unwrap();
+    let removed = remove(&config, "dev").unwrap();
     assert_eq!(removed.link_target.as_deref(), Some(work.path()));
-    assert!(std::fs::symlink_metadata(&link).is_err(), "bağlantı kalmış");
+    assert!(
+        std::fs::symlink_metadata(&link).is_err(),
+        "the link is still there"
+    );
     assert_eq!(
         std::fs::read_to_string(work.join("main.js")).unwrap(),
-        "// kaynak"
+        "// source"
     );
 }
 
 #[test]
 fn install_state_says_manual_for_a_plugin_placed_by_hand() {
-    let config = temp_config("elle");
-    let source = Source::new("elle");
+    let config = temp_config("manual");
+    let source = Source::new("manual");
     source.plugin("echo", "0.1.0", &[], &script("e"));
     let dir = config.plugins_dir().join("echo");
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join(ORIGIN_FILE), "{ bozuk").unwrap();
+    std::fs::write(dir.join(ORIGIN_FILE), "{ broken").unwrap();
     match state(&config, &source, "echo") {
         InstallState::Unreadable { detail } => assert!(detail.contains("origin.json"), "{detail}"),
         other => panic!("{other:?}"),
@@ -842,7 +871,7 @@ fn install_state_says_manual_for_a_plugin_placed_by_hand() {
 
 #[test]
 fn the_http_client_is_only_used_through_the_trait() {
-    // `Arc<dyn HttpClient>` — Session'ın çağıranlardan aldığı biçim (K7).
+    // `Arc<dyn HttpClient>` — the form Session receives from its callers (K7).
     let source = Source::new("dyn");
     source.plugin("echo", "0.1.0", &[], &script("e"));
     let http: Arc<dyn HttpClient> = Arc::new(source.http());

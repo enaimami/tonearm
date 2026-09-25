@@ -1,15 +1,17 @@
-//! `headshell` — çekirdeğin masaüstü kabuğu (PLAN Faz 3).
+//! `headshell` — the core's desktop shell (PLAN Phase 3).
 //!
-//! **Altın Kural:** burada iş mantığı yok. Bu paket yalnızca pencereyi açar,
-//! IPC komutlarını çekirdeğe iletir, tik döngüsünü sürer ve olayları
-//! webview'e geçirir. Bir özelliği buradan silsen çekirdek onu hâlâ sunar —
-//! CLI'nin `--json` çıktısı bunun kanıtı: GUI ile **aynı** veriyi alıyor.
+//! **The Golden Rule:** no business logic here. This package only opens the
+//! window, forwards IPC commands to the core, drives the tick loop and passes
+//! events to the webview. Delete a feature from here and the core still
+//! offers it — the CLI's `--json` output proves it: it gets **the same** data
+//! as the GUI.
 //!
-//! **D-030:** bağımlılık tek yönlü. Bu paket `headshell-cli`'yi hiç görmez; biri
-//! diğerinden bir şey isterse o şey çekirdeğe aittir.
+//! **D-030:** the dependency goes one way. This package never sees
+//! `headshell-cli`; if one wants something from the other, that thing belongs
+//! in the core.
 
-// Windows'ta konsol penceresi açılmasın; hata ayıklama derlemesinde kalsın
-// ki tanı satırları görünür olsun.
+// No console window on Windows; it stays in debug builds so the diagnostic
+// lines are visible.
 #![cfg_attr(all(not(debug_assertions), windows), windows_subsystem = "windows")]
 
 mod commands;
@@ -27,19 +29,20 @@ use crate::state::{AppState, Core};
 use crate::theme::ThemeStore;
 
 fn main() -> ExitCode {
-    // İlk iş: ortam düzeltmesi. GDK `GDK_BACKEND`'i `gtk_init` sırasında,
-    // WebKit `WEBKIT_DISABLE_DMABUF_RENDERER`'ı web süreci doğarken okur —
-    // ikisi de Tauri kurulumundan sonra, yani buradan sonrası geç kalır.
+    // First thing: fixing up the environment. GDK reads `GDK_BACKEND` during
+    // `gtk_init`, WebKit reads `WEBKIT_DISABLE_DMABUF_RENDERER` when the web
+    // process is born — both after Tauri's setup, so anything after here is
+    // too late.
     env::fixup();
     init_tracing();
 
-    // Bağlam tek kez üretiliyor: arayüz dosyalarını ikiliye gömüyor ve iki
-    // yolda da (uygulama ya da hata penceresi) aynısı kullanılıyor.
+    // The context is generated once: it embeds the interface files in the
+    // binary, and both paths (the app or the error window) use the same one.
     let context = tauri::generate_context!();
 
-    // Kütüphane pencereden **önce** açılıyor: veri dizini yoksa ya da
-    // veritabanı bozuksa kullanıcı boş bir pencereye değil, aşamasını
-    // söyleyen bir hataya baksın.
+    // The library is opened **before** the window: if the data directory
+    // is missing or the database is corrupt, the user should look at an
+    // error that says its stage, not at an empty window.
     let (core, themes) = match open_core() {
         Ok(opened) => opened,
         Err(text) => {
@@ -52,8 +55,8 @@ fn main() -> ExitCode {
     match run(core, themes, context) {
         Ok(()) => ExitCode::SUCCESS,
         Err(text) => {
-            // Pencere hiç açılamadıysa gösterilecek bir yüzey yok; hata
-            // aşamasıyla birlikte `stderr`'e gider (K9).
+            // If the window could not be opened at all there is no surface to
+            // show; the error goes to `stderr` with its stage (K9).
             report(&text);
             ExitCode::FAILURE
         }
@@ -62,31 +65,32 @@ fn main() -> ExitCode {
 
 fn report(text: &str) {
     eprintln!("{text}");
-    eprintln!("\nayrıntı için: headshell diag");
+    eprintln!("\nfor details: headshell diag");
 }
 
 fn open_core() -> Result<(Core, ThemeStore), String> {
     let config = Config::discover().map_err(|err| err.chain_text())?;
-    // Tema deposu çekirdeğe gitmiyor, yalnızca veri dizinini biliyor (§3.3).
+    // The theme store does not go to the core; it only knows the data directory
+    // (§3.3).
     let themes = ThemeStore::new(config.data_dir());
     let core = Core::open(config).map_err(|err| err.chain_text())?;
     Ok((core, themes))
 }
 
-/// Açılış başarısız olduysa hatayı bir pencerede gösterir (D-070).
+/// Shows the error in a window if startup failed (D-070).
 ///
-/// Windows'un sürüm derlemesi konsolsuz (`windows_subsystem`, dosyanın
-/// başında): `stderr`'e yazılan hata orada **hiçbir yere** gitmiyor ve
-/// uygulamaya çift tıklayan kullanıcı hiçbir şey görmüyordu. K9 bunu
-/// yasaklıyor — her başarısızlık hangi aşamada olduğunu söyler. Pencere her
-/// platformda açılıyor: tek metin, tek davranış.
+/// The Windows release build has no console (`windows_subsystem`, at the top
+/// of the file): an error written to `stderr` goes **nowhere** there, and a
+/// user double-clicking the app saw nothing at all. K9 forbids that — every
+/// failure says which stage it is in. The window opens on every platform: one
+/// text, one behaviour.
 ///
-/// Metin sayfaya adresin `#` kısmıyla gidiyor, IPC'yle değil: çekirdek yok,
-/// komutlar yok, ve sayfanın CSP'si (`script-src 'self'`) satır içi betiğe
-/// izin vermiyor.
+/// The text reaches the page through the `#` part of the address, not over
+/// IPC: there is no core, no commands, and the page's CSP (`script-src
+/// 'self'`) does not allow inline scripts.
 fn show_startup_error(mut context: tauri::Context, text: &str) {
-    // Ana pencere (`index.html`) açılmasın: arkasında çekirdek yok, arayüz
-    // boş ve donuk kalırdı.
+    // The main window (`index.html`) must not open: there is no core behind
+    // it, and the interface would stay empty and frozen.
     context.config_mut().app.windows.clear();
     let url = format!("startup-error.html#{}", encode_fragment(text));
 
@@ -97,27 +101,30 @@ fn show_startup_error(mut context: tauri::Context, text: &str) {
                 "startup-error",
                 tauri::WebviewUrl::App(url.into()),
             )
-            .title("headshell açılamadı")
+            .title("headshell could not start")
             .inner_size(760.0, 460.0)
             .build()?;
             Ok(())
         })
         .build(context);
     match built {
-        // Pencere kapanınca döner; süreç yine başarısızlık koduyla çıkar.
+        // Returns when the window is closed; the process still exits with a
+        // failure code.
         Ok(app) => {
             let _ = app.run_return(|_, _| {});
         }
-        Err(err) => eprintln!("ADIM: STARTUP_ERROR — hata penceresi de açılamadı: {err}"),
+        Err(err) => {
+            eprintln!("STEP: STARTUP_ERROR — the error window could not be opened either: {err}")
+        }
     }
 }
 
-/// Metni adresin parça (`#…`) kısmına yazılabilir hâle getirir.
+/// Makes text writable into the fragment (`#…`) part of an address.
 ///
-/// Ayrılmamış karakterler (RFC 3986) dışındaki her bayt `%XX` olur. Elle
-/// yazılıyor, çünkü URL ayrıştırıcıları satır sonlarını sessizce siler —
-/// çok satırlı bir hata zinciri tek satıra düşerdi. Sayfa
-/// `decodeURIComponent` ile geri çeviriyor.
+/// Every byte outside the unreserved characters (RFC 3986) becomes `%XX`.
+/// Written by hand, because URL parsers silently drop line breaks — a
+/// multi-line error chain would collapse into one line. The page turns it
+/// back with `decodeURIComponent`.
 fn encode_fragment(text: &str) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let mut out = String::with_capacity(text.len() * 3);
@@ -137,33 +144,34 @@ fn run(core: Core, themes: ThemeStore, context: tauri::Context) -> Result<(), St
     let (jobs_tx, jobs_rx) = mpsc::unbounded_channel();
 
     tauri::Builder::default()
-        // Yalnızca yol seçtiriyor. Dosyayı okuyan/yazan taraf çekirdek —
-        // `capabilities/default.json` bu yüzden `fs` izni vermiyor.
+        // It only lets the user pick a path. The side that reads/writes the
+        // file is the core — which is why `capabilities/default.json` grants no
+        // `fs` permission.
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::new(jobs_tx, themes))
         .setup(move |app| {
-            // Çekirdek kendi iş parçacığına burada taşınıyor: `AppHandle`
-            // ancak kurulumda var, olaylar da oradan gidiyor.
+            // The core is moved onto its own thread here: the `AppHandle` only
+            // exists during setup, and events go out from there.
             core_thread::spawn(core, jobs_rx, app.handle().clone())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            // Kütüphane
+            // Library
             commands::search,
             commands::stats,
             commands::sleeve,
             commands::sleeve_svg,
-            // İçe aktarma ve kimlik
+            // Import and identity
             commands::import,
             commands::resolve,
-            // Sağlayıcı
+            // Providers
             commands::providers,
             commands::provider_test,
             commands::provider_scan,
             commands::servers_list,
             commands::server_add,
             commands::server_remove,
-            // Oynatma
+            // Playback
             commands::play,
             commands::toggle_pause,
             commands::stop,
@@ -172,7 +180,7 @@ fn run(core: Core, themes: ThemeStore, context: tauri::Context) -> Result<(), St
             commands::jump_to,
             commands::set_shuffle,
             commands::set_repeat,
-            // Eklenti ve sır (Faz 2 yüzeyi)
+            // Plugins and secrets (the Phase 2 surface)
             commands::plugins,
             commands::plugin_approve,
             commands::plugin_disable,
@@ -185,11 +193,11 @@ fn run(core: Core, themes: ThemeStore, context: tauri::Context) -> Result<(), St
             commands::secrets,
             commands::secret_set,
             commands::secret_remove,
-            // Tema
+            // Themes
             commands::themes_list,
             commands::theme_active,
             commands::theme_select,
-            // Durum ve tanılama
+            // State and diagnostics
             commands::anchor,
             commands::queue,
             commands::diag,
@@ -197,15 +205,15 @@ fn run(core: Core, themes: ThemeStore, context: tauri::Context) -> Result<(), St
             commands::environment,
         ])
         .run(context)
-        .map_err(|err| format!("ADIM: PLAYBACK_OUTPUT\n  pencere açılamadı: {err}"))
+        .map_err(|err| format!("STEP: PLAYBACK_OUTPUT\n  could not open the window: {err}"))
 
-    // `run` döndüğünde `AppState` düşer, kanal kapanır ve çekirdek iş
-    // parçacığı döngüden çıkıp kalan dinlemeleri yazar (`core_thread::run`
-    // sonundaki `shutdown`).
+    // When `run` returns, `AppState` is dropped, the channel closes, and the
+    // core thread leaves its loop and writes the remaining listens (the
+    // `shutdown` at the end of `core_thread::run`).
 }
 
-/// Log `stderr`'e; `println!` yalnızca kullanıcıya dönük çıktı içindi ve
-/// bir GUI'de öyle bir çıktı yok.
+/// Logging goes to `stderr`; `println!` was only for user-facing output, and
+/// a GUI has no such output.
 fn init_tracing() {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         tracing_subscriber::EnvFilter::new("headshell_core=warn,headshell=warn")
@@ -222,12 +230,12 @@ mod tests {
 
     use super::encode_fragment;
 
-    /// Kodlama, sayfanın `decodeURIComponent`'iyle geri dönmeli — satır
-    /// sonları, Türkçe harfler ve `#`/`%` dahil. Sayfanın yaptığı çözme
-    /// burada gerçek bir JS motorunda yapılıyor (QuickJS, D-070).
+    /// The encoding must come back through the page's `decodeURIComponent` —
+    /// line breaks, Turkish letters and `#`/`%` included. The decoding the page
+    /// does is done here in a real JS engine (QuickJS, D-070).
     #[test]
     fn the_error_text_survives_the_trip_through_the_url_fragment() {
-        let text = "ADIM: CONFIG_LOAD\n  → veri dizini — %LOCALAPPDATA% yok; #1 çğıöşü İ";
+        let text = "STEP: CONFIG_LOAD\n  → data directory — no %LOCALAPPDATA%; #1 çğıöşü İ";
         let encoded = encode_fragment(text);
         assert!(!encoded.contains('\n') && !encoded.contains('#') && !encoded.contains(' '));
 

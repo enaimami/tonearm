@@ -1,14 +1,15 @@
-//! Çapa tahmininin doğruluk kümesi (PLAN §3.2).
+//! The accuracy set for anchor estimation (PLAN §3.2).
 //!
-//! **Neden ayrı bir fixture dosyası, doğrudan Rust testi değil:** pozisyon
-//! webview'de çekirdeğe sorulmadan tahmin ediliyor, yani formülün ikinci bir
-//! kopyası JS'te yaşayacak. İki kopya zamanla kayar ve kayma kimsenin fark
-//! etmediği yerde başlar — ilerleme çubuğu birkaç yüz milisaniye yalan söyler,
-//! kimse şikâyet etmez, sonra Faz 4'te **aynı formül oda senkronunu sürer.**
+//! **Why a separate fixture file and not a plain Rust test:** in the webview
+//! the position is estimated without asking the core, so a second copy of the
+//! formula will live in JS. Two copies drift over time, and the drift starts
+//! where nobody notices — the progress bar lies by a few hundred
+//! milliseconds, nobody complains, and then in Phase 4 **the same formula
+//! drives room sync.**
 //!
-//! `fixtures/anchor/position_cases.json` iki tarafın da okuduğu tek doğruluk
-//! kaynağı. Bu dosya Rust tarafını bağlar; GUI paketi yazıldığında JS tarafı
-//! aynı dosyayı okuyacak.
+//! `fixtures/anchor/position_cases.json` is the single source of truth both
+//! sides read. This file binds the Rust side; when the GUI package is written
+//! the JS side will read the same file.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -35,8 +36,8 @@ fn cases() -> Cases {
         "/../../fixtures/anchor/position_cases.json"
     ));
     let text = std::fs::read_to_string(&path)
-        .unwrap_or_else(|err| panic!("{} okunamadı: {err}", path.display()));
-    serde_json::from_str(&text).expect("doğruluk kümesi ayrıştırılmalı")
+        .unwrap_or_else(|err| panic!("could not read {}: {err}", path.display()));
+    serde_json::from_str(&text).expect("the accuracy set must parse")
 }
 
 #[test]
@@ -44,7 +45,7 @@ fn every_case_in_the_shared_truth_set_matches_the_core_formula() {
     let cases = cases();
     assert!(
         cases.cases.len() >= 12,
-        "doğruluk kümesi küçülmüş: {} vaka",
+        "the accuracy set has shrunk: {} cases",
         cases.cases.len()
     );
 
@@ -53,24 +54,24 @@ fn every_case_in_the_shared_truth_set_matches_the_core_formula() {
         let got = case.anchor.position_at(case.now);
         if got != case.expected_ms {
             failures.push(format!(
-                "  {}: beklenen {} ms, çıkan {} ms",
+                "  {}: expected {} ms, got {} ms",
                 case.name, case.expected_ms, got
             ));
         }
     }
 
-    // Hepsi tek seferde raporlanıyor: ilk uyuşmazlıkta durmak, formül
-    // değiştiğinde kaç vakanın etkilendiğini gizlerdi.
+    // All are reported at once: stopping at the first mismatch would hide
+    // how many cases are affected when the formula changes.
     assert!(
         failures.is_empty(),
-        "{} / {} vaka uymadı:\n{}",
+        "{} / {} cases did not match:\n{}",
         failures.len(),
         cases.cases.len(),
         failures.join("\n")
     );
 }
 
-/// Doğruluk kümesi yalnızca kolay yolu kapsıyorsa kilit değildir.
+/// An accuracy set that only covers the easy path is no lock.
 #[test]
 fn the_truth_set_covers_the_cases_that_actually_break_a_reimplementation() {
     let cases = cases();
@@ -82,17 +83,17 @@ fn the_truth_set_covers_the_cases_that_actually_break_a_reimplementation() {
         .join("\n");
 
     for needle in [
-        "paused",    // ilerlememeli
-        "buffering", // Buffering de ilerlememeli — kolayca atlanan durum
-        "rate 0",    // çalıyor görünüp ilerlemeyen hâl
-        "1.001",     // Faz 4 sürüklenme düzeltmesi
-        "backwards", // saat geri atlarsa
-        "exceed",    // süreye kırpma
-        "unknown",   // süre yoksa kırpma yok
+        "paused",    // must not advance
+        "buffering", // Buffering must not advance either — the easily missed case
+        "rate 0",    // looks like playing but does not advance
+        "1.001",     // Phase 4 drift correction
+        "backwards", // if the clock jumps back
+        "exceed",    // clipping to the duration
+        "unknown",   // no clipping without a duration
     ] {
         assert!(
             all.contains(needle),
-            "doğruluk kümesinde '{needle}' vakası yok:\n{all}"
+            "there is no '{needle}' case in the accuracy set:\n{all}"
         );
     }
 }

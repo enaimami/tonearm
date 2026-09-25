@@ -1,63 +1,67 @@
-//! Bulanık eşleşme skoru — kimlik zincirinin üçüncü halkası.
+//! The fuzzy match score — the third link of the identity chain.
 //!
-//! Girdi normalize edilmiş sanatçı+başlık+süre; çıktı 0.0–1.0 arası bir güven.
-//! Skorun ağırlıkları burada tek yerde durur ki doğruluk kümesi üzerinde
-//! ayarlanabilsin.
+//! The input is normalised artist+title+duration; the output is a confidence
+//! between 0.0 and 1.0. The score's weights live here in one place so they
+//! can be tuned on the accuracy set.
 
 use crate::identity::normalize::{
     VARIANT_MARKERS, normalize_artist, normalize_text, variant_markers,
 };
 
-/// Başlık, sanatçıdan daha ayırt edicidir: aynı sanatçının 300 parçası olur.
+/// The title is more distinctive than the artist: one artist has 300 tracks.
 const TITLE_WEIGHT: f64 = 0.6;
-/// Sanatçının ağırlığı.
+/// The artist's weight.
 const ARTIST_WEIGHT: f64 = 0.4;
-/// Bu farkın altındaki süreler "aynı" sayılır (farklı master'lar, sessizlik payı).
+/// Durations closer than this count as "the same" (different masters, a
+/// margin for silence).
 const DURATION_MATCH_MS: u64 = 3_000;
-/// Bu farkın üstündeki süreler ciddi şüphe: radio edit / uzun versiyon.
+/// Durations further apart than this are seriously suspect: a radio edit / a
+/// long version.
 const DURATION_MISMATCH_MS: u64 = 15_000;
-/// Süre uyuşması skora eklenen pay.
+/// The amount a duration agreement adds to the score.
 const DURATION_BONUS: f64 = 0.08;
-/// Süre çelişmesi skoru bu oranla çarpar.
+/// A duration conflict multiplies the score by this ratio.
 const DURATION_PENALTY: f64 = 0.7;
-/// Sanatçı benzerliği bunun altındaysa aynı kayıt olamaz.
+/// If the artist similarity is below this, it cannot be the same recording.
 ///
-/// Aynı başlığı taşıyan farklı sanatçılar çok yaygın (cover, tribute,
-/// karaoke, adaş parça). Başlık ağırlığı tek başına 0.6 olduğu için
-/// tamamen yabancı bir sanatçı bile eşiğe dayanabiliyordu (D-009).
+/// Different artists with the same title are very common (covers, tributes,
+/// karaoke, same-named tracks). Since the title weight alone is 0.6, even a
+/// completely unrelated artist could get close to the threshold (D-009).
 const ARTIST_MIN_SIMILARITY: f64 = 0.7;
-/// Sanatçı tabanının altında kalan skor bu oranla çarpar.
+/// A score below the artist floor is multiplied by this ratio.
 const ARTIST_MISMATCH_PENALTY: f64 = 0.5;
-/// Varyant etiketleri uyuşmayan skor bu oranla çarpar.
+/// A score whose variant labels do not agree is multiplied by this ratio.
 ///
-/// `Creep` ile `Creep (Live)` aynı şarkıdır ama aynı **kayıt** değildir.
+/// `Creep` and `Creep (Live)` are the same song but not the same
+/// **recording**.
 const VARIANT_MISMATCH_PENALTY: f64 = 0.5;
-/// Bundan kısa kelimeler ayırt edici sayılmaz.
+/// Words shorter than this do not count as distinctive.
 ///
-/// `at`, `in`, `de`, `ve` gibi bağlaçlar iki metinde de bulunmayabilir ve
-/// bulunmamaları hiçbir şey söylemez. `nyc` (3) ayırt edicidir, `at` (2) değil.
+/// Connectives like `at`, `in`, `de`, `ve` may be missing from either text,
+/// and their absence says nothing. `nyc` (3) is distinctive, `at` (2) is not.
 const DETAIL_MIN_LEN: usize = 3;
 
-/// İki parça tanımı arasındaki benzerlik.
+/// The similarity between two track descriptions.
 ///
-/// `duration_*` bilinmiyorsa süre bileşeni devreye girmez — bilinmeyen süreyi
-/// uyuşma saymak yanlış eşleşme üretir.
+/// If `duration_*` is unknown the duration component does not apply —
+/// counting an unknown duration as agreement produces wrong matches.
 ///
-/// Metin benzerliğinin **üstünde** iki ayrık kural var; ikisi de "başlık
-/// benziyor ama bu aynı kayıt değil" durumunu yakalar:
-/// - sanatçı tabanı ([`ARTIST_MIN_SIMILARITY`]) — cover/tribute/karaoke,
-/// - varyant uyuşmazlığı — canlı/remix/akustik kayıtlar.
+/// On **top** of text similarity there are two separate rules; both catch the
+/// case "the title looks alike but this is not the same recording":
+/// - the artist floor ([`ARTIST_MIN_SIMILARITY`]) — covers/tributes/karaoke,
+/// - a variant mismatch — live/remix/acoustic recordings.
 ///
-/// # `context_b` — varyant bilgisi başlıkta olmayabilir
+/// # `context_b` — the variant information may not be in the title
 ///
-/// Asimetrik ve bilerek öyle: `a` kullanıcının kaydıdır, elinde ne varsa
-/// başlıktadır. `b` bir üstveri kataloğundan gelir ve MusicBrainz canlı
-/// kayıtları **başlıkta değil** `disambiguation` alanında işaretler —
-/// katalogda üç ayrı `Creep`'in ikisi canlıdır ve üçünün de başlığı düpedüz
-/// `Creep`'tir. Bu alan okunmadığında ölçülen sonuç şuydu (D-045, gerçek
-/// yanıt üzerinde): 1994 Astoria kaydı, süresi stüdyo kaydına 12 sn yakın
-/// olduğu için **1.00 güvenle "tam isabet"** sayılıyordu. Yani zincirin
-/// en emin göründüğü yerde yanlış kayda bağlanıyordu.
+/// Asymmetric, and on purpose: `a` is the user's record, and whatever they
+/// have is in the title. `b` comes from a metadata catalog, and MusicBrainz
+/// marks live recordings **not in the title** but in the `disambiguation`
+/// field — of three separate `Creep`s in the catalog two are live, and all
+/// three are titled plainly `Creep`. When this field was not read, the
+/// measured result was this (D-045, on a real response): the 1994 Astoria
+/// recording, because its duration was 12 s close to the studio recording,
+/// counted as a **"perfect hit" with 1.00 confidence**. That is, the chain was
+/// tying itself to the wrong recording exactly where it looked most sure.
 #[must_use]
 pub fn similarity(
     artist_a: &str,
@@ -95,25 +99,27 @@ pub fn similarity(
     if markers_a != markers_b {
         scored *= VARIANT_MISMATCH_PENALTY;
     } else if !markers_a.is_empty() && unmatched_detail(&norm_a, &norm_b, context_b) {
-        // İkisi de canlı kayıt, ama farklı geceler: `Creep (Live at
-        // Glastonbury)` ile `Creep` + `live, 1994-05-27: Astoria, London, UK`
-        // aynı işareti taşır, aynı performans değildir (D-010: kanonik kimlik
-        // kayıt düzeyindedir). Bu ayrım katalogda gerçek canlı kayıtlar
-        // olmadan görünmüyordu; onlar eklenince ortaya çıktı (D-045).
+        // Both are live recordings, but from different nights: `Creep (Live at
+        // Glastonbury)` and `Creep` + `live, 1994-05-27: Astoria, London, UK` carry
+        // the same marker but are not the same performance (D-010: the canonical
+        // identity is at the recording level). This distinction was invisible
+        // without real live recordings in the catalog; it showed up once they were
+        // added (D-045).
         scored *= VARIANT_MISMATCH_PENALTY;
     }
     scored.clamp(0.0, 1.0)
 }
 
-/// Kullanıcının verdiği ayırt edici bir ayrıntı adayda karşılık buluyor mu?
+/// Does a distinguishing detail the user gave find a counterpart in the
+/// candidate?
 ///
-/// Kullanıcı `Live at Glastonbury` yazmışsa `glastonbury` bir iddiadır ve
-/// adayın metninde (başlık **veya** ayırt edici not) geçmiyorsa aday o kayıt
-/// değildir. Yalnızca `Live` yazmışsa hiçbir iddia yok — o zaman en iyi canlı
-/// aday kabul edilir.
+/// If the user wrote `Live at Glastonbury`, `glastonbury` is a claim, and if
+/// it does not occur in the candidate's text (title **or** disambiguation
+/// note) the candidate is not that recording. If they only wrote `Live`
+/// there is no claim — then the best live candidate is accepted.
 ///
-/// Tek yönlü ve bilerek öyle: adayın fazladan taşıdığı ayrıntı (`1994-05-27`)
-/// kullanıcının onu bilmediği anlamına gelir, çelişki değil.
+/// One-directional, and on purpose: an extra detail the candidate carries
+/// (`1994-05-27`) means the user did not know it, not a contradiction.
 fn unmatched_detail(norm_a: &str, norm_b: &str, context_b: Option<&str>) -> bool {
     let haystack = match context_b {
         Some(context) => format!("{norm_b} {}", normalize_text(context)),
@@ -123,15 +129,16 @@ fn unmatched_detail(norm_a: &str, norm_b: &str, context_b: Option<&str>) -> bool
     norm_a
         .split_whitespace()
         .filter(|word| word.chars().count() >= DETAIL_MIN_LEN)
-        // Varyant etiketlerinin kendisi ayrıntı değil, sınıflandırma.
+        // The variant labels themselves are not details but a classification.
         .filter(|word| !VARIANT_MARKERS.contains(word))
         .any(|word| !known.contains(&word))
 }
 
-/// Adayın varyant işaretleri: başlığında geçenler **ve** bağlam alanındakiler.
+/// The candidate's variant markers: those in its title **and** those in the
+/// context field.
 ///
-/// Birleşim alınıyor, bağlam başlığın yerine geçmiyor: bir kayıt hem
-/// `Creep (Acoustic)` başlığını hem `live, 2003` notunu taşıyabilir.
+/// The union is taken; the context does not replace the title: a recording
+/// may carry both the title `Creep (Acoustic)` and the note `live, 2003`.
 fn merged_variant_markers(normalized_title: &str, context: Option<&str>) -> Vec<&'static str> {
     let mut markers = variant_markers(normalized_title);
     if let Some(context) = context {
@@ -160,7 +167,7 @@ mod tests {
             Some(238_500),
             None,
         );
-        assert!(score > 0.99, "skor {score}");
+        assert!(score > 0.99, "score {score}");
     }
 
     #[test]
@@ -174,7 +181,7 @@ mod tests {
             Some(261_000),
             None,
         );
-        assert!(score < 0.75, "skor {score}");
+        assert!(score < 0.75, "score {score}");
     }
 
     #[test]
@@ -197,12 +204,13 @@ mod tests {
             Some(420_000),
             None,
         );
-        assert!(mismatched < same, "{mismatched} < {same} olmalı");
+        assert!(mismatched < same, "should be {mismatched} < {same}");
     }
 
     #[test]
     fn live_recording_does_not_match_the_studio_take() {
-        // D-009: canlı kayıt ayrı bir kayıttır; süre bilinmese bile birleşmemeli.
+        // D-009: a live recording is a separate recording; it must not merge even if
+        // the duration is unknown.
         let studio = similarity("Radiohead", "Creep", None, "Radiohead", "Creep", None, None);
         let live = similarity(
             "Radiohead",
@@ -213,13 +221,14 @@ mod tests {
             None,
             None,
         );
-        assert!(studio > 0.99, "stüdyo skoru {studio}");
-        assert!(live < 0.7, "canlı skoru {live}");
+        assert!(studio > 0.99, "studio score {studio}");
+        assert!(live < 0.7, "live score {live}");
     }
 
     #[test]
     fn two_live_takes_are_not_penalised_against_each_other() {
-        // Ceza varyant *uyuşmazlığında*; iki canlı kayıt birbirine ceza almaz.
+        // The penalty is for a variant *mismatch*; two live recordings are not
+        // penalised against each other.
         let score = similarity(
             "Radiohead",
             "Creep (Live)",
@@ -229,12 +238,12 @@ mod tests {
             None,
             None,
         );
-        assert!(score > 0.88, "skor {score}");
+        assert!(score > 0.88, "score {score}");
     }
 
     #[test]
     fn a_different_artist_cannot_win_on_the_title_alone() {
-        // D-009: cover/tribute/karaoke — başlık birebir, sanatçı yabancı.
+        // D-009: cover/tribute/karaoke — the title identical, the artist foreign.
         let score = similarity(
             "Karaoke Version",
             "Creep",
@@ -244,13 +253,15 @@ mod tests {
             Some(238_000),
             None,
         );
-        assert!(score < 0.7, "skor {score}");
+        assert!(score < 0.7, "score {score}");
     }
 
-    /// D-045: gerçek katalogda canlı kaydın **tek** işareti ayırt edici nottur.
+    /// D-045: in the real catalog, the **only** marker of a live recording is the
+    /// disambiguation note.
     #[test]
     fn a_live_take_marked_only_in_the_note_loses_to_the_studio_take() {
-        // İki aday da başlığı düz `Creep`; fark yalnızca notta.
+        // Both candidates are titled plainly `Creep`; the difference is only in the
+        // note.
         let studio = similarity("Radiohead", "Creep", None, "Radiohead", "Creep", None, None);
         let live = similarity(
             "Radiohead",
@@ -261,14 +272,14 @@ mod tests {
             None,
             Some("live, 1994-05-27: Astoria, London, UK"),
         );
-        assert!(studio > 0.99, "stüdyo skoru {studio}");
+        assert!(studio > 0.99, "studio score {studio}");
         assert!(
             live < studio,
-            "not okunmadığında ikisi de 1.00 alıyordu: {live} < {studio} olmalı"
+            "when the note was not read both got 1.00: should be {live} < {studio}"
         );
     }
 
-    /// İki farklı canlı kayıt aynı kayıt değildir (D-010).
+    /// Two different live recordings are not the same recording (D-010).
     #[test]
     fn two_different_live_nights_do_not_merge() {
         let score = similarity(
@@ -280,10 +291,10 @@ mod tests {
             None,
             Some("live, 1994-05-27: Astoria, London, UK"),
         );
-        assert!(score < 0.7, "farklı geceler birleşmemeli: {score}");
+        assert!(score < 0.7, "different nights must not merge: {score}");
     }
 
-    /// Ama kullanıcı yalnızca "Live" dediyse hiçbir iddiada bulunmamıştır.
+    /// But if the user only said "Live", they made no claim.
     #[test]
     fn a_bare_live_query_accepts_the_best_live_candidate() {
         let score = similarity(
@@ -295,10 +306,11 @@ mod tests {
             None,
             Some("live, 1994-05-27: Astoria, London, UK"),
         );
-        assert!(score > 0.88, "eşiği geçmeli: {score}");
+        assert!(score > 0.88, "it must pass the threshold: {score}");
     }
 
-    /// Adayın fazladan bildiği ayrıntı çelişki değil: kullanıcı bilmiyordur.
+    /// A detail the candidate additionally knows is not a contradiction: the
+    /// user just does not know it.
     #[test]
     fn extra_detail_on_the_candidate_side_is_not_a_contradiction() {
         let score = similarity(
@@ -310,13 +322,14 @@ mod tests {
             None,
             Some("live, 1994-10-20: Earls Court, London"),
         );
-        assert!(score > 0.88, "skor {score}");
+        assert!(score > 0.88, "score {score}");
     }
 
     #[test]
     fn unknown_duration_is_not_treated_as_agreement() {
-        // Tam isabet eden bir çift seçilirse skor zaten 1.0'a dayanır ve bonus
-        // görünmez; bu yüzden başlığı kasten hafifçe kaydırıyoruz.
+        // If a perfectly matching pair were picked the score would already hit 1.0
+        // and the bonus would be invisible; so we shift the title slightly on
+        // purpose.
         let unknown = similarity(
             "Daft Punk",
             "Aerodynamic",
@@ -335,6 +348,6 @@ mod tests {
             Some(212_500),
             None,
         );
-        assert!(unknown < agreeing, "{unknown} < {agreeing} olmalı");
+        assert!(unknown < agreeing, "should be {unknown} < {agreeing}");
     }
 }

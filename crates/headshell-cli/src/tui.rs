@@ -1,17 +1,18 @@
-//! Terminal oynatıcı arayüzü (PLAN §1.7).
+//! The terminal player interface (PLAN §1.7).
 //!
-//! **Burada iş mantığı yok.** Bu dosya yalnızca: tuşları çekirdek çağrılarına
-//! eşler, [`PlaybackAnchor`]'ı çizer, ekranı tazeler. Kuyruk, tekrar,
-//! karıştırma, scrobble — hepsi `headshell-core` içinde.
+//! **No business logic here.** This file only maps keys to core calls, draws
+//! the [`PlaybackAnchor`] and refreshes the screen. The queue, repeat,
+//! shuffle, scrobbling — all of it is inside `headshell-core`.
 //!
-//! TUI, GUI'nin prototipi değil; çekirdeğin tam kullanılabilir olduğunun
-//! kanıtı. Buradan silinen her şeyi çekirdek hâlâ sunabiliyor olmalı.
+//! The TUI is not the GUI's prototype; it is the proof that the core is fully
+//! usable. The core must still be able to offer everything deleted from here.
 //!
-//! ## Pozisyon neden yoklanmıyor
+//! ## Why the position is not polled
 //!
-//! Çekirdek bildirim yağdırmaz (D-015). TUI kendi çizim hızında
-//! `anchor.position_at(now)` çağırır ve aradaki zamanı kendisi doldurur —
-//! aynı formülü GUI ve mobil de kullanacak, o yüzden formül çekirdekte.
+//! The core does not shower notifications (D-015). The TUI calls
+//! `anchor.position_at(now)` at its own drawing rate and fills in the time in
+//! between itself — the GUI and mobile will use the same formula, which is why
+//! the formula is in the core.
 
 use std::io::{self, Stdout};
 use std::time::{Duration, Instant};
@@ -28,31 +29,35 @@ use ratatui::widgets::{Block, Borders, Gauge, List, ListItem, ListState, Paragra
 
 use headshell_core::playback::{LiveSession, PlayState, PlaybackAnchor, Player, RepeatMode};
 
-/// Ekran ne sıklıkta tazelenecek. Ses hattından bağımsız: yalnızca çizim.
+/// How often the screen is refreshed. Independent of the audio pipeline: only
+/// drawing.
 const TICK: Duration = Duration::from_millis(200);
 
-/// TUI açılmadan **önce** terminalin gerçekten alınabildiğini sınar.
+/// Tests that the terminal can really be taken **before** the TUI opens.
 ///
-/// `--tui` iki kaynak ister: bir terminal ve bir ses çıkışı. Terminal
-/// bedava sınanır, ses çıkışı bir donanım kaynağı açar — o yüzden sıra
-/// budur. Ters sırada, terminali olmayan bir ortamda kullanıcı `--tui`
-/// yazdığı hâlde ses kartı hatası görüyordu; yanlış tanı, yanlış aşama.
+/// `--tui` needs two resources: a terminal and an audio output. The terminal
+/// is tested for free, the audio output opens a hardware resource — which is
+/// why this is the order. In the reverse order, in an environment without a
+/// terminal the user saw a sound card error even though they had typed
+/// `--tui`; the wrong diagnosis, the wrong stage.
 ///
-/// Sınama `enable_raw_mode`'un kendisiyle yapılıyor, ayrı bir `is_terminal`
-/// ölçütüyle değil: iki ölçüt birbirinden kayarsa "sınamada geçti, açarken
-/// düştü" doğar. Ham kip hemen geri veriliyor, ekran değiştirilmiyor.
+/// The test is done with `enable_raw_mode` itself, not with a separate
+/// `is_terminal` criterion: if the two criteria drifted apart, "passed the
+/// test, failed when opening" would be born. Raw mode is given back right
+/// away; the screen is not changed.
 ///
 /// # Errors
-/// Terminal ham kipe alınamazsa.
+/// If the terminal cannot be put into raw mode.
 pub fn require_terminal() -> io::Result<()> {
     terminal::enable_raw_mode()?;
     terminal::disable_raw_mode()
 }
 
-/// Terminali ham kipe alır ve çıkışta **her durumda** geri verir.
+/// Puts the terminal into raw mode and gives it back on exit **in every
+/// case**.
 ///
-/// `Drop` ile geri alma: panik olsa bile kullanıcının terminali bozuk
-/// kalmasın. Bu, elle `restore()` çağırmaktan daha güvenli.
+/// Restoring with `Drop`: even on a panic the user's terminal must not be left
+/// broken. This is safer than calling `restore()` by hand.
 struct TerminalGuard {
     terminal: Terminal<CrosstermBackend<Stdout>>,
 }
@@ -75,10 +80,10 @@ impl Drop for TerminalGuard {
     }
 }
 
-/// Kullanıcının bastığı tuşun anlamı.
+/// What the key the user pressed means.
 ///
-/// Tuş → eylem eşlemesi burada, eylem → çekirdek çağrısı aşağıda. İkisini
-/// ayırmak, tuş dizilimini değiştirmeyi tek bir yere indirir.
+/// The key → action mapping is here, the action → core call below. Keeping
+/// them apart brings changing the key layout down to a single place.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Action {
     Quit,
@@ -93,7 +98,7 @@ enum Action {
 }
 
 fn action_for(key: KeyEvent) -> Option<Action> {
-    // Ctrl+C her zaman çıkış: terminalde beklenen davranış.
+    // Ctrl+C always exits: the behaviour expected in a terminal.
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
         return Some(Action::Quit);
     }
@@ -111,13 +116,13 @@ fn action_for(key: KeyEvent) -> Option<Action> {
     }
 }
 
-/// TUI'yi çalıştırır; kullanıcı çıkana ya da kuyruk bitene kadar sürer.
+/// Runs the TUI; it lasts until the user quits or the queue ends.
 ///
-/// Dönüşte biriken dinleme kayıtları kütüphaneye yazılır (§1.6) ve kaç
-/// tanesinin yazıldığı döndürülür.
+/// On return the accumulated listen records are written to the library
+/// (§1.6) and how many were written is returned.
 ///
 /// # Errors
-/// Terminal kurulamazsa ya da çekirdek bir hata döndürürse.
+/// If the terminal cannot be set up or the core returns an error.
 pub async fn run(live: &mut LiveSession) -> anyhow::Result<usize> {
     let mut guard = TerminalGuard::enter()?;
     let mut selection = ListState::default();
@@ -126,11 +131,12 @@ pub async fn run(live: &mut LiveSession) -> anyhow::Result<usize> {
     let mut recorded = 0usize;
 
     let result = loop {
-        // — Çiz.
+        // — Draw.
         let player = live.player();
         let anchor = player.anchor();
-        // Kuyruğun görünümü çekirdekten tek parça geliyor: çalma sırası,
-        // konum, tekrar ve karıştırma aynı andan. GUI de aynı tipi alıyor.
+        // The queue view comes from the core in one piece: play order,
+        // position, repeat and shuffle from the same moment. The GUI gets the
+        // same type.
         let queue = player.queue().view();
         let queue_items: Vec<String> = queue
             .items
@@ -158,7 +164,7 @@ pub async fn run(live: &mut LiveSession) -> anyhow::Result<usize> {
             );
         })?;
 
-        // — Tuş oku (zaman aşımıyla: ekran yine de tazelenmeli).
+        // — Read a key (with a timeout: the screen must still refresh).
         let deadline = Instant::now() + TICK;
         let mut quit = false;
         while Instant::now() < deadline {
@@ -169,7 +175,7 @@ pub async fn run(live: &mut LiveSession) -> anyhow::Result<usize> {
             let Event::Key(key) = event::read()? else {
                 continue;
             };
-            // Windows'ta tuş bırakma da olay üretir; yalnızca basışı al.
+            // On Windows releasing a key produces an event too; take only presses.
             if key.kind != KeyEventKind::Press {
                 continue;
             }
@@ -183,7 +189,8 @@ pub async fn run(live: &mut LiveSession) -> anyhow::Result<usize> {
             if let Err(err) =
                 apply(live.player_mut(), action, &mut selection, queue_items.len()).await
             {
-                // Hata TUI'yi düşürmez: kullanıcıya gösterilir, döngü sürer.
+                // An error does not bring the TUI down: it is shown to the user and the
+                // loop carries on.
                 last_error = Some(err.chain_text());
             } else {
                 last_error = None;
@@ -193,18 +200,20 @@ pub async fn run(live: &mut LiveSession) -> anyhow::Result<usize> {
             break Ok(());
         }
 
-        // — Bir tur: parça bittiyse sıradakine geç, biriken dinlemeleri yaz.
+        // — One round: if the track ended, move on to the next; write the
+        // accumulated listens.
         match live.tick().await {
             Ok(report) => {
                 recorded += report.listens_recorded;
-                // Depo yazamadıysa sessiz kalınmıyor: kayıtlar elde tutuldu
-                // ve sonraki turda yeniden denenecek, ama kullanıcı bilsin.
+                // If the store could not write, it does not stay silent: the records
+                // were held and will be retried next round, but the user should know.
                 //
-                // Yalnızca hata **varsa** yazılıyor: koşulsuz atama, kullanıcının
-                // az önce bastığı tuşun hatasını bir sonraki turda silerdi.
+                // It is only written **if** there is an error: an unconditional
+                // assignment would wipe out, on the next round, the error of the key
+                // the user just pressed.
                 if let Some(text) = report.store_error {
                     last_error = Some(format!(
-                        "{text}\n  → {} dinleme elde tutuldu",
+                        "{text}\n  → {} listens held back",
                         report.listens_pending
                     ));
                 }
@@ -222,10 +231,10 @@ pub async fn run(live: &mut LiveSession) -> anyhow::Result<usize> {
     Ok(recorded + summary.inserted)
 }
 
-/// Bir eylemi çekirdek çağrısına çevirir.
+/// Turns an action into a core call.
 ///
-/// Dikkat: burada karar verilmiyor. "Duraklat mı sürdür mü" sorusunun
-/// cevabı `Player::toggle_pause` içinde; TUI yalnızca iletiyor.
+/// Note: no decision is made here. The answer to "pause or resume" is in
+/// `Player::toggle_pause`; the TUI only passes it on.
 async fn apply(
     player: &mut Player,
     action: Action,
@@ -233,7 +242,7 @@ async fn apply(
     queue_len: usize,
 ) -> headshell_core::Result<()> {
     match action {
-        // Çıkış çağrı döngüsünde ele alınıyor; buraya gelmez.
+        // Quitting is handled in the calling loop; it never gets here.
         Action::Quit => {}
         Action::TogglePause => player.toggle_pause(),
         Action::Next => {
@@ -274,7 +283,7 @@ async fn apply(
     Ok(())
 }
 
-/// Çizim için gereken her şey — tek yerde toplanmış salt okunur görünüm.
+/// Everything needed for drawing — a read-only view gathered in one place.
 struct View<'a> {
     anchor: &'a PlaybackAnchor,
     title: &'a str,
@@ -288,9 +297,9 @@ struct View<'a> {
 fn draw(frame: &mut ratatui::Frame<'_>, view: &View<'_>, selection: &mut ListState) {
     let area = frame.area();
     let chunks = Layout::vertical([
-        Constraint::Length(3), // çalan parça
-        Constraint::Length(3), // ilerleme
-        Constraint::Min(3),    // kuyruk
+        Constraint::Length(3), // playing track
+        Constraint::Length(3), // progress
+        Constraint::Min(3),    // queue
         Constraint::Length(if view.error.is_some() { 3 } else { 1 }),
     ])
     .split(area);
@@ -303,10 +312,10 @@ fn draw(frame: &mut ratatui::Frame<'_>, view: &View<'_>, selection: &mut ListSta
 
 fn draw_now_playing(frame: &mut ratatui::Frame<'_>, area: Rect, view: &View<'_>) {
     let state = match view.anchor.state {
-        PlayState::Playing => ("▶", Color::Green, "çalıyor"),
-        PlayState::Paused => ("⏸", Color::Yellow, "duraklatıldı"),
-        PlayState::Buffering => ("⋯", Color::Cyan, "bekliyor"),
-        PlayState::Stopped => ("■", Color::DarkGray, "durdu"),
+        PlayState::Playing => ("▶", Color::Green, "playing"),
+        PlayState::Paused => ("⏸", Color::Yellow, "paused"),
+        PlayState::Buffering => ("⋯", Color::Cyan, "waiting"),
+        PlayState::Stopped => ("■", Color::DarkGray, "stopped"),
     };
     let line = Line::from(vec![
         Span::styled(
@@ -326,13 +335,14 @@ fn draw_now_playing(frame: &mut ratatui::Frame<'_>, area: Rect, view: &View<'_>)
 }
 
 fn draw_progress(frame: &mut ratatui::Frame<'_>, area: Rect, anchor: &PlaybackAnchor) {
-    // Pozisyon çapadan **hesaplanıyor** — çekirdeğe sorulmuyor (D-015).
+    // The position is **computed** from the anchor — the core is not asked
+    // (D-015).
     let position = anchor.position_now();
     let (ratio, label) = match anchor.duration_ms {
         Some(duration) if duration > 0 => {
             #[expect(
                 clippy::cast_precision_loss,
-                reason = "ilerleme çubuğu oranı; ms ölçeğinde kayıp görünmez"
+                reason = "progress bar ratio; the loss is invisible at ms scale"
             )]
             let ratio = (position as f64 / duration as f64).clamp(0.0, 1.0);
             (ratio, format!("{} / {}", clock(position), clock(duration)))
@@ -377,10 +387,10 @@ fn draw_queue(
         .collect();
 
     let title = format!(
-        " kuyruk ({}) · tekrar: {} · karıştır: {} ",
+        " queue ({}) · repeat: {} · shuffle: {} ",
         view.queue.len(),
         repeat_label(view.repeat),
-        if view.shuffle { "açık" } else { "kapalı" }
+        if view.shuffle { "on" } else { "off" }
     );
     frame.render_stateful_widget(
         List::new(items)
@@ -391,28 +401,29 @@ fn draw_queue(
     );
 }
 
-/// Tekrar kipinin **kullanıcıya gösterilen** adı.
+/// The **user-facing** name of the repeat mode.
 ///
-/// `RepeatMode`'un `Display`'i `off`/`all`/`one` basar ve orası doğru yer:
-/// o dize JSON'a ve IPC'ye giden tel değeridir. Ekrana yazılan metin ayrı
-/// bir şeydir ve Türkçedir (D-036) — ikisini tek fonksiyona bağlamak, tel
-/// biçimini değiştirmeden arayüz metnini düzeltmeyi imkânsız kılardı.
+/// `RepeatMode`'s `Display` prints `off`/`all`/`one`, and that is the right
+/// place for it: that string is the wire value going to JSON and IPC. The text
+/// written on screen is a separate thing (D-036, D-073) — tying the two into
+/// one function would make it impossible to fix the interface text without
+/// changing the wire format.
 fn repeat_label(mode: RepeatMode) -> &'static str {
     match mode {
-        RepeatMode::Off => "kapalı",
-        RepeatMode::All => "tümü",
-        RepeatMode::One => "tek",
+        RepeatMode::Off => "off",
+        RepeatMode::All => "all",
+        RepeatMode::One => "one",
     }
 }
 
 fn draw_footer(frame: &mut ratatui::Frame<'_>, area: Rect, view: &View<'_>) {
     if let Some(error) = view.error {
-        // Hata ekranı kaplamıyor ama saklanmıyor da (K9): ilk satırı yeter,
-        // tamamı `headshell diag` ile okunur.
+        // The error does not cover the screen, but it is not hidden either (K9):
+        // its first line is enough; all of it can be read with `headshell diag`.
         let first = error.lines().next().unwrap_or(error);
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
-                format!(" {first}  (ayrıntı: headshell diag)"),
+                format!(" {first}  (details: headshell diag)"),
                 Style::default().fg(Color::Red),
             )))
             .block(Block::default().borders(Borders::ALL)),
@@ -422,14 +433,14 @@ fn draw_footer(frame: &mut ratatui::Frame<'_>, area: Rect, view: &View<'_>) {
     }
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            " boşluk duraklat · n/b sonraki/önceki · ↑↓ seç · enter çal · s karıştır · r tekrar · q çık",
+            " space pause · n/b next/previous · ↑↓ select · enter play · s shuffle · r repeat · q quit",
             Style::default().fg(Color::DarkGray),
         ))),
         area,
     );
 }
 
-/// Milisaniyeyi `3:07` biçimine çevirir.
+/// Turns milliseconds into the `3:07` format.
 fn clock(ms: u64) -> String {
     let total_seconds = ms / 1000;
     format!("{}:{:02}", total_seconds / 60, total_seconds % 60)
@@ -439,13 +450,14 @@ fn clock(ms: u64) -> String {
 mod tests {
     use super::*;
 
-    /// Tel değeri İngilizce kalır, ekrana yazılan Türkçe olur (D-036).
+    /// The wire value stays as it is; the text written on screen is a separate
+    /// string (D-036).
     #[test]
     fn the_repeat_label_is_turkish_while_the_wire_value_stays_english() {
-        assert_eq!(repeat_label(RepeatMode::Off), "kapalı");
-        assert_eq!(repeat_label(RepeatMode::All), "tümü");
-        assert_eq!(repeat_label(RepeatMode::One), "tek");
-        // Tel tarafı değişmemeli: JSON ve IPC bunu okuyor.
+        assert_eq!(repeat_label(RepeatMode::Off), "off");
+        assert_eq!(repeat_label(RepeatMode::All), "all");
+        assert_eq!(repeat_label(RepeatMode::One), "one");
+        // The wire side must not change: JSON and IPC read it.
         assert_eq!(RepeatMode::All.as_str(), "all");
         assert_eq!(RepeatMode::One.to_string(), "one");
     }
@@ -484,13 +496,13 @@ mod tests {
         assert_eq!(
             action_for(key(KeyCode::Char('z'))),
             None,
-            "bilinmeyen tuş yok sayılmalı"
+            "an unknown key must be ignored"
         );
     }
 
     #[test]
     fn ctrl_c_always_quits() {
-        // Terminalde beklenen davranış; 'c' tek başına bir şey yapmasa da.
+        // The behaviour expected in a terminal, even though 'c' alone does nothing.
         let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
         assert_eq!(action_for(ctrl_c), Some(Action::Quit));
         assert_eq!(action_for(key(KeyCode::Char('c'))), None);

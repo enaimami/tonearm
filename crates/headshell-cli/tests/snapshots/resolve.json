@@ -1,24 +1,24 @@
 {
   "artist": "Radiohead",
   "diag": {
-    "command": "<değişken>",
+    "command": "<variable>",
     "counters": {
       "identity.confidence_pct": 20,
       "identity.tied_candidates": 1
     },
     "env": {
-      "arch": "<değişken>",
-      "data_dir": "<değişken>",
-      "headshell_version": "<değişken>",
-      "os": "<değişken>"
+      "arch": "<variable>",
+      "data_dir": "<variable>",
+      "headshell_version": "<variable>",
+      "os": "<variable>"
     },
     "error_chain": [],
     "failed_at": null,
-    "finished_at": "<değişken>",
+    "finished_at": "<variable>",
     "notes": [
-      "yöntem: local_key"
+      "method: local_key"
     ],
-    "started_at": "<değişken>"
+    "started_at": "<variable>"
   },
   "query": "Radiohead - Creep",
   "resolution": {

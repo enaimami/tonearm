@@ -1,42 +1,44 @@
-//! K7 yüzey denetimi: dışa açılan tipler `uniffi` ile ifade edilebilir mi?
+//! K7 surface check: can the public types be expressed with `uniffi`?
 //!
-//! Bu test `PlayOptions<'a>` sınıfı bir kaymayı yakalamak için var. O tip
-//! aylarca dışa açılan yüzeyde lifetime taşıdı; kimse fark etmedi çünkü
-//! `cargo clippy` bunu bir kusur saymıyor — kural PLAN.md'de yazılıydı,
-//! kodda değil. Artık kodda.
+//! This test exists to catch a drift of the `PlayOptions<'a>` kind. That type
+//! carried a lifetime on the public surface for months; nobody noticed,
+//! because `cargo clippy` does not count it as a flaw — the rule was written
+//! in PLAN.md, not in the code. Now it is in the code.
 //!
-//! **Ne sınanıyor:** public bir `struct` / `enum` / `type` lifetime parametresi
-//! aldı mı. Aldıysa `uniffi` onu bir record olarak ifade edemez (D-052).
-//! Ayrıca public bir imza closure parametresi alıyor mu — K7 onu da yasaklıyor.
+//! **What is tested:** whether a public `struct` / `enum` / `type` took a
+//! lifetime parameter. If it did, `uniffi` cannot express it as a record
+//! (D-052). Also whether a public signature takes a closure parameter — K7
+//! forbids that too.
 //!
-//! **Ne sınanmıyor:** `pub fn new(x: impl Into<String>)` tarzı ergonomik
-//! yapıcılar. D-052 bunları kuralın dışında bıraktı: `uniffi` yalnızca
-//! işaretlenmiş öğeye bakar, Faz 6'da yanlarına `#[uniffi::constructor]`
-//! eklenir.
+//! **What is not tested:** ergonomic constructors in the style of `pub fn
+//! new(x: impl Into<String>)`. D-052 left those outside the rule: `uniffi`
+//! only looks at the marked item, and in Phase 6 a `#[uniffi::constructor]`
+//! is added next to them.
 //!
-//! **Bu gerçek `uniffi` scaffolding üretimi değildir.** Gerçek kontrol
-//! çekirdekteki tipleri `#[derive(uniffi::Record)]` ile işaretlemeyi
-//! gerektirir; o iş Faz 6'ya ait ve D-052'nin "bilinen açık"ı (boxed future
-//! taşıyan dört trait) onu bugün zaten kırmızı yakardı. Bu test o kontrolün
-//! yerine geçmez, ondan önce gelen ucuz bir süzgeçtir.
+//! **This is not real `uniffi` scaffolding generation.** The real check needs
+//! the core's types marked with `#[derive(uniffi::Record)]`; that job belongs
+//! to Phase 6, and D-052's "known gap" (four traits carrying boxed futures)
+//! would already turn it red today. This test does not replace that check; it
+//! is a cheap filter that comes before it.
 
-// K8 testleri muaf tutuyor; burada `expect` bir kusur değil: dosya
-// okunamıyorsa denetim sessizce boş geçmemeli, gürültüyle düşmeli.
+// K8 exempts tests; here `expect` is not a flaw: if the file cannot be read,
+// the check must not pass silently empty, it must fail loudly.
 #![allow(clippy::expect_used)]
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-/// Lifetime taşımasına **izin verilen** public tipler.
+/// The public types that **are allowed** to carry a lifetime.
 ///
-/// Üçü de aynı şey: `async fn` yerine elle yazılmış kutulanmış future.
-/// Trait'in `dyn` uyumlu olması gerekiyor (K7 `Arc<dyn Trait>`'i serbest
-/// bırakıyor) ve Rust'ta bunun makrosuz başka yolu yok.
+/// All three are the same thing: a hand-written boxed future instead of
+/// `async fn`. The trait has to be `dyn` compatible (K7 leaves
+/// `Arc<dyn Trait>` free), and in Rust there is no other way to do that
+/// without macros.
 ///
-/// Bu liste **borç kaydıdır, muafiyet değil**: `uniffi` bir trait metodunun
-/// dönüşünde `Pin<Box<dyn Future + Send + 'a>>` ifade edemez. Faz 6'da bu
-/// dört trait yeniden yazılacak (D-052). Listeye yeni bir ad eklemek, o
-/// borcu büyütmek demektir — önce sor.
+/// This list is **a debt record, not an exemption**: `uniffi` cannot express
+/// `Pin<Box<dyn Future + Send + 'a>>` in the return value of a trait method.
+/// In Phase 6 these four traits will be rewritten (D-052). Adding a new name
+/// to the list means growing that debt — ask first.
 const BOXED_FUTURE_ALIASES: &[&str] = &["ProviderFuture", "HttpFuture", "LookupFuture"];
 
 #[test]
@@ -44,7 +46,7 @@ fn no_public_type_carries_a_lifetime() {
     let mut findings = String::new();
 
     for file in core_sources() {
-        let source = std::fs::read_to_string(&file).expect("kaynak dosya okunabilmeli");
+        let source = std::fs::read_to_string(&file).expect("the source file must be readable");
         let body = without_test_modules(&source);
 
         for (line_no, line) in body.lines().enumerate() {
@@ -68,12 +70,12 @@ fn no_public_type_carries_a_lifetime() {
 
     assert!(
         findings.is_empty(),
-        "ADIM: K7_SURFACE\n\
-         Dışa açılan tipte lifetime var; `uniffi` bunu record olarak ifade edemez:\n\
+        "STEP: K7_SURFACE\n\
+         A public type has a lifetime; `uniffi` cannot express it as a record:\n\
          {findings}\n\
-         Düzeltme: ödünç alanı sahipli tipe çevir (`&'a str` → `String`).\n\
-         Gerekçe PLAN.md §2 K7 ve D-052. Bu gerçekten kaçınılmazsa listeyi\n\
-         genişletmeden önce sor — `BOXED_FUTURE_ALIASES` bir borç kaydıdır."
+         Fix: turn the borrowed field into an owned type (`&'a str` → `String`).\n\
+         Reasoning: PLAN.md §2 K7 and D-052. If this really cannot be avoided,\n\
+         ask before extending the list — `BOXED_FUTURE_ALIASES` is a debt record."
     );
 }
 
@@ -82,7 +84,7 @@ fn no_public_signature_takes_a_closure() {
     let mut findings = String::new();
 
     for file in core_sources() {
-        let source = std::fs::read_to_string(&file).expect("kaynak dosya okunabilmeli");
+        let source = std::fs::read_to_string(&file).expect("the source file must be readable");
         let body = without_test_modules(&source);
 
         for (line_no, signature) in public_signatures(&body) {
@@ -103,32 +105,29 @@ fn no_public_signature_takes_a_closure() {
 
     assert!(
         findings.is_empty(),
-        "ADIM: K7_SURFACE\n\
-         Dışa açılan imza closure parametresi alıyor; K7 bunu yasaklıyor\n\
-         çünkü `uniffi` closure'ı bağlamalara geçiremez:\n\
+        "STEP: K7_SURFACE\n\
+         A public signature takes a closure parameter; K7 forbids this\n\
+         because `uniffi` cannot pass closures to the bindings:\n\
          {findings}\n\
-         Düzeltme: closure yerine `Arc<dyn Trait>` al — K7 onu serbest bırakıyor\n\
-         ve `uniffi` callback interface olarak modelliyor."
+         Fix: take an `Arc<dyn Trait>` instead of a closure — K7 leaves that free\n\
+         and `uniffi` models it as a callback interface."
     );
 }
 
-/// `headshell-core/src` altındaki bütün `.rs` dosyaları.
+/// All the `.rs` files under `headshell-core/src`.
 fn core_sources() -> Vec<PathBuf> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut files = Vec::new();
     collect(&root, &mut files);
-    assert!(
-        !files.is_empty(),
-        "çekirdek kaynakları bulunamadı: {root:?}"
-    );
+    assert!(!files.is_empty(), "core sources not found: {root:?}");
     files.sort();
     files
 }
 
 fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
-    let entries = std::fs::read_dir(dir).expect("kaynak dizini okunabilmeli");
+    let entries = std::fs::read_dir(dir).expect("the source directory must be readable");
     for entry in entries {
-        let path = entry.expect("dizin girdisi").path();
+        let path = entry.expect("directory entry").path();
         if path.is_dir() {
             collect(&path, out);
         } else if path.extension().is_some_and(|ext| ext == "rs") {
@@ -137,16 +136,17 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Kaynağın test modülleri **çıkarılmış** hâli.
+/// The source with its test modules **removed**.
 ///
-/// Testler K7'ye tabi değil: orada `&str` ödünç almak serbest. Ama yalnızca
-/// test bloğu düşer, dosyanın geri kalanı değil — ilk `#[cfg(test)]`'ten
-/// sonrasını topluca kesmek, test modülünden *sonra* tanımlanan her public
-/// tipi denetimin dışında bırakıyordu. Bu kusur, denetimin kendisini
-/// sınarken çıktı: enjekte edilen ihlal yakalanmadı çünkü dosyanın sonundaydı.
+/// Tests are not subject to K7: borrowing a `&str` there is fine. But only
+/// the test block drops, not the rest of the file — cutting off everything
+/// after the first `#[cfg(test)]` left every public type defined *after* the
+/// test module outside the check. This flaw came out while testing the check
+/// itself: an injected violation was not caught because it was at the end of
+/// the file.
 ///
-/// Süslü parantez sayarak atlıyoruz; satır numaraları korunsun diye atlanan
-/// satırlar boşaltılıyor, silinmiyor.
+/// We skip by counting braces; the skipped lines are blanked, not deleted, so
+/// line numbers are kept.
 fn without_test_modules(source: &str) -> String {
     let mut out = String::with_capacity(source.len());
     let mut depth = 0usize;
@@ -170,8 +170,8 @@ fn without_test_modules(source: &str) -> String {
             continue;
         }
 
-        // `#[cfg(test)]` bir `mod`'u işaretliyorsa bloğu atla; bir `use`'u
-        // ya da tek bir öğeyi işaretliyorsa yalnızca o satır düşer.
+        // If `#[cfg(test)]` marks a `mod`, skip the block; if it marks a
+        // `use` or a single item, only that line drops.
         if armed {
             armed = false;
             if line.contains("mod ") {
@@ -193,9 +193,9 @@ fn without_test_modules(source: &str) -> String {
     out
 }
 
-/// `pub struct/enum/type Ad<...>` satırını parçalar.
+/// Splits a `pub struct/enum/type Name<...>` line.
 ///
-/// Dönüş: (tür, ad, generic listesi). Generic yoksa `None`.
+/// Returns (kind, name, generic list). `None` if there are no generics.
 fn public_type_header(line: &str) -> Option<(&'static str, &str, &str)> {
     let kind = ["struct", "enum", "type"]
         .into_iter()
@@ -204,7 +204,7 @@ fn public_type_header(line: &str) -> Option<(&'static str, &str, &str)> {
     let rest = line["pub ".len() + kind.len() + 1..].trim_start();
     let open = rest.find('<')?;
     let name = &rest[..open];
-    // Ad ile `<` arasında boşluk varsa bu bir tip başlığı değil.
+    // If there is a space between the name and `<`, this is not a type header.
     if name.is_empty() || name.contains(' ') {
         return None;
     }
@@ -215,7 +215,7 @@ fn public_type_header(line: &str) -> Option<(&'static str, &str, &str)> {
     Some((kind, name, &rest[open..=close]))
 }
 
-/// Public fonksiyon imzalarını (çok satırlı olanlar birleştirilmiş) döndürür.
+/// Returns the public function signatures (multi-line ones joined).
 fn public_signatures(body: &str) -> Vec<(usize, String)> {
     let lines: Vec<&str> = body.lines().collect();
     let mut out = Vec::new();
@@ -226,7 +226,7 @@ fn public_signatures(body: &str) -> Vec<(usize, String)> {
             continue;
         }
 
-        // İmza `)` ile kapanana kadar topla; gövdeye girme.
+        // Collect until the signature closes with `)`; do not enter the body.
         let mut signature = String::new();
         for line in lines.iter().skip(index).take(20) {
             signature.push_str(line.trim());
@@ -241,7 +241,8 @@ fn public_signatures(body: &str) -> Vec<(usize, String)> {
     out
 }
 
-/// Hata mesajında depo köküne göre yol göster — mutlak yol gürültü.
+/// Show the path relative to the repository root in the error message — an
+/// absolute path is noise.
 fn display_path(path: &Path) -> String {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     path.strip_prefix(root).map_or_else(

@@ -1,13 +1,15 @@
-//! Çalan bir oturum: `Player` + `Session` tek yerde bağlanır.
+//! A playing session: `Player` + `Session` wired together in one place.
 //!
-//! **Neden çekirdekte (K1):** her kabuk aynı dansı yapıyordu — düzenli
-//! `tick()`, sonra biriken dinlemeleri depoya yazmak. TUI bunu bir kez yazdı,
-//! GUI ikinci, mobil üçüncü kez yazacaktı. Dinlemeyi depoya yazmayı unutan bir
-//! kabuk **sessizce geçmiş kaybeder** — kaybı fark ettiren hiçbir şey yok.
+//! **Why in the core (K1):** every shell was doing the same dance — a regular
+//! `tick()`, then writing the accumulated listens to the store. The TUI wrote
+//! it once, the GUI a second time, mobile would have written it a third. A
+//! shell that forgets to write listens to the store **silently loses
+//! history** — and nothing makes the loss noticeable.
 //!
-//! **D-015'e sadık:** observer/callback yok. Kabuk döngüyü kendi sürer,
-//! her turda bir `TickReport` alır ve pozisyonu çapadan tahmin eder.
-//! **K7'ye sadık:** kapanış (closure) parametresi, generic, ömür sızıntısı yok.
+//! **True to D-015:** no observers/callbacks. The shell drives the loop
+//! itself, gets a `TickReport` every round and estimates the position from
+//! the anchor.
+//! **True to K7:** no closure parameters, generics or leaking lifetimes.
 
 use serde::{Deserialize, Serialize};
 
@@ -17,52 +19,56 @@ use crate::playback::{PlayState, PlaybackAnchor, Player};
 use crate::session::Session;
 use crate::{Error, Result};
 
-/// Bir `tick`'te ne olduğu.
+/// What happened in a `tick`.
 ///
-/// Kabuk buna bakıp yeniden çizer. Pozisyon burada **yok**: o `anchor`'dan
-/// tahmin edilir, yoksa saniyede onlarca kez sorulması gerekirdi.
+/// The shell looks at this and redraws. The position is **not** here: it is
+/// estimated from the `anchor`, otherwise it would have to be asked dozens of
+/// times a second.
 ///
-/// `Serialize`: GUI bunu webview'e olduğu gibi gönderiyor (§3.2).
-/// Ayrı bir "IPC tipi" yazılmıyor — çevirmen katmanı iki tipi kaydırırdı.
+/// `Serialize`: the GUI sends this to the webview as it is (§3.2). No
+/// separate "IPC type" is written — a translating layer would let the two
+/// types drift apart.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TickReport {
-    /// Her zaman dolu. Kabuk pozisyonu bundan hesaplar
+    /// Always filled in. The shell computes the position from this
     /// (`PlaybackAnchor::position_at`).
     pub anchor: PlaybackAnchor,
-    /// Bu turda çalan parça değişti mi.
+    /// Did the playing track change this round.
     pub track_changed: bool,
-    /// Bu turda depoya **yazılan** dinleme sayısı.
+    /// The number of listens **written** to the store this round.
     pub listens_recorded: usize,
-    /// Yazılamayıp elde tutulan dinleme sayısı.
+    /// The number of listens that could not be written and are held back.
     ///
-    /// Sıfırdan büyükse depo yazma hatası vermiş demektir; kayıtlar
-    /// **atılmadı**, sonraki turda yeniden denenecek. Kabuk bunu göstermeli.
+    /// Greater than zero means the store gave a write error; the records **were
+    /// not thrown away**, they will be retried next round. The shell should show
+    /// this.
     pub listens_pending: usize,
-    /// Depo yazması bu turda başarısız olduysa hata zinciri.
+    /// The error chain, if writing to the store failed this round.
     ///
-    /// `tick` bu yüzden `Err` dönmez: ses çalmaya devam ediyor, oturumu
-    /// düşürmek veri kaybını artırırdı. Ama sessiz de kalınmıyor (K9).
+    /// That is why `tick` does not return `Err`: the audio keeps playing, and
+    /// dropping the session would increase the data loss. But it does not stay
+    /// silent either (K9).
     pub store_error: Option<String>,
-    /// Kuyruk tükendi ve ses durdu.
+    /// The queue ran out and the audio stopped.
     pub finished: bool,
 }
 
-/// Çalan oturum.
+/// The playing session.
 ///
-/// `Session` (kütüphane, istatistik, tanılama) ile `Player` (ses, kuyruk)
-/// burada birlikte yaşar. İkisine erişim açık kalır: arama ve istatistik
-/// çalarken de gerekiyor.
+/// `Session` (library, statistics, diagnostics) and `Player` (audio, queue)
+/// live here together. Access to both stays open: search and statistics are
+/// needed while playing too.
 pub struct LiveSession {
     session: Session,
     player: Player,
-    /// Depoya yazılamamış dinlemeler. `take_listens` onları oynatıcıdan
-    /// çekip aldığı için, yazma başarısız olursa **burada tutulmazlarsa
-    /// kaybolurlar**.
+    /// Listens that could not be written to the store. Since `take_listens`
+    /// pulls them out of the player, **if they are not kept here they are lost**
+    /// when the write fails.
     pending: Vec<Listen>,
 }
 
 impl LiveSession {
-    /// Bir oturum ile bir oynatıcıyı bağlar.
+    /// Wires a session and a player together.
     #[must_use]
     pub fn new(session: Session, player: Player) -> Self {
         Self {
@@ -90,46 +96,50 @@ impl LiveSession {
         &mut self.player
     }
 
-    /// Şu anki çapa.
+    /// The current anchor.
     #[must_use]
     pub fn anchor(&self) -> PlaybackAnchor {
         self.player.anchor()
     }
 
-    /// Çalan oynatıcıyı yenisiyle değiştirir (yeni bir kuyruk başlatmak).
+    /// Replaces the playing player with a new one (starting a new queue).
     ///
-    /// **Eski oynatıcının biriken dinlemeleri alınır.** Doğrudan
-    /// `*live.player_mut() = yeni` yazmak eski oynatıcıyı `take_listens`
-    /// çağrılmadan düşürürdü: kullanıcı yeni bir arama yaptığı anda az önce
-    /// dinlediği parça sessizce kaybolurdu. Kayıtlar buradan `pending`'e
-    /// geçer, ilk `tick` onları yazar.
+    /// **The old player's accumulated listens are taken.** Writing
+    /// `*live.player_mut() = new` directly would drop the old player without
+    /// calling `take_listens`: the moment the user made a new search, the track
+    /// they had just listened to would silently be lost. The records move from
+    /// here to `pending`, and the first `tick` writes them.
     ///
-    /// Eski ses hattı kapanır — `Player` düşerken durur.
+    /// The old audio pipeline closes — `Player` stops when dropped.
     pub fn replace_player(&mut self, player: Player) {
         self.player.stop();
         self.pending.extend(self.player.take_listens());
         self.player = player;
     }
 
-    /// Bir tur: oynatıcıyı ilerlet, biriken dinlemeleri **hemen** yaz.
+    /// One round: advance the player, write the accumulated listens
+    /// **immediately**.
     ///
-    /// Yazma her turda yapılıyor, çıkışta değil. Saatlerce açık kalan bir
-    /// arayüzde çıkışta yazmak, çökme ya da `kill` durumunda bütün oturumun
-    /// geçmişini götürürdü. Çoğu turda yazılacak bir şey olmaz — `take_listens`
-    /// boş döner ve depoya hiç gidilmez.
+    /// The write happens every round, not on exit. In an interface left open for
+    /// hours, writing on exit would take the whole session's history with it on
+    /// a crash or a `kill`. Most rounds have nothing to write — `take_listens`
+    /// comes back empty and the store is never touched.
     ///
     /// # Errors
-    /// Oynatıcı ilerlerken hata verirse (kaynak açılamadı, kod çözülemedi).
-    /// **Depo yazma hatası `Err` üretmez** — `TickReport::store_error`'a düşer.
+    /// If the player fails while advancing (the source could not be opened, the
+    /// code could not be decoded). **A store write error does not produce an
+    /// `Err`** — it lands in `TickReport::store_error`.
     pub async fn tick(&mut self) -> Result<TickReport> {
-        // Kuyruk konumu da bakılıyor: aynı parça kuyrukta iki kez olabilir,
-        // yalnızca `TrackRef` karşılaştırmak aralarındaki geçişi kaçırırdı.
+        // The queue position is looked at too: the same track can be in the
+        // queue twice, and comparing only the `TrackRef` would miss the
+        // transition between them.
         //
-        // Yakalamadığı durum bilerek yazılıyor: `RepeatMode::One` aynı parçayı
-        // baştan başlattığında ne parça ne konum değişir, `track_changed`
-        // `false` kalır. Kabuk için doğru olan da bu — gösterilen parça aynı;
-        // baştan başladığını çapanın pozisyonu, yeni dinlemeyi
-        // `listens_recorded` söylüyor.
+        // The case it does not catch is written down on purpose: when
+        // `RepeatMode::One` restarts the same track, neither the track nor the
+        // position changes, and `track_changed` stays `false`. That is also
+        // what is right for the shell — the track shown is the same; the
+        // anchor's position says it started over, and `listens_recorded` says
+        // there is a new listen.
         let before = (
             self.player.current_track().cloned(),
             self.player.queue().position(),
@@ -137,8 +147,8 @@ impl LiveSession {
 
         let tick_result = self.player.tick().await;
 
-        // Oynatıcı hata verse bile biriken dinlemeler yazılmalı: hata
-        // bir parçaya ait, geçmiş bütün oturuma.
+        // The accumulated listens must be written even if the player failed:
+        // the error belongs to one track, the history to the whole session.
         let (recorded, store_error) = self.flush();
 
         let after = (
@@ -161,11 +171,11 @@ impl LiveSession {
         })
     }
 
-    /// Oturumu kapatır: sesi durdurur, kalan her dinlemeyi yazar.
+    /// Closes the session: stops the audio, writes every remaining listen.
     ///
     /// # Errors
-    /// Son yazma başarısız olursa. Bu durumda kayıtlar **hâlâ elde**;
-    /// `pending_listens()` kaç tanesinin yazılamadığını söyler.
+    /// If the last write fails. The records are then **still at hand**;
+    /// `pending_listens()` says how many could not be written.
     pub fn shutdown(&mut self) -> Result<WriteSummary> {
         self.player.stop();
         self.pending.extend(self.player.take_listens());
@@ -177,13 +187,14 @@ impl LiveSession {
         Ok(summary)
     }
 
-    /// Depoya yazılamamış dinleme sayısı.
+    /// The number of listens not yet written to the store.
     #[must_use]
     pub fn pending_listens(&self) -> usize {
         self.pending.len()
     }
 
-    /// Biriken dinlemeleri yazmayı dener. Yazamazsa **elde tutar**.
+    /// Tries to write the accumulated listens. If it cannot, it **holds on** to
+    /// them.
     fn flush(&mut self) -> (usize, Option<String>) {
         self.pending.extend(self.player.take_listens());
         if self.pending.is_empty() {
@@ -194,20 +205,21 @@ impl LiveSession {
     }
 }
 
-/// Yazma sonucunu tampona uygular.
+/// Applies a write result to the buffer.
 ///
-/// Ayrı bir fonksiyon, çünkü asıl iddia **başarısızlık yolunda**: yazılamayan
-/// kayıt atılmaz, elde kalır. Bunu gerçek bir bozuk depoyla sınamak denendi ve
-/// güvenilir olmadı — SQLite açık dosya tanıtıcısıyla salt-okunur dizinde bile
-/// yazmayı sürdürüyor. Koşulu sağlanamayan bir test yeşil yanar ve hiçbir şey
-/// kanıtlamaz; karar buraya çıkarıldı ki doğrudan sınanabilsin.
+/// A separate function, because the real claim is **on the failure path**: a
+/// record that could not be written is not thrown away, it stays at hand.
+/// Testing this with a real broken store was tried and was not reliable —
+/// with an open file handle SQLite keeps writing even in a read-only
+/// directory. A test whose condition cannot be met turns green and proves
+/// nothing; the decision was pulled out here so it can be tested directly.
 fn absorb(pending: &mut Vec<Listen>, outcome: Result<WriteSummary>) -> (usize, Option<String>) {
     match outcome {
         Ok(summary) => {
             pending.clear();
             (summary.inserted, None)
         }
-        // Kayıtlar `pending`'de kalıyor: sonraki tur yeniden denenecek.
+        // The records stay in `pending`: the next round will retry.
         Err(err) => (0, Some(Error::chain_text(&err))),
     }
 }
@@ -227,7 +239,7 @@ mod tests {
     }
 
     fn live_at(dir: &std::path::Path) -> LiveSession {
-        let session = Session::open(Config::with_data_dir(dir)).expect("oturum açılmalı");
+        let session = Session::open(Config::with_data_dir(dir)).expect("the session must open");
         LiveSession::new(session, Player::new(ProviderRegistry::new()))
     }
 
@@ -237,7 +249,7 @@ mod tests {
             played_at: jiff::Timestamp::now(),
             ms_played: 200_000,
             source: ListenSource::Playback {
-                provider: ProviderId::new("yerel"),
+                provider: ProviderId::new("local"),
             },
             canonical_id: None,
         }
@@ -245,12 +257,15 @@ mod tests {
 
     #[tokio::test]
     async fn an_idle_session_reports_finished_without_inventing_listens() {
-        let dir = temp_dir("bosta");
+        let dir = temp_dir("idle");
         let mut live = live_at(&dir);
 
-        let report = live.tick().await.expect("boşta tick hata vermemeli");
+        let report = live.tick().await.expect("an idle tick must not fail");
 
-        assert!(report.finished, "kuyruk boş ve ses durmuş");
+        assert!(
+            report.finished,
+            "the queue is empty and the audio has stopped"
+        );
         assert!(!report.track_changed);
         assert_eq!(report.listens_recorded, 0);
         assert_eq!(report.listens_pending, 0);
@@ -260,50 +275,58 @@ mod tests {
 
     #[test]
     fn flushing_writes_listens_and_empties_the_buffer() {
-        let dir = temp_dir("yaz");
+        let dir = temp_dir("write");
         let mut live = live_at(&dir);
-        live.pending.push(listen("Bir"));
-        live.pending.push(listen("İki"));
+        live.pending.push(listen("One"));
+        live.pending.push(listen("Two"));
 
         let (recorded, error) = live.flush();
 
-        assert_eq!(recorded, 2, "ikisi de yazılmalı");
+        assert_eq!(recorded, 2, "both must be written");
         assert!(error.is_none(), "{error:?}");
-        assert_eq!(live.pending_listens(), 0, "tampon boşalmalı");
+        assert_eq!(live.pending_listens(), 0, "the buffer must empty");
     }
 
-    /// Asıl iddia: **depo yazamazsa dinleme kaybolmaz.**
+    /// The real claim: **if the store cannot write, no listen is lost.**
     ///
-    /// `take_listens` kayıtları oynatıcıdan çekip alıyor; yazma başarısız olur
-    /// ve elde tutulmazlarsa geri alınacakları bir yer yok. Eskiden yazma
-    /// yalnızca çıkışta yapılıyordu, yani tek bir hata bütün oturumu götürürdü.
+    /// `take_listens` pulls the records out of the player; if the write fails
+    /// and they are not held on to, there is no place to get them back from.
+    /// Writing used to happen only on exit, so a single error would take the
+    /// whole session with it.
     #[test]
     fn a_failing_store_keeps_the_listens_instead_of_dropping_them() {
-        let mut pending = vec![listen("Kaybolmamalı"), listen("Bu da")];
+        let mut pending = vec![listen("Must not be lost"), listen("Nor this one")];
 
         let (recorded, error) = absorb(
             &mut pending,
             Err(Error::new(
                 Stage::LibraryWrite,
                 ErrorKind::InvalidInput {
-                    detail: "disk dolu".to_owned(),
+                    detail: "disk full".to_owned(),
                 },
             )),
         );
 
-        assert_eq!(recorded, 0, "hiçbiri yazılmadı");
-        assert_eq!(pending.len(), 2, "kayıtlar ELDE kalmalı, atılmamalı");
-        let text = error.expect("hata bildirilmeli, yutulmamalı");
-        assert!(
-            text.starts_with("ADIM: "),
-            "aşama bildirilmeli (K9): {text}"
+        assert_eq!(recorded, 0, "none were written");
+        assert_eq!(
+            pending.len(),
+            2,
+            "the records must stay AT HAND, not be thrown away"
         );
-        assert!(text.contains("disk dolu"), "sebep görünmeli: {text}");
+        let text = error.expect("the error must be reported, not swallowed");
+        assert!(
+            text.starts_with("STEP: "),
+            "the stage must be reported (K9): {text}"
+        );
+        assert!(
+            text.contains("disk full"),
+            "the reason must be visible: {text}"
+        );
     }
 
     #[test]
     fn a_successful_store_empties_the_buffer() {
-        let mut pending = vec![listen("Yazıldı")];
+        let mut pending = vec![listen("Written")];
 
         let (recorded, error) = absorb(
             &mut pending,
@@ -317,44 +340,57 @@ mod tests {
 
         assert_eq!(recorded, 1);
         assert!(error.is_none());
-        assert!(pending.is_empty(), "yazılan kayıt tamponda kalmamalı");
+        assert!(
+            pending.is_empty(),
+            "a written record must not stay in the buffer"
+        );
     }
 
-    /// Yeni bir kuyruk başlatmak, önceki turdan kalan kayıtları silmemeli.
+    /// Starting a new queue must not delete the records left over from the
+    /// previous round.
     ///
-    /// Bu testin **kapsamadığı** kısım bilerek yazılıyor: eski oynatıcının
-    /// kendi `pending_listens`'i buraya aktarılıyor mu? `Player`'ın alanı
-    /// özel ve dinleme üretmek gerçek bir ses hattı ister; o yol
-    /// `tests/playback_local.rs` ile sınanıyor. Burada sınanan, tamponun
-    /// değiştirme sırasında **atılmadığı**.
+    /// The part this test **does not cover** is written down on purpose: is the
+    /// old player's own `pending_listens` carried over here? `Player`'s field is
+    /// private and producing listens needs a real audio pipeline; that path is
+    /// tested by `tests/playback_local.rs`. What is tested here is that the
+    /// buffer **is not thrown away** during the replacement.
     #[test]
     fn replacing_the_player_swaps_the_queue_and_keeps_pending_listens() {
         use crate::ids::ProviderTrackId;
         use crate::playback::QueueItem;
 
-        let dir = temp_dir("degistir");
+        let dir = temp_dir("replace");
         let mut live = live_at(&dir);
-        live.pending.push(listen("Önceki turdan kalan"));
+        live.pending
+            .push(listen("Left over from the previous round"));
 
-        let mut yeni = Player::new(ProviderRegistry::new());
-        yeni.queue_mut().replace(vec![QueueItem {
-            id: ProviderTrackId::new(ProviderId::new("yerel"), "1"),
+        let mut replacement = Player::new(ProviderRegistry::new());
+        replacement.queue_mut().replace(vec![QueueItem {
+            id: ProviderTrackId::new(ProviderId::new("local"), "1"),
             track: TrackRef::new("Artist", "New queue"),
         }]);
 
-        live.replace_player(yeni);
+        live.replace_player(replacement);
 
-        assert_eq!(live.player().queue().len(), 1, "yeni kuyruk geçerli olmalı");
-        assert_eq!(live.pending_listens(), 1, "eski tampon atılmamalı");
+        assert_eq!(
+            live.player().queue().len(),
+            1,
+            "the new queue must be in effect"
+        );
+        assert_eq!(
+            live.pending_listens(),
+            1,
+            "the old buffer must not be thrown away"
+        );
     }
 
     #[test]
     fn shutdown_writes_what_is_still_pending() {
-        let dir = temp_dir("kapat");
+        let dir = temp_dir("close");
         let mut live = live_at(&dir);
         live.pending.push(listen("Son"));
 
-        let summary = live.shutdown().expect("kapanış yazabilmeli");
+        let summary = live.shutdown().expect("shutdown must be able to write");
 
         assert_eq!(summary.inserted, 1);
         assert_eq!(live.pending_listens(), 0);

@@ -1,13 +1,13 @@
-//! Eklenti onay defteri: `<data_dir>/plugins.json` (D-040).
+//! The plugin consent ledger: `<data_dir>/plugins.json` (D-040).
 //!
-//! Onaylanan izin kümesi **olduğu gibi** saklanır, özeti değil: kullanıcı
-//! neye evet dediğini dosyayı açıp okuyabilmeli, ve "yeni ne isteniyor?"
-//! sorusunun cevabı bir hash karşılaştırmasından değil kümeler farkından
-//! gelmeli.
+//! The approved permission set is stored **as it is**, not a digest of it:
+//! the user should be able to open the file and read what they said yes to,
+//! and the answer to "what new thing is being asked?" should come from a set
+//! difference, not a hash comparison.
 //!
-//! Onay verilmemiş bir eklenti **yüklenmez ama görünür**: `headshell plugin list`
-//! onu "onay bekliyor" diye gösterir. Sessizce atlanan bir eklenti,
-//! kullanıcının kurduğunu sandığı ama çalışmayan bir eklentidir (K9).
+//! A plugin without consent **is not loaded but is visible**: `headshell
+//! plugin list` shows it as "awaiting consent". A plugin skipped silently is
+//! a plugin the user thinks is installed but that does not work (K9).
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -19,14 +19,15 @@ use crate::error::{Error, ErrorKind, Result, io_err};
 
 use super::manifest::Permissions;
 
-/// Bir eklentinin onay kaydı.
+/// A plugin's consent record.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PluginConsent {
-    /// Kullanıcının evet dediği izin kümesi.
+    /// The permission set the user said yes to.
     pub granted: Permissions,
     pub granted_at: jiff::Timestamp,
-    /// Kullanıcı sonradan kapattıysa `false`. Kayıt silinmez: kapatmak
-    /// unutmak değildir, ve yeniden açarken aynı izinler sorulmaz.
+    /// `false` if the user later disabled it. The record is not deleted:
+    /// disabling is not forgetting, and re-enabling does not ask for the same
+    /// permissions again.
     #[serde(default = "default_true")]
     pub enabled: bool,
 }
@@ -35,43 +36,44 @@ const fn default_true() -> bool {
     true
 }
 
-/// Bir eklentinin bu andaki onay durumu.
+/// A plugin's consent state at this moment.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum ConsentStatus {
-    /// Onaylı ve istenen izinler onayın içinde.
+    /// Approved, and the requested permissions are within the consent.
     Approved,
-    /// Hiç sorulmamış.
+    /// Never asked.
     NotAsked,
-    /// Onay var ama eklenti **daha fazlasını** istiyor. `extra` yeni istekler.
+    /// There is consent, but the plugin asks for **more**. `extra` is the new
+    /// requests.
     NeedsApproval { extra: Permissions },
-    /// Kullanıcı kapattı.
+    /// The user disabled it.
     Disabled,
 }
 
 impl ConsentStatus {
-    /// Eklenti çalıştırılabilir mi.
+    /// Can the plugin be run.
     #[must_use]
     pub fn is_approved(&self) -> bool {
         matches!(self, Self::Approved)
     }
 
-    /// Kullanıcıya gösterilecek tek satırlık sebep.
+    /// A one-line reason to show the user.
     #[must_use]
     pub fn describe(&self) -> String {
         match self {
-            Self::Approved => "onaylı".to_owned(),
-            Self::NotAsked => "onay bekliyor — `headshell plugin approve <ad>`".to_owned(),
+            Self::Approved => "approved".to_owned(),
+            Self::NotAsked => "awaiting consent — `headshell plugin approve <name>`".to_owned(),
             Self::NeedsApproval { extra } => format!(
-                "yeni izin istiyor ({}) — `headshell plugin approve <ad>`",
+                "asks for new permissions ({}) — `headshell plugin approve <name>`",
                 extra.describe()
             ),
-            Self::Disabled => "kapalı — `headshell plugin enable <ad>`".to_owned(),
+            Self::Disabled => "disabled — `headshell plugin enable <name>`".to_owned(),
         }
     }
 }
 
-/// Onay defteri.
+/// The consent ledger.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ConsentStore {
@@ -79,12 +81,12 @@ pub struct ConsentStore {
 }
 
 impl ConsentStore {
-    /// Dosyadan okur. Dosya yoksa boş defter — henüz hiçbir eklenti
-    /// onaylanmamış demek. Bozuksa hata: boş defter dönmek, bütün onayları
-    /// sessizce silmek olurdu.
+    /// Reads from the file. If there is no file, an empty ledger — meaning no
+    /// plugin has been approved yet. If it is corrupt, an error: returning an
+    /// empty ledger would silently delete every consent.
     ///
     /// # Errors
-    /// Dosya okunamaz ya da JSON bozuksa.
+    /// If the file cannot be read or the JSON is corrupt.
     pub fn load(path: &Path) -> Result<Self> {
         let raw = match std::fs::read_to_string(path) {
             Ok(raw) => raw,
@@ -102,10 +104,10 @@ impl ConsentStore {
         })
     }
 
-    /// Dosyaya yazar.
+    /// Writes to the file.
     ///
     /// # Errors
-    /// Dizin oluşturulamaz ya da dosya yazılamazsa.
+    /// If the directory cannot be created or the file cannot be written.
     pub fn save(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
@@ -123,7 +125,7 @@ impl ConsentStore {
         std::fs::write(path, text).map_err(|err| io_err(Stage::PluginLoad, path, err))
     }
 
-    /// Bir eklentinin istediği izinlere göre durumu.
+    /// The state for the permissions a plugin asks for.
     #[must_use]
     pub fn status(&self, name: &str, requested: &Permissions) -> ConsentStatus {
         let Some(record) = self.plugins.get(name) else {
@@ -141,9 +143,9 @@ impl ConsentStore {
         }
     }
 
-    /// İzinleri onaylar (ve kapalıysa açar). Onaylanan küme **istenenin
-    /// kendisidir**, birleşimi değil: eklenti izin bıraktıysa defter de
-    /// bırakmalı.
+    /// Approves the permissions (and enables the plugin if it was disabled). The
+    /// approved set is **exactly what was asked**, not the union: if the plugin
+    /// dropped a permission, the ledger should drop it too.
     pub fn approve(&mut self, name: &str, requested: &Permissions, now: jiff::Timestamp) {
         self.plugins.insert(
             name.to_owned(),
@@ -155,9 +157,9 @@ impl ConsentStore {
         );
     }
 
-    /// Eklentiyi kapatır. Onay kaydı **korunur**.
+    /// Disables the plugin. The consent record is **kept**.
     ///
-    /// Dönüş: kayıt var mıydı.
+    /// Returns: whether there was a record.
     pub fn disable(&mut self, name: &str) -> bool {
         match self.plugins.get_mut(name) {
             Some(record) => {
@@ -168,7 +170,7 @@ impl ConsentStore {
         }
     }
 
-    /// Kapalı bir eklentiyi yeniden açar. Dönüş: kayıt var mıydı.
+    /// Re-enables a disabled plugin. Returns: whether there was a record.
     pub fn enable(&mut self, name: &str) -> bool {
         match self.plugins.get_mut(name) {
             Some(record) => {
@@ -179,13 +181,13 @@ impl ConsentStore {
         }
     }
 
-    /// Onayı tamamen unutur — bir sonraki çalıştırmada baştan sorulur.
-    /// Dönüş: kayıt var mıydı.
+    /// Forgets the consent entirely — it is asked from scratch on the next run.
+    /// Returns: whether there was a record.
     pub fn forget(&mut self, name: &str) -> bool {
         self.plugins.remove(name).is_some()
     }
 
-    /// Kayıtlı onay (varsa).
+    /// The recorded consent (if any).
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&PluginConsent> {
         self.plugins.get(name)
@@ -232,7 +234,7 @@ mod tests {
             ConsentStatus::NeedsApproval { extra } => {
                 assert_eq!(extra.net, vec!["c.example".to_owned()]);
             }
-            other => panic!("büyüyen izin yeniden onay istemeli: {other:?}"),
+            other => panic!("a grown permission set must ask for consent again: {other:?}"),
         }
     }
 
@@ -274,8 +276,8 @@ mod tests {
 
         let back = ConsentStore::load(&path).unwrap();
         assert_eq!(back, store);
-        // Onaylanan küme sıralı yazılmalı; sıra değişikliği yeniden onay
-        // istemesin diye normalize ediliyor.
+        // The approved set must be written sorted; it is normalised so that a
+        // change in order does not ask for consent again.
         assert_eq!(
             back.get("p").unwrap().granted.net,
             vec!["a.example".to_owned(), "b.example".to_owned()]
@@ -286,7 +288,7 @@ mod tests {
     fn a_broken_ledger_is_an_error_not_an_empty_one() {
         let dir = crate::test_support::TempDir::new("consent-broken");
         let path = dir.join("plugins.json");
-        std::fs::write(&path, "{bozuk").unwrap();
+        std::fs::write(&path, "{broken").unwrap();
         let err = ConsentStore::load(&path).unwrap_err();
         assert_eq!(err.stage(), Stage::PluginLoad);
     }

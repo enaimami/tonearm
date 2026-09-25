@@ -1,30 +1,32 @@
-//! Eklentinin dış dünyaya açılan tek kapısı: `host` nesnesi (D-069).
+//! The plugin's only door to the outside world: the `host` object (D-069).
 //!
-//! QuickJS'in kendisinde ağ, dosya, süreç yok — yalnızca dil var. Eklenti
-//! dışarıya ne yapabiliyorsa **burada** verildi, ve her kapı kendi
-//! denetimini yapıyor:
+//! QuickJS itself has no network, files or processes — only the language.
+//! Whatever a plugin can do outside is given **here**, and every door does its
+//! own check:
 //!
-//! | JS | Ne yapar | Denetim |
+//! | JS | What it does | Check |
 //! |---|---|---|
-//! | `host.http.request/get/post` | HTTP isteği | her istekte ve her yönlendirmede `permissions.net`; süre; yükleme sırasında yasak |
-//! | `host.secrets.get(k)` | eklentinin **kendi** sırrı | ad alanı (D-042) |
-//! | `host.secrets.file(k)` | sırrı `0600` geçici dosyaya yazar, yolu verir | yalnızca kendi sırrı; motor kapanınca silinir |
-//! | `host.storage.get/set/remove` | eklentiye özel kalıcı anahtar-değer | eklentinin durum dizini; 1 MB tavan |
-//! | `host.tools.run(ad, argümanlar, seçenekler)` | motorun kurduğu aracı çalıştırır | yalnızca manifestte beyan edilmiş ve karması doğrulanmış eser; süre |
-//! | `host.log.*`, `console.*` | `tracing`'e yazar | — |
+//! | `host.http.request/get/post` | HTTP request | `permissions.net` on every request and every redirect; time limit; forbidden while loading |
+//! | `host.secrets.get(k)` | the plugin's **own** secret | namespace (D-042) |
+//! | `host.secrets.file(k)` | writes the secret to a `0600` temporary file, returns its path | only its own secret; deleted when the engine shuts down |
+//! | `host.storage.get/set/remove` | persistent key-value store private to the plugin | the plugin's state directory; 1 MB cap |
+//! | `host.tools.run(name, args, options)` | runs a tool the engine installed | only an artifact declared in the manifest with a verified hash; time limit |
+//! | `host.log.*`, `console.*` | writes to `tracing` | — |
 //!
-//! Hepsi **eşzamanlı**: fonksiyon döndüğünde iş bitmiştir. Motorda olay
-//! döngüsü ve zamanlayıcı yok; `async function` yazılabilir ama motor
-//! çağrıları söz döndürmez. Eşzamansız bir API eklemek sonradan `api`'yi
-//! kırmadan mümkün (eklemek kırmaz), tersi değil.
+//! All of them are **synchronous**: when the function returns, the work is
+//! done. The engine has no event loop and no timers; `async function` can be
+//! written, but engine calls do not return promises. An asynchronous API can
+//! be added later without breaking `api` (adding does not break), not the
+//! other way round.
 //!
-//! ## Yönlendirmeler neden elle izleniyor
+//! ## Why redirects are followed by hand
 //!
-//! İzin denetimi istek adresine bakar. HTTP istemcisi yönlendirmeleri
-//! kendisi izleseydi, izinli bir adres eklentiyi izinsiz bir adrese
-//! taşıyabilirdi ve motor bunu hiç görmezdi. Eklentilere verilen istemci bu
-//! yüzden yönlendirme izlemiyor ([`crate::net::plugin_http_client`]); her
-//! adımı motor izliyor ve her adımda yeniden soruyor.
+//! The permission check looks at the request address. If the HTTP client
+//! followed redirects itself, an allowed address could carry the plugin to a
+//! forbidden one and the engine would never see it. That is why the client
+//! given to plugins does not follow redirects
+//! ([`crate::net::plugin_http_client`]); the engine follows every step and
+//! asks again at every step.
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
@@ -46,22 +48,23 @@ use super::artifact::{ArtifactStore, RequirementState};
 use super::manifest::{Permissions, Requirement};
 use super::protocol::PLUGIN_API;
 
-/// Bir isteğin izleyeceği en fazla yönlendirme.
+/// The most redirects a request will follow.
 const MAX_REDIRECTS: usize = 5;
 
-/// `host.storage`'ın toplam tavanı (anahtar + değer baytları).
+/// The total cap of `host.storage` (key + value bytes).
 ///
-/// Depo önbellek içindir (`client_id` gibi), veritabanı değil; tavan
-/// aşılırsa yazma **reddedilir**, eski değerler sessizce atılmaz.
+/// The store is a cache (like a `client_id`), not a database; if the cap is
+/// exceeded, the write is **refused** and old values are not silently
+/// dropped.
 const STORAGE_LIMIT: usize = 1024 * 1024;
 
-/// Bir aracın stdout/stderr'inden alınan en fazla bayt.
+/// The most bytes taken from a tool's stdout/stderr.
 ///
-/// Fazlası okunup atılır (araç dolan boruda takılmasın) ve dönüşte
-/// `truncated: true` yazar — kırpma sessiz değil.
+/// The rest is read and discarded (so the tool does not block on a full
+/// pipe), and the result says `truncated: true` — truncation is not silent.
 const MAX_TOOL_OUTPUT: usize = 8 * 1024 * 1024;
 
-/// Bir eklentinin motor tarafındaki durumu. Eklentinin iş parçacığında yaşar.
+/// A plugin's state on the engine side. Lives on the plugin's thread.
 pub(crate) struct HostState {
     plugin: String,
     permissions: Permissions,
@@ -70,12 +73,13 @@ pub(crate) struct HostState {
     http: std::result::Result<Arc<dyn HttpClient>, String>,
     store: ArtifactStore,
     requires: Vec<Requirement>,
-    /// Doğrulanmış araç yolları. İlk kullanımda karma denetlenir ve yol
-    /// burada tutulur: her çağrıda 40 MB'lık bir ikiliyi yeniden
-    /// karmalamak bir çalma isteğine saniyeler eklerdi.
+    /// Verified tool paths. The hash is checked on first use and the path kept
+    /// here: re-hashing a 40 MB binary on every call would add seconds to a
+    /// play request.
     tools: RefCell<BTreeMap<String, PathBuf>>,
     deadline: Rc<Cell<Option<Instant>>>,
-    /// Modül değerlendirilirken `true`: ağ ve araç yasak.
+    /// `true` while the module is being evaluated: network and tools are
+    /// forbidden.
     loading: Cell<bool>,
     storage: RefCell<Option<BTreeMap<String, String>>>,
     secret_files: RefCell<BTreeMap<String, PathBuf>>,
@@ -111,14 +115,15 @@ impl HostState {
         self.deadline.set(deadline);
     }
 
-    /// Çağrının kalan süresi; dolduysa neden.
+    /// The call's remaining time; if it ran out, why.
     fn remaining(&self) -> std::result::Result<Duration, String> {
         match self.deadline.get() {
             Some(at) => at
                 .checked_duration_since(Instant::now())
                 .filter(|left| !left.is_zero())
-                .ok_or_else(|| "çağrının süresi doldu".to_owned()),
-            // Süresiz bir çağrı yok; yine de sınırsız bir bütçe vermiyoruz.
+                .ok_or_else(|| "the call's time ran out".to_owned()),
+            // There is no call without a time limit; still, we don't hand out an
+            // unlimited budget.
             None => Ok(Duration::from_secs(20)),
         }
     }
@@ -126,7 +131,7 @@ impl HostState {
     fn forbid_while_loading(&self, what: &str) -> std::result::Result<(), String> {
         if self.loading.get() {
             return Err(format!(
-                "modül yüklenirken {what} yapılamaz — bu işi ilk çağrıya (health, search…) bırakın"
+                "{what} is not possible while the module is loading — leave this to the first call (health, search…)"
             ));
         }
         Ok(())
@@ -144,7 +149,7 @@ impl HostState {
     // --- http ---------------------------------------------------------------
 
     fn http_request(&self, options: HttpOptions) -> std::result::Result<serde_json::Value, String> {
-        self.forbid_while_loading("ağa çıkma")?;
+        self.forbid_while_loading("going online")?;
         let http = self.http.as_ref().map_err(Clone::clone)?;
 
         let mut method = match options.method.as_deref().map(str::to_ascii_uppercase) {
@@ -153,7 +158,7 @@ impl HostState {
             Some(name) if name == "POST" => HttpMethod::Post,
             Some(name) => {
                 return Err(format!(
-                    "`{name}` desteklenmiyor — motor yalnızca GET ve POST gönderir"
+                    "`{name}` is not supported — the engine only sends GET and POST"
                 ));
             }
         };
@@ -167,7 +172,7 @@ impl HostState {
 
         for hop in 0..=MAX_REDIRECTS {
             if let Err(reason) = self.permissions.check_url(&url) {
-                tracing::warn!(plugin = %self.plugin, %url, "eklentinin isteği reddedildi: {reason}");
+                tracing::warn!(plugin = %self.plugin, %url, "the plugin's request was refused: {reason}");
                 return Err(reason);
             }
             self.remaining()?;
@@ -186,11 +191,11 @@ impl HostState {
             {
                 if hop == MAX_REDIRECTS {
                     return Err(format!(
-                        "{MAX_REDIRECTS} yönlendirmeden sonra vazgeçildi (son adres: {url})"
+                        "gave up after {MAX_REDIRECTS} redirects (last address: {url})"
                     ));
                 }
                 url = resolve_location(&url, location)?;
-                // Tarayıcıların yaptığı: 303 her zaman, 301/302 POST'ta GET'e döner.
+                // What browsers do: 303 always, and 301/302 on POST, switch to GET.
                 if response.status == 303
                     || (matches!(response.status, 301 | 302) && method == HttpMethod::Post)
                 {
@@ -218,7 +223,7 @@ impl HostState {
                 "body": response.text_lossy(),
             }));
         }
-        Err("yönlendirme döngüsü".to_owned())
+        Err("redirect loop".to_owned())
     }
 
     // --- secrets ------------------------------------------------------------
@@ -227,12 +232,12 @@ impl HostState {
         self.secrets.get(key).cloned()
     }
 
-    /// Sırrı `0600` bir geçici dosyaya yazar ve yolunu verir.
+    /// Writes the secret to a `0600` temporary file and returns its path.
     ///
-    /// Tek kullanıcısı bugün yt-dlp'nin çerez dosyası (D-061): yt-dlp çerezi
-    /// yalnızca **dosyadan** okuyor. Kapı dar tutuldu — eklenti dosyaya
-    /// kendi seçtiği içeriği değil yalnızca **kendi sırrını** yazdırabilir;
-    /// dosyayı okuyamaz da, yolu yalnızca bir araca verebilir.
+    /// Its only user today is yt-dlp's cookie file (D-061): yt-dlp reads cookies
+    /// only **from a file**. The door is kept narrow — the plugin cannot have the
+    /// file written with content of its choosing, only **its own secret**; it
+    /// cannot read the file either, it can only hand the path to a tool.
     fn secret_file(&self, key: &str) -> std::result::Result<Option<String>, String> {
         let Some(value) = self.secrets.get(key) else {
             return Ok(None);
@@ -247,8 +252,12 @@ impl HostState {
             std::process::id(),
             jiff::Timestamp::now().as_nanosecond()
         ));
-        write_private(&path, value.as_bytes())
-            .map_err(|err| format!("sır dosyası yazılamadı ({}): {err}", path.display()))?;
+        write_private(&path, value.as_bytes()).map_err(|err| {
+            format!(
+                "could not write the secret file ({}): {err}",
+                path.display()
+            )
+        })?;
         self.secret_files
             .borrow_mut()
             .insert(key.to_owned(), path.clone());
@@ -261,11 +270,11 @@ impl HostState {
         self.state_dir.join("storage.json")
     }
 
-    /// Depoyu (gerekirse diskten okuyup) `apply`'a verir.
+    /// Hands the store (read from disk if needed) to `apply`.
     ///
-    /// Bozuk bir depo **boş sayılmaz**: sessizce sıfırlamak eklentinin
-    /// verisini yutmak olurdu. Hata eklentiye fırlatılır, eklenti de
-    /// kullanıcıya.
+    /// A corrupt store **does not count as empty**: resetting it silently would
+    /// swallow the plugin's data. The error is thrown to the plugin, and by the
+    /// plugin to the user.
     fn with_storage<T>(
         &self,
         apply: impl FnOnce(&mut BTreeMap<String, String>) -> T,
@@ -276,18 +285,23 @@ impl HostState {
             let loaded = match std::fs::read_to_string(&path) {
                 Ok(text) => serde_json::from_str(&text).map_err(|err| {
                     format!(
-                        "depo bozuk ({}): {err} — dosyayı silmek sıfırlar",
+                        "store is corrupt ({}): {err} — deleting the file resets it",
                         path.display()
                     )
                 })?,
                 Err(err) if err.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
-                Err(err) => return Err(format!("depo okunamadı ({}): {err}", path.display())),
+                Err(err) => {
+                    return Err(format!(
+                        "could not read the store ({}): {err}",
+                        path.display()
+                    ));
+                }
             };
             *slot = Some(loaded);
         }
         match slot.as_mut() {
             Some(map) => Ok(apply(map)),
-            None => Err("depo yüklenemedi".to_owned()),
+            None => Err("could not load the store".to_owned()),
         }
     }
 
@@ -311,18 +325,18 @@ impl HostState {
         let size: usize = snapshot.iter().map(|(k, v)| k.len() + v.len()).sum();
         if size > STORAGE_LIMIT {
             return Err(format!(
-                "depo tavanı aşılıyor ({size} bayt > {STORAGE_LIMIT}); yazılmadı"
+                "the store cap would be exceeded ({size} bytes > {STORAGE_LIMIT}); not written"
             ));
         }
         let text = serde_json::to_string_pretty(&snapshot).map_err(|err| err.to_string())?;
         let path = self.storage_path();
-        let temp = path.with_extension(format!("json.{}.yaziliyor", std::process::id()));
+        let temp = path.with_extension(format!("json.{}.writing", std::process::id()));
         std::fs::create_dir_all(&self.state_dir)
             .and_then(|()| std::fs::write(&temp, text))
             .and_then(|()| std::fs::rename(&temp, &path))
             .map_err(|err| {
                 let _ = std::fs::remove_file(&temp);
-                format!("depo yazılamadı ({}): {err}", path.display())
+                format!("could not write the store ({}): {err}", path.display())
             })?;
         *self.storage.borrow_mut() = Some(snapshot);
         Ok(())
@@ -330,15 +344,15 @@ impl HostState {
 
     // --- tools --------------------------------------------------------------
 
-    /// Beyan edilmiş, kurulu ve karması tutan bir aracın yolu.
+    /// The path of a tool that is declared, installed and whose hash matches.
     fn tool_path(&self, name: &str) -> std::result::Result<PathBuf, String> {
         if let Some(path) = self.tools.borrow().get(name) {
             return Ok(path.clone());
         }
         let Some(requirement) = self.requires.iter().find(|r| r.name == name) else {
             return Err(format!(
-                "`{name}` bu eklentinin manifestinde beyan edilmiş bir eser değil — motor \
-                 yalnızca `requires`'taki araçları çalıştırır"
+                "`{name}` is not an artifact declared in this plugin's manifest — the engine \
+                 only runs the tools in `requires`"
             ));
         };
         match self.store.state_of(requirement) {
@@ -349,7 +363,7 @@ impl HostState {
                 Ok(path)
             }
             Ok(state) => Err(format!(
-                "{name} hazır değil: {} — bunu eklenti değil motor kurar: \
+                "{name} is not ready: {} — the engine installs it, not the plugin: \
                  `headshell plugin install {}`",
                 state.describe(),
                 self.plugin
@@ -364,7 +378,7 @@ impl HostState {
         args: Vec<String>,
         options: ToolOptions,
     ) -> std::result::Result<serde_json::Value, String> {
-        self.forbid_while_loading("araç çalıştırma")?;
+        self.forbid_while_loading("running tools")?;
         let path = self.tool_path(name)?;
         let remaining = self.remaining()?;
         let budget = options
@@ -380,15 +394,15 @@ impl HostState {
             .stderr(Stdio::piped());
         #[cfg(windows)]
         {
-            // Masaüstü uygulamasından açılan bir konsol programı her
-            // çağrıda bir konsol penceresi yanıp söndürür.
+            // A console program started from a desktop app flashes a console
+            // window on every call.
             use std::os::windows::process::CommandExt as _;
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             command.creation_flags(CREATE_NO_WINDOW);
         }
         let mut child = command
             .spawn()
-            .map_err(|err| format!("{name} başlatılamadı ({}): {err}", path.display()))?;
+            .map_err(|err| format!("could not start {name} ({}): {err}", path.display()))?;
 
         let stdout = child.stdout.take().map(read_capped_in_background);
         let stderr = child.stderr.take().map(read_capped_in_background);
@@ -400,28 +414,30 @@ impl HostState {
                 Ok(None) if started.elapsed() >= budget => {
                     let _ = child.kill();
                     let _ = child.wait();
-                    // Okuyucular beklenmiyor: aracın kendi çocuğu (PyInstaller
-                    // ikilileri kendini bir alt süreçte açıyor) boruyu açık
-                    // tutabilir, o zaman burada takılırdık.
+                    // The readers are not waited for: the tool's own child (PyInstaller
+                    // binaries start themselves in a subprocess) can keep the pipe
+                    // open, and then we would be stuck here.
                     return Err(format!(
-                        "{name} {:.1} sn içinde bitmedi ve durduruldu",
+                        "{name} did not finish within {:.1} s and was stopped",
                         budget.as_secs_f64()
                     ));
                 }
                 Ok(None) => std::thread::sleep(Duration::from_millis(20)),
-                Err(err) => return Err(format!("{name} beklenirken hata: {err}")),
+                Err(err) => return Err(format!("error while waiting for {name}: {err}")),
             }
         };
 
-        // Okuyucu düştüyse çıktı boş sayılmaz: eksik çıktıyla "araç bir şey
-        // demedi" sanılırdı (K9).
+        // If a reader died the output does not count as empty: with missing
+        // output it would look as if "the tool said nothing" (K9).
         let collect =
             |reader: Option<std::thread::JoinHandle<(Vec<u8>, bool)>>, which: &str| match reader
                 .map(std::thread::JoinHandle::join)
             {
                 Some(Ok(output)) => Ok(output),
-                Some(Err(_)) => Err(format!("{name} çıktısı ({which}) okunamadı")),
-                None => Err(format!("{name} çıktısına ({which}) boru açılamadı")),
+                Some(Err(_)) => Err(format!("could not read {name}'s output ({which})")),
+                None => Err(format!(
+                    "could not open a pipe to {name}'s output ({which})"
+                )),
             };
         let (out, out_cut) = collect(stdout, "stdout")?;
         let (err, err_cut) = collect(stderr, "stderr")?;
@@ -436,23 +452,23 @@ impl HostState {
 
 impl Drop for HostState {
     fn drop(&mut self) {
-        // Sırrın diskteki kopyası motorla birlikte gider (D-061'in kuralı:
-        // bir hesap oturumunun kalıcı kopyası bırakılmaz).
+        // The secret's copy on disk goes with the engine (D-061's rule: no
+        // persistent copy of an account session is left behind).
         for path in self.secret_files.borrow().values() {
             if let Err(err) = std::fs::remove_file(path)
                 && err.kind() != std::io::ErrorKind::NotFound
             {
                 tracing::warn!(
                     plugin = %self.plugin,
-                    yol = %path.display(),
-                    "sır dosyası silinemedi: {err}"
+                    path = %path.display(),
+                    "could not delete a secret file: {err}"
                 );
             }
         }
     }
 }
 
-/// `host.http.request`'in seçenekleri.
+/// The options of `host.http.request`.
 #[derive(Debug, Deserialize)]
 struct HttpOptions {
     url: String,
@@ -464,7 +480,7 @@ struct HttpOptions {
     body: Option<String>,
 }
 
-/// `host.tools.run`'ın seçenekleri.
+/// The options of `host.tools.run`.
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ToolOptions {
@@ -472,14 +488,16 @@ struct ToolOptions {
     timeout_ms: Option<u64>,
 }
 
-/// Bir yönlendirme başlığını mutlak adrese çevirir.
+/// Turns a redirect header into an absolute address.
 fn resolve_location(base: &str, location: &str) -> std::result::Result<String, String> {
     let location = location.trim();
     if location.contains("://") {
         return Ok(location.to_owned());
     }
     let Some((scheme, rest)) = base.split_once("://") else {
-        return Err(format!("yönlendirme çözülemedi: {base} → {location}"));
+        return Err(format!(
+            "could not resolve the redirect: {base} → {location}"
+        ));
     };
     if let Some(network_path) = location.strip_prefix("//") {
         return Ok(format!("{scheme}://{network_path}"));
@@ -495,7 +513,7 @@ fn resolve_location(base: &str, location: &str) -> std::result::Result<String, S
     Ok(format!("{origin}{directory}{location}"))
 }
 
-/// Dosya adına girecek metni zararsızlaştırır.
+/// Makes text that goes into a file name harmless.
 fn file_safe(value: &str) -> String {
     value
         .chars()
@@ -509,7 +527,7 @@ fn file_safe(value: &str) -> String {
         .collect()
 }
 
-/// Yalnızca sahibinin okuyabileceği yeni bir dosya yazar.
+/// Writes a new file only its owner can read.
 fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write as _;
     let mut options = std::fs::OpenOptions::new();
@@ -524,11 +542,12 @@ fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     file.flush()
 }
 
-/// Bir boruyu arka planda, tavana kadar okur; fazlasını okuyup atar.
+/// Reads a pipe in the background, up to the cap; reads and discards the
+/// rest.
 ///
-/// Dönüşün ikinci öğesi "çıktı eksik": tavan aşıldıysa **ya da** okuma bir
-/// hatayla kesildiyse `true`. İkisi de eklentiye `truncated` olarak gider;
-/// eksik bir çıktı tam gibi görünmemeli.
+/// The second item of the return value is "output incomplete": `true` if the
+/// cap was exceeded **or** the read was cut short by an error. Both reach the
+/// plugin as `truncated`; incomplete output must not look complete.
 fn read_capped_in_background<R: Read + Send + 'static>(
     mut reader: R,
 ) -> std::thread::JoinHandle<(Vec<u8>, bool)> {
@@ -557,13 +576,13 @@ fn read_capped_in_background<R: Read + Send + 'static>(
     })
 }
 
-// --- JS tarafı ----------------------------------------------------------------
+// --- JS side ----------------------------------------------------------------
 
 fn throw(ctx: &Ctx<'_>, message: &str) -> rquickjs::Error {
     Exception::throw_message(ctx, message)
 }
 
-/// Bir JS değerini (nesne) serde tipine çevirir — JSON üzerinden.
+/// Turns a JS value (an object) into a serde type — through JSON.
 fn from_js<'js, T: serde::de::DeserializeOwned>(
     ctx: &Ctx<'js>,
     value: Value<'js>,
@@ -574,15 +593,16 @@ fn from_js<'js, T: serde::de::DeserializeOwned>(
         .map(|text| text.to_string())
         .transpose()?
         .unwrap_or_else(|| "null".to_owned());
-    serde_json::from_str(&text)
-        .map_err(|err| Exception::throw_type(ctx, &format!("{what} beklenen biçimde değil: {err}")))
+    serde_json::from_str(&text).map_err(|err| {
+        Exception::throw_type(ctx, &format!("{what} is not in the expected form: {err}"))
+    })
 }
 
-/// Yoksa `null`, varsa dize — `undefined` değil.
+/// `null` if missing, a string if present — not `undefined`.
 ///
-/// `rquickjs` Rust'ın `None`'unu `undefined` yapıyor; sözleşme ise "yoksa
-/// `null`" diyor (`localStorage.getItem` gibi). Eklenti `=== null` ile
-/// bakınca yanılmasın diye dönüş burada sabitleniyor.
+/// `rquickjs` turns Rust's `None` into `undefined`; the contract says "`null`
+/// if missing" (like `localStorage.getItem`). The return value is pinned
+/// here so a plugin checking with `=== null` is not fooled.
 fn nullable<'js>(ctx: &Ctx<'js>, value: Option<String>) -> rquickjs::Result<Value<'js>> {
     match value {
         Some(text) => text.into_js(ctx),
@@ -590,13 +610,13 @@ fn nullable<'js>(ctx: &Ctx<'js>, value: Option<String>) -> rquickjs::Result<Valu
     }
 }
 
-/// Bir `serde_json` değerini JS değerine çevirir.
+/// Turns a `serde_json` value into a JS value.
 fn to_js<'js>(ctx: &Ctx<'js>, value: &serde_json::Value) -> rquickjs::Result<Value<'js>> {
     let text = serde_json::to_string(value).map_err(|err| throw(ctx, &err.to_string()))?;
     ctx.json_parse(text)
 }
 
-/// `host` nesnesini kurar ve küresel alana koyar.
+/// Sets up the `host` object and puts it in the global scope.
 pub(crate) fn install<'js>(ctx: &Ctx<'js>, state: Rc<HostState>) -> rquickjs::Result<()> {
     let host = Object::new(ctx.clone())?;
     host.set("api", PLUGIN_API)?;
@@ -697,7 +717,7 @@ pub(crate) fn install<'js>(ctx: &Ctx<'js>, state: Rc<HostState>) -> rquickjs::Re
             Function::new(
                 ctx.clone(),
                 move |ctx: Ctx<'js>, options: Value<'js>| -> rquickjs::Result<Value<'js>> {
-                    let options: HttpOptions = from_js(&ctx, options, "istek seçenekleri")?;
+                    let options: HttpOptions = from_js(&ctx, options, "request options")?;
                     let response = state
                         .http_request(options)
                         .map_err(|err| throw(&ctx, &err))?;
@@ -718,7 +738,7 @@ pub(crate) fn install<'js>(ctx: &Ctx<'js>, state: Rc<HostState>) -> rquickjs::Re
                       -> rquickjs::Result<Value<'js>> {
                     let headers = match headers.0 {
                         Some(value) if !value.is_undefined() && !value.is_null() => {
-                            from_js(&ctx, value, "başlıklar")?
+                            from_js(&ctx, value, "headers")?
                         }
                         _ => BTreeMap::new(),
                     };
@@ -748,7 +768,7 @@ pub(crate) fn install<'js>(ctx: &Ctx<'js>, state: Rc<HostState>) -> rquickjs::Re
                       -> rquickjs::Result<Value<'js>> {
                     let headers = match headers.0 {
                         Some(value) if !value.is_undefined() && !value.is_null() => {
-                            from_js(&ctx, value, "başlıklar")?
+                            from_js(&ctx, value, "headers")?
                         }
                         _ => BTreeMap::new(),
                     };
@@ -787,7 +807,7 @@ pub(crate) fn install<'js>(ctx: &Ctx<'js>, state: Rc<HostState>) -> rquickjs::Re
                         .collect();
                     let options = match options.0 {
                         Some(value) if !value.is_undefined() && !value.is_null() => {
-                            from_js(&ctx, value, "araç seçenekleri")?
+                            from_js(&ctx, value, "tool options")?
                         }
                         _ => ToolOptions::default(),
                     };
@@ -811,26 +831,26 @@ mod tests {
 
     #[test]
     fn redirects_resolve_like_a_browser_would() {
-        let base = "https://a.ornek.com/dizin/sayfa?q=1";
+        let base = "https://a.example.com/dir/page?q=1";
         assert_eq!(
-            resolve_location(base, "https://b.ornek.com/x").unwrap(),
-            "https://b.ornek.com/x"
+            resolve_location(base, "https://b.example.com/x").unwrap(),
+            "https://b.example.com/x"
         );
         assert_eq!(
-            resolve_location(base, "//c.ornek.com/y").unwrap(),
-            "https://c.ornek.com/y"
+            resolve_location(base, "//c.example.com/y").unwrap(),
+            "https://c.example.com/y"
         );
         assert_eq!(
-            resolve_location(base, "/kok").unwrap(),
-            "https://a.ornek.com/kok"
+            resolve_location(base, "/root").unwrap(),
+            "https://a.example.com/root"
         );
         assert_eq!(
-            resolve_location(base, "komsu").unwrap(),
-            "https://a.ornek.com/dizin/komsu"
+            resolve_location(base, "sibling").unwrap(),
+            "https://a.example.com/dir/sibling"
         );
         assert_eq!(
-            resolve_location("https://a.ornek.com", "yol").unwrap(),
-            "https://a.ornek.com/yol"
+            resolve_location("https://a.example.com", "path").unwrap(),
+            "https://a.example.com/path"
         );
     }
 

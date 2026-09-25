@@ -1,7 +1,7 @@
 {
   "delisted": [],
   "diag": {
-    "command": "<değişken>",
+    "command": "<variable>",
     "counters": {
       "catalog.installable": 1,
       "catalog.installed": 0,
@@ -10,21 +10,21 @@
       "catalog.updates": 0
     },
     "env": {
-      "arch": "<değişken>",
-      "data_dir": "<değişken>",
-      "headshell_version": "<değişken>",
-      "os": "<değişken>"
+      "arch": "<variable>",
+      "data_dir": "<variable>",
+      "headshell_version": "<variable>",
+      "os": "<variable>"
     },
     "error_chain": [],
     "failed_at": null,
-    "finished_at": "<değişken>",
+    "finished_at": "<variable>",
     "notes": [
-      "katalog: http://127.0.0.1:<port>/index.json"
+      "catalog: http://127.0.0.1:<port>/index.json"
     ],
-    "started_at": "<değişken>"
+    "started_at": "<variable>"
   },
   "index": "http://127.0.0.1:<port>/index.json",
-  "platform": "<değişken>",
+  "platform": "<variable>",
   "plugins": [
     {
       "api": 2,
@@ -32,18 +32,18 @@
         "search",
         "stream"
       ],
-      "description": "Eklenti sözleşmesini sınayan sabit kataloglu eklenti. Ağa çıkmaz.",
-      "display_name": "Echo (sınama)",
+      "description": "A plugin with a fixed catalog that exercises the plugin contract. It never goes online.",
+      "display_name": "Echo (test)",
       "files": [
         {
-          "path": "<değişken>",
-          "sha256": "8fa484771dcd97698fce883a3e346f6017fdcf82ec708fc1f273cb506edb14d0",
-          "url": "http://127.0.0.1:<port>/echo/plugin.json?surum=0.2.0"
+          "path": "<variable>",
+          "sha256": "cf714df6d7a7d45e0abe0c5554346194a4020cae1569141685d2dafc5cd79ff6",
+          "url": "http://127.0.0.1:<port>/echo/plugin.json?version=0.2.0"
         },
         {
-          "path": "<değişken>",
-          "sha256": "8fba213a139bd4ae896bfa0d43a6b25b4f1263e43552a7c8a2c3c5c872c26843",
-          "url": "http://127.0.0.1:<port>/echo/main.js?surum=0.2.0"
+          "path": "<variable>",
+          "sha256": "37087a56f6bac0a2196326637b1ca853d9bd05f6fb000e5590ddbae3ebda5c42",
+          "url": "http://127.0.0.1:<port>/echo/main.js?version=0.2.0"
         }
       ],
       "installed": {
@@ -52,7 +52,7 @@
       "name": "echo",
       "permissions": {
         "net": [
-          "ornek.gecersiz"
+          "example.invalid"
         ]
       },
       "problem": null,

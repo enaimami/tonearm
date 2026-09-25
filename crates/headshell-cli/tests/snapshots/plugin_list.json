@@ -1,6 +1,6 @@
 {
   "diag": {
-    "command": "<değişken>",
+    "command": "<variable>",
     "counters": {
       "plugins.awaiting_approval": 1,
       "plugins.broken": 0,
@@ -11,18 +11,18 @@
       "plugins.ready": 0
     },
     "env": {
-      "arch": "<değişken>",
-      "data_dir": "<değişken>",
-      "headshell_version": "<değişken>",
-      "os": "<değişken>"
+      "arch": "<variable>",
+      "data_dir": "<variable>",
+      "headshell_version": "<variable>",
+      "os": "<variable>"
     },
     "error_chain": [],
     "failed_at": null,
-    "finished_at": "<değişken>",
+    "finished_at": "<variable>",
     "notes": [
-      "echo: onay bekliyor — `headshell plugin approve <ad>`"
+      "echo: awaiting consent — `headshell plugin approve <name>`"
     ],
-    "started_at": "<değişken>"
+    "started_at": "<variable>"
   },
   "permissions_enforced": true,
   "plugins": [
@@ -31,12 +31,12 @@
       "consent": {
         "state": "not_asked"
       },
-      "dir": "<değişken>",
-      "display_name": "Echo (sınama)",
+      "dir": "<variable>",
+      "display_name": "Echo (test)",
       "name": "echo",
       "permissions": {
         "net": [
-          "ornek.gecersiz"
+          "example.invalid"
         ]
       },
       "problem": null,

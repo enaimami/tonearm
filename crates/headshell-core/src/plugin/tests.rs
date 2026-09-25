@@ -1,9 +1,10 @@
-//! Eklenti sınırının birim testleri.
+//! Unit tests of the plugin boundary.
 //!
-//! İki kısım: keşif ve onay her derlemede sınanıyor (motor gerekmiyor);
-//! motorun kendisi `plugin-engine` açıkken **gerçek QuickJS'le** sınanıyor.
-//! Betikler test içinde yazılıyor ve ağ sahte istemciden geçiyor — izin
-//! denetimi, yönlendirme ve zaman aşımı ağa çıkmadan görülebiliyor.
+//! Two parts: discovery and consent are tested in every build (no engine
+//! needed); the engine itself is tested **with real QuickJS** when
+//! `plugin-engine` is on. The scripts are written inside the tests and the
+//! network goes through a fake client — permission checks, redirects and
+//! timeouts can be seen without going online.
 
 use std::path::PathBuf;
 
@@ -32,11 +33,11 @@ fn approve(config: &Config, name: &str, net: &[&str]) {
     store.save(&config.plugin_consent_path()).unwrap();
 }
 
-// --- keşif ----------------------------------------------------------------
+// --- discovery ------------------------------------------------------------
 
 #[test]
 fn a_missing_plugins_dir_is_an_empty_list_not_an_error() {
-    let config = temp_config("bos");
+    let config = temp_config("empty");
     let (entries, summary) = discover(&config).unwrap();
     assert!(entries.is_empty());
     assert_eq!(summary, PluginSummary::default());
@@ -44,26 +45,26 @@ fn a_missing_plugins_dir_is_an_empty_list_not_an_error() {
 
 #[test]
 fn discovery_reports_each_plugins_reason_without_stopping() {
-    let config = temp_config("karisik");
+    let config = temp_config("mixed");
     write_plugin(
         &config,
-        "iyi",
-        r#"{"name":"iyi","display_name":"İyi","api":2,"main":"main.js",
+        "good",
+        r#"{"name":"good","display_name":"Good","api":2,"main":"main.js",
             "permissions":{"net":["a.example"]}}"#,
     );
     write_plugin(
         &config,
-        "eski",
-        r#"{"name":"eski","display_name":"Eski","api":1,"exec":["python3","./main.py"]}"#,
+        "old",
+        r#"{"name":"old","display_name":"Old","api":1,"exec":["python3","./main.py"]}"#,
     );
-    write_plugin(&config, "bozuk", "{ bu json değil");
+    write_plugin(&config, "broken", "{ this is not json");
 
     let (entries, summary) = discover(&config).unwrap();
-    assert_eq!(entries.len(), 3, "bozuk eklenti ötekileri gizlememeli");
+    assert_eq!(entries.len(), 3, "a broken plugin must not hide the others");
     assert_eq!(summary.discovered, 3);
     assert_eq!(summary.incompatible, 1);
     assert_eq!(summary.broken, 1);
-    assert_eq!(summary.awaiting_approval, 1, "onay bekleyen: iyi");
+    assert_eq!(summary.awaiting_approval, 1, "awaiting consent: good");
     assert_eq!(summary.ready, 0);
 
     let by_name = |name: &str| {
@@ -73,33 +74,33 @@ fn discovery_reports_each_plugins_reason_without_stopping() {
             .unwrap()
             .clone()
     };
-    let eski = by_name("eski");
-    assert_eq!(eski.api, Some(1));
-    let problem = eski.problem.unwrap();
+    let old = by_name("old");
+    assert_eq!(old.api, Some(1));
+    let problem = old.problem.unwrap();
     assert!(problem.contains("api 1"), "{problem}");
     assert!(
         problem.contains("QuickJS"),
-        "eski eklentiye ne yapılacağını söylemeli: {problem}"
+        "it must say what to do with the old plugin: {problem}"
     );
-    assert!(by_name("bozuk").problem.is_some());
+    assert!(by_name("broken").problem.is_some());
     assert!(
-        !by_name("iyi").is_loadable(),
-        "onaysız eklenti yüklenmemeli"
+        !by_name("good").is_loadable(),
+        "a plugin without consent must not be loaded"
     );
 }
 
 #[test]
 fn an_approved_plugin_becomes_loadable_and_load_starts_no_engine() {
-    let config = temp_config("onayli");
-    // `main.js` bilerek yok: yükleme motoru açsaydı bu dosyayı okumaya
-    // kalkıp düşerdi.
+    let config = temp_config("approved");
+    // `main.js` is missing on purpose: if loading started the engine, it would
+    // try to read this file and fall over.
     write_plugin(
         &config,
-        "iyi",
-        r#"{"name":"iyi","display_name":"İyi","api":2,"main":"main.js",
+        "good",
+        r#"{"name":"good","display_name":"Good","api":2,"main":"main.js",
             "capabilities":["search"],"permissions":{"net":["a.example"]}}"#,
     );
-    approve(&config, "iyi", &["a.example"]);
+    approve(&config, "good", &["a.example"]);
 
     let (entries, summary) = discover(&config).unwrap();
     assert_eq!(summary.ready, 1);
@@ -108,43 +109,44 @@ fn an_approved_plugin_becomes_loadable_and_load_starts_no_engine() {
     let (providers, summary) = load(&config).unwrap();
     assert_eq!(providers.len(), 1);
     assert_eq!(summary.ready, 1);
-    assert_eq!(providers[0].info().id, ProviderId::new("iyi"));
+    assert_eq!(providers[0].info().id, ProviderId::new("good"));
     assert!(
         providers[0]
             .info()
             .capabilities
             .contains(Capabilities::SEARCH)
     );
-    assert!(config.plugin_state_dir("iyi").is_dir());
+    assert!(config.plugin_state_dir("good").is_dir());
 }
 
 #[test]
 fn a_plugin_that_grew_its_permissions_is_not_loaded_until_reapproved() {
-    let config = temp_config("buyuyen");
+    let config = temp_config("growing");
     write_plugin(
         &config,
-        "iyi",
-        r#"{"name":"iyi","display_name":"İyi","api":2,"main":"main.js",
-            "permissions":{"net":["a.example","yeni.example"]}}"#,
+        "good",
+        r#"{"name":"good","display_name":"Good","api":2,"main":"main.js",
+            "permissions":{"net":["a.example","new.example"]}}"#,
     );
-    approve(&config, "iyi", &["a.example"]);
+    approve(&config, "good", &["a.example"]);
 
     let (entries, summary) = discover(&config).unwrap();
     assert_eq!(summary.awaiting_approval, 1);
     assert!(!entries[0].is_loadable());
     assert!(
-        entries[0].status_text().contains("yeni.example"),
+        entries[0].status_text().contains("new.example"),
         "{}",
         entries[0].status_text()
     );
     assert!(load(&config).unwrap().0.is_empty());
 }
 
-/// Bu platform için yayını olmayan bir eser: eklenti yüklenmez ve durum
-/// satırı **kurulum önermez** — kurulum bunu düzeltmez.
+/// An artifact with no release for this platform: the plugin is not loaded
+/// and the status line **does not suggest installing** — installing does not
+/// fix it.
 #[test]
 fn a_tool_without_an_asset_for_this_platform_blocks_loading_without_a_false_hint() {
-    let config = temp_config("platformsuz");
+    let config = temp_config("unsupported");
     let other = if artifact::current_platform() == "windows-x86" {
         "linux-x86_64"
     } else {
@@ -152,42 +154,42 @@ fn a_tool_without_an_asset_for_this_platform_blocks_loading_without_a_false_hint
     };
     write_plugin(
         &config,
-        "arac",
+        "tool",
         &format!(
-            r#"{{"name":"arac","display_name":"Araç","api":2,"main":"main.js",
+            r#"{{"name":"tool","display_name":"Tool","api":2,"main":"main.js",
                 "requires":[{{"name":"yt-dlp","version":"1","assets":{{"{other}":
-                {{"url":"https://ornek.gecersiz/x","sha256":"{}"}}}}}}]}}"#,
+                {{"url":"https://example.invalid/x","sha256":"{}"}}}}}}]}}"#,
             "a".repeat(64)
         ),
     );
-    approve(&config, "arac", &[]);
+    approve(&config, "tool", &[]);
 
     let (entries, summary) = discover(&config).unwrap();
     assert_eq!(summary.needs_install, 1);
     assert!(!entries[0].is_loadable());
     let text = entries[0].status_text();
-    assert!(text.contains("bu platformda yok"), "{text}");
-    assert!(!text.contains("plugin install"), "yanlış tavsiye: {text}");
+    assert!(text.contains("does not exist for this platform"), "{text}");
+    assert!(!text.contains("plugin install"), "wrong advice: {text}");
 }
 
 #[test]
 fn a_plugin_only_sees_its_own_secrets() {
-    let config = temp_config("sirlar");
+    let config = temp_config("secrets");
     let dir = write_plugin(
         &config,
-        "iyi",
-        r#"{"name":"iyi","display_name":"İyi","api":2,"main":"main.js","capabilities":["search"]}"#,
+        "good",
+        r#"{"name":"good","display_name":"Good","api":2,"main":"main.js","capabilities":["search"]}"#,
     );
     let mut secrets = Secrets::default();
-    secrets.set("plugin:iyi", "client_id", "benim");
-    secrets.set("plugin:baska", "client_id", "onun");
+    secrets.set("plugin:good", "client_id", "mine");
+    secrets.set("plugin:other", "client_id", "theirs");
 
     let manifest = PluginManifest::load(&dir).unwrap();
     let provider = PluginProvider::from_manifest(&config, &manifest, &dir, &secrets).unwrap();
     assert_eq!(provider.spec.secrets.len(), 1);
     assert_eq!(
         provider.spec.secrets.get("client_id"),
-        Some(&"benim".to_owned())
+        Some(&"mine".to_owned())
     );
 }
 
@@ -206,15 +208,16 @@ fn offline_provider(config: &Config, name: &str, capabilities: &str) -> PluginPr
         &manifest,
         &dir,
         &Secrets::default(),
-        Err("sınama".to_owned()),
+        Err("test".to_owned()),
     )
     .unwrap()
 }
 
 #[tokio::test]
 async fn a_capability_the_plugin_lacks_is_refused_before_the_engine_starts() {
-    let config = temp_config("yeteneksiz");
-    // `main.js` yok: motor açılsaydı "okunamadı" derdi, "desteklemiyor" değil.
+    let config = temp_config("no-capabilities");
+    // No `main.js`: had the engine started it would say "could not be read", not
+    // "not supported".
     let provider = offline_provider(&config, "demo", r#"["search"]"#);
     let id = ProviderTrackId::new(ProviderId::new("demo"), "1");
     let err = provider.resolve_source(&id).await.unwrap_err();
@@ -226,9 +229,9 @@ async fn a_capability_the_plugin_lacks_is_refused_before_the_engine_starts() {
 
 #[tokio::test]
 async fn a_track_id_from_another_provider_is_refused() {
-    let config = temp_config("baskasi");
+    let config = temp_config("foreign");
     let provider = offline_provider(&config, "demo", r#"["stream"]"#);
-    let id = ProviderTrackId::new(ProviderId::new("baska"), "1");
+    let id = ProviderTrackId::new(ProviderId::new("other"), "1");
     let err = provider.resolve_source(&id).await.unwrap_err();
     assert!(
         matches!(err.kind(), ErrorKind::InvalidInput { .. }),
@@ -242,9 +245,9 @@ fn block_on_waits_for_a_future_that_is_not_ready_on_the_first_poll() {
     use std::pin::Pin;
     use std::task::{Context, Poll};
 
-    /// İlk yoklamada hazır değil, uyandırıcıyı başka bir iş parçacığından
-    /// çağırıyor — meşgul bekleyen bir `block_on` burada da geçerdi ama
-    /// uyandırıcıyı yok sayan bir `block_on` sonsuza kadar uyurdu.
+    /// Not ready on the first poll; it calls the waker from another thread — a
+    /// busy-waiting `block_on` would pass here too, but a `block_on` that ignores
+    /// the waker would sleep forever.
     struct Later(bool);
     impl Future for Later {
         type Output = u8;
@@ -264,7 +267,7 @@ fn block_on_waits_for_a_future_that_is_not_ready_on_the_first_poll() {
     assert_eq!(block_on(Later(false)), 7);
 }
 
-// --- motor ----------------------------------------------------------------
+// --- engine ---------------------------------------------------------------
 
 #[cfg(feature = "plugin-engine")]
 mod engine {
@@ -273,7 +276,8 @@ mod engine {
 
     const CALL: Duration = Duration::from_secs(5);
 
-    /// Betiği ve manifesti yazar, sağlayıcıyı sahte ağla kurar.
+    /// Writes the script and the manifest, sets up the provider with a fake
+    /// network.
     struct Rig {
         config: crate::test_support::TestConfig,
         dir: PathBuf,
@@ -292,7 +296,7 @@ mod engine {
                 name,
                 r#"{"name":"demo","display_name":"Demo","api":2,"main":"main.js",
                     "capabilities":["search","stream"],
-                    "permissions":{"net":["izinli.ornek","*.cdn.ornek"]}}"#,
+                    "permissions":{"net":["allowed.example","*.cdn.example"]}}"#,
                 script,
             )
         }
@@ -318,61 +322,64 @@ mod engine {
         let calls = 0;
         export function health() {
             calls += 1;
-            return { reachable: true, detail: `çağrı ${calls}` };
+            return { reachable: true, detail: `call ${calls}` };
         }
         export function search(query, limit) {
             return [
                 { id: "42", artist: "Ezhel", title: query, duration_ms: 1000, isrc: "TRA111700001" },
-                { id: "43", artist: "B", title: "C", isrc: "uydurma" },
+                { id: "43", artist: "B", title: "C", isrc: "bogus" },
             ].slice(0, limit);
         }
         export function resolve_source(id) {
-            if (id === "yok") return null;
-            return { kind: "http_stream", url: `https://a.cdn.ornek/${id}.mp3`, headers: [] };
+            if (id === "none") return null;
+            return { kind: "http_stream", url: `https://a.cdn.example/${id}.mp3`, headers: [] };
         }
     "#;
 
     #[tokio::test]
     async fn a_script_answers_health_search_and_resolve() {
-        let rig = Rig::simple("mutlu", BASIC);
+        let rig = Rig::simple("happy", BASIC);
         let provider = rig.provider();
 
         let health = provider.health().await.unwrap();
         assert!(health.reachable, "{:?}", health.detail);
-        assert_eq!(health.detail.as_deref(), Some("çağrı 1"));
+        assert_eq!(health.detail.as_deref(), Some("call 1"));
 
         let tracks = provider.search("Geceler", 10).await.unwrap();
         assert_eq!(tracks.len(), 2);
         assert_eq!(tracks[0].id.provider, ProviderId::new("demo"));
         assert_eq!(tracks[0].track.title, "Geceler");
         assert!(tracks[0].track.isrc.is_some());
-        assert!(tracks[1].track.isrc.is_none(), "biçimsiz ISRC düşmeli");
+        assert!(
+            tracks[1].track.isrc.is_none(),
+            "a malformed ISRC must be dropped"
+        );
 
         match provider.resolve_source(&track_id("7")).await.unwrap() {
             Some(AudioSource::HttpStream { url, .. }) => {
-                assert_eq!(url, "https://a.cdn.ornek/7.mp3");
+                assert_eq!(url, "https://a.cdn.example/7.mp3");
             }
-            other => panic!("beklenmeyen kaynak: {other:?}"),
+            other => panic!("unexpected source: {other:?}"),
         }
         assert!(
             provider
-                .resolve_source(&track_id("yok"))
+                .resolve_source(&track_id("none"))
                 .await
                 .unwrap()
                 .is_none(),
-            "`null` bir cevaptır"
+            "`null` is an answer"
         );
     }
 
     #[tokio::test]
     async fn a_throw_is_a_rejection_with_a_location_and_does_not_restart_the_engine() {
         let rig = Rig::simple(
-            "firlatan",
+            "thrower",
             r#"
             let calls = 0;
             export function health() { calls += 1; return { reachable: true, detail: String(calls) }; }
             export function search() {
-                throw new Error("kota doldu");
+                throw new Error("quota exceeded");
             }
             export function resolve_source() { return null; }
             "#,
@@ -388,14 +395,14 @@ mod engine {
             ErrorKind::PluginThrew {
                 message, location, ..
             } => {
-                assert_eq!(message, "kota doldu");
-                assert!(location.contains("main.js:"), "konum yok: {location}");
+                assert_eq!(message, "quota exceeded");
+                assert!(location.contains("main.js:"), "no location: {location}");
             }
-            other => panic!("beklenmeyen hata: {other:?}"),
+            other => panic!("unexpected error: {other:?}"),
         }
         assert_eq!(err.stage(), Stage::ProviderCall);
 
-        // Aynı motor: sayaç kaldığı yerden devam ediyor.
+        // The same engine: the counter carries on where it left off.
         assert_eq!(
             provider.health().await.unwrap().detail.as_deref(),
             Some("2")
@@ -415,8 +422,8 @@ mod engine {
         let provider = rig.provider();
         assert!(provider.health().await.unwrap().reachable);
         assert_eq!(
-            provider.search("söz", 5).await.unwrap()[0].track.title,
-            "söz"
+            provider.search("word", 5).await.unwrap()[0].track.title,
+            "word"
         );
         let err = provider.resolve_source(&track_id("1")).await.unwrap_err();
         assert!(
@@ -429,7 +436,7 @@ mod engine {
     #[tokio::test]
     async fn a_hanging_call_times_out_and_the_next_call_gets_a_fresh_engine() {
         let rig = Rig::simple(
-            "asili",
+            "hung",
             r#"
             let calls = 0;
             export function health() { calls += 1; return { reachable: true, detail: String(calls) }; }
@@ -457,14 +464,14 @@ mod engine {
             started.elapsed()
         );
 
-        // `try/catch` kesmeyi yakalayamaz.
+        // `try/catch` cannot catch the interrupt.
         let err = provider.resolve_source(&track_id("1")).await.unwrap_err();
         assert!(
             matches!(err.kind(), ErrorKind::PluginTimeout { .. }),
             "{err:?}"
         );
 
-        // Yeni motor: sayaç sıfırdan.
+        // A new engine: the counter starts from zero.
         assert_eq!(
             provider.health().await.unwrap().detail.as_deref(),
             Some("1")
@@ -473,17 +480,14 @@ mod engine {
 
     #[tokio::test]
     async fn a_hang_while_loading_times_out_at_the_start_stage() {
-        let rig = Rig::simple(
-            "yuklemede-asili",
-            "for (;;) {}\nexport function health() {}",
-        );
+        let rig = Rig::simple("hung-on-load", "for (;;) {}\nexport function health() {}");
         let provider = rig
             .provider()
             .with_timeouts(Duration::from_millis(300), CALL);
         let started = std::time::Instant::now();
         let err = provider.search("x", 1).await.unwrap_err();
         assert!(
-            matches!(err.kind(), ErrorKind::PluginTimeout { method, .. } if method == "yükleme"),
+            matches!(err.kind(), ErrorKind::PluginTimeout { method, .. } if method == "load"),
             "{err:?}"
         );
         assert_eq!(err.stage(), Stage::PluginStart);
@@ -493,7 +497,7 @@ mod engine {
     #[tokio::test]
     async fn a_missing_export_is_a_contract_breach_and_is_not_retried() {
         let rig = Rig::simple(
-            "eksik",
+            "missing",
             "export function health() { return { reachable: true }; }\n\
              export function search() { return []; }",
         );
@@ -503,11 +507,11 @@ mod engine {
             ErrorKind::PluginContract { detail, .. } => {
                 assert!(detail.contains("resolve_source"), "{detail}");
             }
-            other => panic!("beklenmeyen hata: {other:?}"),
+            other => panic!("unexpected error: {other:?}"),
         }
         assert_eq!(err.stage(), Stage::PluginStart);
 
-        // Tekrar denenmez: sözleşme ihlali yeniden başlatmayla düzelmez.
+        // Not retried: a contract violation is not fixed by a restart.
         let again = provider.search("x", 1).await.unwrap_err();
         assert!(matches!(again.kind(), ErrorKind::PluginCrashed { .. }));
         assert!(provider.state.lock().unwrap().starts == 1);
@@ -515,18 +519,18 @@ mod engine {
 
     #[tokio::test]
     async fn a_script_that_keeps_failing_to_load_is_given_up_after_max_starts() {
-        let rig = Rig::simple("hep-dusen", "throw new Error('açılışta patladı');");
+        let rig = Rig::simple("always-failing", "throw new Error('blew up on start');");
         let provider = rig.provider();
         for _ in 0..MAX_STARTS {
             let err = provider.search("x", 1).await.unwrap_err();
             assert!(
-                matches!(err.kind(), ErrorKind::PluginThrew { method, .. } if method == "yükleme"),
+                matches!(err.kind(), ErrorKind::PluginThrew { method, .. } if method == "load"),
                 "{err:?}"
             );
         }
         let err = provider.search("x", 1).await.unwrap_err();
         assert!(
-            err.chain_text().contains("vazgeçildi"),
+            err.chain_text().contains("giving up"),
             "{}",
             err.chain_text()
         );
@@ -534,9 +538,9 @@ mod engine {
 
     #[tokio::test]
     async fn a_wrong_return_shape_is_a_contract_breach_not_an_empty_answer() {
-        // api 1'in `{ tracks: [...] }` biçimi: api 2 dizi bekliyor.
+        // api 1's `{ tracks: [...] }` shape: api 2 expects an array.
         let rig = Rig::simple(
-            "bicim",
+            "shape",
             r#"
             export function health() { return { reachable: true }; }
             export function search() { return { tracks: [] }; }
@@ -559,7 +563,7 @@ mod engine {
     #[tokio::test]
     async fn running_out_of_memory_is_an_error_not_a_crash() {
         let rig = Rig::simple(
-            "bellek",
+            "memory",
             r#"
             export function health() { return { reachable: true }; }
             export function search() { const all = []; for (;;) all.push(new Array(100000).fill(1)); }
@@ -575,44 +579,47 @@ mod engine {
         );
         assert!(
             provider.health().await.unwrap().reachable,
-            "motor ayakta kalmalı"
+            "the engine must stay up"
         );
     }
 
     #[tokio::test]
     async fn the_network_is_refused_outside_the_declared_hosts() {
         let rig = Rig::simple(
-            "izinsiz",
+            "unpermitted",
             r#"
             export function health() { return { reachable: true }; }
-            export function search() { host.http.get("https://kotu.ornek/sızdır"); return []; }
+            export function search() { host.http.get("https://evil.example/leak"); return []; }
             export function resolve_source() { return null; }
             "#,
         );
-        let http = Arc::new(FakeHttp::new().route("kotu.ornek", "{}"));
+        let http = Arc::new(FakeHttp::new().route("evil.example", "{}"));
         let provider = rig.provider_with(http.clone(), &Secrets::default());
         let err = provider.search("x", 1).await.unwrap_err();
         assert!(
-            err.chain_text().contains("izin yok"),
+            err.chain_text().contains("not allowed"),
             "{}",
             err.chain_text()
         );
         assert!(
-            err.chain_text().contains("kotu.ornek"),
+            err.chain_text().contains("evil.example"),
             "{}",
             err.chain_text()
         );
-        assert!(http.requests().is_empty(), "izinsiz istek ağa çıktı");
+        assert!(
+            http.requests().is_empty(),
+            "an unpermitted request went out to the network"
+        );
     }
 
     #[tokio::test]
     async fn a_declared_host_is_reached_and_the_response_comes_back_whole() {
         let rig = Rig::simple(
-            "izinli",
+            "allowed",
             r#"
             export function health() { return { reachable: true }; }
             export function search(q) {
-                const res = host.http.post("https://izinli.ornek/ara", JSON.stringify({ q }),
+                const res = host.http.post("https://allowed.example/search", JSON.stringify({ q }),
                     { "Content-Type": "application/json" });
                 const body = JSON.parse(res.body);
                 return [{ id: String(res.status), artist: body.artist, title: res.url }];
@@ -620,7 +627,8 @@ mod engine {
             export function resolve_source() { return null; }
             "#,
         );
-        let http = Arc::new(FakeHttp::new().route("izinli.ornek/ara", r#"{"artist":"Ezhel"}"#));
+        let http =
+            Arc::new(FakeHttp::new().route("allowed.example/search", r#"{"artist":"Ezhel"}"#));
         let provider = rig.provider_with(http.clone(), &Secrets::default());
         let tracks = provider.search("geceler", 1).await.unwrap();
         assert_eq!(tracks[0].id.id, "200");
@@ -634,16 +642,17 @@ mod engine {
         );
     }
 
-    /// İzinli bir adres izinsiz bir adrese yönlendirirse motor **ikinci
-    /// adımda** durur: istemci yönlendirmeyi kendisi izleseydi bu görünmezdi.
+    /// If an allowed address redirects to a forbidden one, the engine stops **at
+    /// the second step**: had the client followed the redirect itself, this would
+    /// be invisible.
     #[tokio::test]
     async fn a_redirect_to_an_undeclared_host_is_refused_at_the_hop() {
         let rig = Rig::simple(
-            "yonlendirme",
+            "redirect",
             r#"
             export function health() { return { reachable: true }; }
             export function search(q) {
-                const res = host.http.get(`https://izinli.ornek/${q}`);
+                const res = host.http.get(`https://allowed.example/${q}`);
                 return [{ id: "1", artist: "a", title: res.body }];
             }
             export function resolve_source() { return null; }
@@ -651,59 +660,63 @@ mod engine {
         );
         let http = Arc::new(
             FakeHttp::new()
-                .route_redirect("izinli.ornek/kacis", 302, "https://kotu.ornek/x")
-                .route_redirect("izinli.ornek/ic", 301, "/son")
-                .route("izinli.ornek/son", "vardık")
-                .route("kotu.ornek", "sızdı"),
+                .route_redirect("allowed.example/escape", 302, "https://evil.example/x")
+                .route_redirect("allowed.example/inner", 301, "/end")
+                .route("allowed.example/end", "arrived")
+                .route("evil.example", "leaked"),
         );
         let provider = rig.provider_with(http.clone(), &Secrets::default());
 
-        let err = provider.search("kacis", 1).await.unwrap_err();
+        let err = provider.search("escape", 1).await.unwrap_err();
         assert!(
-            err.chain_text().contains("kotu.ornek"),
+            err.chain_text().contains("evil.example"),
             "{}",
             err.chain_text()
         );
-        assert_eq!(http.requests().len(), 1, "izinsiz adrese istek gitti");
+        assert_eq!(
+            http.requests().len(),
+            1,
+            "a request went to a forbidden address"
+        );
 
-        let tracks = provider.search("ic", 1).await.unwrap();
-        assert_eq!(tracks[0].track.title, "vardık");
+        let tracks = provider.search("inner", 1).await.unwrap();
+        assert_eq!(tracks[0].track.title, "arrived");
     }
 
     #[tokio::test]
     async fn the_network_is_refused_while_the_module_loads() {
         let rig = Rig::simple(
-            "yuklemede-ag",
+            "net-while-loading",
             r#"
-            host.http.get("https://izinli.ornek/");
+            host.http.get("https://allowed.example/");
             export function health() { return { reachable: true }; }
             "#,
         );
-        let http = Arc::new(FakeHttp::new().route("izinli.ornek", ""));
+        let http = Arc::new(FakeHttp::new().route("allowed.example", ""));
         let provider = rig.provider_with(http.clone(), &Secrets::default());
         let err = provider.health().await.unwrap();
         let detail = err.detail.unwrap_or_default();
         assert!(!err.reachable);
-        assert!(detail.contains("modül yüklenirken"), "{detail}");
+        assert!(detail.contains("while the module is loading"), "{detail}");
         assert!(http.requests().is_empty());
     }
 
     #[tokio::test]
     async fn a_stream_the_plugin_may_not_reach_is_refused() {
         let rig = Rig::simple(
-            "akis",
+            "stream",
             r#"
             export function health() { return { reachable: true }; }
             export function search() { return []; }
             export function resolve_source(id) {
-                if (id === "yerel") return { kind: "local_file", path: "/etc/passwd" };
+                if (id === "local") return { kind: "local_file", path: "/etc/passwd" };
                 return { kind: "http_stream", url: "http://192.168.1.1/admin", headers: [] };
             }
             "#,
         );
         let provider = rig.provider();
         let err = provider
-            .resolve_source(&track_id("uzak"))
+            .resolve_source(&track_id("remote"))
             .await
             .unwrap_err();
         assert!(
@@ -717,11 +730,11 @@ mod engine {
         );
 
         let err = provider
-            .resolve_source(&track_id("yerel"))
+            .resolve_source(&track_id("local"))
             .await
             .unwrap_err();
         assert!(
-            err.chain_text().contains("yerel dosya"),
+            err.chain_text().contains("local file"),
             "{}",
             err.chain_text()
         );
@@ -730,32 +743,32 @@ mod engine {
     #[tokio::test]
     async fn secrets_are_scoped_and_a_secret_file_is_private_and_removed() {
         let rig = Rig::simple(
-            "sir",
+            "scoped-secrets",
             r#"
             export function health() {
-                return { reachable: true, detail: `${host.secrets.get("token")}|${host.secrets.get("yok")}` };
+                return { reachable: true, detail: `${host.secrets.get("token")}|${host.secrets.get("missing")}` };
             }
             export function search() { return []; }
             export function resolve_source() {
-                return { kind: "http_stream", url: "https://a.cdn.ornek/x",
-                         headers: [{ name: "X-Yol", value: host.secrets.file("cookies") }] };
+                return { kind: "http_stream", url: "https://a.cdn.example/x",
+                         headers: [{ name: "X-Path", value: host.secrets.file("cookies") }] };
             }
             "#,
         );
         let mut secrets = Secrets::default();
-        secrets.set("plugin:demo", "token", "benim");
+        secrets.set("plugin:demo", "token", "mine");
         secrets.set("plugin:demo", "cookies", "# Netscape HTTP Cookie File\n");
-        secrets.set("plugin:baska", "token", "onun");
+        secrets.set("plugin:other", "token", "theirs");
         let provider = rig.provider_with(Arc::new(FakeHttp::new()), &secrets);
 
         assert_eq!(
             provider.health().await.unwrap().detail.as_deref(),
-            Some("benim|null")
+            Some("mine|null")
         );
 
         let path = match provider.resolve_source(&track_id("1")).await.unwrap() {
             Some(AudioSource::HttpStream { headers, .. }) => PathBuf::from(&headers[0].value),
-            other => panic!("beklenmeyen kaynak: {other:?}"),
+            other => panic!("unexpected source: {other:?}"),
         };
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
@@ -765,28 +778,31 @@ mod engine {
         {
             use std::os::unix::fs::PermissionsExt as _;
             let mode = std::fs::metadata(&path).unwrap().permissions().mode();
-            assert_eq!(mode & 0o777, 0o600, "sır dosyası başkalarına açık");
+            assert_eq!(mode & 0o777, 0o600, "the secret file is open to others");
         }
 
         drop(provider);
-        assert!(!path.exists(), "motor kapandı ama sır dosyası kaldı");
+        assert!(
+            !path.exists(),
+            "the engine shut down but the secret file remained"
+        );
     }
 
     #[tokio::test]
     async fn storage_survives_a_restart_and_a_corrupt_store_is_reported_not_reset() {
         let script = r#"
             export function health() {
-                const seen = host.storage.get("sayac");
-                host.storage.set("sayac", String(Number(seen ?? "0") + 1));
-                return { reachable: true, detail: seen ?? "ilk" };
+                const seen = host.storage.get("counter");
+                host.storage.set("counter", String(Number(seen ?? "0") + 1));
+                return { reachable: true, detail: seen ?? "first" };
             }
-            export function search() { host.storage.remove("sayac"); return []; }
+            export function search() { host.storage.remove("counter"); return []; }
             export function resolve_source() { return null; }
         "#;
-        let rig = Rig::simple("depo", script);
+        let rig = Rig::simple("storage", script);
         assert_eq!(
             rig.provider().health().await.unwrap().detail.as_deref(),
-            Some("ilk")
+            Some("first")
         );
         assert_eq!(
             rig.provider().health().await.unwrap().detail.as_deref(),
@@ -797,12 +813,12 @@ mod engine {
         provider.search("x", 1).await.unwrap();
         assert_eq!(
             provider.health().await.unwrap().detail.as_deref(),
-            Some("ilk")
+            Some("first")
         );
 
         std::fs::write(
             rig.config.plugin_state_dir("demo").join("storage.json"),
-            "{bozuk",
+            "{broken",
         )
         .unwrap();
         let health = rig.provider().health().await.unwrap();
@@ -812,7 +828,7 @@ mod engine {
                 .detail
                 .as_deref()
                 .unwrap_or_default()
-                .contains("depo bozuk"),
+                .contains("store is corrupt"),
             "{:?}",
             health.detail
         );
@@ -821,10 +837,10 @@ mod engine {
     #[tokio::test]
     async fn console_goes_to_the_log_and_does_not_break_the_call() {
         let rig = Rig::simple(
-            "konsol",
+            "console",
             r#"
-            console.log("yükleniyor", { a: 1 }, undefined);
-            export function health() { console.warn(new Error("uyarı")); return { reachable: true }; }
+            console.log("loading", { a: 1 }, undefined);
+            export function health() { console.warn(new Error("warning")); return { reachable: true }; }
             export function search() { return []; }
             export function resolve_source() { return null; }
             "#,
@@ -835,11 +851,11 @@ mod engine {
     #[tokio::test]
     async fn the_host_object_cannot_be_replaced_by_the_plugin() {
         let rig = Rig::simple(
-            "donuk",
+            "frozen",
             r#"
             "use strict";
             export function health() {
-                try { host.http = null; return { reachable: false, detail: "değişti" }; }
+                try { host.http = null; return { reachable: false, detail: "changed" }; }
                 catch (e) { return { reachable: true, detail: host.platform }; }
             }
             export function search() { return []; }
@@ -856,7 +872,7 @@ mod engine {
         use super::*;
         use crate::plugin::artifact::sha256_hex;
 
-        const TOOL: &str = "#!/bin/sh\necho \"arg:$1\"\necho \"hata\" >&2\nexit 3\n";
+        const TOOL: &str = "#!/bin/sh\necho \"arg:$1\"\necho \"error\" >&2\nexit 3\n";
         const SLOW: &str = "#!/bin/sh\nsleep 5\n";
 
         fn manifest(tool_sha: &str, slow_sha: &str) -> String {
@@ -865,12 +881,12 @@ mod engine {
                 r#"{{"name":"demo","display_name":"Demo","api":2,"main":"main.js",
                     "capabilities":["search"],
                     "requires":[
-                      {{"name":"arac","version":"1","assets":{{"{platform}":
-                        {{"url":"https://ornek.gecersiz/arac","sha256":"{tool_sha}"}}}}}},
-                      {{"name":"yavas","version":"1","assets":{{"{platform}":
-                        {{"url":"https://ornek.gecersiz/yavas","sha256":"{slow_sha}"}}}}}},
-                      {{"name":"kurulmamis","version":"1","assets":{{"{platform}":
-                        {{"url":"https://ornek.gecersiz/k","sha256":"{}"}}}}}}
+                      {{"name":"tool","version":"1","assets":{{"{platform}":
+                        {{"url":"https://example.invalid/tool","sha256":"{tool_sha}"}}}}}},
+                      {{"name":"slow","version":"1","assets":{{"{platform}":
+                        {{"url":"https://example.invalid/slow","sha256":"{slow_sha}"}}}}}},
+                      {{"name":"uninstalled","version":"1","assets":{{"{platform}":
+                        {{"url":"https://example.invalid/u","sha256":"{}"}}}}}}
                     ]}}"#,
                 "c".repeat(64)
             )
@@ -895,7 +911,7 @@ mod engine {
         const SCRIPT: &str = r#"
             export function health() { return { reachable: true }; }
             export function search(q) {
-                const r = host.tools.run(q, ["bir", "iki"], { timeoutMs: 400 });
+                const r = host.tools.run(q, ["one", "two"], { timeoutMs: 400 });
                 return [{ id: String(r.code), artist: r.stdout.trim(), title: r.stderr.trim() }];
             }
         "#;
@@ -903,21 +919,21 @@ mod engine {
         #[tokio::test]
         async fn a_declared_installed_tool_runs_and_its_output_comes_back() {
             let rig = Rig::new(
-                "arac",
+                "tool",
                 &manifest(&sha256_hex(TOOL.as_bytes()), &sha256_hex(SLOW.as_bytes())),
                 SCRIPT,
             );
-            install(&rig, "arac", TOOL);
-            let tracks = rig.provider().search("arac", 1).await.unwrap();
-            assert_eq!(tracks[0].id.id, "3", "çıkış kodu");
-            assert_eq!(tracks[0].track.artist, "arg:bir");
-            assert_eq!(tracks[0].track.title, "hata");
+            install(&rig, "tool", TOOL);
+            let tracks = rig.provider().search("tool", 1).await.unwrap();
+            assert_eq!(tracks[0].id.id, "3", "exit code");
+            assert_eq!(tracks[0].track.artist, "arg:one");
+            assert_eq!(tracks[0].track.title, "error");
         }
 
         #[tokio::test]
         async fn only_declared_and_installed_tools_run_and_the_reason_is_said() {
             let rig = Rig::new(
-                "arac-yok",
+                "no-tool",
                 &manifest(&sha256_hex(TOOL.as_bytes()), &sha256_hex(SLOW.as_bytes())),
                 SCRIPT,
             );
@@ -925,23 +941,23 @@ mod engine {
 
             let err = provider.search("/bin/sh", 1).await.unwrap_err();
             assert!(
-                err.chain_text().contains("beyan edilmiş"),
+                err.chain_text().contains("declared"),
                 "{}",
                 err.chain_text()
             );
 
-            let err = provider.search("kurulmamis", 1).await.unwrap_err();
+            let err = provider.search("uninstalled", 1).await.unwrap_err();
             assert!(
                 err.chain_text().contains("headshell plugin install demo"),
                 "{}",
                 err.chain_text()
             );
 
-            // Karması tutmayan bir dosya çalıştırılmaz.
-            install(&rig, "arac", "#!/bin/sh\necho kurcalandi\n");
-            let err = provider.search("arac", 1).await.unwrap_err();
+            // A file whose hash does not match is not run.
+            install(&rig, "tool", "#!/bin/sh\necho tampered\n");
+            let err = provider.search("tool", 1).await.unwrap_err();
             assert!(
-                err.chain_text().contains("karma tutmuyor"),
+                err.chain_text().contains("hash mismatch"),
                 "{}",
                 err.chain_text()
             );
@@ -950,14 +966,18 @@ mod engine {
         #[tokio::test]
         async fn a_tool_that_overruns_its_budget_is_stopped() {
             let rig = Rig::new(
-                "yavas",
+                "slow",
                 &manifest(&sha256_hex(TOOL.as_bytes()), &sha256_hex(SLOW.as_bytes())),
                 SCRIPT,
             );
-            install(&rig, "yavas", SLOW);
+            install(&rig, "slow", SLOW);
             let started = std::time::Instant::now();
-            let err = rig.provider().search("yavas", 1).await.unwrap_err();
-            assert!(err.chain_text().contains("bitmedi"), "{}", err.chain_text());
+            let err = rig.provider().search("slow", 1).await.unwrap_err();
+            assert!(
+                err.chain_text().contains("did not finish"),
+                "{}",
+                err.chain_text()
+            );
             assert!(
                 started.elapsed() < Duration::from_secs(3),
                 "{:?}",
@@ -966,25 +986,25 @@ mod engine {
         }
     }
 
-    /// Unix'teki araç testlerinin Windows karşılığı (D-070).
+    /// The Windows counterpart of the Unix tool tests (D-070).
     ///
-    /// Windows'ta kabuk betiği yok; "araç" olarak sistemin kendi `cmd.exe`'sinin
-    /// bir kopyası kuruluyor, karması koşum anında hesaplanıyor. Motorun
-    /// sınadığı şey aynı: yalnızca beyan edilmiş, kurulu ve karması tutan bir
-    /// dosya çalışır; çıktı, çıkış kodu ve süre sınırı geri gelir.
+    /// Windows has no shell scripts; a copy of the system's own `cmd.exe` is
+    /// installed as the "tool", and its hash is computed at run time. What the
+    /// engine is tested for is the same: only a declared, installed file whose
+    /// hash matches runs; the output, the exit code and the time limit come back.
     #[cfg(windows)]
     mod tools_windows {
         use super::*;
         use crate::plugin::artifact::sha256_hex;
 
         fn system_cmd() -> Vec<u8> {
-            let root = std::env::var_os("SystemRoot").expect("SystemRoot tanımlı olmalı");
+            let root = std::env::var_os("SystemRoot").expect("SystemRoot must be defined");
             std::fs::read(PathBuf::from(root).join("System32").join("cmd.exe"))
-                .expect("cmd.exe okunmalı")
+                .expect("cmd.exe must be readable")
         }
 
-        /// `/D`: kayıt defterindeki AutoRun komutları koşmasın — test
-        /// makinenin ayarına bağlı kalmasın.
+        /// `/D`: so the AutoRun commands in the registry do not run — the test must
+        /// not depend on the machine's settings.
         const SCRIPT: &str = r#"
             export function health() { return { reachable: true }; }
             export function search(q) {
@@ -1003,17 +1023,17 @@ mod engine {
                     r#"{{"name":"demo","display_name":"Demo","api":2,"main":"main.js",
                         "capabilities":["search"],
                         "requires":[
-                          {{"name":"arac","version":"1","assets":{{"{platform}":
-                            {{"url":"https://ornek.gecersiz/arac","sha256":"{}"}}}}}},
-                          {{"name":"kurulmamis","version":"1","assets":{{"{platform}":
-                            {{"url":"https://ornek.gecersiz/k","sha256":"{}"}}}}}}
+                          {{"name":"tool","version":"1","assets":{{"{platform}":
+                            {{"url":"https://example.invalid/tool","sha256":"{}"}}}}}},
+                          {{"name":"uninstalled","version":"1","assets":{{"{platform}":
+                            {{"url":"https://example.invalid/u","sha256":"{}"}}}}}}
                         ]}}"#,
                     sha256_hex(&body),
                     "c".repeat(64)
                 ),
                 SCRIPT,
             );
-            install(&rig, "arac", &body);
+            install(&rig, "tool", &body);
             rig
         }
 
@@ -1032,20 +1052,20 @@ mod engine {
 
         #[tokio::test]
         async fn a_declared_installed_tool_runs_and_its_output_comes_back() {
-            let rig = rig("arac-win");
+            let rig = rig("tool-win");
             let tracks = rig
                 .provider()
-                .search("arac|echo arg:bir& echo hata 1>&2& exit /b 3", 1)
+                .search("tool|echo arg:one& echo error 1>&2& exit /b 3", 1)
                 .await
                 .unwrap();
-            assert_eq!(tracks[0].id.id, "3", "çıkış kodu");
-            assert_eq!(tracks[0].track.artist, "arg:bir");
-            assert_eq!(tracks[0].track.title, "hata");
+            assert_eq!(tracks[0].id.id, "3", "exit code");
+            assert_eq!(tracks[0].track.artist, "arg:one");
+            assert_eq!(tracks[0].track.title, "error");
         }
 
         #[tokio::test]
         async fn only_declared_and_installed_tools_run_and_the_reason_is_said() {
-            let rig = rig("arac-yok-win");
+            let rig = rig("no-tool-win");
             let provider = rig.provider();
 
             let err = provider
@@ -1053,24 +1073,24 @@ mod engine {
                 .await
                 .unwrap_err();
             assert!(
-                err.chain_text().contains("beyan edilmiş"),
+                err.chain_text().contains("declared"),
                 "{}",
                 err.chain_text()
             );
 
-            let err = provider.search("kurulmamis|echo x", 1).await.unwrap_err();
+            let err = provider.search("uninstalled|echo x", 1).await.unwrap_err();
             assert!(
                 err.chain_text().contains("headshell plugin install demo"),
                 "{}",
                 err.chain_text()
             );
 
-            // Karması tutmayan bir dosya çalıştırılmaz.
-            install(&rig, "arac", b"MZ kurcalandi");
+            // A file whose hash does not match is not run.
+            install(&rig, "tool", b"MZ tampered");
             let fresh = rig.provider();
-            let err = fresh.search("arac|echo x", 1).await.unwrap_err();
+            let err = fresh.search("tool|echo x", 1).await.unwrap_err();
             assert!(
-                err.chain_text().contains("karma tutmuyor"),
+                err.chain_text().contains("hash mismatch"),
                 "{}",
                 err.chain_text()
             );
@@ -1078,15 +1098,19 @@ mod engine {
 
         #[tokio::test]
         async fn a_tool_that_overruns_its_budget_is_stopped() {
-            let rig = rig("yavas-win");
+            let rig = rig("slow-win");
             let started = std::time::Instant::now();
-            // ~5 sn bekleyen bir komut; süre sınırı 1,5 sn.
+            // A command that waits ~5 s; the time limit is 1.5 s.
             let err = rig
                 .provider()
-                .search("arac|ping -n 6 127.0.0.1 >nul", 1)
+                .search("tool|ping -n 6 127.0.0.1 >nul", 1)
                 .await
                 .unwrap_err();
-            assert!(err.chain_text().contains("bitmedi"), "{}", err.chain_text());
+            assert!(
+                err.chain_text().contains("did not finish"),
+                "{}",
+                err.chain_text()
+            );
             assert!(
                 started.elapsed() < Duration::from_secs(4),
                 "{:?}",

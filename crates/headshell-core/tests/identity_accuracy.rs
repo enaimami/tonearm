@@ -1,10 +1,10 @@
-//! Kimlik çözümlemesinin doğruluk ölçümü.
+//! The accuracy measurement of identity resolution.
 //!
-//! `fixtures/identity/cases.json` etiketli doğruluk kümesidir. Bu testin
-//! bastığı oran projenin en önemli metriğidir: eşleştirmeye dokunan her
-//! değişiklikten sonra buradaki sayıya bak.
+//! `fixtures/identity/cases.json` is the labelled accuracy set. The rate this
+//! test prints is the project's most important metric: after every change
+//! that touches matching, look at the number here.
 //!
-//! Ağa çıkılmaz — katalog dosyanın içindedir.
+//! Nothing goes online — the catalog is inside the file.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -15,8 +15,8 @@ use headshell_core::ids::{CanonicalId, Isrc, Mbid};
 use headshell_core::model::TrackRef;
 use serde::Deserialize;
 
-/// Kabul edilen en düşük doğruluk. Oran yükseldikçe bu da yükselir; asla
-/// düşürülerek "test geçsin" yapılmaz — düşüş bir gerilemedir (D-009).
+/// The lowest accepted accuracy. As the rate goes up, so does this; it is
+/// never lowered "to make the test pass" — a drop is a regression (D-009).
 const ACCURACY_FLOOR: f64 = 0.97;
 
 #[derive(Debug, Deserialize)]
@@ -32,15 +32,16 @@ struct CatalogEntry {
     title: String,
     duration_ms: Option<u64>,
     isrc: Option<String>,
-    /// MusicBrainz'in ayırt edici notu. Gerçek katalogda canlı kayıtların
-    /// **tek** işareti budur; başlık düz kalır (D-045).
+    /// MusicBrainz's disambiguation note. In the real catalog this is the
+    /// **only** marker of live recordings; the title stays plain (D-045).
     #[serde(default)]
     disambiguation: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct Case {
-    /// Vaka sınıfı (`live`, `cover`, `turkish`, ...). Oran sınıf bazında da basılır.
+    /// The case class (`live`, `cover`, `turkish`, ...). The rate is printed per
+    /// class too.
     class: String,
     note: String,
     artist: String,
@@ -48,9 +49,10 @@ struct Case {
     duration_ms: Option<u64>,
     #[serde(default)]
     isrc: Option<String>,
-    /// `None` ise: hiçbir otoriteye bağlanmamalı (yerel anahtara düşmeli).
+    /// If `None`: it must not be tied to any authority (it must fall back to the
+    /// local key).
     expect_mbid: Option<String>,
-    /// Verilmişse zincirin bu halkasının çözmesi beklenir.
+    /// If given, this link of the chain is expected to resolve it.
     #[serde(default)]
     expect_method: Option<String>,
 }
@@ -59,12 +61,12 @@ impl Case {
     fn expectation(&self) -> String {
         match (&self.expect_mbid, &self.expect_method) {
             (Some(mbid), _) => mbid.clone(),
-            (None, Some(method)) => format!("otorite: {method}"),
-            (None, None) => "eşleşme yok".to_owned(),
+            (None, Some(method)) => format!("authority: {method}"),
+            (None, None) => "no match".to_owned(),
         }
     }
 
-    /// Çözümleme bu vakanın etiketiyle uyuşuyor mu?
+    /// Does the resolution agree with this case's label?
     fn is_satisfied_by(&self, resolution: &headshell_core::identity::Resolution) -> bool {
         if let Some(method) = &self.expect_method {
             if resolution.method.as_str() != method {
@@ -74,12 +76,12 @@ impl Case {
         match &self.expect_mbid {
             Some(mbid) => {
                 let want = CanonicalId::from_mbid(
-                    &Mbid::parse(mbid).expect("beklenen mbid geçerli olmalı"),
+                    &Mbid::parse(mbid).expect("the expected mbid must be valid"),
                 );
                 resolution.canonical_id == want
             }
-            // Yöntem beklentisi verilmişse onu zaten kontrol ettik; verilmemişse
-            // "hiçbir otoriteye bağlanmamalı" demektir.
+            // If a method expectation was given we already checked it; if not, it
+            // means "must not be tied to any authority".
             None if self.expect_method.is_some() => true,
             None => resolution.method == ResolveMethod::LocalKey,
         }
@@ -91,8 +93,8 @@ fn load() -> Dataset {
         env!("CARGO_MANIFEST_DIR"),
         "/../../fixtures/identity/cases.json"
     );
-    let body = std::fs::read(path).unwrap_or_else(|err| panic!("{path} okunamadı: {err}"));
-    serde_json::from_slice(&body).expect("cases.json geçerli olmalı")
+    let body = std::fs::read(path).unwrap_or_else(|err| panic!("could not read {path}: {err}"));
+    serde_json::from_slice(&body).expect("cases.json must be valid")
 }
 
 #[tokio::test]
@@ -103,7 +105,7 @@ async fn identity_accuracy_over_labelled_cases() {
             .catalog
             .iter()
             .map(|entry| Candidate {
-                mbid: Mbid::parse(&entry.mbid).expect("katalogdaki mbid geçerli olmalı"),
+                mbid: Mbid::parse(&entry.mbid).expect("the mbid in the catalog must be valid"),
                 artist: entry.artist.clone(),
                 title: entry.title.clone(),
                 duration_ms: entry.duration_ms,
@@ -116,7 +118,7 @@ async fn identity_accuracy_over_labelled_cases() {
 
     let mut correct = 0usize;
     let mut failures = Vec::new();
-    // Sınıf bazlı kırılım: toplam oran bir sınıftaki çöküşü gizleyebilir.
+    // A breakdown by class: the overall rate can hide a collapse in one class.
     let mut by_class: BTreeMap<&str, (usize, usize)> = BTreeMap::new();
 
     for case in &dataset.cases {
@@ -127,7 +129,7 @@ async fn identity_accuracy_over_labelled_cases() {
         let resolution = resolver
             .resolve(&track)
             .await
-            .expect("çözümleme hata vermemeli");
+            .expect("resolution must not fail");
 
         let entry = by_class.entry(case.class.as_str()).or_default();
         entry.1 += 1;
@@ -136,7 +138,7 @@ async fn identity_accuracy_over_labelled_cases() {
             entry.0 += 1;
         } else {
             failures.push(format!(
-                "  [{}/{}] {} - {} → {} ({}, güven {:.2}), beklenen: {}",
+                "  [{}/{}] {} - {} → {} ({}, confidence {:.2}), expected: {}",
                 case.class,
                 case.note,
                 case.artist,
@@ -156,37 +158,38 @@ async fn identity_accuracy_over_labelled_cases() {
         .filter(|case| case.expect_mbid.is_none() && case.expect_method.is_none())
         .count();
 
-    // D-009: kolay bir kümede %100 ölçüm yapılmadığı anlamına gelir. Kümenin
-    // kendisi de bir sözleşmedir; küçülürse metrik anlamsızlaşır.
+    // D-009: 100% on an easy set means nothing was measured. The set itself is a
+    // contract too; if it shrinks the metric becomes meaningless.
     assert!(
         total >= 60,
-        "doğruluk kümesi en az 60 vaka içermeli, {total} var"
+        "the accuracy set must contain at least 60 cases, it has {total}"
     );
     assert!(
         negatives >= 15,
-        "en az 15 negatif vaka gerekli, {negatives} var"
+        "at least 15 negative cases are needed, there are {negatives}"
     );
 
-    #[expect(clippy::cast_precision_loss, reason = "oran gösterimi")]
+    #[expect(clippy::cast_precision_loss, reason = "rate display")]
     let accuracy = correct as f64 / total as f64;
     println!(
-        "\nKİMLİK DOĞRULUĞU: {correct}/{total} = %{:.1}  ({negatives} negatif vaka)",
+        "\nIDENTITY ACCURACY: {correct}/{total} = {:.1}%  ({negatives} negative cases)",
         accuracy * 100.0
     );
-    println!("sınıf bazında:");
+    println!("by class:");
     for (class, (ok, seen)) in &by_class {
         let mark = if ok == seen { " " } else { "!" };
         println!("  {mark} {class:<16} {ok:>2}/{seen:<2}");
     }
     if !failures.is_empty() {
-        println!("başarısız vakalar:\n{}", failures.join("\n"));
+        println!("failing cases:\n{}", failures.join("\n"));
     }
 
-    // Eşik bilinçli olarak mevcut orandan biraz aşağıda: gerileme yakalanır,
-    // ufak dalgalanma testi kırmaz. Oran yükseldikçe eşiği de yükselt.
+    // The threshold is deliberately a little below the current rate: a
+    // regression is caught, a small fluctuation does not break the test. Raise
+    // the threshold as the rate goes up.
     assert!(
         accuracy >= ACCURACY_FLOOR,
-        "doğruluk %{:.1}'e düştü (eşik %{:.1})\n{}",
+        "accuracy dropped to {:.1}% (threshold {:.1}%)\n{}",
         accuracy * 100.0,
         ACCURACY_FLOOR * 100.0,
         failures.join("\n")

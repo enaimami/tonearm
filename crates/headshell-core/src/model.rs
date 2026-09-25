@@ -1,27 +1,30 @@
-//! Çekirdek veri modeli: dinleme olayı ve parça referansı.
+//! The core data model: the listen event and the track reference.
 
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{CanonicalId, Isrc, ProviderId, ProviderTrackId};
 
-/// Bir parçanın kanonikleşmemiş hâli — export dosyasından okuduğumuz gibi.
+/// A track in its non-canonical form — as read from the export file.
 ///
-/// Kimlik çözümlemesinin girdisi budur; çıktısı [`CanonicalId`].
+/// This is the input of identity resolution; its output is a
+/// [`CanonicalId`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TrackRef {
     pub artist: String,
     pub title: String,
     pub album: Option<String>,
-    /// Parçanın tam süresi (biliniyorsa). Bulanık eşleşmenin ayırt edici alanı.
+    /// The track's full duration (if known). The distinguishing field for fuzzy
+    /// matching.
     pub duration_ms: Option<u64>,
-    /// Kimlik zincirinin ilk halkası. Export'ta varsa altın değerinde.
+    /// The first link of the identity chain. Worth its weight in gold if the
+    /// export has it.
     pub isrc: Option<Isrc>,
-    /// Export'un kendi kimliği (`spotify:track:...`). Kanonik değildir.
+    /// The export's own id (`spotify:track:...`). Not canonical.
     pub provider_track_id: Option<ProviderTrackId>,
 }
 
 impl TrackRef {
-    /// Yalnızca sanatçı+başlık bilinen en yalın hâl.
+    /// The plainest form, with only artist+title known.
     #[must_use]
     pub fn new(artist: impl Into<String>, title: impl Into<String>) -> Self {
         Self {
@@ -58,20 +61,20 @@ impl TrackRef {
         self
     }
 
-    /// İnsan okunur tek satır: `Sanatçı - Başlık`.
+    /// One human-readable line: `Artist - Title`.
     #[must_use]
     pub fn display_name(&self) -> String {
         format!("{} - {}", self.artist, self.title)
     }
 
-    /// `"Radiohead - Creep"` biçimindeki tek satırlık sorguyu ayrıştırır.
+    /// Parses a one-line query of the form `"Radiohead - Creep"`.
     ///
-    /// Ayırıcı ilk ` - ` dizisidir; sanatçı adında tire olabilir diye
-    /// boşluklu biçim aranır. CLI bunu kendisi yapmaz — ayrıştırma veri
-    /// dönüşümüdür ve çekirdeğe aittir.
+    /// The separator is the first ` - ` sequence; the spaced form is looked for
+    /// because an artist's name may contain a hyphen. The CLI does not do this
+    /// itself — parsing is a data transformation and belongs in the core.
     ///
     /// # Errors
-    /// Ayırıcı yoksa ya da iki taraftan biri boşsa.
+    /// If there is no separator or either side is empty.
     pub fn parse_query(input: &str) -> crate::Result<Self> {
         let invalid = |detail: String| {
             crate::Error::new(
@@ -81,60 +84,66 @@ impl TrackRef {
         };
         let (artist, title) = input.split_once(" - ").ok_or_else(|| {
             invalid(format!(
-                "{input:?} 'Sanatçı - Başlık' biçiminde değil (ayırıcı: boşluk-tire-boşluk)"
+                "{input:?} is not of the form 'Artist - Title' (separator: space-hyphen-space)"
             ))
         })?;
         let (artist, title) = (artist.trim(), title.trim());
         if artist.is_empty() || title.is_empty() {
             return Err(invalid(format!(
-                "{input:?} içinde sanatçı ya da başlık boş"
+                "the artist or the title is empty in {input:?}"
             )));
         }
         Ok(Self::new(artist, title))
     }
 }
 
-/// Tek bir dinleme olayı. Sözlükteki `listen`.
+/// A single listen event. The glossary's `listen`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Listen {
-    /// Ne dinlendi (ham hâliyle).
+    /// What was listened to (in its raw form).
     pub track: TrackRef,
-    /// Ne zaman başladı/bitti — export'a göre değişir, UTC'ye normalize edilir.
+    /// When it started/ended — depends on the export, normalised to UTC.
     pub played_at: jiff::Timestamp,
-    /// Kaç milisaniye çalındı. Skip tespiti ve "gerçek dinleme" eşiği buna dayanır.
+    /// How many milliseconds were played. Skip detection and the "real listen"
+    /// threshold rest on this.
     pub ms_played: u64,
-    /// Kayıt nereden geldi.
+    /// Where the record came from.
     pub source: ListenSource,
-    /// Çözümlenmişse kanonik kimlik. Faz 0'da import sonrası doldurulur.
+    /// The canonical identity, if resolved. In Phase 0 it is filled in after
+    /// import.
     pub canonical_id: Option<CanonicalId>,
 }
 
 impl Listen {
-    /// Bu dinleme sayılan bir çalma mı?
+    /// Is this listen a counted play?
     ///
-    /// Kararı [`PlayRule`] verir — çekirdekte tek tanım (D-008).
+    /// [`PlayRule`] decides — a single definition in the core (D-008).
     #[must_use]
     pub fn counts_as_play(&self, rule: PlayRule) -> bool {
         rule.counts(self.ms_played, self.track.duration_ms)
     }
 }
 
-/// Spotify'ın "dinlendi" saydığı eşik; sektör alışkanlığı olduğu için
-/// varsayılan bu, ama gizli değil — [`PlayRule`] ile değiştirilebilir.
+/// The threshold Spotify counts as "listened"; it is the default because it
+/// is an industry habit, but it is not hidden — it can be changed with
+/// [`PlayRule`].
 pub const DEFAULT_MIN_MS_PLAYED: u64 = 30_000;
 
-/// Bir dinleme olayının **sayılan çalma** olup olmadığına karar veren kural.
+/// The rule that decides whether a listen event is a **counted play**.
 ///
-/// D-008: bu kavram çekirdekte tek yerde tanımlıdır. `stats` eşiği uygulayıp,
-/// `library search` ham olayları sayınca aynı fixture'da "18 çalma" ve
-/// "9 çalma" çıkmıştı. Artık iki yüzey de bu kuralı çağırır.
+/// D-008: this concept is defined in one place in the core. When `stats`
+/// applied the threshold and `library search` counted raw events, the same
+/// fixture came out as "18 plays" and "9 plays". Now both surfaces call this
+/// rule.
 ///
-/// İki sayı birbirine karıştırılmasın diye adları da ayrıldı:
-/// - **`play_count`** — bu kuralı geçen, kullanıcıya gösterilen çalma sayısı.
-/// - **`listen_events`** — ham olay sayısı; yalnızca `diag` ve hata ayıklamada.
+/// The names were separated too, so the two numbers are not mixed up:
+/// - **`play_count`** — the number of plays that pass this rule, shown to the
+///   user.
+/// - **`listen_events`** — the raw event count; only in `diag` and when
+///   debugging.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlayRule {
-    /// Bu sürenin altında kalan çalmalar atlama (skip) sayılır.
+    /// Plays shorter than this count as skips.
     pub min_ms_played: u64,
 }
 
@@ -152,12 +161,13 @@ impl PlayRule {
         Self { min_ms_played }
     }
 
-    /// Scrobble konvansiyonu: eşiği geçmiş **ya da** parçanın en az yarısı.
+    /// The scrobble convention: past the threshold **or** at least half of the
+    /// track.
     ///
-    /// Yarım-parça kolu yalnızca süre biliniyorsa çalışır; bilinmeyen süreyi
-    /// "yarısını dinledi" saymak sayıyı şişirir. Faz 0'daki Spotify export'u
-    /// süre taşımıyor, dolayısıyla pratikte eşik kolu karar veriyor — kural
-    /// yerel dosyalar geldiğinde (Faz 1) devreye girecek.
+    /// The half-track arm only works if the duration is known; counting an
+    /// unknown duration as "listened to half" inflates the number. Phase 0's
+    /// Spotify export carries no durations, so in practice the threshold arm
+    /// decides — the rule comes into play once local files arrive (Phase 1).
     #[must_use]
     pub const fn counts(self, ms_played: u64, duration_ms: Option<u64>) -> bool {
         if ms_played >= self.min_ms_played {
@@ -170,25 +180,25 @@ impl PlayRule {
     }
 }
 
-/// Bir dinlemenin kaynağı.
+/// Where a listen comes from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ListenSource {
-    /// Bir veri export dosyasından içe aktarıldı.
+    /// Imported from a data export file.
     Import { export: ExportKind },
-    /// Bir sağlayıcı üzerinden `headshell` ile çalındı.
+    /// Played with `headshell` through a provider.
     Playback { provider: ProviderId },
 }
 
-/// Hangi sağlayıcının export biçimi.
+/// Which provider's export format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExportKind {
     /// Spotify "Extended streaming history" (`Streaming_History_Audio_*.json`).
     SpotifyExtended,
-    /// Spotify hesap verisi (`StreamingHistory*.json`) — yalnızca son 1 yıl.
+    /// Spotify account data (`StreamingHistory*.json`) — only the last year.
     SpotifyAccount,
-    /// Apple Music gizlilik export'u.
+    /// Apple Music privacy export.
     AppleMusic,
     /// Google Takeout / YouTube Music.
     GoogleTakeout,
@@ -238,13 +248,13 @@ mod tests {
     #[test]
     fn half_a_short_track_counts_even_below_the_threshold() {
         let rule = PlayRule::default();
-        // 40 sn'lik bir parçanın 25 sn'si: eşiğin altında ama yarısından fazla.
+        // 25 s of a 40 s track: below the threshold but more than half.
         assert!(rule.counts(25_000, Some(40_000)));
-        // Aynı süre, uzun parça: yarısına ulaşmıyor, sayılmaz.
+        // The same duration, a long track: it does not reach half, not counted.
         assert!(!rule.counts(25_000, Some(240_000)));
-        // Süre bilinmiyorsa yarım-parça kolu hiç çalışmaz.
+        // If the duration is unknown the half-track arm never applies.
         assert!(!rule.counts(25_000, None));
-        // Sıfır süre bölme/şişirme üretmemeli.
+        // A zero duration must not produce a division or an inflated count.
         assert!(!rule.counts(1, Some(0)));
     }
 
@@ -268,9 +278,9 @@ mod tests {
 
     #[test]
     fn parse_query_rejects_input_without_a_separator() {
-        let err = TrackRef::parse_query("sadece başlık").unwrap_err();
+        let err = TrackRef::parse_query("only a title").unwrap_err();
         assert!(
-            err.chain_text().contains("Sanatçı - Başlık"),
+            err.chain_text().contains("Artist - Title"),
             "{}",
             err.chain_text()
         );

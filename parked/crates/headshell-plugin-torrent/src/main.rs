@@ -1,8 +1,10 @@
-//! Torrent eklentisinin ince kabuğu: stdin'den satır oku, gönder, cevabı yaz.
+//! The torrent plugin's thin shell: read a line from stdin, dispatch it, write
+//! the answer.
 //!
-//! Bütün mantık `lib.rs` ve altındaki modüllerde. Ayrım Altın Kural'ın
-//! eklentiye düşen hâli: buradan silinen hiçbir şey yeteneği götürmemeli —
-//! entegrasyon testleri de aynı işleyicileri kütüphaneden çağırıyor.
+//! All the logic is in `lib.rs` and the modules under it. The split is the
+//! Golden Rule as it applies to a plugin: nothing deleted from here should
+//! take a capability with it — the integration tests call the same handlers
+//! from the library.
 
 use headshell_core::plugin::protocol::method;
 use headshell_plugin_torrent::rpc::{CODE_METHOD_NOT_FOUND, CODE_PLUGIN_ERROR, Incoming};
@@ -11,8 +13,9 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
-    // stdout protokole ait; her günlük satırı stderr'e. Çekirdek stderr'i
-    // `tracing`'e aktarıyor, yani librqbit'in teşhisi `headshell diag`'a ulaşır.
+    // stdout belongs to the protocol; every log line goes to stderr. The core
+    // forwards stderr into `tracing`, so librqbit's diagnostics reach
+    // `headshell diag`.
     let filter = tracing_subscriber::EnvFilter::try_from_env("HEADSHELL_TORRENT_LOG")
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
     tracing_subscriber::fmt()
@@ -27,10 +30,10 @@ async fn main() {
     loop {
         let line = match lines.next_line().await {
             Ok(Some(line)) => line,
-            // EOF: çekirdek boruyu kapattı, düzgün çıkıyoruz.
+            // EOF: the core closed the pipe, we exit cleanly.
             Ok(None) => return,
             Err(error) => {
-                eprintln!("stdin okunamadı: {error}");
+                eprintln!("could not read stdin: {error}");
                 return;
             }
         };
@@ -39,7 +42,7 @@ async fn main() {
             continue;
         }
         let Ok(incoming) = serde_json::from_str::<Incoming>(line) else {
-            eprintln!("ayrıştırılamayan satır atlandı");
+            eprintln!("skipped a line that could not be parsed");
             continue;
         };
 
@@ -51,12 +54,12 @@ async fn main() {
         let params = incoming.params.clone().unwrap_or(serde_json::Value::Null);
         match dispatch(&mut app, &method_name, params).await {
             Ok(Some(result)) => rpc::reply(incoming.id, result),
-            // Tanınmayan metot: protokol bunu "bu yeteneği desteklemiyorum"
-            // diye okur ve çekirdek çökmez.
+            // An unrecognised method: the protocol reads this as "I do not support
+            // this capability" and the core does not crash.
             Ok(None) => rpc::fail(
                 incoming.id,
                 CODE_METHOD_NOT_FOUND,
-                &format!("metot yok: {method_name}"),
+                &format!("no such method: {method_name}"),
             ),
             Err(error) => rpc::fail(incoming.id, CODE_PLUGIN_ERROR, &error.to_string()),
         }

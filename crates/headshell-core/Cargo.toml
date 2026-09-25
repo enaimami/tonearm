@@ -1,6 +1,6 @@
 [package]
 name = "headshell-core"
-description = "Sağlayıcıdan bağımsız dinleme kimliği çekirdeği. Bütün mantık burada."
+description = "The core of a provider-independent listening identity. All the logic lives here."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,23 +11,22 @@ publish.workspace = true
 cpal = { version = "0.18", optional = true }
 jiff = { version = "0.2.35", features = ["serde"] }
 resvg = { version = "0.48", optional = true }
-# D-069: eklenti motoru — gömülü QuickJS-NG. Ölçülen bedel **+4 crate**
-# (51 → 55 benzersiz; `hashbrown`/`foldhash`/`equivalent` zaten ağaçtaydı)
-# ve soyulmuş ikilide ~1,3 MB. Derleme C derleyicisi istiyor, ama `rusqlite`'ın
-# `bundled`'ı onu zaten istiyor: yeni bir derleme gereksinimi yok. Varsayılan
-# feature'lar kapalı: `std` dışında hiçbir şey (yükleyici, makrolar, async
-# köprüsü) kullanılmıyor.
+# D-069: the plugin engine — embedded QuickJS-NG. The measured price is **+4 crates**
+# (51 → 55 unique; `hashbrown`/`foldhash`/`equivalent` were already in the tree) and
+# ~1.3 MB in the stripped binary. Building needs a C compiler, but `rusqlite`'s
+# `bundled` already needs one: no new build requirement. Default features are off:
+# nothing but `std` (the loader, macros, the async bridge) is used.
 rquickjs = { version = "0.14", default-features = false, features = ["std"], optional = true }
 rusty-chromaprint = { version = "0.3.0", optional = true }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
-# D-055: motorun indirdiği eserin karmasını doğrulamak için. Ölçülen bedel
-# **+8 crate** (51 → 59 benzersiz) ve bu ağaç mobile gidiyor. Feature
-# kapısının arkasına konmadı: kapalı bir kapı, "karma tutmuyor" tanısını
-# koyamamak demekti ve bu tanının susması tam da doğrulamanın var olma
-# sebebini yok ederdi. `0.10` seçildi (0.11 değil) — Tauri kabuğu zaten
-# 0.10.9'u kilitliyor, workspace'te ikinci bir kopya olmuyor.
+# D-055: for verifying the hash of the artifact the engine downloads. The measured
+# price is **+8 crates** (51 → 59 unique), and this tree goes to mobile. It was not
+# put behind a feature gate: a closed gate would mean not being able to give the
+# "hash mismatch" diagnosis, and silencing that diagnosis would remove the very
+# reason verification exists. `0.10` was chosen (not 0.11) — the Tauri shell
+# already locks 0.10.9, so there is no second copy in the workspace.
 sha2 = "0.10"
 strsim = "0.11.1"
 symphonia = { version = "0.6", features = ["mp3", "flac", "vorbis", "isomp4", "aac"], optional = true }
@@ -36,21 +35,21 @@ ureq = { version = "3.4", default-features = false, features = ["rustls"], optio
 tracing = "0.1.44"
 zip = { version = "7.2.0", default-features = false, features = ["deflate"] }
 
-# D-070 — BSD'ler: DENENMEDİ (canary). `rquickjs-sys` FreeBSD, NetBSD, OpenBSD
-# ve DragonFly için hazır bağlama taşımıyor; orada bağlama derleme anında
-# libclang ile üretilir (`bindgen`). Aynı bağımlılık yalnızca bu hedeflerde bu
-# özellikle bir kez daha yazılıyor, Cargo ikisini birleştiriyor: Linux, macOS
-# ve Windows derlemesi değişmiyor, bu hedeflerde `libclang` kurulu olmalı.
-# Buradan derlenip sınanamadı — BSD makinesi yok; belgelerde öyle yazar.
+# D-070 — the BSDs: UNTESTED (canary). `rquickjs-sys` carries no prebuilt bindings for
+# FreeBSD, NetBSD, OpenBSD and DragonFly; there the bindings are generated with libclang
+# at build time (`bindgen`). The same dependency is written once more, only for these
+# targets and with this feature, and Cargo merges the two: the Linux, macOS and Windows
+# builds do not change; on these targets `libclang` must be installed. It could not be
+# built and tested from here — there is no BSD machine; the documentation says so.
 [target.'cfg(any(target_os = "freebsd", target_os = "netbsd", target_os = "openbsd", target_os = "dragonfly"))'.dependencies]
 rquickjs = { version = "0.14", default-features = false, features = ["std", "bindgen"], optional = true }
 
 [dev-dependencies]
 tokio = { version = "1.53.1", features = ["rt", "macros"] }
 
-# Eklenti testleri motoru çalıştırıyor; motor kapalı bir derlemede (tek
-# başına `cargo test -p headshell-core`) derlenmezler. Kapı koşumu
-# `--workspace` olduğu için orada her zaman koşarlar (CLI feature'ı açıyor).
+# The plugin tests run the engine; they do not compile in a build with the engine off
+# (`cargo test -p headshell-core` on its own). Since the gate run is `--workspace`,
+# they always run there (the CLI turns the feature on).
 [[test]]
 name = "plugin_script"
 required-features = ["plugin-engine"]
@@ -63,17 +62,17 @@ required-features = ["plugin-engine", "http-client"]
 name = "plugin_ytmusic"
 required-features = ["plugin-engine", "http-client"]
 
-# Elle çalıştırılan çalma denemesi; ses aygıtı ister, CI'da koşmaz.
+# A playback probe run by hand; needs an audio device, does not run in CI.
 [[example]]
 name = "playback_probe"
 required-features = ["audio"]
 
-# AcoustID'ye giden parmak izi dizesini gözle görmek için (D-046).
+# For seeing the fingerprint string that goes to AcoustID with your own eyes (D-046).
 [[example]]
 name = "fingerprint_probe"
 required-features = ["fingerprint"]
 
-# MusicBrainz aramasının aday kümesi koşumlar arası sabit mi (D-046 eki).
+# Is the candidate set of a MusicBrainz search stable across runs (D-046 addendum).
 [[example]]
 name = "mb_stability_probe"
 required-features = ["http-client"]
@@ -82,31 +81,31 @@ required-features = ["http-client"]
 workspace = true
 
 [features]
-# D-011: PNG rasterizasyonu opsiyonel. Çekirdek her zaman SVG üretir;
-# `render-png` açıkken `sleeve::render_png` derlenir. CLI açar, mobil açmaz.
+# D-011: PNG rasterisation is optional. The core always produces SVG; with
+# `render-png` on, `sleeve::render_png` is compiled. The CLI turns it on, mobile does not.
 render-png = ["dep:resvg"]
 
-# D-016: ses hattı (symphonia çözme + cpal çıkış) tek feature arkasında.
-# Kapalıyken `playback` modülünün trait'leri ve kuyruk mantığı yine derlenir;
-# yalnızca gerçek ses çıkışı düşer. Böylece sunucu/mobil derlemeleri ALSA'ya
-# bağlanmak zorunda kalmaz.
+# D-016: the audio pipeline (symphonia decoding + cpal output) behind a single feature.
+# With it off, the `playback` module's traits and queue logic still compile; only the
+# real audio output drops out. So server/mobile builds do not have to link against
+# ALSA.
 audio = ["dep:symphonia", "dep:cpal"]
 
-# D-045: ses parmak izi (Chromaprint). `audio`'yu gerektiriyor çünkü PCM'i
-# symphonia üretiyor; ayrı bir feature çünkü `rustfft` + `rubato` ağacını
-# yalnızca parmak izi isteyen derlemeler taşısın. Kapalıyken zincirin 4.
-# halkası düşer ve bu **söylenir**, sessizce atlanmaz (K9).
+# D-045: the audio fingerprint (Chromaprint). It needs `audio` because symphonia
+# produces the PCM; a separate feature so that only builds that want fingerprints
+# carry the `rustfft` + `rubato` tree. With it off, the chain's 4th link drops out and
+# this **is said**, not silently skipped (K9).
 fingerprint = ["dep:rusty-chromaprint", "audio"]
 
-# D-069: eklenti motoru (QuickJS). Kapalıyken eklentiler yine keşfedilir,
-# listelenir, onaylanır ve eserleri kurulur — yalnızca **çalıştırılamazlar**,
-# ve ilk çağrı bunu bir hatayla söyler: "bu derlemede eklenti motoru yok".
-# CLI ve masaüstü açar. Kapısı var çünkü çekirdek eklentisiz de eksiksizdir
-# (yerel dosya, Subsonic, istatistik, içe aktarma).
+# D-069: the plugin engine (QuickJS). With it off, plugins are still discovered,
+# listed and approved and their artifacts installed — they just **cannot run**, and
+# the first call says so with an error: "this build has no plugin engine". The CLI and
+# the desktop turn it on. It has a gate because the core is complete without plugins
+# too (local files, Subsonic, statistics, import).
 plugin-engine = ["dep:rquickjs"]
 
-# D-020: HTTP taşıma katmanı. `net::HttpClient` trait'i her zaman derlenir;
-# bu feature yalnızca somut istemciyi (ureq + rustls) getirir. Kapalıyken
-# Subsonic/Jellyfin mantığı yine derlenir ve test edilebilir — çağıran kendi
-# `Arc<dyn HttpClient>`'ını verirse çalışır da. CLI açar, mobil açmaz.
+# D-020: the HTTP transport layer. The `net::HttpClient` trait always compiles; this
+# feature only brings the concrete client (ureq + rustls). With it off, the
+# Subsonic/Jellyfin logic still compiles and can be tested — and it even works if the
+# caller supplies its own `Arc<dyn HttpClient>`. The CLI turns it on, mobile does not.
 http-client = ["dep:ureq"]

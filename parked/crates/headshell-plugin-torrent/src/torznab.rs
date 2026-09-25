@@ -1,46 +1,50 @@
-//! Torznab istemcisi (D-047 S3b).
+//! The Torznab client (D-047 S3b).
 //!
-//! Torznab, Newznab'dan türeyen ve Prowlarr/Jackett'ın konuştuğu standart
-//! arama API'si: sorgu bir URL, cevap RSS. **Depoda hiçbir siteye özel
-//! kazıyıcı yok** — hangi indekslerin sorgulanacağını kullanıcı kendi
-//! Prowlarr/Jackett'ında seçer, biz tek bir ayrıştırıcı taşırız.
+//! Torznab is the standard search API derived from Newznab that Prowlarr and
+//! Jackett speak: the query is a URL, the answer is RSS. **There is no
+//! site-specific scraper in the repository** — the user picks which indexers
+//! to query in their own Prowlarr/Jackett; we carry a single parser.
 //!
-//! Cevabın üç ayrı "boş"u var ve üçü ayrı tanıdır (K9):
-//! - `<error code=...>` — indeks bizi **reddetti** (anahtar yanlış vb.),
-//! - sıfır `<item>` — indeks baktı, **bulamadı**,
-//! - ağ hatası — indekse **ulaşamadık**.
+//! The answer has three different "empties", and all three are separate
+//! diagnoses (K9):
+//! - `<error code=...>` — the indexer **refused** us (a wrong key etc.),
+//! - zero `<item>`s — the indexer looked and **found nothing**,
+//! - a network error — we **could not reach** the indexer.
 
 use crate::rpc::{Result, err};
 
-/// Torznab'ın ses kategorisi. Alt kategoriler (3010 MP3, 3040 FLAC…) bunun
-/// içinde; üst kategoriyi sormak indeksin kendi eşlemesine güvenmek demektir.
+/// Torznab's audio category. The subcategories (3010 MP3, 3040 FLAC…) are
+/// inside it; asking for the parent category means trusting the indexer's own
+/// mapping.
 pub const CATEGORY_AUDIO: &str = "3000";
 
-/// Torznab'ın `torznab:attr` ad alanı. `roxmltree` yerel ada bakmamıza izin
-/// veriyor ama önekin ne olduğu indeksten indekse değişiyor; ad alanına
-/// bakmak öneki tahmin etmekten sağlam.
+/// Torznab's `torznab:attr` namespace. `roxmltree` lets us look at the local
+/// name, but the prefix varies from indexer to indexer; looking at the
+/// namespace is sturdier than guessing the prefix.
 const TORZNAB_NS: &str = "http://torznab.com/schemas/2015/feed";
 
-/// Aramadan dönen tek bir yayım (release). **Bir parça değil** — genelde bir
-/// albüm ya da derleme. Parçaya inmek ikinci adım (bkz. `main::search`).
+/// A single release returned by a search. **Not a track** — usually an album
+/// or a compilation. Going down to a track is the second step (see
+/// `main::search`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Release {
-    /// Yayım adı, indeksin yazdığı gibi.
+    /// The release name, as the indexer wrote it.
     pub title: String,
-    /// 40 haneli hex infohash. Kimliğimiz bu.
+    /// The 40-digit hex infohash. This is our id.
     pub infohash: String,
-    /// Tercih edilen kaynak: tracker listesini de taşıdığı için magnet.
+    /// The preferred source: a magnet, since it also carries the tracker list.
     pub magnet: Option<String>,
-    /// Magnet yoksa `.torrent` dosyasının adresi.
+    /// The address of the `.torrent` file if there is no magnet.
     pub torrent_url: Option<String>,
     pub size_bytes: Option<u64>,
     pub seeders: Option<u32>,
-    /// Hangi indeksten geldi (Prowlarr bunu yazıyor).
+    /// Which indexer it came from (Prowlarr writes this).
     pub indexer: Option<String>,
 }
 
 impl Release {
-    /// `librqbit`'e verilecek adres. Magnet varsa o, yoksa `.torrent` adresi.
+    /// The address to give `librqbit`. The magnet if there is one, otherwise the
+    /// `.torrent` address.
     pub fn source_url(&self) -> Option<&str> {
         self.magnet
             .as_deref()
@@ -49,12 +53,13 @@ impl Release {
     }
 }
 
-/// Bir aramanın sonucu ve **düşürülenlerin sayısı**. Sessizce kısaltılmış bir
-/// liste, kullanıcıya indeksin az sonuç verdiğini düşündürür (K9).
+/// A search's result and **the number of dropped entries**. A silently
+/// shortened list makes the user think the indexer gave few results (K9).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SearchOutcome {
     pub releases: Vec<Release>,
-    /// Infohash'i de magnet'i de olmayan, yani çalınamayacak kayıtlar.
+    /// Records with neither an infohash nor a magnet, that is, ones that could not
+    /// be played.
     pub dropped_unidentifiable: usize,
 }
 
@@ -69,11 +74,11 @@ impl Torznab {
     pub fn new(base_url: impl Into<String>, api_key: impl Into<String>) -> Result<Self> {
         let base_url = base_url.into().trim().to_owned();
         if base_url.is_empty() {
-            return err("Torznab adresi boş");
+            return err("the Torznab address is empty");
         }
         if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
             return err(format!(
-                "Torznab adresi `http://` ya da `https://` ile başlamalı: {base_url}"
+                "the Torznab address must start with `http://` or `https://`: {base_url}"
             ));
         }
         let http = reqwest::Client::builder()
@@ -81,7 +86,7 @@ impl Torznab {
             .timeout(std::time::Duration::from_secs(12))
             .build()
             .map_err(|error| {
-                crate::rpc::PluginError::new(format!("HTTP istemcisi kurulamadı: {error}"))
+                crate::rpc::PluginError::new(format!("could not set up the HTTP client: {error}"))
             })?;
         Ok(Self {
             base_url,
@@ -90,8 +95,9 @@ impl Torznab {
         })
     }
 
-    /// Adresi kurar. Anahtar sorgu dizesinde gider (Torznab'ın tanımı böyle),
-    /// bu yüzden **hiçbir log satırında tam adres basılmaz** (D-042).
+    /// Builds the address. The key goes in the query string (that is how Torznab
+    /// defines it), which is why **the full address is printed in no log line**
+    /// (D-042).
     fn url(&self, params: &[(&str, &str)]) -> String {
         let mut url = self.base_url.clone();
         url.push(if url.contains('?') { '&' } else { '?' });
@@ -106,12 +112,13 @@ impl Torznab {
         url
     }
 
-    /// Log'a ve hata metnine girecek olan adres: anahtar **yok**.
+    /// The address that goes into the log and the error text: **without** the
+    /// key.
     fn redacted_base(&self) -> &str {
         &self.base_url
     }
 
-    /// Indeksin ayakta olup olmadığını en ucuz şekilde sorar (`t=caps`).
+    /// Asks the indexer whether it is up, in the cheapest way (`t=caps`).
     pub async fn caps(&self) -> Result<String> {
         let body = self.get(&self.url(&[("t", "caps")])).await?;
         let document = parse(&body)?;
@@ -121,7 +128,7 @@ impl Torznab {
             .filter(|node| node.has_tag_name("category"))
             .count();
         Ok(format!(
-            "Torznab {} — {categories} kategori bildiriyor",
+            "Torznab {} — reports {categories} categories",
             self.redacted_base()
         ))
     }
@@ -141,22 +148,23 @@ impl Torznab {
     async fn get(&self, url: &str) -> Result<String> {
         let response = self.http.get(url).send().await.map_err(|error| {
             crate::rpc::PluginError::new(format!(
-                "Torznab'a ulaşılamadı ({}): {error}",
+                "could not reach Torznab ({}): {error}",
                 self.redacted_base()
             ))
         })?;
         let status = response.status();
         let body = response.text().await.map_err(|error| {
-            crate::rpc::PluginError::new(format!("Torznab cevabı okunamadı: {error}"))
+            crate::rpc::PluginError::new(format!("could not read the Torznab answer: {error}"))
         })?;
         if !status.is_success() {
-            // Gövde önce ayrıştırılıyor: Torznab hataları 200 ile de gelebiliyor,
-            // ama HTTP hatasıyla gelenin gövdesinde de açıklama olabilir.
+            // The body is parsed first: Torznab errors can arrive with a 200 too,
+            // and one arriving with an HTTP error may still carry an explanation in
+            // its body.
             if let Ok(document) = parse(&body) {
                 check_error(&document)?;
             }
             return err(format!(
-                "Torznab HTTP {} döndürdü ({})",
+                "Torznab returned HTTP {} ({})",
                 status.as_u16(),
                 self.redacted_base()
             ));
@@ -182,16 +190,17 @@ fn encode(raw: &str) -> String {
 fn parse(body: &str) -> Result<roxmltree::Document<'_>> {
     roxmltree::Document::parse(body).map_err(|error| {
         crate::rpc::PluginError::new(format!(
-            "Torznab XML olmayan bir cevap verdi: {error} (ilk 120 karakter: {})",
+            "Torznab gave an answer that is not XML: {error} (first 120 characters: {})",
             body.chars().take(120).collect::<String>()
         ))
     })
 }
 
-/// `<error code=.. description=..>` varsa hataya çevirir.
+/// Turns an `<error code=.. description=..>` into an error if there is one.
 ///
-/// Bu, "sonuç yok"tan **ayrı** bir tanıdır: indeks baktı ve bulamadı değil,
-/// indeks bize bakmayı reddetti.
+/// This is a diagnosis **separate** from "no results": it is not that the
+/// indexer looked and found nothing, it is that the indexer refused to look for
+/// us.
 fn check_error(document: &roxmltree::Document<'_>) -> Result<()> {
     let Some(node) = document
         .descendants()
@@ -203,9 +212,9 @@ fn check_error(document: &roxmltree::Document<'_>) -> Result<()> {
     let description = node
         .attribute("description")
         .or_else(|| node.attribute("message"))
-        .unwrap_or("açıklama yok");
+        .unwrap_or("no description");
     err(format!(
-        "Torznab isteği reddetti (kod {code}): {description}"
+        "Torznab refused the request (code {code}): {description}"
     ))
 }
 
@@ -271,10 +280,10 @@ fn enclosure_url(node: &roxmltree::Node<'_, '_>) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// `<torznab:attr name="..." value="..."/>` okur.
+/// Reads `<torznab:attr name="..." value="..."/>`.
 ///
-/// Ad alanı doğruysa onunla, değilse yerel adla eşleşiyor: bazı indeksler
-/// `newznab` ad alanını kullanıyor ve alan adları aynı.
+/// It matches by the namespace if that is right, otherwise by the local name:
+/// some indexers use the `newznab` namespace and the field names are the same.
 fn attr(node: &roxmltree::Node<'_, '_>, name: &str) -> Option<String> {
     node.children()
         .filter(|child| child.is_element() && child.tag_name().name() == "attr")
@@ -298,11 +307,12 @@ pub fn is_infohash(candidate: &str) -> bool {
     candidate.len() == 40 && candidate.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-/// `magnet:?xt=urn:btih:<hash>` içinden infohash'i çıkarır.
+/// Extracts the infohash from a `magnet:?xt=urn:btih:<hash>`.
 ///
-/// Base32 (32 hane) biçimini **kabul etmiyoruz**: dönüştürmek mümkün ama
-/// bugüne kadar ölçtüğümüz bir örneği yok ve yanlış dönüştürmek kimliği
-/// sessizce bozar. Karşılaşırsak sayılıp düşer.
+/// We **do not accept** the base32 (32-digit) form: converting it is possible,
+/// but we have not measured a single example of it so far, and a wrong
+/// conversion silently corrupts the id. If we meet one, it is counted and
+/// dropped.
 pub fn infohash_from_magnet(magnet: &str) -> Option<String> {
     let marker = "urn:btih:";
     let start = magnet.to_ascii_lowercase().find(marker)? + marker.len();
@@ -338,7 +348,7 @@ mod tests {
                  <torznab:attr name="infohash" value="{HASH}" />
                  <torznab:attr name="seeders" value="42" />
                  <torznab:attr name="size" value="512000000" />
-                 <torznab:attr name="indexer" value="ornek" />
+                 <torznab:attr name="indexer" value="example" />
                </item>"#
         ));
         let outcome = parse_search_response(&body).unwrap();
@@ -347,7 +357,7 @@ mod tests {
         assert_eq!(release.infohash, HASH);
         assert_eq!(release.seeders, Some(42));
         assert_eq!(release.size_bytes, Some(512_000_000));
-        assert_eq!(release.indexer.as_deref(), Some("ornek"));
+        assert_eq!(release.indexer.as_deref(), Some("example"));
         assert!(
             release
                 .source_url()
@@ -359,7 +369,7 @@ mod tests {
     fn an_item_without_an_infohash_attribute_still_works_if_the_magnet_has_one() {
         let body = feed(&format!(
             r#"<item>
-                 <title>Bir Yayım</title>
+                 <title>A Release</title>
                  <link>magnet:?xt=urn:btih:{}&amp;tr=udp://x</link>
                </item>"#,
             HASH.to_ascii_uppercase()
@@ -367,15 +377,15 @@ mod tests {
         let outcome = parse_search_response(&body).unwrap();
         assert_eq!(
             outcome.releases[0].infohash, HASH,
-            "hex küçük harfe indirilmeli"
+            "the hex must be lower-cased"
         );
     }
 
     #[test]
     fn an_item_we_could_never_play_is_counted_not_silently_dropped() {
         let body = feed(
-            r#"<item><title>Kimliksiz</title><link>https://ornek/sayfa</link></item>
-               <item><title>Boş</title></item>"#,
+            r#"<item><title>No id</title><link>https://example/page</link></item>
+               <item><title>Empty</title></item>"#,
         );
         let outcome = parse_search_response(&body).unwrap();
         assert!(outcome.releases.is_empty());
@@ -388,7 +398,7 @@ mod tests {
             r#"<?xml version="1.0"?><error code="100" description="Incorrect user credentials" />"#;
         let error = parse_search_response(body).unwrap_err();
         let text = error.to_string();
-        assert!(text.contains("reddetti"), "{text}");
+        assert!(text.contains("refused"), "{text}");
         assert!(text.contains("100"), "{text}");
         assert!(text.contains("Incorrect user credentials"), "{text}");
     }
@@ -402,27 +412,27 @@ mod tests {
 
     #[test]
     fn html_instead_of_xml_says_what_arrived_instead_of_a_bare_parse_error() {
-        let error = parse_search_response("<!DOCTYPE html><html><body>Giriş yapın").unwrap_err();
+        let error = parse_search_response("<!DOCTYPE html><html><body>Please sign in").unwrap_err();
         let text = error.to_string();
-        assert!(text.contains("XML olmayan"), "{text}");
+        assert!(text.contains("not XML"), "{text}");
         assert!(
             text.contains("DOCTYPE"),
-            "ilk karakterler gösterilmeli: {text}"
+            "the first characters must be shown: {text}"
         );
     }
 
     #[test]
     fn the_api_key_never_appears_in_an_error_message() {
-        let client = Torznab::new("https://indeks.ornek/api", "GIZLI-ANAHTAR").unwrap();
-        assert!(!client.redacted_base().contains("GIZLI"));
+        let client = Torznab::new("https://indexer.example/api", "SECRET-KEY").unwrap();
+        assert!(!client.redacted_base().contains("SECRET"));
         let url = client.url(&[("t", "search")]);
         assert!(
-            url.contains("apikey=GIZLI-ANAHTAR"),
-            "anahtar adreste olmalı: {url}"
+            url.contains("apikey=SECRET-KEY"),
+            "the key must be in the address: {url}"
         );
         assert!(
             !client.redacted_base().contains("apikey"),
-            "ama log'a giden adreste olmamalı"
+            "but not in the address that goes to the log"
         );
     }
 
@@ -436,7 +446,7 @@ mod tests {
 
     #[test]
     fn a_url_without_a_scheme_is_refused_up_front() {
-        let error = Torznab::new("indeks.ornek/api", "k").unwrap_err();
+        let error = Torznab::new("indexer.example/api", "k").unwrap_err();
         assert!(error.to_string().contains("http"), "{error}");
     }
 
@@ -454,7 +464,7 @@ mod tests {
         assert!(url.contains("q=pink+floyd"), "{url}");
         assert!(
             !url.contains("apikey="),
-            "anahtar boşken parametre eklenmemeli: {url}"
+            "no parameter must be added while the key is empty: {url}"
         );
     }
 }

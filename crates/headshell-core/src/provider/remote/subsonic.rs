@@ -1,12 +1,13 @@
-//! Subsonic / OpenSubsonic istemcisi (D-019).
+//! The Subsonic / OpenSubsonic client (D-019).
 //!
-//! Navidrome, Airsonic, Gonic, LMS ve Subsonic eklentili Jellyfin bu API'yi
-//! konuşur. Kimlik doğrulama Subsonic'in kendi salt/token yolu (D-021):
-//! her istek `u`, `t`, `s` taşır; parola tel üzerinden hiç geçmez.
+//! Navidrome, Airsonic, Gonic, LMS and Jellyfin with the Subsonic plugin speak
+//! this API. Authentication is Subsonic's own salt/token scheme (D-021): every
+//! request carries `u`, `t`, `s`; the password never goes over the wire.
 //!
-//! **Subsonic hataları HTTP 200 ile gelir** — gövdedeki `status: "failed"`
-//! okunmazsa "her şey yolunda" sanılır. Bu yüzden zarf her yanıtta denetlenir
-//! ve hata [`crate::ErrorKind::RemoteApi`] olur (taşıma hatasından ayrı).
+//! **Subsonic errors arrive with HTTP 200** — if the `status: "failed"` in the
+//! body is not read, "all is well" is assumed. That is why the envelope is
+//! checked on every response and an error becomes
+//! [`crate::ErrorKind::RemoteApi`] (separate from a transport error).
 
 use std::sync::Arc;
 
@@ -24,14 +25,14 @@ use crate::provider::{
 
 use super::{RemoteServer, StoredAuth};
 
-/// Konuştuğumuz protokol sürümü. 1.16.1 = Subsonic 6.1; `search3` ve
-/// `getScanStatus` bu sürümde var.
+/// The protocol version we speak. 1.16.1 = Subsonic 6.1; `search3` and
+/// `getScanStatus` exist in this version.
 const API_VERSION: &str = "1.16.1";
 
-/// Sunucuların log'unda göreceği istemci adı.
+/// The client name servers will see in their logs.
 const CLIENT_NAME: &str = "headshell";
 
-/// Subsonic sağlayıcısı.
+/// The Subsonic provider.
 pub struct SubsonicProvider {
     server: RemoteServer,
     http: Arc<dyn HttpClient>,
@@ -52,11 +53,11 @@ impl SubsonicProvider {
         Self { server, http }
     }
 
-    /// Kimlik parametreleriyle birlikte bir uç nokta URL'si kurar.
+    /// Builds an endpoint URL together with the credential parameters.
     ///
-    /// Kimlik sorgu dizesinde: Subsonic'in tanımladığı yol bu. Bu yüzden
-    /// **`http://` üzerinden kullanmak token'ı ağa açar** — `normalize_url`
-    /// şema tahmininde bulunmamasının sebebi de bu.
+    /// The credentials go in the query string: that is the scheme Subsonic
+    /// defines. That is why **using it over `http://` exposes the token to the
+    /// network** — which is also why `normalize_url` does not guess the scheme.
     pub(crate) fn endpoint(&self, name: &str, params: &[(&str, &str)]) -> String {
         let mut url = format!(
             "{}/rest/{}?u={}&v={API_VERSION}&c={CLIENT_NAME}&f=json",
@@ -72,8 +73,8 @@ impl SubsonicProvider {
                     net::encode_query(salt)
                 ));
             }
-            // Elle düzenlenmiş bir kayıtta olabilir: OpenSubsonic'in
-            // `apiKey` yolu. Sessizce kimliksiz istek atmaktan iyidir.
+            // This can happen in a hand-edited record: OpenSubsonic's
+            // `apiKey` route. Better than silently sending requests without credentials.
             StoredAuth::ApiKey { key } => {
                 url.push_str(&format!("&apiKey={}", net::encode_query(key)));
             }
@@ -84,7 +85,7 @@ impl SubsonicProvider {
         url
     }
 
-    /// Uç noktayı çağırır ve zarfı doğrular.
+    /// Calls the endpoint and validates the envelope.
     async fn call(&self, name: &str, params: &[(&str, &str)]) -> Result<SubsonicBody> {
         let url = self.endpoint(name, params);
         let request = HttpRequest::get(&url);
@@ -106,14 +107,14 @@ impl SubsonicProvider {
                     code: error.code,
                     message: error
                         .message
-                        .unwrap_or_else(|| "sunucu bir mesaj vermedi".to_owned()),
+                        .unwrap_or_else(|| "the server gave no message".to_owned()),
                 },
             ));
         }
         Ok(body)
     }
 
-    /// Bir parçanın akış URL'si.
+    /// A track's stream URL.
     #[must_use]
     pub fn stream_url(&self, song_id: &str) -> String {
         self.endpoint("stream", &[("id", song_id)])
@@ -125,8 +126,8 @@ impl Provider for SubsonicProvider {
         ProviderInfo {
             id: self.server.id.clone(),
             display_name: self.server.display_name(),
-            // CONTROL yok: Subsonic uzaktaki bir oynatıcıyı kumanda etmez,
-            // ses baytlarını bize verir.
+            // No CONTROL: Subsonic does not control a remote player,
+            // it gives us the audio bytes.
             capabilities: Capabilities::SEARCH | Capabilities::BROWSE | Capabilities::STREAM,
         }
     }
@@ -136,8 +137,8 @@ impl Provider for SubsonicProvider {
             let ping = match self.call("ping", &[]).await {
                 Ok(body) => body,
                 Err(err) => {
-                    // Ulaşılamamak bir sağlık **cevabıdır**, komutun hatası
-                    // değil: `provider test` çıktısı sebebi göstermeli.
+                    // Being unreachable is a health **answer**, not an error of the
+                    // command: the `provider test` output must show the reason.
                     return Ok(ProviderHealth {
                         id: self.server.id.clone(),
                         reachable: false,
@@ -153,13 +154,13 @@ impl Provider for SubsonicProvider {
                 _ => "Subsonic".to_owned(),
             };
 
-            // Parça sayısı isteğe bağlı bir uç noktadan geliyor; yoksa
-            // "bilmiyorum" (None) diyoruz, sıfır değil.
+            // The track count comes from an optional endpoint; if it is
+            // missing we say "I don't know" (None), not zero.
             let track_count = match self.call("getScanStatus", &[]).await {
                 Ok(body) => body.scan_status.and_then(|status| status.count),
                 Err(err) => {
                     detail.push_str(&format!(
-                        " — parça sayısı okunamadı ({})",
+                        " — the track count could not be read ({})",
                         err.chain_text().replace('\n', " ")
                     ));
                     None
@@ -211,11 +212,11 @@ impl Provider for SubsonicProvider {
                 }
             }
             if skipped > 0 {
-                // Sessizce yutmuyoruz: sayı log'a düşüyor (K9).
+                // We do not swallow it silently: the count goes to the log (K9).
                 tracing::warn!(
                     provider = %self.server.id,
                     skipped,
-                    "başlığı ya da kimliği olmayan parçalar atlandı"
+                    "skipped tracks without a title or an id"
                 );
             }
             Ok(hits)
@@ -231,28 +232,32 @@ impl Provider for SubsonicProvider {
                 return Err(Error::new(
                     Stage::PlaybackResolve,
                     ErrorKind::InvalidInput {
-                        detail: format!("{id} bu sağlayıcıya ait değil ({})", self.server.id),
+                        detail: format!(
+                            "{id} does not belong to this provider ({})",
+                            self.server.id
+                        ),
                     },
                 ));
             }
-            // Varlık kontrolü için ayrı bir `getSong` çağrısı atmıyoruz:
-            // olmayan bir kimlik akış açılırken net bir HTTP hatası verir
-            // (ADIM: NETWORK_REQUEST) ve her çalmadan önce bir tur ağ
-            // gecikmesi eklemeye değmez.
+            // We do not send a separate `getSong` call to check existence:
+            // an id that does not exist gives a clear HTTP error when the stream
+            // is opened (STEP: NETWORK_REQUEST), and it is not worth adding a
+            // network round trip before every play.
             Ok(Some(AudioSource::HttpStream {
                 url: self.stream_url(&id.id),
-                // Kimlik sorgu dizesinde; ek başlık gerekmiyor.
+                // The credentials are in the query string; no extra header needed.
                 headers: Vec::new(),
             }))
         })
     }
 
-    // `scan_catalog` uygulanmadı (varsayılan `None`): Subsonic'te bütün
-    // kataloğu ucuza döken bir uç nokta yok — sanatçı → albüm → parça diye
-    // yüzlerce istek gerekirdi. Uzak arama sunucuya doğrudan gidiyor.
+    // `scan_catalog` is not implemented (the default `None`): Subsonic has no
+    // endpoint that dumps the whole catalog cheaply — it would take hundreds of
+    // requests, artist → album → track. Remote search goes straight to the
+    // server.
 }
 
-/// `{"subsonic-response": {...}}` zarfı.
+/// The `{"subsonic-response": {...}}` envelope.
 #[derive(Debug, Deserialize)]
 struct Envelope {
     #[serde(rename = "subsonic-response")]
@@ -298,14 +303,15 @@ struct Song {
     title: Option<String>,
     artist: Option<String>,
     album: Option<String>,
-    /// Saniye cinsinden (Subsonic böyle veriyor).
+    /// In seconds (that is how Subsonic gives it).
     duration: Option<u64>,
-    /// OpenSubsonic eklentisi; varsa kimlik zincirinin ilk halkası (K6).
+    /// An OpenSubsonic extension; if present, the first link of the identity
+    /// chain (K6).
     isrc: Option<Vec<String>>,
 }
 
 impl Song {
-    /// Kimliği ya da başlığı olmayan satır `None` döner — çağıran sayar.
+    /// A row without an id or a title returns `None` — the caller counts it.
     fn into_track(self, server: &RemoteServer) -> Option<ProviderTrack> {
         let id = self.id?;
         let title = self.title?;
@@ -318,8 +324,7 @@ impl Song {
         Some(ProviderTrack {
             id: ProviderTrackId::new(server.id.clone(), id),
             track: TrackRef::new(
-                self.artist
-                    .unwrap_or_else(|| "Bilinmeyen sanatçı".to_owned()),
+                self.artist.unwrap_or_else(|| "Unknown artist".to_owned()),
                 title,
             )
             .with_album(self.album)
@@ -339,7 +344,7 @@ mod tests {
         RemoteServer {
             id: ProviderId::new("ev"),
             kind: super::super::ServerKind::Subsonic,
-            url: "https://muzik.ev".to_owned(),
+            url: "https://music.home".to_owned(),
             username: "enai".to_owned(),
             auth: StoredAuth::SubsonicToken {
                 salt: "c19b2d".to_owned(),
@@ -354,19 +359,19 @@ mod tests {
         {"id":"a1","title":"Geceler","artist":"Ezhel","album":"Müptezhel","duration":215,
          "isrc":["TRA123456789"]},
         {"id":"a2","title":"Felaket","artist":"Ezhel","duration":180},
-        {"title":"kimliksiz"}]}}}"#;
+        {"title":"no-id"}]}}}"#;
 
     #[test]
     fn the_url_carries_credentials_and_encodes_the_query() {
         let provider = SubsonicProvider::new(server(), Arc::new(FakeHttp::new()));
         let url = provider.endpoint("search3", &[("query", "Ezhel Geceler")]);
-        assert!(url.starts_with("https://muzik.ev/rest/search3?"), "{url}");
+        assert!(url.starts_with("https://music.home/rest/search3?"), "{url}");
         assert!(url.contains("u=enai"), "{url}");
         assert!(url.contains("&t=26719a1196d2a940705a59634eb18eab"), "{url}");
         assert!(url.contains("&s=c19b2d"), "{url}");
         assert!(url.contains("&f=json"), "{url}");
         assert!(url.contains("query=Ezhel%20Geceler"), "{url}");
-        // Parola hiçbir yerde geçmemeli.
+        // The password must not appear anywhere.
         assert!(!url.contains("p="), "{url}");
     }
 
@@ -376,7 +381,7 @@ mod tests {
         let provider = SubsonicProvider::new(server(), Arc::clone(&http) as Arc<dyn HttpClient>);
 
         let hits = provider.search("Ezhel", 10).await.unwrap();
-        assert_eq!(hits.len(), 2, "başlıksız satır atlanmalı");
+        assert_eq!(hits.len(), 2, "a row without a title must be skipped");
         assert_eq!(hits[0].track.title, "Geceler");
         assert_eq!(hits[0].track.artist, "Ezhel");
         assert_eq!(hits[0].track.album.as_deref(), Some("Müptezhel"));
@@ -384,7 +389,7 @@ mod tests {
         assert_eq!(
             hits[0].track.isrc.as_ref().map(|i| i.as_str()),
             Some("TRA123456789"),
-            "ISRC varsa kimlik zincirinin ilk halkası (K6)"
+            "if there is an ISRC it is the first link of the identity chain (K6)"
         );
         assert_eq!(hits[0].id.provider.as_str(), "ev");
         assert_eq!(hits[0].id.id, "a1");
@@ -404,7 +409,7 @@ mod tests {
 
         let err = provider.search("Ezhel", 10).await.unwrap_err();
         let text = err.chain_text();
-        assert!(text.starts_with("ADIM: PROVIDER_CALL"), "{text}");
+        assert!(text.starts_with("STEP: PROVIDER_CALL"), "{text}");
         assert!(text.contains("Wrong username or password"), "{text}");
         assert!(text.contains("40"), "{text}");
     }
@@ -437,14 +442,14 @@ mod tests {
 
     #[tokio::test]
     async fn an_unreachable_server_is_a_health_answer_not_a_command_failure() {
-        // Sahte istemcide hiç yol yok: her istek taşıma hatası.
+        // The fake client has no routes at all: every request is a transport error.
         let http = Arc::new(FakeHttp::new());
         let provider = SubsonicProvider::new(server(), http);
 
         let health = provider.health().await.unwrap();
         assert!(!health.reachable);
-        assert!(health.detail.is_some(), "sebep gösterilmeli");
-        assert_eq!(health.track_count, None, "bilinmiyor sıfır değildir");
+        assert!(health.detail.is_some(), "the reason must be shown");
+        assert_eq!(health.track_count, None, "unknown is not zero");
     }
 
     #[tokio::test]
@@ -460,13 +465,13 @@ mod tests {
                 assert!(url.contains("id=a1"), "{url}");
                 assert!(headers.is_empty());
             }
-            other => panic!("HTTP akışı bekleniyordu: {other:?}"),
+            other => panic!("an HTTP stream was expected: {other:?}"),
         }
 
-        let foreign = ProviderTrackId::new(ProviderId::new("baska"), "a1");
+        let foreign = ProviderTrackId::new(ProviderId::new("other"), "a1");
         assert!(
             provider.resolve_source(&foreign).await.is_err(),
-            "başka sağlayıcının kimliği sessizce kabul edilmemeli"
+            "another provider's id must not be accepted silently"
         );
     }
 }

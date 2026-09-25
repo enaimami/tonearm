@@ -1,17 +1,19 @@
-//! Kanonik kimlik çözümlemesi.
+//! Canonical identity resolution.
 //!
-//! **Değişmez kural #5 — zincir bozulmaz:**
-//! ISRC → MusicBrainz ID → bulanık eşleşme (sanatçı+başlık+süre) → AcoustID
-//! parmak izi. Her adım bir güven skoru döndürür ve hangi adımın çözdüğü
-//! kayıtta durur; "çözüldü" demek yetmez, *nasıl* çözüldüğü ölçülebilir olmalı.
+//! **Invariant #5 — the chain is not broken:**
+//! ISRC → MusicBrainz ID → fuzzy match (artist+title+duration) → AcoustID
+//! fingerprint. Every step returns a confidence score and the step that
+//! resolved a record stays in the record; saying "resolved" is not enough,
+//! *how* it was resolved must be measurable.
 
-/// AcoustID sorgusu — yalnızca `fingerprint` derlemelerinde.
+/// AcoustID lookup — only in `fingerprint` builds.
 ///
-/// Modülün kendisi parmak izini AcoustID'nin beklediği biçime sıkıştırmak
-/// zorunda ve o sıkıştırıcı `rusty-chromaprint` içinde. Feature kapalıyken
-/// modül **yok**; zincirin 4. halkasını çağıran kod ise
-/// [`Resolver::resolve_file`] üstünden geçtiği için derlemeye devam eder ve
-/// halkanın neden yok olduğunu [`fingerprint::fingerprint_file`] söyler (K9).
+/// The module itself has to compress the fingerprint into the form AcoustID
+/// expects, and that compressor lives in `rusty-chromaprint`. With the
+/// feature off the module **does not exist**; the code that calls the
+/// chain's 4th link still compiles because it goes through
+/// [`Resolver::resolve_file`], and [`fingerprint::fingerprint_file`] says why
+/// the link is missing (K9).
 #[cfg(feature = "fingerprint")]
 pub mod acoustid;
 pub mod fingerprint;
@@ -30,22 +32,22 @@ use crate::Result;
 use crate::ids::{CanonicalId, Isrc, Mbid};
 use crate::model::TrackRef;
 
-/// Zincirin hangi halkasının çözdüğü.
+/// Which link of the chain resolved it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResolveMethod {
-    /// ISRC doğrudan bir kayda götürdü.
+    /// The ISRC led straight to a recording.
     Isrc,
-    /// Üstveri araması tam (normalize) isabet verdi.
+    /// The metadata search gave an exact (normalised) hit.
     Mbid,
-    /// Bulanık eşleşme eşiği geçti.
+    /// The fuzzy match passed the threshold.
     Fuzzy,
-    /// Ses parmak izi (AcoustID) — Faz 2.
+    /// Audio fingerprint (AcoustID) — Phase 2.
     Fingerprint,
-    /// Zincir sonuçsuz kaldı; yerel anahtardan kimlik türetildi.
+    /// The chain came up empty; the identity was derived from a local key.
     ///
-    /// Gruplama için yeterli, otorite olarak değersiz. Ağ geldiğinde bu
-    /// kayıtlar yeniden çözümlenmeli.
+    /// Good enough for grouping, worthless as an authority. Once the network is
+    /// available, these records should be resolved again.
     LocalKey,
 }
 
@@ -68,62 +70,67 @@ impl std::fmt::Display for ResolveMethod {
     }
 }
 
-/// Tek bir parçanın çözümleme sonucu.
+/// The resolution result for a single track.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Resolution {
     pub canonical_id: CanonicalId,
     pub method: ResolveMethod,
-    /// 0.0–1.0. `LocalKey` için düşüktür: kimlik tutarlı ama otoritesiz.
+    /// 0.0–1.0. Low for `LocalKey`: the identity is consistent but has no
+    /// authority.
     pub confidence: f64,
-    /// Eşleşmenin hangi kayda gittiği (varsa).
+    /// Which recording the match went to (if any).
     pub matched: Option<Candidate>,
-    /// En yüksek skoru **kaç aday paylaştı**. `1` = tekil kazanan.
+    /// **How many candidates shared** the top score. `1` = a single winner.
     ///
-    /// Gerçek bir katalogda beraberlik istisna değil kural: `Radiohead —
-    /// Creep` araması onlarca birebir aynı sanatçı ve başlığı döndürüyor ve
-    /// süre bilinmediğinde hepsi aynı skoru alıyor. Bu sayı olmadan çıktı
-    /// "%100 güven" diyordu — oysa yapılan iş 25 eşdeğer aday arasından
-    /// **belirlenimci ama keyfi** bir seçimdi (D-045). K9: seçimin dayandığı
-    /// kanıtın zayıflığı ölçülebilir olmalı.
+    /// In a real catalog a tie is the rule, not the exception: a `Radiohead —
+    /// Creep` search returns dozens of identical artists and titles, and when
+    /// the duration is unknown they all get the same score. Without this number
+    /// the output said "100% confidence" — while what actually happened was a
+    /// **deterministic but arbitrary** choice among 25 equivalent candidates
+    /// (D-045). K9: the weakness of the evidence behind a choice must be
+    /// measurable.
     ///
-    /// Aday listesi kullanılmayan halkalarda (ISRC, `LocalKey`) `1`.
+    /// `1` for links that do not use a candidate list (ISRC, `LocalKey`).
     #[serde(default = "one")]
     pub tied_candidates: usize,
 }
 
-/// `serde` varsayılanı: alanı olmayan eski kayıtlar tekil sayılır.
+/// `serde` default: old records without the field count as a single winner.
 const fn one() -> usize {
     1
 }
 
-/// İki skorun "aynı" sayılacağı pay.
+/// The margin within which two scores count as "the same".
 ///
-/// Kayan noktada tam eşitlik aramak, aynı hesabı farklı sırayla yapan iki
-/// adayı ayrı gösterirdi. Beraberliği kaçırmak onu uydurmaktan daha kötü:
-/// kaçırılan beraberlik "%100 güven" diye raporlanır.
+/// Looking for exact equality in floating point would show two candidates
+/// that ran the same computation in a different order as different. Missing
+/// a tie is worse than inventing one: a missed tie is reported as "100%
+/// confidence".
 const SCORE_EPSILON: f64 = 1e-9;
 
-/// Beraberlikte güvenin **kesin olarak** altında kalacağı eşiğe pay.
+/// The margin by which confidence stays **strictly** below the threshold in a
+/// tie.
 const AMBIGUITY_MARGIN: f64 = 0.01;
 
-/// Skorlanmış bir aday ve onu ayırt eden bütün kanıt.
+/// A scored candidate and all the evidence that tells it apart.
 ///
-/// Skorun yanında `gap` taşınıyor çünkü [`fuzzy::similarity`] süre farkını
-/// **bantlara** bölüyor: 0 sn ile 2.9 sn aynı bandın içinde, ikisi de "uyuyor".
-/// Bant kararı için doğru, eşitliği kırmak için değil — o bilgi kayboluyordu.
+/// `gap` travels next to the score because [`fuzzy::similarity`] splits the
+/// duration difference into **bands**: 0 s and 2.9 s fall in the same band,
+/// both "fit". Right for the band decision, not for breaking ties — that
+/// information was being lost.
 struct Scored {
     candidate: Candidate,
     score: f64,
-    /// Sorgunun süresiyle adayın süresi arasındaki fark. Biri bilinmiyorsa
-    /// [`u64::MAX`]: "yakınlık iddiasında bulunamıyorum", en sona düşer.
+    /// The difference between the query's duration and the candidate's. If
+    /// either is unknown, [`u64::MAX`]: "I can't claim closeness", it sorts last.
     gap: u64,
 }
 
-/// Sorgunun süresine uzaklık; bilinmiyorsa en kötü değer.
+/// Distance to the query's duration; the worst value if unknown.
 ///
-/// Bilinmeyen süreyi 0 saymak "birebir uyuyor" demek olurdu — bilinmeyeni
-/// uyuşma saymanın bu modüldeki üçüncü tekrarı, ve her seferinde yanlış
-/// eşleşme üretti.
+/// Counting an unknown duration as 0 would mean "matches exactly" — the third
+/// time in this module that an unknown would have been counted as a match,
+/// and every time it produced a wrong match.
 fn duration_gap(query_ms: Option<u64>, candidate_ms: Option<u64>) -> u64 {
     match (query_ms, candidate_ms) {
         (Some(query), Some(candidate)) => query.abs_diff(candidate),
@@ -131,17 +138,18 @@ fn duration_gap(query_ms: Option<u64>, candidate_ms: Option<u64>) -> u64 {
     }
 }
 
-/// Kazananla **gerçekten ayırt edilemeyen** kaç aday var.
+/// How many candidates are **truly indistinguishable** from the winner.
 ///
-/// Liste sıralamanın bütün ölçütlerine göre sıralı olduğu için ayırt
-/// edilemeyenler bir önek oluşturuyor: aynı skor, aynı [`tiebreak_rank`], aynı
-/// süre farkı. Üçünde de eşit olan iki adayı ayıran tek şey MBID sırası kalır
-/// — ve o bir kanıt değil, sadece sabit bir seçim.
+/// The list is sorted by every sorting criterion, so the indistinguishable
+/// ones form a prefix: same score, same [`tiebreak_rank`], same duration gap.
+/// The only thing left to separate two candidates equal on all three is the
+/// MBID order — and that is not evidence, just a fixed choice.
 ///
-/// Yalnızca skora bakmak yetmiyordu (D-046): canlı katalogda `Radiohead —
-/// Creep` araması 9–10 adayı aynı skorda bırakıyor ve `Şebnem Ferah — Sil
-/// Baştan` üç adayı — süreleri 309, 313, 315 sn — aynı skorda. İlkinde ortada
-/// gerçekten kanıt yok; ikincisinde kanıt var ve bantların altında kalmıştı.
+/// Looking only at the score was not enough (D-046): in the live catalog a
+/// `Radiohead — Creep` search leaves 9–10 candidates on the same score, and
+/// `Şebnem Ferah — Sil Baştan` leaves three candidates — 309, 313 and 315 s
+/// long — on the same score. In the first there really is no evidence; in the
+/// second there is, and it had been hidden under the bands.
 fn count_tied(scored: &[Scored]) -> usize {
     let Some(top) = scored.first() else {
         return 1;
@@ -158,7 +166,7 @@ fn count_tied(scored: &[Scored]) -> usize {
         .max(1)
 }
 
-/// Üstveri kaynağından dönen aday kayıt.
+/// A candidate recording returned by the metadata source.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Candidate {
     pub mbid: Mbid,
@@ -166,32 +174,36 @@ pub struct Candidate {
     pub title: String,
     pub duration_ms: Option<u64>,
     pub isrc: Option<Isrc>,
-    /// Kaydı adaşlarından ayıran not — MusicBrainz'in `disambiguation` alanı.
+    /// The note that sets a recording apart from its namesakes — MusicBrainz's
+    /// `disambiguation` field.
     ///
-    /// Başlıkta olmayan ama kimliği belirleyen bilgi buradan gelir:
-    /// `"live, 1994-05-27: Astoria, London, UK"`. Katalogdaki üç `Creep`'in
-    /// üçünün de başlığı `Creep`'tir; hangisinin canlı kayıt olduğu **yalnızca**
-    /// bu alanda yazar (D-045). [`fuzzy::similarity`] onu `context_b` olarak
-    /// alır.
+    /// Information that is not in the title but decides the identity comes from
+    /// here: `"live, 1994-05-27: Astoria, London, UK"`. All three `Creep`s in the
+    /// catalog are titled `Creep`; which one is the live recording is written
+    /// **only** in this field (D-045). [`fuzzy::similarity`] takes it as
+    /// `context_b`.
     #[serde(default)]
     pub disambiguation: Option<String>,
 }
 
-/// Skorları eşit adaylar arasında hangisinin daha iyi bir kanonik seçim
-/// olduğu. Büyük olan kazanır.
+/// Among candidates with equal scores, which one is the better canonical
+/// choice. The larger one wins.
 ///
-/// İki ölçüt, ikisi de "hangisi bu şarkının **varsayılan** kaydı" sorusunu
-/// cevaplıyor:
-/// - **Ayırt edici notu olmayan** kayıt varsayılandır: MusicBrainz notu
-///   yalnızca bir kaydı adaşlarından ayırmak gerektiğinde yazar. Notu olan
-///   kayıt tanım gereği bir istisnadır (canlı, remiks, farklı bir gece).
-/// - **Süresi bilinen** kayıt, bilinmeyene tercih edilir: daha çok bilgi
-///   taşıyan kayıt daha çok işlenmiş, dolayısıyla daha çok güvenilir kayıttır.
+/// Two criteria, both answering "which is this song's **default**
+/// recording":
+/// - A recording **without a disambiguation note** is the default:
+///   MusicBrainz writes the note only when a recording has to be told apart
+///   from its namesakes. A recording with a note is by definition an
+///   exception (live, remix, a different night).
+/// - A recording **with a known duration** is preferred over one without: a
+///   recording carrying more information has been worked on more, and is
+///   therefore more trustworthy.
 fn tiebreak_rank(candidate: &Candidate) -> u8 {
     u8::from(candidate.disambiguation.is_none()) * 2 + u8::from(candidate.duration_ms.is_some())
 }
 
-/// Bir çözümleme turunun özeti. Projenin en önemli metriği buradan okunur.
+/// The summary of one resolution round. The project's most important metric
+/// is read from here.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResolveSummary {
     pub total: usize,
@@ -214,22 +226,26 @@ impl ResolveSummary {
         }
     }
 
-    /// Otoriteli (MusicBrainz'e bağlanmış) çözümlemelerin oranı.
+    /// The share of authoritative resolutions (linked to MusicBrainz).
     ///
-    /// Doğruluk kümesindeki hedef metrik budur — `LocalKey` sayılmaz.
+    /// This is the target metric of the accuracy set — `LocalKey` does not
+    /// count.
     #[must_use]
     pub fn authoritative_ratio(&self) -> f64 {
         if self.total == 0 {
             return 0.0;
         }
         let authoritative = self.by_isrc + self.by_mbid + self.by_fuzzy + self.by_fingerprint;
-        #[expect(clippy::cast_precision_loss, reason = "oran gösterimi; kayıp önemsiz")]
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "ratio for display; the loss is negligible"
+        )]
         {
             authoritative as f64 / self.total as f64
         }
     }
 
-    /// Sayaçları tanı kaydediciye aktarır.
+    /// Copies the counters into the diagnostics recorder.
     pub fn record_into(&self, recorder: &mut crate::diag::Recorder) {
         let n = |v: usize| i64::try_from(v).unwrap_or(i64::MAX);
         recorder.set("identity.total", n(self.total));
@@ -241,28 +257,29 @@ impl ResolveSummary {
     }
 }
 
-/// Bir üstveri çağrısının dönüşü.
+/// The return type of a metadata call.
 ///
-/// `async fn` yerine kutulanmış future, çünkü trait'in `dyn` uyumlu olması
-/// gerekiyor (K7 / D-006): `-> impl Future` taşıyan bir trait'ten
-/// `Arc<dyn MetadataLookup>` üretilemez. Bu, `async-trait` makrosunun
-/// ürettiğinin elle yazılmış hâli — bağımlılık ağacını büyütmemek için.
+/// A boxed future instead of `async fn`, because the trait has to be `dyn`
+/// compatible (K7 / D-006): a trait carrying `-> impl Future` cannot give an
+/// `Arc<dyn MetadataLookup>`. This is a hand-written version of what the
+/// `async-trait` macro generates — so the dependency tree does not grow.
 pub type LookupFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
 
-/// Üstveri kaynağı (MusicBrainz, yerel katalog, test sahtesi).
+/// A metadata source (MusicBrainz, a local catalog, a test fake).
 ///
-/// Ağa çıkan her şey bu trait'in arkasında; testler ağa bağlanmaz.
-/// İmzalar `async` çünkü gerçek uygulaması HTTP konuşacak — bugün senkron
-/// yazıp yarın bütün çağıranları değiştirmemek için.
+/// Everything that goes online is behind this trait; tests never touch the
+/// network. The signatures are `async` because the real implementation will
+/// speak HTTP — written synchronously today, every caller would have to
+/// change tomorrow.
 ///
-/// `Send + Sync`: `uniffi` bunu **callback interface** olarak modeller
-/// (`#[uniffi::export(with_foreign)]`), yani Kotlin/Swift tarafında da
-/// uygulanabilir; oradan gelen nesne iş parçacıkları arasında geçer.
+/// `Send + Sync`: `uniffi` models this as a **callback interface**
+/// (`#[uniffi::export(with_foreign)]`), so it can be implemented on the
+/// Kotlin/Swift side too; an object coming from there crosses threads.
 pub trait MetadataLookup: Send + Sync {
-    /// ISRC'den kayıt kimliği.
+    /// Recording id from an ISRC.
     fn recording_by_isrc<'a>(&'a self, isrc: &'a Isrc) -> LookupFuture<'a, Option<Candidate>>;
 
-    /// Sanatçı+başlık ile aday arama.
+    /// Candidate search by artist+title.
     fn search_recordings<'a>(
         &'a self,
         artist: &'a str,
@@ -270,38 +287,41 @@ pub trait MetadataLookup: Send + Sync {
     ) -> LookupFuture<'a, Vec<Candidate>>;
 }
 
-/// Bir parmak izi eşleşmesi: aday kayıt + servisin kendi güveni.
+/// A fingerprint match: a candidate recording + the service's own
+/// confidence.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FingerprintCandidate {
     pub candidate: Candidate,
-    /// AcoustID'nin **parmak izi örtüşme** skoru, 0–1.
+    /// AcoustID's **fingerprint overlap** score, 0–1.
     ///
-    /// Metin benzerliği değil: [`fuzzy::similarity`] sanatçı ve başlığı
-    /// karşılaştırır, bu sayı ise sesin kendisini. İkisini aynı ölçekte
-    /// görüp karıştırmamak için ayrı bir alanda duruyor — etiketi bozuk bir
-    /// dosyada metin skoru sıfıra yakınken bu skor 0.99 olabilir, ve doğru
-    /// olan odur.
+    /// Not text similarity: [`fuzzy::similarity`] compares artist and title,
+    /// while this number compares the audio itself. It lives in a separate field
+    /// so the two are not seen on the same scale and confused — for a file with
+    /// broken tags the text score can be near zero while this one is 0.99, and
+    /// this one is right.
     pub score: f64,
 }
 
-/// Ses parmak izinden kayıt arayan kaynak (AcoustID).
+/// A source that looks up recordings from an audio fingerprint (AcoustID).
 ///
-/// [`MetadataLookup`]'tan ayrı bir trait çünkü girdisi bambaşka: o metin
-/// alır, bu ses alır. Aynı trait'e sıkıştırmak, ağa hiç çıkmayan
-/// [`OfflineLookup`]'a anlamsız bir metot eklemek olurdu.
+/// A separate trait from [`MetadataLookup`] because its input is entirely
+/// different: that one takes text, this one takes audio. Squeezing them into
+/// one trait would add a meaningless method to [`OfflineLookup`], which never
+/// goes online.
 pub trait FingerprintLookup: Send + Sync {
-    /// Parmak izine karşılık gelen kayıtlar — en güçlü eşleşme başta.
+    /// The recordings that match a fingerprint — strongest match first.
     ///
-    /// Boş liste **hata değil**: "bu ses veritabanında yok" geçerli bir
-    /// cevaptır ve zincirin bir sonraki adımına (yerel anahtar) geçmek
-    /// demektir. Hata yalnızca soruyu **soramadığımız** hâldir (K9).
+    /// An empty list is **not an error**: "this audio is not in the database" is
+    /// a valid answer, and means moving on to the chain's next step (the local
+    /// key). An error is only the case where we **could not ask** (K9).
     fn recordings_by_fingerprint<'a>(
         &'a self,
         fingerprint: &'a fingerprint::Fingerprint,
     ) -> LookupFuture<'a, Vec<FingerprintCandidate>>;
 }
 
-/// Ağa çıkmayan kaynak. Faz 0'ın varsayılanı: zincir yerel anahtara düşer.
+/// A source that never goes online. Phase 0's default: the chain falls to
+/// the local key.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct OfflineLookup;
 
@@ -319,7 +339,7 @@ impl MetadataLookup for OfflineLookup {
     }
 }
 
-/// Bellekteki sabit katalog. Testler ve doğruluk kümesi için.
+/// A fixed catalog in memory. For tests and the accuracy set.
 #[derive(Debug, Clone, Default)]
 pub struct StaticLookup {
     candidates: Vec<Candidate>,
@@ -351,8 +371,8 @@ impl MetadataLookup for StaticLookup {
         Box::pin(async move {
             let key_artist = normalize::normalize_artist(artist);
             let key_title = normalize::normalize_text(title);
-            // Gerçek bir arama motoru gibi davran: ilk harflerden kabaca ele,
-            // asıl kararı skorlama versin.
+            // Behave like a real search engine: filter roughly by the first letters and
+            // let the scoring make the real decision.
             Ok(self
                 .candidates
                 .iter()
@@ -366,12 +386,13 @@ impl MetadataLookup for StaticLookup {
     }
 }
 
-/// Çözümleme eşikleri.
+/// Resolution thresholds.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ResolveConfig {
-    /// Bulanık eşleşmenin kabul eşiği. Altı `LocalKey`'e düşer.
+    /// The acceptance threshold for a fuzzy match. Below it, it falls to
+    /// `LocalKey`.
     pub min_fuzzy_confidence: f64,
-    /// Bu skorun üstündeki eşleşme "tam isabet" (`Mbid`) sayılır.
+    /// A match above this score counts as an "exact hit" (`Mbid`).
     pub exact_match_confidence: f64,
 }
 
@@ -384,27 +405,29 @@ impl Default for ResolveConfig {
     }
 }
 
-/// Kimlik zincirini yürüten çözümleyici.
+/// The resolver that walks the identity chain.
 ///
-/// Üstveri kaynağı generic değil `Arc<dyn MetadataLookup>` (D-006): `uniffi`
-/// generic parametre ifade edemez, `Arc<dyn Trait>` ise callback interface
-/// olarak geçer.
+/// The metadata source is `Arc<dyn MetadataLookup>`, not a generic (D-006):
+/// `uniffi` cannot express generic parameters, while `Arc<dyn Trait>` crosses
+/// as a callback interface.
 #[derive(Clone)]
 pub struct Resolver {
     lookup: Arc<dyn MetadataLookup>,
-    /// Zincirin 4. halkası. `None` = bu çözümleyici parmak izine bakmıyor.
+    /// The chain's 4th link. `None` = this resolver does not look at
+    /// fingerprints.
     ///
-    /// Opsiyonel çünkü halkanın çalışması iki şeye birden bağlı: elde bir
-    /// **dosya** olmasına ve bir AcoustID kaynağının verilmiş olmasına. İçe
-    /// aktarılan geçmiş kayıtlarının dosyası yok; onlar için bu alanı
-    /// doldurmak boşuna bir bağımlılık taşımak olurdu.
+    /// Optional because the link depends on two things at once: having a
+    /// **file**, and an AcoustID source having been supplied. Imported history
+    /// records have no file; filling this field for them would only carry a
+    /// useless dependency.
     fingerprint_lookup: Option<Arc<dyn FingerprintLookup>>,
     config: ResolveConfig,
 }
 
 impl std::fmt::Debug for Resolver {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Kaynak yabancı dilde uygulanmış olabilir; `Debug` istemiyoruz.
+        // The source may be implemented in a foreign language; we don't ask for
+        // `Debug`.
         f.debug_struct("Resolver")
             .field("config", &self.config)
             .finish_non_exhaustive()
@@ -427,23 +450,23 @@ impl Resolver {
         self
     }
 
-    /// Zincirin 4. halkasını bağlar.
+    /// Wires up the chain's 4th link.
     ///
-    /// Yalnızca [`Self::resolve_file`] tarafından kullanılır — [`Self::resolve`]
-    /// bir dosya görmediği için bu kaynağa hiç dokunmaz.
+    /// Used only by [`Self::resolve_file`] — [`Self::resolve`] never sees a file,
+    /// so it never touches this source.
     #[must_use]
     pub fn with_fingerprint_lookup(mut self, lookup: Arc<dyn FingerprintLookup>) -> Self {
         self.fingerprint_lookup = Some(lookup);
         self
     }
 
-    /// Tek bir parçayı zincirden geçirir.
+    /// Runs a single track through the chain.
     ///
     /// # Errors
-    /// Üstveri kaynağı hata döndürürse. Kaynağın "bulamadım" demesi hata
-    /// değildir — zincir bir sonraki halkaya geçer.
+    /// If the metadata source returns an error. The source saying "not found" is
+    /// not an error — the chain moves on to the next link.
     pub async fn resolve(&self, track: &TrackRef) -> Result<Resolution> {
-        // 1. Halka: ISRC.
+        // Link 1: ISRC.
         if let Some(isrc) = &track.isrc {
             if let Some(candidate) = self.lookup.recording_by_isrc(isrc).await? {
                 return Ok(Resolution {
@@ -454,7 +477,8 @@ impl Resolver {
                     tied_candidates: 1,
                 });
             }
-            // Kaynak ISRC'yi tanımadı ama ISRC'nin kendisi geçerli bir otorite.
+            // The source did not know the ISRC, but the ISRC itself is a valid
+            // authority.
             return Ok(Resolution {
                 canonical_id: CanonicalId::from_isrc(isrc),
                 method: ResolveMethod::Isrc,
@@ -464,7 +488,7 @@ impl Resolver {
             });
         }
 
-        // 2. ve 3. Halka: üstveri araması + skorlama.
+        // Links 2 and 3: metadata search + scoring.
         let candidates = self
             .lookup
             .search_recordings(&track.artist, &track.title)
@@ -489,24 +513,24 @@ impl Resolver {
                 }
             })
             .collect();
-        // Skor eşitliğini **belirlenimci** biçimde kır. Gerçek bir katalogda
-        // eşitlik istisna değil kural: `Radiohead — Creep` araması 190'dan
-        // fazla kayıt döndürüyor, onlarcası birebir aynı sanatçı ve başlığı
-        // taşıyor ve süre bilinmediğinde hepsi aynı skoru alıyor. `max_by` bu
-        // durumda MusicBrainz'in gönderdiği sıraya teslim oluyordu ve o sıra
-        // sabit değil — aynı sorgu iki koşumda iki farklı MBID verdi (D-045).
-        // Kimlik katmanı için bu kabul edilemez: aynı parça yarın başka bir
-        // kanonik kimlik alamaz.
+        // Break score ties **deterministically**. In a real catalog a tie is the
+        // rule, not the exception: a `Radiohead — Creep` search returns more than
+        // 190 recordings, dozens of which carry exactly the same artist and title,
+        // and when the duration is unknown they all get the same score. `max_by`
+        // used to surrender to the order MusicBrainz sent, and that order is not
+        // stable — the same query gave two different MBIDs in two runs (D-045).
+        // For an identity layer that is unacceptable: the same track cannot get a
+        // different canonical id tomorrow.
         scored.sort_by(|left, right| {
             right
                 .score
                 .total_cmp(&left.score)
                 .then_with(|| tiebreak_rank(&right.candidate).cmp(&tiebreak_rank(&left.candidate)))
-                // Süreye yakınlık: skorun bantları içinde yutulan kanıt
-                // (D-046). Küçük fark kazanır.
+                // Closeness in duration: evidence that the score's bands swallowed
+                // (D-046). The smaller gap wins.
                 .then_with(|| left.gap.cmp(&right.gap))
-                // Son çare: MBID sırası. Keyfi ama **sabit** — sabit olması
-                // keyfi olmamasından daha önemli.
+                // Last resort: MBID order. Arbitrary but **stable** — being stable
+                // matters more than not being arbitrary.
                 .then_with(|| {
                     left.candidate
                         .mbid
@@ -523,29 +547,29 @@ impl Resolver {
         {
             if score >= self.config.min_fuzzy_confidence {
                 if tied > 1 {
-                    // **Beraberlikte otorite iddia edilmiyor** (D-046).
+                    // **No authority is claimed in a tie** (D-046).
                     //
-                    // D-045 buradan bir MBID döndürüyor, yalnızca güveni
-                    // kırpıyor ve kaç adayın berabere olduğunu söylüyordu.
-                    // Canlı koşum bunun yetmediğini gösterdi: MusicBrainz
-                    // aramayı birden çok indeks kopyasından sunuyor ve aynı
-                    // sorgu art arda iki kez **hiç kesişmeyen** 25'er aday
-                    // döndürebiliyor. Belirlenimci sıralama bu kümenin
-                    // *içinde* çalışıyor ama küme her seferinde başka, yani
-                    // seçilen MBID hangi kopyanın cevapladığına bağlı
-                    // kalıyordu. Kimlik katmanında bu kabul edilemez.
+                    // D-045 returned an MBID from here, only clipping the confidence
+                    // and saying how many candidates were tied. The live run showed
+                    // this was not enough: MusicBrainz serves search from several
+                    // index replicas, and the same query run twice in a row can
+                    // return 25 candidates each time that **do not overlap at all**.
+                    // The deterministic ordering works *within* the set, but the set
+                    // is different every time, so the chosen MBID depended on which
+                    // replica answered. For an identity layer that is unacceptable.
                     //
-                    // Ölçülen: `Radiohead — Creep` (süresiz) her koşumda 9–10
-                    // adayı aynı skorda **ve** aynı rütbede bırakıyor. Ortada
-                    // ayırt edici kanıt yok; olmayan kanıttan kimlik üretmek
-                    // yerine yerel anahtara düşüyoruz. Kaybedilen şey
-                    // `authoritative_ratio`, kazanılan şey kimliğin **aynı
-                    // kalması** — ikincisi olmadan birincisi anlamsız.
+                    // Measured: `Radiohead — Creep` (without duration) leaves 9–10
+                    // candidates on the same score **and** the same rank in every
+                    // run. There is no distinguishing evidence; instead of producing
+                    // an identity from evidence that does not exist, we fall to the
+                    // local key. What is lost is `authoritative_ratio`; what is
+                    // gained is the identity **staying the same** — without the
+                    // second, the first is meaningless.
                     tracing::debug!(
                         track = track.display_name(),
                         score,
-                        berabere = tied,
-                        "eşdeğer adaylar ayırt edilemedi; otorite iddia edilmiyor"
+                        tied,
+                        "equivalent candidates could not be told apart; no authority is claimed"
                     );
                     return Ok(self.ambiguous(track, tied));
                 }
@@ -565,22 +589,23 @@ impl Resolver {
             tracing::debug!(
                 track = track.display_name(),
                 score,
-                esik = self.config.min_fuzzy_confidence,
-                "en iyi aday eşiği geçemedi"
+                threshold = self.config.min_fuzzy_confidence,
+                "the best candidate did not pass the threshold"
             );
         }
 
-        // 4. Halka (AcoustID) buradan çağrılmıyor ve çağrılamaz: parmak izi
-        // sesin kendisine bakar, `TrackRef`'in elinde ses yok. O halka
-        // [`Self::resolve_file`] üstünden, dosya varken çalışır.
+        // Link 4 (AcoustID) is not called from here and cannot be: the fingerprint
+        // looks at the audio itself, and a `TrackRef` has no audio. That link runs
+        // through [`Self::resolve_file`], when there is a file.
         Ok(self.ambiguous(track, 1))
     }
 
-    /// Zincirin otoriteye bağlanamadığı hâl: yerel anahtar.
+    /// The case where the chain could not reach an authority: the local key.
     ///
-    /// `tied` 1'den büyükse sebep "hiç aday yok" değil "adaylar ayırt
-    /// edilemedi" — ikisi aynı kimliği üretiyor ama **aynı tanı değil** ve
-    /// rapor bunu ayırabilmeli (K9).
+    /// If `tied` is greater than 1 the reason is not "no candidates at all" but
+    /// "the candidates could not be told apart" — both produce the same
+    /// identity but they are **not the same diagnosis**, and the report must be
+    /// able to tell them apart (K9).
     fn ambiguous(&self, track: &TrackRef, tied: usize) -> Resolution {
         let _ = self;
         Resolution {
@@ -595,30 +620,31 @@ impl Resolver {
         }
     }
 
-    /// Bir **ses dosyasını** zincirin dördünden birden geçirir.
+    /// Runs an **audio file** through all four links of the chain.
     ///
-    /// [`Self::resolve`]'dan farkı tek şey: elde dosya var. Bu, iki şey
-    /// kazandırıyor — üstveri dosyanın kendi etiketlerinden okunuyor
-    /// (export'un verdiğine mahkûm değiliz) ve metin halkaları sonuçsuz
-    /// kalırsa **ses** sorulabiliyor.
+    /// It differs from [`Self::resolve`] in one thing: there is a file. That
+    /// gains two things — the metadata is read from the file's own tags (we are
+    /// not stuck with what the export gave), and if the text links come up
+    /// empty, the **audio** can be asked.
     ///
-    /// Sıra bozulmuyor (K6): önce etiketlerden ISRC/MBID/bulanık, ancak üçü
-    /// de `LocalKey`'e düşerse parmak izi. Parmak izi en son çünkü en pahalı
-    /// olanı — dosyanın tamamı çözülür — ve ilk üçü çalıştığında ona gerek
-    /// yoktur.
+    /// The order is not broken (K6): first ISRC/MBID/fuzzy from the tags, and
+    /// only if all three fall to `LocalKey`, the fingerprint. The fingerprint is
+    /// last because it is the most expensive — the whole file is decoded — and
+    /// it is not needed when the first three work.
     ///
     /// # Errors
-    /// Dosya açılamaz/okunamazsa, ya da parmak izi kaynağına **soru
-    /// sorulamazsa**. Parmak izinin *üretilememesi* (dosya çok kısa, paketler
-    /// bozuk) hata değil: sebebi loglanır ve zincir yerel anahtarla biter —
-    /// metin halkalarının bulduğu şeyi bir ses kusuru yüzünden kaybetmeyiz.
+    /// If the file cannot be opened or read, or the fingerprint source **cannot
+    /// be asked**. Failing to *produce* a fingerprint (file too short, broken
+    /// packets) is not an error: the reason is logged and the chain ends with the
+    /// local key — we do not lose what the text links found because of an audio
+    /// defect.
     pub async fn resolve_file(&self, path: &Path) -> Result<Resolution> {
         let (track, from_tags) = crate::provider::local::read_track(path)?;
         if !from_tags {
-            // Etiket yok: metin halkalarının girdisi dosya adından türetildi.
-            // Zincirin buraya kadar gelip parmak izine düşmesi **beklenen**
-            // durum, sürpriz değil.
-            tracing::debug!(dosya = %path.display(), "etiket yok, üstveri dosya adından");
+            // No tags: the text links' input was derived from the file name.
+            // The chain getting this far and falling to the fingerprint is the
+            // **expected** case, not a surprise.
+            tracing::debug!(file = %path.display(), "no tags, metadata from the file name");
         }
 
         let text = self.resolve(&track).await?;
@@ -628,8 +654,8 @@ impl Resolver {
 
         let Some(lookup) = self.fingerprint_lookup.as_ref() else {
             tracing::debug!(
-                dosya = %path.display(),
-                "zincir yerel anahtara düştü ve parmak izi kaynağı bağlı değil"
+                file = %path.display(),
+                "the chain fell to the local key and no fingerprint source is wired up"
             );
             return Ok(text);
         };
@@ -637,26 +663,25 @@ impl Resolver {
         let print = match fingerprint::fingerprint_file(path) {
             Ok(print) => print,
             Err(err) => {
-                // Sessizce yutmuyoruz: hangi dosyanın neden parmak izi
-                // veremediği görünür kalmalı, yoksa "AcoustID hiç eşleşme
-                // bulmuyor" diye yanlış yerde aranır (K9).
+                // We do not swallow it silently: which file could not give a
+                // fingerprint, and why, must stay visible, or "AcoustID never
+                // finds a match" gets investigated in the wrong place (K9).
                 tracing::warn!(
-                    dosya = %path.display(),
-                    hata = %err.chain_text(),
-                    "parmak izi üretilemedi, zincir yerel anahtarla bitiyor"
+                    file = %path.display(),
+                    error = %err.chain_text(),
+                    "could not produce a fingerprint; the chain ends with the local key"
                 );
                 return Ok(text);
             }
         };
 
-        // Buradaki hata **propagate ediliyor** ve bu bilinçli bir ayrım:
-        // parmak izini üretememek dosyanın bir özelliğidir, AcoustID'ye
-        // soramamak ise bir yapılandırma ya da ağ kusurudur. İkincisini
-        // yutmak, anahtarı ayarlanmamış bir kurulumu "hiçbir şey eşleşmiyor"
-        // diye raporlardı.
+        // The error here **is propagated**, and that is a deliberate distinction:
+        // failing to produce a fingerprint is a property of the file, while being
+        // unable to ask AcoustID is a configuration or network defect. Swallowing
+        // the second would report a setup with no key as "nothing matches".
         let matches = lookup.recordings_by_fingerprint(&print).await?;
         let Some(best) = matches.first() else {
-            tracing::debug!(dosya = %path.display(), "parmak izi tanınmadı");
+            tracing::debug!(file = %path.display(), "fingerprint not recognised");
             return Ok(text);
         };
 
@@ -665,8 +690,8 @@ impl Resolver {
             .take_while(|found| (best.score - found.score).abs() <= SCORE_EPSILON)
             .count()
             .max(1);
-        // Metin tarafındaki kuralın aynısı (D-045): eşdeğerler arasından
-        // yapılan seçim tam isabet diye raporlanamaz.
+        // The same rule as on the text side (D-045): a choice made among equivalents
+        // cannot be reported as an exact hit.
         let confidence = if tied > 1 {
             best.score
                 .min(self.config.exact_match_confidence - AMBIGUITY_MARGIN)
@@ -683,13 +708,13 @@ impl Resolver {
         })
     }
 
-    /// Bir parça kümesini çözümler ve özet döndürür.
+    /// Resolves a set of tracks and returns a summary.
     ///
-    /// Aynı parça birden çok kez geçebilir; tekrar eden çözümlemeler
-    /// önbelleğe alınır.
+    /// The same track can appear more than once; repeated resolutions are
+    /// cached.
     ///
     /// # Errors
-    /// Üstveri kaynağı hata döndürürse.
+    /// If the metadata source returns an error.
     pub async fn resolve_all(
         &self,
         tracks: &[TrackRef],
@@ -721,7 +746,7 @@ mod tests {
 
     fn candidate(mbid: &str, artist: &str, title: &str, duration_ms: Option<u64>) -> Candidate {
         Candidate {
-            mbid: Mbid::parse(mbid).expect("test mbid geçerli"),
+            mbid: Mbid::parse(mbid).expect("test mbid is valid"),
             artist: artist.to_owned(),
             title: title.to_owned(),
             duration_ms,
@@ -753,7 +778,8 @@ mod tests {
     #[tokio::test]
     async fn isrc_wins_the_chain() {
         let resolver = Resolver::new(Arc::new(catalog()));
-        // Üstveri kasten çöp: ISRC varsa zincir ona bakmadan bağlanmalı.
+        // The metadata is garbage on purpose: with an ISRC, the chain must link up
+        // without looking at it.
         let track = TrackRef::new("misspelled artist", "wrong title")
             .with_isrc(Isrc::parse("GBAYE9200001"));
         let res = resolver.resolve(&track).await.unwrap();
@@ -789,17 +815,18 @@ mod tests {
         assert_eq!(res.method, ResolveMethod::LocalKey);
     }
 
-    /// Eşdeğer adaylar arasından **seçim yapılmaz** (D-046).
+    /// **No choice is made** among equivalent candidates (D-046).
     ///
-    /// D-045 buradan bir MBID döndürüyor, yalnızca güveni kırpıyordu. Canlı
-    /// koşum bunun yetmediğini gösterdi: MusicBrainz aramayı birden çok indeks
-    /// kopyasından sunuyor ve aynı sorgu art arda **hiç kesişmeyen** iki aday
-    /// kümesi döndürebiliyor. Küme içinde belirlenimci olmak, küme değiştiğinde
-    /// kimliği koruyamıyor. Ayırt edici kanıt yoksa otorite iddia edilmiyor.
+    /// D-045 returned an MBID from here, only clipping the confidence. The live
+    /// run showed that was not enough: MusicBrainz serves search from several
+    /// index replicas, and the same query run twice in a row can return two
+    /// candidate sets that **do not overlap at all**. Being deterministic within
+    /// a set cannot keep the identity when the set changes. Without
+    /// distinguishing evidence, no authority is claimed.
     #[tokio::test]
     async fn equivalent_candidates_yield_no_authority_at_all() {
-        // Aynı sanatçı, aynı başlık, üç ayrı kayıt — gerçek MusicBrainz'de
-        // `Radiohead — Creep` tam olarak bunu döndürüyor.
+        // Same artist, same title, three separate recordings — real MusicBrainz
+        // returns exactly this for `Radiohead — Creep`.
         let lookup = StaticLookup::new(vec![
             candidate(
                 "cccccccc-1111-4042-ae91-78d6a3267d01",
@@ -824,29 +851,34 @@ mod tests {
         let track = TrackRef::new("Nirvana", "Lithium");
 
         let res = resolver.resolve(&track).await.unwrap();
-        assert_eq!(res.tied_candidates, 3, "üç aday da ayırt edilemez olmalı");
+        assert_eq!(
+            res.tied_candidates, 3,
+            "all three candidates must be indistinguishable"
+        );
         assert_eq!(
             res.method,
             ResolveMethod::LocalKey,
-            "ayırt edici kanıt yokken otorite iddia edilemez"
+            "no authority can be claimed without distinguishing evidence"
         );
         assert!(
             res.matched.is_none(),
-            "seçilmeyen bir aday eşleşme diye raporlanamaz"
+            "a candidate that was not chosen cannot be reported as the match"
         );
         assert_eq!(
             res.canonical_id.kind(),
             crate::ids::CanonicalKind::Local,
-            "kimlik yerel anahtardan gelmeli: {}",
+            "the identity must come from the local key: {}",
             res.canonical_id
         );
     }
 
-    /// Yerel anahtara düşmenin **iki ayrı sebebi** ayırt edilebilmeli (K9).
+    /// The **two separate reasons** for falling to the local key must be
+    /// distinguishable (K9).
     ///
-    /// "Hiç aday yok" ile "adaylar ayırt edilemedi" aynı kimliği üretiyor ama
-    /// aynı tanı değil: ilki daha iyi üstveriyle çözülür, ikincisi daha iyi
-    /// **ayırt edici** bilgiyle (süre, ISRC, parmak izi).
+    /// "No candidates at all" and "the candidates could not be told apart"
+    /// produce the same identity but are not the same diagnosis: the first is
+    /// solved by better metadata, the second by better **distinguishing**
+    /// information (duration, ISRC, fingerprint).
     #[tokio::test]
     async fn an_ambiguous_fallback_is_distinguishable_from_an_empty_one() {
         let empty = Resolver::new(Arc::new(OfflineLookup))
@@ -854,7 +886,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(empty.method, ResolveMethod::LocalKey);
-        assert_eq!(empty.tied_candidates, 1, "aday hiç yoktu");
+        assert_eq!(empty.tied_candidates, 1, "there were no candidates at all");
 
         let ambiguous = Resolver::new(Arc::new(StaticLookup::new(vec![
             candidate(
@@ -874,10 +906,13 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(ambiguous.method, ResolveMethod::LocalKey);
-        assert_eq!(ambiguous.tied_candidates, 2, "iki aday ayırt edilemedi");
+        assert_eq!(
+            ambiguous.tied_candidates, 2,
+            "two candidates could not be told apart"
+        );
     }
 
-    /// Sunucunun sırası değişse bile aynı kimlik çıkmalı.
+    /// The same identity must come out even if the server's order changes.
     #[tokio::test]
     async fn candidate_order_does_not_change_the_chosen_id() {
         let entries = [
@@ -915,16 +950,18 @@ mod tests {
 
         assert_eq!(
             forward.canonical_id, backward.canonical_id,
-            "seçim kaynağın gönderdiği sıraya bağlı kalmış"
+            "the choice depended on the order the source sent"
         );
     }
 
-    /// Notu olmayan kayıt varsayılandır; süre bilgisi ikinci ölçüt.
+    /// A recording without a note is the default; the duration is the second
+    /// criterion.
     #[tokio::test]
     async fn the_plain_recording_wins_over_the_annotated_one() {
         let live = Candidate {
             disambiguation: Some("live, 1994-05-27: Astoria, London, UK".to_owned()),
-            // MBID kasten alfabetik olarak önce: not olmasaydı bu kazanırdı.
+            // The MBID sorts first alphabetically on purpose: without the note, it
+            // would win.
             ..candidate(
                 "00000000-1111-4042-ae91-78d6a3267d01",
                 "Nirvana",
@@ -944,10 +981,10 @@ mod tests {
             .resolve(&TrackRef::new("Nirvana", "Lithium"))
             .await
             .unwrap();
-        let matched = res.matched.expect("aday dönmeli");
+        let matched = res.matched.expect("a candidate must be returned");
         assert_eq!(
             matched.disambiguation, None,
-            "notu olan kayıt seçilmemeliydi"
+            "the recording with a note should not have been chosen"
         );
     }
 
@@ -964,13 +1001,13 @@ mod tests {
         assert_eq!(summary.total, 3);
         assert_eq!(
             summary.by_mbid, 2,
-            "aynı parça önbellekten aynı sonucu almalı"
+            "the same track must get the same result from the cache"
         );
         assert_eq!(summary.by_local_key, 1);
         assert!((summary.authoritative_ratio() - 2.0 / 3.0).abs() < 1e-9);
     }
 
-    /// Zincirin 4. halkası — yalnızca parmak izi üretilebilen derlemelerde.
+    /// The chain's 4th link — only in builds that can produce fingerprints.
     #[cfg(feature = "fingerprint")]
     mod chain_with_audio {
         use super::*;
@@ -982,7 +1019,7 @@ mod tests {
                 .join(name)
         }
 
-        /// Sabit cevap veren parmak izi kaynağı; kaç kez sorulduğunu sayar.
+        /// A fingerprint source with fixed answers; counts how often it is asked.
         struct FakeFingerprints {
             answer: Vec<FingerprintCandidate>,
             calls: AtomicUsize,
@@ -1014,7 +1051,8 @@ mod tests {
             }
         }
 
-        /// Metin halkaları boşa çıkınca ses sorulur ve kimlik oradan gelir.
+        /// When the text links come up empty, the audio is asked and the identity
+        /// comes from there.
         #[tokio::test]
         async fn the_fingerprint_link_answers_when_the_text_links_cannot() {
             let prints = Arc::new(FakeFingerprints::new(vec![found(
@@ -1024,22 +1062,23 @@ mod tests {
             let resolver = Resolver::new(Arc::new(catalog()))
                 .with_fingerprint_lookup(Arc::clone(&prints) as Arc<dyn FingerprintLookup>);
 
-            // Fixture'ın etiketi yok ve adı katalogda hiçbir şeye uymuyor:
-            // üç metin halkası da çaresiz.
+            // The fixture has no tags and its name matches nothing in the catalog:
+            // all three text links are helpless.
             let res = resolver
                 .resolve_file(&fixture("fingerprint_sample.flac"))
                 .await
-                .expect("çözümleme");
+                .expect("resolution");
 
             assert_eq!(res.method, ResolveMethod::Fingerprint);
             assert!((res.confidence - 0.99).abs() < 1e-9);
             assert_eq!(prints.calls.load(Ordering::SeqCst), 1);
         }
 
-        /// Sıra bozulmuyor: etiketler cevabı verdiyse sese hiç sorulmaz.
+        /// The order is not broken: if the tags gave the answer, the audio is never
+        /// asked.
         ///
-        /// Parmak izi en pahalı halka (dosyanın tamamı çözülür); onu gereksiz
-        /// yere çalıştırmak sessiz bir maliyet olurdu.
+        /// The fingerprint is the most expensive link (the whole file is decoded);
+        /// running it needlessly would be a silent cost.
         #[tokio::test]
         async fn a_tagged_file_never_reaches_the_fingerprint_link() {
             let prints = Arc::new(FakeFingerprints::new(vec![found(
@@ -1058,20 +1097,21 @@ mod tests {
             let res = resolver
                 .resolve_file(&fixture("tagged.flac"))
                 .await
-                .expect("çözümleme");
+                .expect("resolution");
 
             assert_ne!(res.method, ResolveMethod::Fingerprint);
             assert_eq!(
                 prints.calls.load(Ordering::SeqCst),
                 0,
-                "sese sorulmamalıydı"
+                "the audio should not have been asked"
             );
         }
 
-        /// Parmak izi **üretilemezse** metin tarafının bulduğu kaybolmaz.
+        /// If a fingerprint **cannot be produced**, what the text side found is not
+        /// lost.
         ///
-        /// 2 saniyelik fixture eşiğin altında: zincir yerel anahtarla biter,
-        /// hata döndürmez.
+        /// The 2-second fixture is below the threshold: the chain ends with the
+        /// local key and returns no error.
         #[tokio::test]
         async fn a_file_that_cannot_be_fingerprinted_still_returns_a_local_key() {
             let prints = Arc::new(FakeFingerprints::new(vec![found(
@@ -1084,17 +1124,18 @@ mod tests {
             let res = resolver
                 .resolve_file(&fixture("Test Artist - Mp3 Track.mp3"))
                 .await
-                .expect("kısa dosya zinciri düşürmemeli");
+                .expect("a short file must not bring the chain down");
 
             assert_eq!(res.method, ResolveMethod::LocalKey);
             assert_eq!(
                 prints.calls.load(Ordering::SeqCst),
                 0,
-                "parmak izi yokken servise sorulmamalı"
+                "the service must not be asked without a fingerprint"
             );
         }
 
-        /// Ses tanınmadıysa bu hata değil: zincir yerel anahtarla biter.
+        /// If the audio was not recognised that is not an error: the chain ends with
+        /// the local key.
         #[tokio::test]
         async fn an_unrecognised_fingerprint_is_absence_not_failure() {
             let prints = Arc::new(FakeFingerprints::new(Vec::new()));
@@ -1104,13 +1145,13 @@ mod tests {
             let res = resolver
                 .resolve_file(&fixture("fingerprint_sample.flac"))
                 .await
-                .expect("çözümleme");
+                .expect("resolution");
 
             assert_eq!(res.method, ResolveMethod::LocalKey);
         }
 
-        /// Parmak izi tarafında da beraberlik "tam isabet" diye raporlanamaz
-        /// (D-045'in üçüncü dersi, bu kez ses tarafında).
+        /// On the fingerprint side too, a tie cannot be reported as an "exact hit"
+        /// (D-045's third lesson, this time on the audio side).
         #[tokio::test]
         async fn a_tie_on_the_audio_side_is_reported_and_capped() {
             let prints = Arc::new(FakeFingerprints::new(vec![
@@ -1123,7 +1164,7 @@ mod tests {
             let res = resolver
                 .resolve_file(&fixture("fingerprint_sample.flac"))
                 .await
-                .expect("çözümleme");
+                .expect("resolution");
 
             assert_eq!(res.tied_candidates, 2);
             assert!(
@@ -1133,18 +1174,20 @@ mod tests {
             );
         }
 
-        /// Kaynak bağlı değilse zincir üç halkayla biter — çökmez.
+        /// If no source is wired up the chain ends after three links — it does not
+        /// crash.
         #[tokio::test]
         async fn without_a_fingerprint_source_the_chain_simply_ends_early() {
             let resolver = Resolver::new(Arc::new(catalog()));
             let res = resolver
                 .resolve_file(&fixture("fingerprint_sample.flac"))
                 .await
-                .expect("çözümleme");
+                .expect("resolution");
             assert_eq!(res.method, ResolveMethod::LocalKey);
         }
 
-        /// Servise **sorulamaması** yutulmaz: yapılandırma kusuru görünmeli.
+        /// Failing to **ask** the service is not swallowed: a configuration defect
+        /// must be visible.
         #[tokio::test]
         async fn a_lookup_failure_is_propagated_not_swallowed() {
             struct Broken;
@@ -1156,7 +1199,7 @@ mod tests {
                     Box::pin(std::future::ready(Err(crate::error::Error::new(
                         crate::diag::Stage::IdentityResolve,
                         crate::error::ErrorKind::InvalidInput {
-                            detail: "anahtar yok".to_owned(),
+                            detail: "no key".to_owned(),
                         },
                     ))))
                 }
@@ -1168,11 +1211,7 @@ mod tests {
                 .resolve_file(&fixture("fingerprint_sample.flac"))
                 .await
                 .unwrap_err();
-            assert!(
-                err.chain_text().contains("anahtar yok"),
-                "{}",
-                err.chain_text()
-            );
+            assert!(err.chain_text().contains("no key"), "{}", err.chain_text());
         }
     }
 }

@@ -1,8 +1,9 @@
-//! `headshell` — çekirdeğin elle sınandığı ince CLI kabuğu.
+//! `headshell` — the thin CLI shell the core is exercised by hand with.
 //!
-//! **Altın Kural:** burada iş mantığı yok. Bu dosya yalnızca argüman ayrıştırır,
-//! `headshell_core::session::Session` çağırır, çıktıyı biçimler ve çıkış kodu verir.
-//! Bir özelliği buradan silsen çekirdek onu hâlâ sunar.
+//! **The Golden Rule:** no business logic here. This file only parses
+//! arguments, calls `headshell_core::session::Session`, formats the output and
+//! sets the exit code. Delete a feature from here and the core still offers
+//! it.
 
 mod output;
 mod tui;
@@ -20,37 +21,37 @@ use headshell_core::session::{self, LookupMode, Session};
 use headshell_core::sleeve::CardPreset;
 use headshell_core::stats::StatsQuery;
 
-/// Çıkış kodları: 0 başarı, 1 çekirdek hatası, 2 kullanım hatası (clap).
+/// Exit codes: 0 success, 1 core error, 2 usage error (clap).
 const EXIT_FAILURE: u8 = 1;
 
 #[derive(Debug, Parser)]
 #[command(
     name = "headshell",
     version,
-    about = "Sağlayıcıdan bağımsız dinleme kimliği"
+    about = "A provider-independent listening identity"
 )]
 struct Cli {
-    /// Veri dizinini elle belirt. Varsayılan sistemden sisteme değişir:
+    /// Give the data directory by hand. The default varies by system:
     /// Linux/BSD `~/.local/share/headshell`, macOS
     /// `~/Library/Application Support/headshell`, Windows
-    /// `%LOCALAPPDATA%\headshell`. `headshell diag` kullanılanı yazar.
-    #[arg(long, global = true, value_name = "DİZİN")]
+    /// `%LOCALAPPDATA%\headshell`. `headshell diag` prints the one in use.
+    #[arg(long, global = true, value_name = "DIR")]
     data_dir: Option<PathBuf>,
 
-    /// Çıktıyı JSON olarak ver.
+    /// Give the output as JSON.
     #[arg(long, global = true)]
     json: bool,
 
-    /// Kimlik çözümlemesinde MusicBrainz'e sor.
+    /// Ask MusicBrainz during identity resolution.
     ///
-    /// Varsayılan kapalı: `headshell` ağ olmadan da çalışır ve bir export'u içe
-    /// aktarmak kimseyi sessizce ağa bağlamaz. MusicBrainz saniyede bir
-    /// istek kabul ediyor — tek parçalık `resolve` için uygun, binlerce
-    /// parçalık `import` için saatler sürer.
+    /// Off by default: `headshell` works without a network, and importing an
+    /// export never silently connects anyone to the network. MusicBrainz accepts
+    /// one request per second — fine for a single-track `resolve`, hours for an
+    /// `import` of thousands of tracks.
     #[arg(long, global = true)]
     online: bool,
 
-    /// Ayrıntılı log (tekrarlanabilir: -v, -vv).
+    /// Verbose logging (repeatable: -v, -vv).
     #[arg(short, long, global = true, action = clap::ArgAction::Count)]
     verbose: u8,
 
@@ -58,7 +59,7 @@ struct Cli {
     command: Command,
 }
 
-/// Hazır kart biçimleri (clap ValueEnum — çekirdekte yok).
+/// The ready-made card formats (a clap ValueEnum — not in the core).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum CardFormat {
     Square,
@@ -76,259 +77,266 @@ impl CardFormat {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Bir veri export arşivini (zip ya da açılmış dizin) içe aktar.
+    /// Import a data export archive (a zip or an extracted directory).
     Import {
-        /// Export zip'i ya da açılmış export dizini.
+        /// The export zip or the extracted export directory.
         path: PathBuf,
     },
-    /// Dinleme istatistikleri.
+    /// Listening statistics.
     Stats {
-        /// Yalnızca bu yıl (UTC).
-        #[arg(long, value_name = "YIL")]
+        /// Only this year (UTC).
+        #[arg(long, value_name = "YEAR")]
         year: Option<i16>,
-        /// Listelerde kaç satır.
+        /// How many rows in lists.
         #[arg(long, default_value_t = 10, value_name = "N")]
         top: usize,
-        /// "Dinlendi" sayılma eşiği (ms).
+        /// The threshold for counting as "listened" (ms).
         #[arg(long, value_name = "MS")]
         min_ms: Option<u64>,
     },
-    /// Tek bir parçayı kimlik zincirinden geçir.
+    /// Run a single track through the identity chain.
     Resolve {
-        /// `"Sanatçı - Başlık"` biçiminde sorgu.
+        /// A query of the form `"Artist - Title"`.
         #[arg(required_unless_present = "file", conflicts_with = "file")]
         query: Option<String>,
-        /// Sorgu yerine bir ses dosyası: üstveri etiketlerinden okunur ve
-        /// metin halkaları sonuçsuz kalırsa ses parmak izi sorulur.
-        #[arg(long, value_name = "YOL")]
+        /// An audio file instead of a query: it is read from the metadata tags, and
+        /// if the text links come up empty the audio fingerprint is asked.
+        #[arg(long, value_name = "PATH")]
         file: Option<PathBuf>,
     },
-    /// Kütüphane işlemleri.
+    /// Library operations.
     Library {
         #[command(subcommand)]
         command: LibraryCommand,
     },
-    /// Paylaşılabilir dinleme kartı (Sleeve) üret.
+    /// Produce a shareable listening card (Sleeve).
     Sleeve {
-        /// Yalnızca bu yıl (UTC).
-        #[arg(long, value_name = "YIL")]
+        /// Only this year (UTC).
+        #[arg(long, value_name = "YEAR")]
         year: Option<i16>,
-        /// Çıktı dosyası; uzantı biçimi belirler (.svg / .png).
-        /// Verilmezse kart verisi yalnızca ekrana/JSON'a yazılır.
-        #[arg(long, value_name = "DOSYA")]
+        /// The output file; the extension decides the format (.svg / .png).
+        /// If not given, the card data is only written to the screen/JSON.
+        #[arg(long, value_name = "FILE")]
         out: Option<PathBuf>,
-        /// Kart biçimi.
+        /// The card format.
         #[arg(long, default_value_t = CardFormat::Square, value_enum)]
         format: CardFormat,
     },
-    /// Sağlayıcı işlemleri.
+    /// Provider operations.
     Provider {
         #[command(subcommand)]
         command: ProviderCommand,
     },
-    /// Eklenti işlemleri: katalog, kurulum, onay, güncelleme, kaldırma.
+    /// Plugin operations: catalog, install, consent, update, removal.
     Plugin {
         #[command(subcommand)]
         command: PluginCommand,
     },
-    /// Sır deposu: eklenti ve sağlayıcı kimlik bilgileri.
+    /// The secret store: credentials for plugins and providers.
     Secret {
         #[command(subcommand)]
         command: SecretCommand,
     },
-    /// Yerel bir parçayı çal.
+    /// Play a local track.
     Play {
-        /// Çalınacak parçayı bulmak için arama metni.
+        /// The search text for finding the track to play.
         query: String,
-        /// Eşleşen ilk parça yerine tümünü kuyruğa al.
+        /// Queue all of the matches instead of the first one.
         #[arg(long)]
         all: bool,
-        /// Kuyruğu karıştır.
+        /// Shuffle the queue.
         #[arg(long)]
         shuffle: bool,
-        /// Çalmayı beklemeden çık (yalnızca kuyruğu göster).
+        /// Exit without waiting for playback (only show the queue).
         #[arg(long)]
         dry_run: bool,
-        /// Terminal arayüzünü aç (kuyruk, ilerleme, tuş kumandası).
+        /// Open the terminal interface (queue, progress, key controls).
         #[arg(long)]
         tui: bool,
     },
-    /// Son çalıştırmanın tanı raporu.
+    /// The diagnostics report of the last run.
     Diag,
 }
 
 #[derive(Debug, Subcommand)]
 enum ProviderCommand {
-    /// Kayıtlı sağlayıcıları listele.
+    /// List the registered providers.
     List,
-    /// Bir sağlayıcıyı sına (ayakta mı, kaç parça görüyor).
+    /// Test a provider (is it up, how many tracks does it see).
     Test {
-        /// Sağlayıcı adı (`local`).
+        /// The provider name (`local`).
         name: String,
     },
-    /// Yerel müzik dizinlerini yeniden tara.
+    /// Rescan the local music directories.
     Scan {
-        /// Yalnızca dizinler son taramadan beri değiştiyse tara.
+        /// Scan only if the directories changed since the last scan.
         ///
-        /// Dizin damgalarına bakar; tam tarama yapmaz. Yerinde yeniden
-        /// etiketlenen dosyaları göremez — o durumda düz `scan` gerekir.
+        /// Looks at directory stamps; does not do a full scan. It cannot see files
+        /// re-tagged in place — that needs a plain `scan`.
         #[arg(long)]
         if_stale: bool,
     },
-    /// Uzak bir sunucu kaydet (Subsonic ya da Jellyfin).
+    /// Register a remote server (Subsonic or Jellyfin).
     ///
-    /// Parola `HEADSHELL_PASSWORD` ortam değişkeninden ya da sorulan istemden
-    /// alınır; komut satırına yazılmaz (kabuk geçmişine düşerdi).
+    /// The password is taken from the `HEADSHELL_PASSWORD` environment variable
+    /// or from a prompt; it is not written on the command line (it would end up
+    /// in the shell history).
     Add {
-        /// Sunucu türü: `subsonic` | `jellyfin`.
+        /// The server type: `subsonic` | `jellyfin`.
         kind: String,
-        /// Taban adres (`https://muzik.ev`).
+        /// The base address (`https://music.home`).
         #[arg(long, value_name = "URL")]
         url: String,
-        /// Kullanıcı adı.
-        #[arg(long, value_name = "AD")]
+        /// The user name.
+        #[arg(long, value_name = "NAME")]
         user: String,
-        /// Sağlayıcı adı; verilmezse adresten türetilir.
-        #[arg(long, value_name = "AD")]
+        /// The provider name; derived from the address if not given.
+        #[arg(long, value_name = "NAME")]
         name: Option<String>,
-        /// Parola yerine doğrudan API anahtarı (yalnızca Jellyfin).
-        #[arg(long, value_name = "ANAHTAR")]
+        /// An API key directly instead of a password (Jellyfin only).
+        #[arg(long, value_name = "KEY")]
         api_key: Option<String>,
-        /// Kaydetmeden önce sunucuya bağlanıp kimliği doğrulama.
+        /// Connect to the server and verify the credentials before saving.
         #[arg(long)]
         no_verify: bool,
     },
-    /// Kayıtlı bir uzak sunucuyu sil.
+    /// Delete a registered remote server.
     Remove {
-        /// Sağlayıcı adı.
+        /// The provider name.
         name: String,
     },
-    /// Kayıtlı uzak sunucuları listele (kimlik bilgisi gösterilmez).
+    /// List the registered remote servers (credentials are not shown).
     Servers,
 }
 
 #[derive(Debug, Subcommand)]
 enum PluginCommand {
-    /// Kurulu eklentileri ve durumlarını listele (eklentileri çalıştırmaz).
+    /// List the installed plugins and their state (does not run plugins).
     List,
-    /// Eklenti kataloğunu göster: ne kurulabilir, ne kurulu, ne güncellenebilir.
+    /// Show the plugin catalog: what can be installed, what is installed, what
+    /// can be updated.
     ///
-    /// Katalog `headshell/plugins` deposundaki `index.json`'dur;
-    /// `HEADSHELL_PLUGIN_INDEX` başka bir adres verir (bir ayna, bir çatal).
-    /// Yalnızca okur, hiçbir şey kurmaz. `--online` beklemez: listeyi istemek
-    /// ağa çıkmaktır.
+    /// The catalog is the `index.json` in the `headshell/plugins` repository;
+    /// `HEADSHELL_PLUGIN_INDEX` gives another address (a mirror, a fork). It only
+    /// reads, it installs nothing. It does not wait for `--online`: asking for
+    /// the list is going online.
     Catalog,
-    /// Bir eklentinin beyan ettiği izinleri onayla.
+    /// Approve the permissions a plugin declares.
     ///
-    /// Onaylanan izinler zorlanır (D-069): eklenti yalnızca beyan ettiği
-    /// ana bilgisayarlara bağlanabilir ve dosya sistemine erişemez. Motorun
-    /// kurduğu araçlar (yt-dlp gibi) ayrı programlardır ve bu sınırın
-    /// dışındadır.
+    /// Approved permissions are enforced (D-069): the plugin can only connect to
+    /// the hosts it declares and cannot access the file system. The tools the
+    /// engine installs (like yt-dlp) are separate programs and are outside this
+    /// boundary.
     Approve {
-        /// Eklenti adı (dizin adı).
+        /// The plugin name (the directory name).
         name: String,
     },
-    /// Bir eklentiyi kur: diskte yoksa katalogdan indir, sonra araçlarını kur.
+    /// Install a plugin: download it from the catalog if it is not on disk, then
+    /// install its tools.
     ///
-    /// Katalogdan gelen her dosya sha256'sıyla doğrulanır ve inen manifest
-    /// katalogda gösterilenle karşılaştırılır; tutmazsa hiçbir şey yazılmaz.
-    /// Kurulan eklenti **onay bekler**: `headshell plugin approve <ad>`.
-    /// Diskte zaten olan eklenti için katalog okunmaz, yalnızca araçları
-    /// kurulur — güncellemek `update`'in işi (D-071).
+    /// Every file from the catalog is verified with its sha256, and the
+    /// downloaded manifest is compared with the one shown in the catalog; if they
+    /// do not match, nothing is written. An installed plugin **awaits consent**:
+    /// `headshell plugin approve <name>`. For a plugin already on disk the
+    /// catalog is not read, only its tools are installed — updating is
+    /// `update`'s job (D-071).
     ///
-    /// Araçları (yt-dlp gibi) motor indirir, eklenti değil; her biri
-    /// sabitlenmiş bir sürümle ve platform başına ayrı bir ikiliyle gelir,
-    /// sha256'sı doğrulanmadan yerine konmaz. Root istenmez, Python gerekmez
-    /// (D-055, D-069).
+    /// The engine downloads the tools (like yt-dlp), not the plugin; each comes
+    /// with a pinned version and a separate binary per platform, and is not put
+    /// in place before its sha256 is verified. No root is asked for, no Python is
+    /// needed (D-055, D-069).
     ///
-    /// `--online` beklemez: indirme komutun kendisidir, yan etkisi değil.
+    /// It does not wait for `--online`: downloading is the command itself, not a
+    /// side effect.
     Install {
-        /// Eklenti adı.
+        /// The plugin name.
         name: String,
     },
-    /// Katalogdan kurulmuş eklentileri katalogdaki sürüme getir.
+    /// Bring the plugins installed from the catalog up to the catalog's version.
     ///
-    /// Ad verilmezse katalogdan kurulmuş hepsi. Elle konmuş ya da yerelde
-    /// değiştirilmiş bir eklentinin üstüne yazılmaz. Yeni sürüm fazladan
-    /// izin istiyorsa eklenti yeniden onay bekler; araç (yt-dlp) değiştiyse
-    /// çıktı bunu yazar (D-071).
+    /// Without a name, all of those installed from the catalog. A plugin put
+    /// there by hand or changed locally is not overwritten. If the new version
+    /// asks for extra permissions the plugin awaits consent again; if a tool
+    /// (yt-dlp) changed, the output says so (D-071).
     Update {
-        /// Eklenti adı; verilmezse hepsi.
+        /// The plugin name; all of them if not given.
         name: Option<String>,
     },
-    /// Bir eklentiyi kaldır: dizinini siler, onayını unutur.
+    /// Remove a plugin: deletes its directory, forgets its consent.
     ///
-    /// Sırlar ve motorun kurduğu araçlar silinmez; kalan sırların adları
-    /// yazılır. Dizin bir bağlantıysa yalnızca bağlantı kaldırılır.
+    /// Secrets and the tools the engine installed are not deleted; the names of
+    /// the remaining secrets are printed. If the directory is a link, only the
+    /// link is removed.
     Remove {
-        /// Eklenti adı.
+        /// The plugin name.
         name: String,
     },
-    /// Katalog deposunun indeksini üret ya da denetle (katalog bakımı).
+    /// Produce or check the catalog repository's index (catalog maintenance).
     ///
-    /// `DİZİN` bir `headshell/plugins` kopyası: her eklenti `<ad>/plugin.json`
-    /// ve betiği. Her manifest kurulumdaki doğrulamanın aynısından geçer,
-    /// dosyaların sha256'sı hesaplanır ve `<DİZİN>/index.json` yazılır.
+    /// `DIR` is a copy of `headshell/plugins`: each plugin is `<name>/plugin.json`
+    /// and its script. Every manifest goes through the same validation as an
+    /// install, the files' sha256 are computed and `<DIR>/index.json` is written.
     Index {
-        /// Katalog deposunun kökü.
-        #[arg(value_name = "DİZİN")]
+        /// The root of the catalog repository.
+        #[arg(value_name = "DIR")]
         dir: PathBuf,
-        /// Dosya adresi şablonu: `{name}`, `{version}` ve `{path}` zorunlu.
-        /// Verilmezse var olan `index.json`'daki şablon kullanılır.
-        #[arg(long, value_name = "ŞABLON")]
+        /// The file address template: `{name}`, `{version}` and `{path}` are
+        /// required. If not given, the template in the existing `index.json` is used.
+        #[arg(long, value_name = "TEMPLATE")]
         url_template: Option<String>,
-        /// Hiçbir şey yazma; indeks güncel değilse neyin farklı olduğunu
-        /// söyleyip başarısız ol (katalog deposunun CI'ı için).
+        /// Write nothing; if the index is not up to date, say what differs and fail
+        /// (for the catalog repository's CI).
         #[arg(long)]
         check: bool,
     },
-    /// Bir eklentiyi kapat (onay kaydı korunur).
+    /// Disable a plugin (the consent record is kept).
     Disable {
-        /// Eklenti adı.
+        /// The plugin name.
         name: String,
     },
-    /// Kapalı bir eklentiyi yeniden aç.
+    /// Re-enable a disabled plugin.
     Enable {
-        /// Eklenti adı.
+        /// The plugin name.
         name: String,
     },
-    /// Onayı tamamen unut; bir dahaki sefere baştan sorulur.
+    /// Forget the consent entirely; it is asked from scratch next time.
     Forget {
-        /// Eklenti adı.
+        /// The plugin name.
         name: String,
     },
 }
 
 #[derive(Debug, Subcommand)]
 enum SecretCommand {
-    /// Ad alanlarını ve anahtar adlarını listele (değerler gösterilmez).
+    /// List the namespaces and key names (values are not shown).
     List,
-    /// Bir sır yaz. Değer `HEADSHELL_SECRET`'ten ya da yankısız istemden okunur.
+    /// Write a secret. The value is read from `HEADSHELL_SECRET` or from a prompt
+    /// without echo.
     Set {
-        /// Ad alanı (`plugin:soundcloud`).
+        /// The namespace (`plugin:soundcloud`).
         namespace: String,
-        /// Anahtar adı (`client_id`).
+        /// The key name (`client_id`).
         key: String,
     },
-    /// Bir sırrı sil.
+    /// Delete a secret.
     Remove {
-        /// Ad alanı.
+        /// The namespace.
         namespace: String,
-        /// Anahtar adı.
+        /// The key name.
         key: String,
     },
 }
 
 #[derive(Debug, Subcommand)]
 enum LibraryCommand {
-    /// Tam metin arama.
+    /// Full-text search.
     Search {
-        /// Aranacak metin.
+        /// The text to search for.
         query: String,
-        /// En fazla kaç sonuç.
+        /// At most how many results.
         #[arg(long, default_value_t = 20, value_name = "N")]
         limit: usize,
-        /// "Dinlendi" sayılma eşiği (ms) — `stats` ile aynı kural.
+        /// The threshold for counting as "listened" (ms) — the same rule as `stats`.
         #[arg(long, value_name = "MS")]
         min_ms: Option<u64>,
     },
@@ -339,8 +347,9 @@ async fn main() -> ExitCode {
     let cli = Cli::parse();
     init_tracing(cli.verbose);
 
-    // Kısmi başarı üreten bir komut (bütün eklentileri güncellemek) raporunu
-    // yine basar ama sıfır dönmez: betik "bir şey olmadı"yı görebilmeli.
+    // A command that can partly succeed (updating every plugin) still prints
+    // its report, but does not return zero: a script must be able to see
+    // "something did not happen".
     let mut succeeded = true;
     match run(&cli, &mut succeeded).await {
         Ok(text) => {
@@ -353,14 +362,14 @@ async fn main() -> ExitCode {
         }
         Err(err) => {
             eprintln!("{}", err.chain_text());
-            eprintln!("\nayrıntı için: headshell diag");
+            eprintln!("\nfor details: headshell diag");
             ExitCode::from(EXIT_FAILURE)
         }
     }
 }
 
-/// Komutu çalıştırır ve basılacak metni döndürür. Komut kısmen
-/// başarısızsa `succeeded`'ı indirir; metin yine basılır.
+/// Runs the command and returns the text to print. If the command partly
+/// fails it lowers `succeeded`; the text is still printed.
 async fn run(cli: &Cli, succeeded: &mut bool) -> headshell_core::Result<String> {
     let config = match &cli.data_dir {
         Some(dir) => Config::with_data_dir(dir),
@@ -405,13 +414,13 @@ async fn run(cli: &Cli, succeeded: &mut bool) -> headshell_core::Result<String> 
                         .resolve_track(query, session::lookup_for(lookup_mode)?)
                         .await?
                 }
-                // `clap` bu bileşimi zaten reddediyor (`required_unless_present`);
-                // yine de sessiz bir varsayılan üretmiyoruz.
+                // `clap` already rejects this combination (`required_unless_present`);
+                // still, we do not produce a silent default.
                 (None, None) => {
                     return Err(headshell_core::Error::new(
                         headshell_core::diag::Stage::IdentityResolve,
                         headshell_core::error::ErrorKind::InvalidInput {
-                            detail: "sorgu ya da --file verilmeli".to_owned(),
+                            detail: "a query or --file must be given".to_owned(),
                         },
                     ));
                 }
@@ -470,12 +479,12 @@ async fn run(cli: &Cli, succeeded: &mut bool) -> headshell_core::Result<String> 
                     let kind = provider::remote::ServerKind::parse(kind)?;
                     let id = match name {
                         Some(name) => ProviderId::new(name.clone()),
-                        // Öneri çekirdekte üretiliyor: GUI de aynısını
-                        // gösterecek (Altın Kural).
+                        // The suggestion is produced in the core: the GUI will show
+                        // the same one (the Golden Rule).
                         None => provider::remote::suggest_id(url, kind),
                     };
-                    // Parola yalnızca istem/ortamdan: argüman olarak almak
-                    // onu kabuk geçmişine ve `ps` çıktısına yazardı.
+                    // The password only from the prompt/environment: taking it as an
+                    // argument would write it into the shell history and `ps` output.
                     let password = match api_key {
                         Some(_) => None,
                         None => Some(read_password(&id)?),
@@ -559,8 +568,8 @@ async fn run(cli: &Cli, succeeded: &mut bool) -> headshell_core::Result<String> 
                 render(cli.json, &report, || output::secret_list(&report))
             }
             SecretCommand::Set { namespace, key } => {
-                // Değer argüman olarak alınmıyor: parolayla aynı gerekçe
-                // (kabuk geçmişi + `ps` çıktısı).
+                // The value is not taken as an argument: the same reasoning as the
+                // password (the shell history + `ps` output).
                 let value = read_hidden_value(&format!("{namespace} / {key}"))?;
                 let report = session.set_secret(namespace, key, &value)?;
                 render(cli.json, &report, || output::secret_write(&report))
@@ -577,9 +586,9 @@ async fn run(cli: &Cli, succeeded: &mut bool) -> headshell_core::Result<String> 
             dry_run,
             tui: use_tui,
         } => {
-            // Tarama **yapılmıyor**: indeks kalıcı (SQLite `provider_tracks`).
-            // Kullanıcı `headshell provider scan` ile bir kez tarar; `play` yalnızca
-            // arar. Katalog boşsa hata kullanıcıyı taramaya yönlendirir.
+            // **No** scan is done: the index is persistent (SQLite `provider_tracks`).
+            // The user scans once with `headshell provider scan`; `play` only
+            // searches. If the catalog is empty, the error points the user to scanning.
             let registry = provider::default_registry(session.config())?;
 
             let options = session::PlayOptions {
@@ -590,21 +599,21 @@ async fn run(cli: &Cli, succeeded: &mut bool) -> headshell_core::Result<String> 
             };
 
             if *use_tui {
-                // Terminal ses aygıtından **önce** sınanıyor. İkisi de
-                // gerekli, ama biri bedava bir sınama, öteki bir donanım
-                // kaynağı; ters sırada ses kartsız bir makinede kullanıcı
-                // `--tui` yazdığı hâlde ALSA hatası görüyordu (K9: hata,
-                // kullanıcının yaptığı şeyi anlatmalı).
+                // The terminal is tested **before** the audio device. Both are
+                // needed, but one is a free test and the other a hardware
+                // resource; in the reverse order, on a machine without a sound card
+                // the user saw an ALSA error even though they had typed `--tui` (K9:
+                // the error should describe what the user did).
                 tui::require_terminal().map_err(|err| anyhow_to_core(&anyhow::Error::from(err)))?;
 
-                // TUI yalnızca döngüyü sürer; tick ve dinleme kaydı
-                // `LiveSession`'ın işi (çekirdekte, K1).
+                // The TUI only drives the loop; ticks and listen recording are
+                // `LiveSession`'s job (in the core, K1).
                 let player = session.player_from_search(&registry, options).await?;
                 let mut live = LiveSession::new(session, player);
                 let recorded = tui::run(&mut live)
                     .await
                     .map_err(|err| anyhow_to_core(&err))?;
-                return Ok(format!("kaydedilen dinleme: {recorded}\n"));
+                return Ok(format!("listens recorded: {recorded}\n"));
             }
 
             let report = session.play(&registry, options).await?;
@@ -617,34 +626,36 @@ async fn run(cli: &Cli, succeeded: &mut bool) -> headshell_core::Result<String> 
                 None => Ok(if cli.json {
                     "null\n".to_owned()
                 } else {
-                    "henüz çalıştırılmış bir komut yok\n".to_owned()
+                    "no command has been run yet\n".to_owned()
                 }),
             }
         }
     }
 }
 
-/// TUI'den gelen terminal/G-Ç hatasını çekirdek hata tipine sarar.
+/// Wraps a terminal/I/O error from the TUI in the core error type.
 ///
-/// TUI bir sunum katmanı ve `anyhow` kullanabiliyor (konvansiyon: CLI'de
-/// serbest); ama `run` çekirdek hata tipi döndürüyor. Aşama
-/// [`Stage::PlaybackOutput`]: kullanıcının gördüğü yüzey bozulmuş demek.
+/// The TUI is a presentation layer and can use `anyhow` (convention: free in
+/// the CLI); but `run` returns the core error type. The stage is
+/// [`Stage::PlaybackOutput`]: the surface the user sees is broken.
 fn anyhow_to_core(err: &anyhow::Error) -> headshell_core::Error {
     headshell_core::Error::new(
         headshell_core::diag::Stage::PlaybackOutput,
         headshell_core::ErrorKind::Audio {
-            detail: format!("terminal arayüzü: {err}"),
+            detail: format!("terminal interface: {err}"),
         },
     )
 }
 
-/// Parolanın komut satırı yerine okunabileceği ortam değişkeni.
+/// The environment variable the password can be read from instead of the
+/// command line.
 const PASSWORD_ENV: &str = "HEADSHELL_PASSWORD";
 
-/// Sır değerinin okunabileceği ortam değişkeni (`headshell secret set`).
+/// The environment variable a secret value can be read from (`headshell
+/// secret set`).
 const SECRET_ENV: &str = "HEADSHELL_SECRET";
 
-/// Kullanım hatası üretir (aşama: yapılandırma okuma).
+/// Produces a usage error (stage: reading the configuration).
 fn input_err(detail: impl Into<String>) -> headshell_core::Error {
     headshell_core::Error::new(
         headshell_core::diag::Stage::ConfigLoad,
@@ -654,43 +665,46 @@ fn input_err(detail: impl Into<String>) -> headshell_core::Error {
     )
 }
 
-/// Parolayı `HEADSHELL_PASSWORD`'dan ya da terminalden **yankısız** okur.
+/// Reads the password from `HEADSHELL_PASSWORD` or from the terminal
+/// **without echo**.
 ///
-/// Argüman olarak almıyoruz: komut satırına yazılan parola kabuk geçmişine
-/// ve `ps` çıktısına düşer. Betikler ortam değişkenini kullanır, insanlar
-/// istemi.
+/// We do not take it as an argument: a password written on the command line
+/// ends up in the shell history and the `ps` output. Scripts use the
+/// environment variable, people the prompt.
 fn read_password(id: &ProviderId) -> headshell_core::Result<String> {
     if let Ok(from_env) = std::env::var(PASSWORD_ENV) {
         if from_env.is_empty() {
-            // Boşu parola saymak, sunucunun anlamsız bir "yetkisiz"
-            // hatasıyla dönmesine yol açardı.
-            return Err(input_err(format!("{PASSWORD_ENV} tanımlı ama boş")));
+            // Counting empty as a password would make the server come back with
+            // a meaningless "unauthorised" error.
+            return Err(input_err(format!("{PASSWORD_ENV} is set but empty")));
         }
         return Ok(from_env);
     }
     prompt_password(id)
 }
 
-/// Sır değerini `HEADSHELL_SECRET`'ten ya da terminalden **yankısız** okur.
+/// Reads a secret value from `HEADSHELL_SECRET` or from the terminal
+/// **without echo**.
 ///
-/// Parolayla aynı gerekçe: komut satırına yazılan bir sır kabuk geçmişine ve
-/// `ps` çıktısına düşer (D-042).
+/// The same reasoning as the password: a secret written on the command line
+/// ends up in the shell history and the `ps` output (D-042).
 fn read_hidden_value(label: &str) -> headshell_core::Result<String> {
     if let Ok(from_env) = std::env::var(SECRET_ENV) {
         if from_env.is_empty() {
-            return Err(input_err(format!("{SECRET_ENV} tanımlı ama boş")));
+            return Err(input_err(format!("{SECRET_ENV} is set but empty")));
         }
         return Ok(from_env);
     }
-    prompt_hidden(&format!("{label} değeri"), SECRET_ENV)
+    prompt_hidden(&format!("{label} value"), SECRET_ENV)
 }
 
-/// Terminali ham kipe alıp parolayı ekrana basmadan okur.
+/// Puts the terminal in raw mode and reads the password without echoing it.
 fn prompt_password(id: &ProviderId) -> headshell_core::Result<String> {
-    prompt_hidden(&format!("{id} parolası"), PASSWORD_ENV)
+    prompt_hidden(&format!("{id} password"), PASSWORD_ENV)
 }
 
-/// Yankısız istem. `env_hint`: tty yoksa kullanıcıya önerilecek değişken.
+/// A prompt without echo. `env_hint`: the variable to suggest to the user if
+/// there is no tty.
 fn prompt_hidden(label: &str, env_hint: &str) -> headshell_core::Result<String> {
     use crossterm::terminal;
     use std::io::Write as _;
@@ -699,37 +713,39 @@ fn prompt_hidden(label: &str, env_hint: &str) -> headshell_core::Result<String> 
     let _ = std::io::stderr().flush();
 
     terminal::enable_raw_mode().map_err(|source| {
-        // Tty yoksa (boru hattı, CI) sessizce yankılı okumaya düşmüyoruz:
-        // parolayı ekrana basmaktansa ne yapılacağını söylemek iyidir.
+        // Without a tty (a pipeline, CI) we do not silently fall back to
+        // reading with echo: saying what to do is better than printing the
+        // password on screen.
         input_err(format!(
-            "terminal yankısız kipe alınamadı ({source}); değeri {env_hint} ile verin"
+            "could not put the terminal into no-echo mode ({source}); give the value with {env_hint}"
         ))
     })?;
     let secret = read_secret();
-    // Ham kip her yolda geri veriliyor — hata da olsa kullanıcının terminali
-    // bozuk kalmamalı (TUI'deki `TerminalGuard` ile aynı gerekçe).
+    // Raw mode is given back on every path — even on an error, the user's
+    // terminal must not be left broken (the same reasoning as the TUI's
+    // `TerminalGuard`).
     let _ = terminal::disable_raw_mode();
     eprintln!();
     secret
 }
 
-/// Ham kipte bir satır okur; hiçbir tuş ekrana yansımaz.
+/// Reads a line in raw mode; no key is echoed to the screen.
 fn read_secret() -> headshell_core::Result<String> {
     use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 
     let mut secret = String::new();
     loop {
         let event =
-            event::read().map_err(|source| input_err(format!("tuş okunamadı: {source}")))?;
+            event::read().map_err(|source| input_err(format!("could not read a key: {source}")))?;
         let Event::Key(key) = event else { continue };
         if key.kind != KeyEventKind::Press {
             continue;
         }
-        // Ham kipte Ctrl+C sinyal üretmez; iptali kendimiz karşılıyoruz.
+        // In raw mode Ctrl+C produces no signal; we handle cancelling ourselves.
         if key.modifiers.contains(KeyModifiers::CONTROL)
             && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('d'))
         {
-            return Err(input_err("giriş iptal edildi"));
+            return Err(input_err("input cancelled"));
         }
         if key
             .modifiers
@@ -747,12 +763,13 @@ fn read_secret() -> headshell_core::Result<String> {
         }
     }
     if secret.is_empty() {
-        return Err(input_err("boş değer kabul edilmiyor"));
+        return Err(input_err("an empty value is not accepted"));
     }
     Ok(secret)
 }
 
-/// `--json` verildiyse veriyi seri hâle getirir, yoksa insan biçimini kullanır.
+/// If `--json` was given, serialises the data; otherwise uses the human
+/// format.
 fn render<T: serde::Serialize>(
     json: bool,
     value: &T,

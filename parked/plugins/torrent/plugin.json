@@ -9,5 +9,5 @@
     "net": ["dht.transmissionbt.com", "dht.libtorrent.org"],
     "fs": []
   },
-  "description": "Torznab (Prowlarr/Jackett) üzerinde arar, librqbit ile sıralı indirip yerel bir adresten çalar. DİKKAT — beyan edilen iki ana bilgisayar yalnızca DHT giriş noktalarıdır: bir torrent istemcisi tanımı gereği önceden bilinemeyen tracker'lara ve rastgele peer adreslerine bağlanır, ve arama için sizin verdiğiniz Torznab adresine gider. İzin sözlüğü (D-040) bunu ifade edemiyor; liste eksiktir ve bilerek eksiktir."
+  "description": "Searches Torznab (Prowlarr/Jackett), downloads sequentially with librqbit and plays from a local address. NOTE — the two declared hosts are only DHT entry points: a torrent client by definition connects to trackers and random peer addresses that cannot be known in advance, and goes to the Torznab address you give it for search. The permission vocabulary (D-040) cannot express this; the list is incomplete, and incomplete on purpose."
 }

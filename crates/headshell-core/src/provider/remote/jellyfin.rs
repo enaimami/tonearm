@@ -1,16 +1,18 @@
-//! Jellyfin istemcisi (D-019).
+//! The Jellyfin client (D-019).
 //!
-//! Subsonic'ten üç yerde ayrılıyor:
+//! It differs from Subsonic in three places:
 //!
-//! 1. **Kimlik başlıkta**, sorgu dizesinde değil: `Authorization: MediaBrowser
-//!    Token="..."`. Bu yüzden akış kaynağı `AudioSource::HttpStream`'in
-//!    `headers` alanını kullanır — kaynak URL'si tek başına yetmez.
-//! 2. **Hatalar HTTP durum koduyla** gelir; gövdede `status: failed` yok.
-//! 3. Çoğu uç nokta **kullanıcı kimliği** ister (`/Users/{id}/Items`). Kayıt
-//!    anında öğrenilir, öğrenilemezse ilk kullanımda tembel olarak sorulur.
+//! 1. **The credentials are in a header**, not in the query string:
+//!    `Authorization: MediaBrowser Token="..."`. That is why the stream source
+//!    uses the `headers` field of `AudioSource::HttpStream` — the source URL
+//!    alone is not enough.
+//! 2. **Errors come with the HTTP status code**; there is no `status: failed`
+//!    in the body.
+//! 3. Most endpoints want a **user id** (`/Users/{id}/Items`). It is learned
+//!    at registration time; if it cannot be, it is asked lazily on first use.
 //!
-//! Parola saklanmaz (D-021): `AuthenticateByName` bir kez çağrılır ve
-//! dönen erişim anahtarı yazılır.
+//! The password is not stored (D-021): `AuthenticateByName` is called once
+//! and the access key it returns is written.
 
 use std::sync::{Arc, RwLock};
 
@@ -28,19 +30,20 @@ use crate::provider::{
 
 use super::{RemoteServer, ServerKind, StoredAuth};
 
-/// Jellyfin'in sürüm/istemci tanıtımı. Sunucunun "aygıtlar" listesinde
-/// bu adla görünürüz.
+/// Jellyfin's version/client identification. We show up under this name in
+/// the server's "devices" list.
 const CLIENT_NAME: &str = "headshell";
 const DEVICE_NAME: &str = "headshell-core";
 
-/// `RunTimeTicks` 100 nanosaniyelik birimlerde; milisaniye için bölen.
+/// `RunTimeTicks` is in units of 100 nanoseconds; the divisor for
+/// milliseconds.
 const TICKS_PER_MS: u64 = 10_000;
 
-/// Jellyfin sağlayıcısı.
+/// The Jellyfin provider.
 pub struct JellyfinProvider {
     server: RemoteServer,
     http: Arc<dyn HttpClient>,
-    /// Kayıt anında bilinmiyorsa ilk kullanımda öğrenilir.
+    /// If not known at registration time, it is learned on first use.
     user_id: RwLock<Option<String>>,
 }
 
@@ -64,16 +67,16 @@ impl JellyfinProvider {
         }
     }
 
-    /// Erişim anahtarı.
+    /// The access key.
     fn token(&self) -> Result<&str> {
         match &self.server.auth {
             StoredAuth::ApiKey { key } => Ok(key),
-            // Elle düzenlenmiş kayıt: Subsonic token'ı Jellyfin'de işe yaramaz.
+            // A hand-edited record: a Subsonic token is no use on Jellyfin.
             StoredAuth::SubsonicToken { .. } => Err(Error::new(
                 Stage::ProviderCall,
                 ErrorKind::InvalidInput {
                     detail: format!(
-                        "{} kaydı Jellyfin ama Subsonic token'ı taşıyor; `headshell provider add` ile yeniden kaydedin",
+                        "the {} record is Jellyfin but carries a Subsonic token; register it again with `headshell provider add`",
                         self.server.id
                     ),
                 },
@@ -81,12 +84,12 @@ impl JellyfinProvider {
         }
     }
 
-    /// Kimlik başlıkları.
+    /// The credential headers.
     fn auth_headers(&self) -> Result<Vec<HttpHeader>> {
         Ok(auth_headers(Some(self.token()?)))
     }
 
-    /// Kullanıcı kimliğini verir; bilinmiyorsa sunucuya sorar ve saklar.
+    /// Returns the user id; if it is not known, asks the server and keeps it.
     async fn user_id(&self) -> Result<String> {
         if let Ok(cached) = self.user_id.read()
             && let Some(id) = cached.as_ref()
@@ -100,7 +103,7 @@ impl JellyfinProvider {
         Ok(id)
     }
 
-    /// Kimlikli bir GET atar ve JSON'u çözer.
+    /// Sends an authenticated GET and decodes the JSON.
     async fn get_json<T: serde::de::DeserializeOwned>(&self, url: &str, what: &str) -> Result<T> {
         let request = HttpRequest::get(url).with_headers(self.auth_headers()?);
         let response = self.http.send(&request).await?;
@@ -108,7 +111,7 @@ impl JellyfinProvider {
         net::parse_json(&response, what)
     }
 
-    /// Bir parçanın akış URL'si. Kimlik **başlıkta** gider.
+    /// A track's stream URL. The credentials go **in a header**.
     #[must_use]
     pub fn stream_url(&self, item_id: &str) -> String {
         format!(
@@ -137,7 +140,7 @@ impl Provider for JellyfinProvider {
                 detail: Some(detail),
             };
 
-            // Kimliksiz uç: sunucu ayakta mı?
+            // An endpoint without credentials: is the server up?
             let public_url = format!("{}/System/Info/Public", self.server.url);
             let public: PublicInfo = match self.get_json(&public_url, "jellyfin public info").await
             {
@@ -149,16 +152,17 @@ impl Provider for JellyfinProvider {
                 public.server_name.unwrap_or_else(|| "Jellyfin".to_owned()),
                 public
                     .version
-                    .unwrap_or_else(|| "(sürüm bildirmedi)".to_owned())
+                    .unwrap_or_else(|| "(no version reported)".to_owned())
             );
 
-            // Kimlikli uç: anahtar hâlâ geçerli mi? Ayakta ama reddeden bir
-            // sunucu "erişilebilir" değildir — kullanıcının yapacağı iş farklı.
+            // An authenticated endpoint: is the key still valid? A server that
+            // is up but refuses is not "reachable" — the user has a different
+            // job to do.
             let user_id = match self.user_id().await {
                 Ok(id) => id,
                 Err(err) => {
                     return Ok(unreachable(format!(
-                        "{detail} — kimlik doğrulanamadı: {}",
+                        "{detail} — could not authenticate: {}",
                         err.chain_text().replace('\n', " ")
                     )));
                 }
@@ -176,7 +180,7 @@ impl Provider for JellyfinProvider {
                 Ok(page) => page.total_record_count.map(|n| n as usize),
                 Err(err) => {
                     detail.push_str(&format!(
-                        " — parça sayısı okunamadı ({})",
+                        " — the track count could not be read ({})",
                         err.chain_text().replace('\n', " ")
                     ));
                     None
@@ -213,7 +217,8 @@ impl Provider for JellyfinProvider {
 
             let items = match page.items {
                 Some(items) => items,
-                // Alan hiç yoksa sonuç yok demektir; sessiz bir kayıp değil.
+                // If the field is missing altogether there are no results; not a silent
+                // loss.
                 None => return Ok(Vec::new()),
             };
 
@@ -229,7 +234,7 @@ impl Provider for JellyfinProvider {
                 tracing::warn!(
                     provider = %self.server.id,
                     skipped,
-                    "adı ya da kimliği olmayan öğeler atlandı"
+                    "skipped items without a name or an id"
                 );
             }
             Ok(hits)
@@ -245,23 +250,27 @@ impl Provider for JellyfinProvider {
                 return Err(Error::new(
                     Stage::PlaybackResolve,
                     ErrorKind::InvalidInput {
-                        detail: format!("{id} bu sağlayıcıya ait değil ({})", self.server.id),
+                        detail: format!(
+                            "{id} does not belong to this provider ({})",
+                            self.server.id
+                        ),
                     },
                 ));
             }
             Ok(Some(AudioSource::HttpStream {
                 url: self.stream_url(&id.id),
-                // Kimlik URL'de değil başlıkta: akış adresi log'a ya da
-                // ekrana düşerse anahtar sızmasın.
+                // The credentials are in a header, not in the URL: if the stream
+                // address ends up in the log or on screen, the key must not leak.
                 headers: self.auth_headers()?,
             }))
         })
     }
 }
 
-/// `Authorization: MediaBrowser ...` başlığı.
+/// The `Authorization: MediaBrowser ...` header.
 ///
-/// Token yoksa (giriş isteği) alan atlanır — Jellyfin bunu böyle bekler.
+/// If there is no token (a login request) the field is left out — that is
+/// what Jellyfin expects.
 fn auth_headers(token: Option<&str>) -> Vec<HttpHeader> {
     let version = env!("CARGO_PKG_VERSION");
     let mut value = format!(
@@ -273,11 +282,11 @@ fn auth_headers(token: Option<&str>) -> Vec<HttpHeader> {
     vec![HttpHeader::new("Authorization", value)]
 }
 
-/// Kullanıcı adı + parolayı erişim anahtarına çevirir (D-021).
+/// Turns a user name + password into an access key (D-021).
 ///
 /// # Errors
-/// Sunucuya ulaşılamazsa, kimlik reddedilirse ya da yanıt anahtar
-/// içermiyorsa.
+/// If the server cannot be reached, the credentials are refused or the
+/// response contains no key.
 pub async fn authenticate(
     url: &str,
     username: &str,
@@ -294,7 +303,7 @@ pub async fn authenticate(
         Error::new(
             Stage::ProviderCall,
             ErrorKind::Json {
-                entry: "jellyfin auth isteği".to_owned(),
+                entry: "jellyfin auth request".to_owned(),
                 source,
             },
         )
@@ -304,12 +313,12 @@ pub async fn authenticate(
     let response = http.send(&request).await?;
     response.error_for_status(&endpoint)?;
 
-    let auth: AuthResult = net::parse_json(&response, "jellyfin auth yanıtı")?;
+    let auth: AuthResult = net::parse_json(&response, "jellyfin auth response")?;
     let key = auth.access_token.ok_or_else(|| {
         Error::new(
             Stage::ProviderCall,
             ErrorKind::NotFound {
-                what: "Jellyfin yanıtında AccessToken".to_owned(),
+                what: "AccessToken in the Jellyfin response".to_owned(),
             },
         )
     })?;
@@ -324,10 +333,10 @@ pub async fn authenticate(
     })
 }
 
-/// Anahtarın sahibi olan kullanıcının kimliğini sorar.
+/// Asks for the id of the user who owns the key.
 ///
 /// # Errors
-/// Anahtar geçersizse ya da sunucuya ulaşılamazsa.
+/// If the key is invalid or the server cannot be reached.
 pub async fn fetch_user_id(server: &RemoteServer, http: &dyn HttpClient) -> Result<String> {
     let token = match &server.auth {
         StoredAuth::ApiKey { key } => key.as_str(),
@@ -335,7 +344,7 @@ pub async fn fetch_user_id(server: &RemoteServer, http: &dyn HttpClient) -> Resu
             return Err(Error::new(
                 Stage::ProviderCall,
                 ErrorKind::InvalidInput {
-                    detail: format!("{} Jellyfin kaydı değil", server.id),
+                    detail: format!("{} is not a Jellyfin record", server.id),
                 },
             ));
         }
@@ -350,7 +359,7 @@ pub async fn fetch_user_id(server: &RemoteServer, http: &dyn HttpClient) -> Resu
         Error::new(
             Stage::ProviderCall,
             ErrorKind::NotFound {
-                what: "Jellyfin yanıtında kullanıcı kimliği (Id)".to_owned(),
+                what: "the user id (Id) in the Jellyfin response".to_owned(),
             },
         )
     })
@@ -402,7 +411,7 @@ impl Item {
         let artist = self
             .album_artist
             .or_else(|| self.artists.first().cloned())
-            .unwrap_or_else(|| "Bilinmeyen sanatçı".to_owned());
+            .unwrap_or_else(|| "Unknown artist".to_owned());
 
         Some(ProviderTrack {
             id: ProviderTrackId::new(provider.clone(), id),
@@ -425,7 +434,7 @@ mod tests {
             url: "https://jf.ev".to_owned(),
             username: "enai".to_owned(),
             auth: StoredAuth::ApiKey {
-                key: "gizli-anahtar".to_owned(),
+                key: "secret-key".to_owned(),
             },
             user_id: Some("u1".to_owned()),
         }
@@ -435,7 +444,7 @@ mod tests {
         {"Id":"i1","Name":"Geceler","Album":"Müptezhel","AlbumArtist":"Ezhel",
          "Artists":["Ezhel"],"RunTimeTicks":2150000000},
         {"Id":"i2","Name":"Felaket","Artists":["Ezhel"]},
-        {"Name":"kimliksiz"}],"TotalRecordCount":3}"#;
+        {"Name":"no-id"}],"TotalRecordCount":3}"#;
 
     #[tokio::test]
     async fn search_maps_items_and_converts_ticks_to_ms() {
@@ -443,13 +452,13 @@ mod tests {
         let provider = JellyfinProvider::new(server(), Arc::clone(&http) as Arc<dyn HttpClient>);
 
         let hits = provider.search("Ezhel", 5).await.unwrap();
-        assert_eq!(hits.len(), 2, "kimliksiz öğe atlanmalı");
+        assert_eq!(hits.len(), 2, "an item without an id must be skipped");
         assert_eq!(hits[0].track.title, "Geceler");
         assert_eq!(hits[0].track.artist, "Ezhel");
         assert_eq!(hits[0].track.duration_ms, Some(215_000));
         assert_eq!(
             hits[1].track.artist, "Ezhel",
-            "AlbumArtist yoksa Artists[0]"
+            "Artists[0] if there is no AlbumArtist"
         );
 
         let url = http.last_url();
@@ -466,16 +475,16 @@ mod tests {
 
         let request = http.requests().pop().unwrap();
         assert!(
-            !request.url.contains("gizli-anahtar"),
-            "anahtar URL'de olmamalı: {}",
+            !request.url.contains("secret-key"),
+            "the key must not be in the URL: {}",
             request.url
         );
         let auth = request
             .headers
             .iter()
             .find(|h| h.name == "Authorization")
-            .expect("Authorization başlığı");
-        assert!(auth.value.contains("Token=\"gizli-anahtar\""), "{auth:?}");
+            .expect("the Authorization header");
+        assert!(auth.value.contains("Token=\"secret-key\""), "{auth:?}");
         assert!(auth.value.contains("Client=\"headshell\""), "{auth:?}");
     }
 
@@ -490,7 +499,7 @@ mod tests {
                 assert_eq!(headers.len(), 1);
                 assert!(headers[0].value.contains("Token="), "{headers:?}");
             }
-            other => panic!("HTTP akışı bekleniyordu: {other:?}"),
+            other => panic!("an HTTP stream was expected: {other:?}"),
         }
     }
 
@@ -505,9 +514,9 @@ mod tests {
 
         let err = provider.search("Ezhel", 5).await.unwrap_err();
         let text = err.chain_text();
-        // D-023: sunucu ayaktaydı ve **reddetti**; bu bir ağ hatası değil.
-        // Kullanıcının yapacağı iş anahtarını yenilemek, ağını kurcalamak değil.
-        assert!(text.starts_with("ADIM: PROVIDER_CALL"), "{text}");
+        // D-023: the server was up and **refused**; this is not a network error.
+        // The user's job is to renew their key, not to fiddle with their network.
+        assert!(text.starts_with("STEP: PROVIDER_CALL"), "{text}");
         assert!(text.contains("401"), "{text}");
         assert!(text.contains("expired"), "{text}");
     }
@@ -531,7 +540,7 @@ mod tests {
             .iter()
             .filter(|req| req.url.ends_with("/Users/Me"))
             .count();
-        assert_eq!(me_calls, 1, "kullanıcı kimliği her aramada sorulmamalı");
+        assert_eq!(me_calls, 1, "the user id must not be asked on every search");
     }
 
     #[tokio::test]
@@ -553,9 +562,10 @@ mod tests {
         assert_eq!(stored.user_id.as_deref(), Some("u1"));
         match &stored.auth {
             StoredAuth::ApiKey { key } => assert_eq!(key, "tok123"),
-            other => panic!("anahtar bekleniyordu: {other:?}"),
+            other => panic!("a key was expected: {other:?}"),
         }
-        // Parola yalnızca istekte gitti, kayda girmedi.
+        // The password only went out in the request; it did not get into the
+        // record.
         let stored_json = serde_json::to_string(&stored).unwrap();
         assert!(!stored_json.contains("sesame"), "{stored_json}");
     }

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""PLAN §3.1 kontrol deneyi.
+"""The PLAN §3.1 control experiment.
 
-Aynı `ui/index.html`'i düz bir tarayıcıya servis eder ve raporu geri alır.
-Amaç tek bir ayrımı yapabilmek: **"WebKitGTK yavaş" mı, yoksa "bu makine bu
-sayfayı 60 fps çizemiyor" mu?** İkisi aynı sonuca benziyor ama farklı karar
-gerektiriyor — ikincisiyse yerel Rust GUI'ye kaçmak da kurtarmaz, çünkü aynı
-GPU'ya çarpar.
+Serves the same `ui/index.html` to a plain browser and takes the report back.
+The goal is to be able to make a single distinction: **is "WebKitGTK slow", or
+"this machine cannot draw this page at 60 fps"?** The two look like the same
+result but call for different decisions — if it is the latter, running off to
+a native Rust GUI does not save us either, because it hits the same GPU.
 
-Ayrı bir kopya yazmadım; kontrol farklı bir sayfayı ölçseydi karşılaştırma
-anlamsız olurdu.
+I did not write a separate copy; had the control measured a different page,
+the comparison would be meaningless.
 """
 
 import http.server
@@ -21,7 +21,7 @@ import threading
 
 HERE = pathlib.Path(__file__).parent
 UI = HERE / "ui"
-OUT = HERE / "report-kontrol.json"
+OUT = HERE / "report-control.json"
 PORT = 8731
 
 done = threading.Event()
@@ -38,7 +38,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.send_response(204)
         self.end_headers()
         try:
-            if json.loads(body).get("tamam"):
+            if json.loads(body).get("done"):
                 done.set()
         except json.JSONDecodeError:
             pass
@@ -55,7 +55,7 @@ def main() -> int:
     with socketserver.TCPServer(("127.0.0.1", PORT), Handler) as srv:
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         url = f"http://127.0.0.1:{PORT}/"
-        print(f"{browser} açılıyor: {url}")
+        print(f"opening {browser}: {url}")
         proc = subprocess.Popen(
             [browser, "--new-window", url],
             stdout=subprocess.DEVNULL,
@@ -63,14 +63,14 @@ def main() -> int:
         )
 
         if not done.wait(timeout=120):
-            print("ZAMAN AŞIMI: kontrol koşumu 120 sn içinde bitmedi")
+            print("TIMEOUT: the control run did not finish within 120 s")
         proc.terminate()
 
     if OUT.exists():
         print(f"--- {OUT.name} ---")
         print(OUT.read_text())
         return 0
-    print("RAPOR YOK")
+    print("NO REPORT")
     return 1
 
 

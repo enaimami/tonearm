@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "GO/NO-GO ölçümü — olay dinleme için core:default gerekiyor",
+  "description": "The GO/NO-GO measurement — listening to events needs core:default",
   "windows": ["main"],
   "permissions": ["core:default"]
 }

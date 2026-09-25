@@ -1,20 +1,20 @@
-//! Gerçek süreçle protokol sınaması: ikili gerçekten konuşuyor mu?
+//! A protocol test with the real process: does the binary really talk?
 //!
-//! §2.1'in `plugin_process.rs`'i bunu Python eklentisi için yapıyordu. Burada
-//! sınanan aynı şey ama **Rust** bir eklenti için: satır çerçeveleme, el
-//! sıkışma, tanınmayan metodun `-32601` olması, ve hataların süreci
-//! öldürmemesi.
+//! §2.1's `plugin_process.rs` did this for the Python plugin. What is tested
+//! here is the same thing, but for a **Rust** plugin: line framing, the
+//! handshake, an unrecognised method being `-32601`, and errors not killing
+//! the process.
 //!
-//! Ağa çıkmıyor: Torznab yapılandırılmadığı için arama zaten indekse gitmeden
-//! hata veriyor — ve tam olarak bu sınanıyor.
+//! It does not go online: since Torznab is not configured, search fails
+//! before going to the indexer anyway — and that is exactly what is tested.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
-/// Tek bir cevap için beklenecek en uzun süre. Bu testlerdeki çağrıların
-/// hiçbiri ağa çıkmıyor; bunu aşmak "eklenti takıldı" demektir.
+/// The longest to wait for a single answer. None of the calls in these tests
+/// go online; going over this means "the plugin hung".
 const REPLY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
 struct Plugin {
@@ -30,9 +30,9 @@ impl Plugin {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
-            .expect("eklenti ikilisi çalıştırılmalı");
-        let stdin = child.stdin.take().expect("stdin borusu");
-        let stdout = BufReader::new(child.stdout.take().expect("stdout borusu"));
+            .expect("the plugin binary must run");
+        let stdin = child.stdin.take().expect("stdin pipe");
+        let stdout = BufReader::new(child.stdout.take().expect("stdout pipe"));
         Self {
             child,
             stdin,
@@ -41,30 +41,30 @@ impl Plugin {
     }
 
     fn send(&mut self, line: &serde_json::Value) {
-        writeln!(self.stdin, "{line}").expect("istek yazılmalı");
-        self.stdin.flush().expect("istek gönderilmeli");
+        writeln!(self.stdin, "{line}").expect("the request must be written");
+        self.stdin.flush().expect("the request must be sent");
     }
 
-    /// Bir cevap okur; `log` bildirimlerini atlar (kimlikleri yok).
+    /// Reads an answer; skips `log` notifications (they have no id).
     fn recv(&mut self) -> serde_json::Value {
         let deadline = std::time::Instant::now() + REPLY_TIMEOUT;
         loop {
             assert!(
                 std::time::Instant::now() < deadline,
-                "eklenti {REPLY_TIMEOUT:?} içinde cevap vermedi"
+                "the plugin did not answer within {REPLY_TIMEOUT:?}"
             );
             let mut line = String::new();
-            let read = self.stdout.read_line(&mut line).expect("stdout okunmalı");
-            assert!(read > 0, "eklenti cevap vermeden kapandı");
+            let read = self.stdout.read_line(&mut line).expect("stdout must be readable");
+            assert!(read > 0, "the plugin closed without answering");
             let value: serde_json::Value =
-                serde_json::from_str(line.trim()).expect("stdout satırı JSON olmalı");
+                serde_json::from_str(line.trim()).expect("a stdout line must be JSON");
             if value.get("id").is_some() {
                 return value;
             }
-            // `log` bildirimi: kimliksiz, cevap değil.
+            // A `log` notification: no id, not an answer.
             assert_eq!(
                 value["method"], "log",
-                "kimliksiz satır yalnızca log olmalı"
+                "a line without an id must only be a log"
             );
         }
     }
@@ -82,7 +82,7 @@ impl Plugin {
             std::process::id(),
             id_suffix()
         ));
-        std::fs::create_dir_all(&data_dir).expect("veri dizini");
+        std::fs::create_dir_all(&data_dir).expect("data directory");
         self.call(
             1,
             "handshake",
@@ -98,8 +98,8 @@ impl Plugin {
 
     fn shutdown(mut self) {
         self.send(&serde_json::json!({"jsonrpc": "2.0", "method": "shutdown", "params": {}}));
-        let status = self.child.wait().expect("süreç beklenmeli");
-        assert!(status.success(), "eklenti düzgün kapanmalı: {status}");
+        let status = self.child.wait().expect("the process must be waited for");
+        assert!(status.success(), "the plugin must close cleanly: {status}");
     }
 }
 
@@ -123,15 +123,15 @@ fn the_binary_speaks_the_protocol_end_to_end() {
         serde_json::json!(["search", "stream"])
     );
 
-    // Tanınmayan metot: çökme değil, `-32601`.
+    // An unrecognised method: not a crash, `-32601`.
     let unknown = plugin.call(2, "teleport", serde_json::json!({}));
     assert_eq!(unknown["error"]["code"], -32601);
 
-    // Süreç hâlâ ayakta: bir sonraki çağrı cevaplanıyor.
+    // The process is still up: the next call is answered.
     let alive = plugin.call(3, "health", serde_json::json!({}));
     assert!(
         alive["result"].is_object(),
-        "hatadan sonra süreç yaşamalı: {alive}"
+        "the process must live on after an error: {alive}"
     );
 
     plugin.shutdown();
@@ -149,11 +149,11 @@ fn an_unconfigured_search_says_it_did_not_look_rather_than_finding_nothing() {
     );
     let message = response["error"]["message"]
         .as_str()
-        .unwrap_or_else(|| panic!("boş sonuç değil hata bekleniyordu: {response}"));
-    assert!(message.contains("yapılandırılmamış"), "{message}");
+        .unwrap_or_else(|| panic!("an error was expected, not an empty result: {response}"));
+    assert!(message.contains("not configured"), "{message}");
     assert!(
         message.contains("headshell secret set plugin:torrent torznab_url"),
-        "kullanıcıya ne yazacağı söylenmeli: {message}"
+        "the user must be told what to write: {message}"
     );
 
     plugin.shutdown();
@@ -167,15 +167,15 @@ fn health_separates_search_from_the_torrent_engine() {
     let response = plugin.call(2, "health", serde_json::json!({}));
     let detail = response["result"]["detail"]
         .as_str()
-        .unwrap_or_else(|| panic!("detay bekleniyordu: {response}"));
-    // İkisi ayrı satırda raporlanmalı: arama çalışmıyor olabilir ama elde
-    // infohash olan bir parça yine çalar (K9).
-    assert!(detail.contains("arama"), "{detail}");
-    assert!(detail.contains("torrent motoru"), "{detail}");
+        .unwrap_or_else(|| panic!("a detail was expected: {response}"));
+    // The two must be reported on separate lines: search may not work, but a
+    // track whose infohash is at hand still plays (K9).
+    assert!(detail.contains("search"), "{detail}");
+    assert!(detail.contains("torrent engine"), "{detail}");
     assert_eq!(
         response["result"]["track_count"],
         serde_json::Value::Null,
-        "torrent'in kataloğu yok; sayı uydurulmamalı"
+        "a torrent has no catalog; no number must be made up"
     );
 
     plugin.shutdown();
@@ -186,11 +186,11 @@ fn a_bad_id_is_refused_without_starting_a_download() {
     let mut plugin = Plugin::start();
     plugin.handshake(serde_json::json!({}));
 
-    let response = plugin.call(2, "resolve_source", serde_json::json!({"id": "merhaba"}));
+    let response = plugin.call(2, "resolve_source", serde_json::json!({"id": "hello"}));
     assert!(
         response["error"]["message"]
             .as_str()
-            .is_some_and(|text| text.contains("infohash değil")),
+            .is_some_and(|text| text.contains("not an infohash")),
         "{response}"
     );
 
@@ -202,8 +202,8 @@ fn a_malformed_line_is_skipped_instead_of_killing_the_process() {
     let mut plugin = Plugin::start();
     plugin.handshake(serde_json::json!({}));
 
-    writeln!(plugin.stdin, "bu json değil").expect("bozuk satır yazılmalı");
-    plugin.stdin.flush().expect("gönderilmeli");
+    writeln!(plugin.stdin, "this is not json").expect("the broken line must be written");
+    plugin.stdin.flush().expect("must be sent");
 
     let alive = plugin.call(2, "health", serde_json::json!({}));
     assert!(alive["result"].is_object(), "{alive}");

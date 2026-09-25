@@ -1,10 +1,11 @@
-//! Gerçek dosyayı gerçek ses aygıtında çalma testi.
+//! Playing a real file on a real audio device.
 //!
-//! **Ses aygıtı olmayan ortamda (CI, konteyner) kendini atlar** — testi
-//! susturmak değil, koşulun sağlanmadığını açıkça söyleyip geçmek. Aygıt
-//! varsa gerçekten çalar ve pozisyonun ilerlediğini doğrular.
+//! **In an environment without an audio device (CI, a container) it skips
+//! itself** — not silencing the test, but saying plainly that the condition
+//! is not met and moving on. If there is a device it really plays and
+//! verifies that the position advances.
 //!
-//! `audio` feature'ı olmadan bu dosya boş derlenir.
+//! Without the `audio` feature this file compiles empty.
 
 #![cfg(feature = "audio")]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -15,7 +16,7 @@ use std::time::{Duration, Instant};
 use headshell_core::playback::{AudioEngine, PlayState};
 use headshell_core::provider::AudioSource;
 
-/// Yerel dosya kaynağı (kısayol).
+/// A local file source (a shortcut).
 fn local(path: &std::path::Path) -> AudioSource {
     AudioSource::LocalFile {
         path: path.to_path_buf(),
@@ -26,25 +27,26 @@ fn fixture(name: &str) -> PathBuf {
     PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/audio")).join(name)
 }
 
-/// Ses çıkışı var mı? Yoksa test anlamlı değil.
+/// Is there an audio output? Without one the test is meaningless.
 fn has_output_device() -> bool {
     use cpal::traits::HostTrait;
     cpal::default_host().default_output_device().is_some()
 }
 
-/// Motoru kurar; aygıt yoksa `None` döner.
+/// Sets up the engine; returns `None` if there is no device.
 fn engine_for(name: &str) -> Option<AudioEngine> {
     if !has_output_device() {
-        eprintln!("ses çıkışı yok — test atlanıyor (bu bir başarısızlık değil)");
+        eprintln!("no audio output — skipping the test (this is not a failure)");
         return None;
     }
     match AudioEngine::play_file(&fixture(name)) {
         Ok(engine) => Some(engine),
         Err(err) => {
-            // Aygıt var göründü ama açılamadı (kilitli, izin yok…).
-            // Bunu başarısızlık saymıyoruz ama sessizce de geçmiyoruz.
+            // The device seemed to be there but could not be opened (locked, no
+            // permission…). We do not count this as a failure, but we do not pass
+            // over it silently either.
             eprintln!(
-                "ses aygıtı açılamadı, test atlanıyor:\n{}",
+                "could not open the audio device, skipping the test:\n{}",
                 err.chain_text()
             );
             None
@@ -58,44 +60,48 @@ fn a_real_file_plays_and_the_position_advances() {
         return;
     };
 
-    // Süre kaptan okunmalı: 1 saniyelik fixture.
-    let duration = engine.duration_ms().expect("süre okunmalı");
+    // The duration must be read from the container: a 1-second fixture.
+    let duration = engine.duration_ms().expect("the duration must be read");
     assert!(
         (900..=1100).contains(&duration),
-        "1 sn beklenirken {duration}ms"
+        "{duration}ms while 1 s was expected"
     );
 
-    // Sesin akmaya başlamasını bekle.
+    // Wait for the audio to start flowing.
     let deadline = Instant::now() + Duration::from_secs(3);
     while engine.position_ms() == 0 && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(
         engine.position_ms() > 0,
-        "3 saniyede tek kare bile çalınmadı (durum: {})",
+        "not a single frame played in 3 seconds (state: {})",
         engine.state()
     );
 
-    // Parça bitene kadar bekle; 1 sn'lik dosya 4 sn içinde bitmeli.
+    // Wait until the track ends; a 1 s file must end within 4 s.
     let deadline = Instant::now() + Duration::from_secs(4);
     while !engine.finished() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(50));
     }
     assert!(
         engine.finished(),
-        "parça bitmedi (durum: {})",
+        "the track did not end (state: {})",
         engine.state()
     );
     assert_eq!(engine.state(), PlayState::Stopped);
 
-    // Pozisyon süreyi aşmamalı ve ona yakın durmalı.
+    // The position must not exceed the duration and must stay close to it.
     let position = engine.position_ms();
     assert!(
         position >= duration.saturating_sub(150),
-        "pozisyon ({position}ms) süreye ({duration}ms) ulaşmalıydı"
+        "the position ({position}ms) should have reached the duration ({duration}ms)"
     );
 
-    assert_eq!(engine.take_error(), None, "çözme hatasız bitmeliydi");
+    assert_eq!(
+        engine.take_error(),
+        None,
+        "decoding should have finished without errors"
+    );
 }
 
 #[test]
@@ -109,7 +115,7 @@ fn pausing_freezes_the_position() {
         std::thread::sleep(Duration::from_millis(20));
     }
     if engine.position_ms() == 0 {
-        eprintln!("ses akmadı — test atlanıyor");
+        eprintln!("the audio did not flow — skipping the test");
         return;
     }
 
@@ -121,33 +127,34 @@ fn pausing_freezes_the_position() {
     assert_eq!(
         engine.position_ms(),
         paused_at,
-        "duraklatılmışken pozisyon ilerlememeli"
+        "the position must not advance while paused"
     );
 
     engine.resume();
     std::thread::sleep(Duration::from_millis(200));
     assert!(
         engine.position_ms() > paused_at,
-        "sürdürüldükten sonra ilerlemeli"
+        "it must advance after resuming"
     );
 }
 
-/// D-024'ün iddiası: iki parça arka arkaya çalarken **çıkış hiç durmuyor.**
+/// D-024's claim: while two tracks play back to back **the output never
+/// stops.**
 ///
-/// Eski tasarımda her parça için yeni bir cpal akışı ve yeni bir çözücü
-/// kuruluyordu; boşluk buydu. Artık akış açık kalıyor ve sıradaki parçanın
-/// örnekleri bitenin arkasına ekleniyor.
+/// In the old design a new cpal stream and a new decoder were set up for
+/// every track; that was the gap. Now the stream stays open and the next
+/// track's samples are appended behind the finished one.
 #[test]
 fn two_tracks_play_back_to_back_without_the_output_ever_stopping() {
     if !has_output_device() {
-        eprintln!("ses çıkışı yok — gapless testi atlanıyor (bu bir başarısızlık değil)");
+        eprintln!("no audio output — skipping the gapless test (this is not a failure)");
         return;
     }
     let engine = match AudioEngine::open() {
         Ok(engine) => engine,
         Err(err) => {
             eprintln!(
-                "ses aygıtı açılamadı, test atlanıyor:\n{}",
+                "could not open the audio device, skipping the test:\n{}",
                 err.chain_text()
             );
             return;
@@ -157,8 +164,11 @@ fn two_tracks_play_back_to_back_without_the_output_ever_stopping() {
     let first = local(&fixture("tagged.flac"));
     let second = local(&fixture("Test Artist - Mp3 Track.mp3"));
 
-    let seq0 = engine.play_source(&first).expect("ilk parça açılmalı");
-    // İkinci parça, birincisi **çalarken** sıraya giriyor: gapless'ın koşulu.
+    let seq0 = engine
+        .play_source(&first)
+        .expect("the first track must open");
+    // The second track is queued **while** the first plays: the condition for
+    // gapless.
     let seq1 = engine.enqueue(&second);
     assert_ne!(seq0, seq1);
 
@@ -170,7 +180,7 @@ fn two_tracks_play_back_to_back_without_the_output_ever_stopping() {
             switched = true;
             break;
         }
-        // Geçiş duyulmadan önce çıkış **durmuş** görünmemeli.
+        // The output must not look **stopped** before the transition is heard.
         if engine.state() == PlayState::Stopped {
             stopped_before_switch = true;
         }
@@ -179,46 +189,51 @@ fn two_tracks_play_back_to_back_without_the_output_ever_stopping() {
 
     assert!(
         switched,
-        "ikinci parçaya geçilmeliydi (durum: {})",
+        "it should have moved on to the second track (state: {})",
         engine.state()
     );
     assert!(
         !stopped_before_switch,
-        "geçişte çıkış durdu — gapless bozuk"
+        "the output stopped at the transition — gapless is broken"
     );
     assert!(
         !engine.finished(),
-        "sırada parça varken motor bitmiş sayılmamalı"
+        "the engine must not count as finished while a track is queued"
     );
 
-    // Biten parçanın scrobble'ı kendi uzunluğunu görmeli, çıkışın toplamını değil.
-    let played = engine.played_ms_of(seq0).expect("ilk dilim bilinmeli");
+    // The finished track's scrobble must see its own length, not the output's
+    // total.
+    let played = engine
+        .played_ms_of(seq0)
+        .expect("the first slice must be known");
     assert!(
         (900..=1200).contains(&played),
-        "1 sn'lik parça tam çalınmalıydı: {played}ms"
+        "the 1-second track should have played in full: {played}ms"
     );
-    // Yeni parçanın pozisyonu **baştan** sayılmalı.
+    // The new track's position must be counted **from the start**.
     assert!(
         engine.position_ms() < 900,
-        "ikinci parça baştan başlamalı: {}ms",
+        "the second track must start from the beginning: {}ms",
         engine.position_ms()
     );
 }
 
 #[test]
 fn a_corrupt_file_fails_with_the_decode_stage() {
-    // Ses aygıtı olmasa da çalışır: hata çözme aşamasında, çıkıştan önce.
-    let err = AudioEngine::play_file(&fixture("corrupt.flac")).expect_err("bozuk dosya açılmamalı");
+    // It works without an audio device too: the error is at the decoding
+    // stage, before the output.
+    let err =
+        AudioEngine::play_file(&fixture("corrupt.flac")).expect_err("a corrupt file must not open");
     assert_eq!(err.stage(), headshell_core::diag::Stage::PlaybackDecode);
 }
 
 #[test]
 fn a_missing_file_names_the_path() {
-    let err = AudioEngine::play_file(&fixture("olmayan.flac")).expect_err("olmayan dosya");
+    let err = AudioEngine::play_file(&fixture("missing.flac")).expect_err("a missing file");
     assert_eq!(err.stage(), headshell_core::diag::Stage::PlaybackDecode);
     assert!(
-        err.chain_text().contains("olmayan.flac"),
-        "hata dosyayı söylemeli:\n{}",
+        err.chain_text().contains("missing.flac"),
+        "the error must name the file:\n{}",
         err.chain_text()
     );
 }

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="tr">
+<html lang="en">
 <head>
 <meta charset="utf-8" />
 <title>headshell — GO/NO-GO</title>
@@ -10,18 +10,19 @@
          font:13px/1.4 system-ui, sans-serif; overflow:hidden; }
   #wrap { display:grid; grid-template-rows:auto 1fr auto; height:100vh; }
 
-  /* İKİ AYRI CSS KÜMESİ ölçülüyor — "WebKitGTK yavaş" ile "bu CSS pahalı"
-     farklı iddialar ve §3.3'ün tema sözleşmesi tam bu farkı bilmek zorunda.
+  /* TWO SEPARATE CSS SETS are measured — "WebKitGTK is slow" and "this CSS is
+     expensive" are different claims, and §3.3's theme contract has to know
+     exactly this difference.
 
-     .anim-ok    → yalnızca transform ve opacity. Kompozitörde kalır,
-                   her karede layout/paint istemez.
-     .anim-saf   → tema yazarının içgüdüsel yazacağı şey: height,
-                   box-shadow, filter, background-position. Hepsi
-                   her karede layout ya da paint tetikler. */
+     .anim-ok    → only transform and opacity. Stays on the compositor,
+                   needs no layout/paint on every frame.
+     .anim-naive → what a theme author writes by instinct: height,
+                   box-shadow, filter, background-position. All of them
+                   trigger layout or paint on every frame. */
   header { padding:10px 14px; border-bottom:1px solid #262336;
            background:linear-gradient(90deg,#1b1826,#2a2140,#1b1826);
            background-size:300% 100%; }
-  .anim-saf header { animation: slide 6s linear infinite; }
+  .anim-naive header { animation: slide 6s linear infinite; }
   @keyframes slide { to { background-position:300% 0; } }
   .anim-ok header { animation: dim 6s linear infinite alternate; }
   @keyframes dim { to { opacity:.72; } }
@@ -29,7 +30,7 @@
   #eq { display:flex; gap:3px; align-items:flex-end; height:22px; margin-top:6px; }
   #eq i { width:4px; background:var(--accent); border-radius:2px; height:20%;
           transform-origin:bottom; }
-  .anim-saf #eq i { box-shadow:0 0 6px var(--accent);
+  .anim-naive #eq i { box-shadow:0 0 6px var(--accent);
                     animation: bounce .9s ease-in-out infinite alternate; }
   @keyframes bounce { to { height:100%; filter:hue-rotate(90deg); } }
   .anim-ok #eq i { animation: bounce-t .9s ease-in-out infinite alternate; }
@@ -46,7 +47,7 @@
   .row .d { width:56px; text-align:right; }
   .anim-ok .row:nth-child(3n) .t { animation: fade 2s ease-in-out infinite alternate; }
   @keyframes fade { to { opacity:.55; } }
-  .anim-saf .row:nth-child(3n) .t { animation: glow 2s ease-in-out infinite alternate; }
+  .anim-naive .row:nth-child(3n) .t { animation: glow 2s ease-in-out infinite alternate; }
   @keyframes glow { to { text-shadow:0 0 8px var(--accent); color:#fff; } }
 
   footer { padding:8px 14px; border-top:1px solid #262336; color:var(--dim);
@@ -60,11 +61,11 @@
     <div id="eq"></div>
   </header>
   <div id="list"><div id="spacer"></div></div>
-  <footer id="log">hazırlanıyor…</footer>
+  <footer id="log">preparing…</footer>
 </div>
 
 <script>
-const N        = 50000;   // PLAN §3.1: 50.000 satır
+const N        = 50000;   // PLAN §3.1: 50,000 rows
 const ROW_H    = 36;
 const OVERSCAN = 6;
 
@@ -76,15 +77,15 @@ const eqEl     = document.getElementById('eq');
 
 for (let i = 0; i < 24; i++) eqEl.appendChild(document.createElement('i'));
 
-// --- veri: 50k gerçek nesne (bellek de ölçüme dahil olsun) ---------------
+// --- data: 50k real objects (so memory is part of the measurement) -------
 const rows = new Array(N);
 for (let i = 0; i < N; i++) {
-  rows[i] = { id:i, title:`Parça ${i} — uzunca bir başlık olabilir`,
-              artist:`Sanatçı ${i % 997}`, ms: 120000 + (i % 240000) };
+  rows[i] = { id:i, title:`Track ${i} — this could be a rather long title`,
+              artist:`Artist ${i % 997}`, ms: 120000 + (i % 240000) };
 }
 spacerEl.style.height = (N * ROW_H) + 'px';
 
-// --- sanallaştırma: düğüm havuzu, innerHTML değil -------------------------
+// --- virtualisation: a node pool, not innerHTML ---------------------------
 const pool = [];
 function nodeFor(k) {
   while (pool.length <= k) {
@@ -121,18 +122,18 @@ function render() {
   for (let k = count; k < pool.length; k++) pool[k].el.style.display = 'none';
 }
 
-// --- ölçüm çekirdeği ------------------------------------------------------
+// --- the measurement core ------------------------------------------------
 const pct = (arr, p) => arr.length ? arr.slice().sort((x,y)=>x-y)[
   Math.min(arr.length-1, Math.floor(arr.length*p))] : 0;
 
 function phase(name, ms, opts = {}) {
   return new Promise(res => {
-    // rAF durursa (pencere gizli/kısılmış) faz asla bitmez ve ölçüm asılı kalır.
-    // Bu koruma "ölçemedim"i sessiz beklemeden ayırıyor.
+    // If rAF stops (the window is hidden/throttled) the phase never ends and the
+    // measurement hangs. This guard tells "could not measure" apart from a silent wait.
     let done = false;
     const finish = v => { if (!done) { done = true; clearTimeout(guard); res(v); } };
     const guard = setTimeout(() => {
-      finish({ name, rAF_durdu: true, kare_sayisi: frames.length });
+      finish({ name, rAF_stopped: true, frame_count: frames.length });
     }, ms + 8000);
     const frames = [];
     let prev = performance.now(), t0 = prev, vel = opts.scroll ? 42 : 0, dir = 1;
@@ -156,123 +157,125 @@ function phase(name, ms, opts = {}) {
       if (now - t0 < ms) requestAnimationFrame(step);
       else {
         if (ipcTimer) clearInterval(ipcTimer);
-        frames.shift(); // ilk kare faz geçişini taşır
+        frames.shift(); // the first frame carries the phase transition
         finish({ name,
-              fps_medyan:  +(1000 / pct(frames, .50)).toFixed(1),
-              kare_p50_ms: +pct(frames, .50).toFixed(2),
-              kare_p95_ms: +pct(frames, .95).toFixed(2),
-              kare_enkotu_ms: +Math.max(...frames).toFixed(2),
-              takilan_kare: frames.filter(f => f > 33.4).length,
-              kare_sayisi: frames.length,
-              ipc_gonderilen: ipcSent, ipc_tamamlanan: ipcDone });
+              fps_median:   +(1000 / pct(frames, .50)).toFixed(1),
+              frame_p50_ms: +pct(frames, .50).toFixed(2),
+              frame_p95_ms: +pct(frames, .95).toFixed(2),
+              frame_worst_ms: +Math.max(...frames).toFixed(2),
+              dropped_frames: frames.filter(f => f > 33.4).length,
+              frame_count: frames.length,
+              ipc_sent: ipcSent, ipc_done: ipcDone });
       }
     }
     requestAnimationFrame(step);
   });
 }
 
-// Ekrana da yaz, run.log'a da: takılırsa hangi adımda takıldığı görünsün.
+// Write it on screen and to run.log too: if it hangs, the step it hung at shows.
 const say = t => {
   logEl.textContent = t;
   if (window.__TAURI__) window.__TAURI__.core.invoke('mark', { msg: t });
-  else console.log('ADIM: ' + t);
+  else console.log('STEP: ' + t);
 };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-// KONTROL KİPİ: aynı sayfa düz bir tarayıcıda da koşabilsin diye.
-// Tek kaynak, iki motor — ayrı bir kopya yazsaydım karşılaştırma anlamsız olurdu.
-// Tauri yoksa IPC fazları atlanır, rapor HTTP ile geri gönderilir.
+// CONTROL MODE: so the same page can run in a plain browser too.
+// One source, two engines — had I written a separate copy, the comparison would be meaningless.
+// Without Tauri the IPC phases are skipped and the report is sent back over HTTP.
 const TAURI = !!window.__TAURI__;
 
 async function run() {
   const invoke = TAURI ? window.__TAURI__.core.invoke
-                       : async () => { throw new Error('kontrol kipi'); };
+                       : async () => { throw new Error('control mode'); };
   const listen = TAURI ? window.__TAURI__.event.listen : null;
-  const rapor = { motor: TAURI ? 'webkitgtk (tauri)' : 'kontrol tarayıcı',
-                  ajan: navigator.userAgent, satir: N, fazlar: [] };
+  const report = { engine: TAURI ? 'webkitgtk (tauri)' : 'control browser',
+                   agent: navigator.userAgent, rows: N, phases: [] };
 
-  // Rapor **artımlı** yazılıyor: sonraki adım asılırsa öncekilerin sayıları
-  // kaybolmasın. İlk koşumda tam bunu kaybettik.
+  // The report is written **incrementally**: if a later step hangs, the numbers
+  // of the earlier ones must not be lost. We lost exactly that on the first run.
   const save = () => {
-    const json = JSON.stringify(rapor, null, 2);
+    const json = JSON.stringify(report, null, 2);
     return TAURI ? invoke('save_report', { json })
                  : fetch('/report', { method:'POST', body: json }).catch(() => {});
   };
 
   render();
-  await sleep(600); // ilk boyama otursun
+  await sleep(600); // let the first paint settle
 
-  say('1/8 boşta…');
-  rapor.fazlar.push(await phase('bosta', 2000));
+  say('1/8 idle…');
+  report.phases.push(await phase('idle', 2000));
   await save();
 
-  say('2/8 kaydırma…');
-  rapor.fazlar.push(await phase('kaydirma', 5000, { scroll:true }));
+  say('2/8 scrolling…');
+  report.phases.push(await phase('scroll', 5000, { scroll:true }));
   await save();
 
-  say('3/8 kaydırma + disiplinli CSS…');
+  say('3/8 scrolling + disciplined CSS…');
   wrapEl.className = 'anim-ok';
-  rapor.fazlar.push(await phase('kaydirma+css_disiplinli', 5000, { scroll:true }));
+  report.phases.push(await phase('scroll+css_disciplined', 5000, { scroll:true }));
   await save();
 
-  say('4/8 kaydırma + saf CSS…');
-  wrapEl.className = 'anim-saf';
-  rapor.fazlar.push(await phase('kaydirma+css_saf', 5000, { scroll:true }));
+  say('4/8 scrolling + naive CSS…');
+  wrapEl.className = 'anim-naive';
+  report.phases.push(await phase('scroll+css_naive', 5000, { scroll:true }));
   await save();
 
   wrapEl.className = '';
   await save();
 
-  // Kontrol kipinde IPC diye bir şey yok — burada duruluyor. Karşılaştırılan
-  // şey zaten motorun çizim tavanı, Tauri'nin köprüsü değil.
+  // There is no such thing as IPC in control mode — it stops here. What is
+  // compared is the engine's drawing ceiling anyway, not Tauri's bridge.
   if (!TAURI) {
-    rapor.tamam = true;
-    say('kontrol koşumu bitti');
+    report.done = true;
+    say('the control run is done');
     await save();
     return;
   }
 
-  say('5/8 kaydırma + disiplinli CSS + IPC 30 Hz…');
+  say('5/8 scrolling + disciplined CSS + IPC 30 Hz…');
   wrapEl.className = 'anim-ok';
-  rapor.fazlar.push(await phase('kaydirma+css_disiplinli+ipc30', 5000,
+  report.phases.push(await phase('scroll+css_disciplined+ipc30', 5000,
                                 { scroll:true, ipcHz:30 }));
   wrapEl.className = '';
   await save();
 
-  say('6/8 IPC gidiş-dönüş…');
+  say('6/8 IPC round trip…');
   const lat = [];
   for (let i = 0; i < 1000; i++) {
     const t = performance.now();
     await invoke('ping', { seq: i });
     lat.push(performance.now() - t);
   }
-  rapor.ipc_gidis_donus_ms = { p50:+pct(lat,.50).toFixed(3), p95:+pct(lat,.95).toFixed(3),
-                               p99:+pct(lat,.99).toFixed(3), enkotu:+Math.max(...lat).toFixed(3),
-                               ornek: lat.length };
+  report.ipc_round_trip_ms = { p50:+pct(lat,.50).toFixed(3), p95:+pct(lat,.95).toFixed(3),
+                               p99:+pct(lat,.99).toFixed(3), worst:+Math.max(...lat).toFixed(3),
+                               samples: lat.length };
   await save();
 
-  say('7/8 IPC yük (200 satır × 50)…');
+  say('7/8 IPC load (200 rows × 50)…');
   const pay = [];
   for (let i = 0; i < 50; i++) {
     const t = performance.now();
     const r = await invoke('page', { offset: i * 200, limit: 200 });
     pay.push(performance.now() - t);
-    if (r.length !== 200) rapor.hata = 'sayfa boyu yanlış';
+    if (r.length !== 200) report.error = 'wrong page size';
   }
-  rapor.ipc_sayfa_200_ms = { p50:+pct(pay,.50).toFixed(2), p95:+pct(pay,.95).toFixed(2),
-                             enkotu:+Math.max(...pay).toFixed(2) };
+  report.ipc_page_200_ms = { p50:+pct(pay,.50).toFixed(2), p95:+pct(pay,.95).toFixed(2),
+                             worst:+Math.max(...pay).toFixed(2) };
 
-  rapor.ipc_sayfa_200_ms.toplam_satir = 50 * 200;
+  report.ipc_page_200_ms.total_rows = 50 * 200;
   await save();
 
-  // Kademeli. İlk koşumda 10.000'lik tek atış ana iş parçacığını öyle doyurdu ki
-  // fazın kendi `setTimeout` zaman aşımı bile koşamadı — ölçüm asılı kaldı.
-  // Tavanı bulmak için küçükten büyüğe gidiliyor; her basamak ayrı yazılıyor.
-  rapor.olay_akisi = [];
+  // In steps. On the first run a single shot of 10,000 flooded the main thread so
+  // badly that even the phase's own `setTimeout` timeout could not run — the
+  // measurement hung. To find the ceiling it goes from small to large; each step
+  // is written separately.
+  report.event_stream = [];
   for (const BURST of [100, 500, 2000]) {
-    say(`8/8 olay akışı ${BURST}…`);
-    // `listen` reddedilirse (yetenek izni yoksa) hata async executor içinde
-    // yutulur ve ölçüm sessizce asılır — ilk koşumda tam bu oldu. Artık patlıyor.
+    say(`8/8 event stream ${BURST}…`);
+    // If `listen` is refused (no capability permission), the error is swallowed
+    // inside the async executor and the measurement hangs silently — exactly what
+    // happened on the first run. Now it blows up.
     const un = await listen('tick', onTick);
     let n = 0, t0 = 0, settle;
     function onTick() {
@@ -284,25 +287,25 @@ async function run() {
       invoke('emit_burst', { count: BURST }).catch(e => res(-1));
     });
     un();
-    rapor.olay_akisi.push({ adet: BURST, ms: +got.toFixed(1),
-                            olay_sn: Math.round(BURST / (got / 1000)) });
+    report.event_stream.push({ count: BURST, ms: +got.toFixed(1),
+                               events_per_s: Math.round(BURST / (got / 1000)) });
     await save();
-    await sleep(400); // kuyruk boşalsın, basamaklar birbirine karışmasın
+    await sleep(400); // let the queue drain so the steps do not mix
   }
 
-  if (performance.memory) rapor.js_heap_mb = +(performance.memory.usedJSHeapSize/1048576).toFixed(1);
+  if (performance.memory) report.js_heap_mb = +(performance.memory.usedJSHeapSize/1048576).toFixed(1);
 
-  rapor.tamam = true;
-  say('bitti');
+  report.done = true;
+  say('done');
   await save();
   await invoke('quit');
 }
 
 addEventListener('DOMContentLoaded', () => {
-  say('0/8 JS koşuyor, 50k satır kuruldu' + (TAURI ? '' : ' (KONTROL KİPİ)'));
+  say('0/8 JS is running, 50k rows built' + (TAURI ? '' : ' (CONTROL MODE)'));
   run().catch(async e => {
-    // Hatayı yutma: hangi adımda patladığı run.log'da/konsolda görünsün.
-    say('HATA: ' + e);
+    // Do not swallow the error: the step it blew up at must show in run.log/the console.
+    say('ERROR: ' + e);
     if (TAURI) await window.__TAURI__.core.invoke('quit');
   });
 });

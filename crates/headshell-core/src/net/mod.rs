@@ -1,19 +1,21 @@
-//! HTTP taşıma sınırı (D-020).
+//! The HTTP transport boundary (D-020).
 //!
-//! Çekirdek ağa **doğrudan** bağlanmaz: [`HttpClient`] bir trait'tir, somut
-//! istemci `http-client` feature'ı arkasındadır. Bunun üç sonucu var:
+//! The core does not connect to the network **directly**: [`HttpClient`] is a
+//! trait, and the concrete client is behind the `http-client` feature. This
+//! has three consequences:
 //!
-//! 1. Sağlayıcı mantığı (Subsonic, Jellyfin) ağ olmadan test edilebilir —
-//!    testler sahte bir istemci verir.
-//! 2. Mobil bağlamalar kendi HTTP yığınlarını `Arc<dyn HttpClient>` olarak
-//!    verebilir; TLS ağacını ikinci kez taşımazlar (K7).
-//! 3. Feature içindeki crate seçimi geri alınabilir bir ayrıntıya döner.
+//! 1. Provider logic (Subsonic, Jellyfin) can be tested without a network —
+//!    the tests supply a fake client.
+//! 2. Mobile bindings can supply their own HTTP stacks as
+//!    `Arc<dyn HttpClient>`; they do not carry a second TLS tree (K7).
+//! 3. The choice of crate inside the feature becomes a detail that can be
+//!    undone.
 //!
-//! ## `uniffi` kısıtı (K7)
+//! ## The `uniffi` constraint (K7)
 //!
-//! Trait `dyn` uyumlu: kutulanmış future döndürür, generic/lifetime/closure
-//! taşımaz. Gövde `Vec<u8>`, başlıklar isim/değer listesi — hepsi `uniffi`'nin
-//! ifade edebildiği tipler.
+//! The trait is `dyn` compatible: it returns boxed futures and carries no
+//! generics/lifetimes/closures. The body is a `Vec<u8>`, the headers a list of
+//! name/value pairs — all types `uniffi` can express.
 
 #[cfg(feature = "http-client")]
 mod ureq_client;
@@ -31,9 +33,9 @@ use crate::error::{Error, ErrorKind, Result};
 #[cfg(feature = "http-client")]
 pub use ureq_client::UreqClient;
 
-/// Tek bir HTTP başlığı.
+/// A single HTTP header.
 ///
-/// `HashMap` değil liste: `uniffi` için daha basit ve sıra korunur.
+/// A list, not a `HashMap`: simpler for `uniffi`, and the order is kept.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HttpHeader {
     pub name: String,
@@ -50,11 +52,11 @@ impl HttpHeader {
     }
 }
 
-/// Desteklenen yöntemler.
+/// The supported methods.
 ///
-/// Kasıtlı olarak dar: uzak sağlayıcılar için `GET` ve `POST` yetiyor.
-/// Genişletmek gerekirse eklenir; bugün ihtiyaç olmayan yöntemi taşımak
-/// yabancı taraf uygulamalarına (mobil) boşuna yük olur.
+/// Deliberately narrow: `GET` and `POST` are enough for remote providers.
+/// Others are added if needed; carrying a method nobody needs today is a
+/// pointless burden on foreign implementations (mobile).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum HttpMethod {
@@ -78,13 +80,13 @@ impl std::fmt::Display for HttpMethod {
     }
 }
 
-/// Gönderilecek istek.
+/// The request to send.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HttpRequest {
     pub method: HttpMethod,
     pub url: String,
     pub headers: Vec<HttpHeader>,
-    /// Gövde (POST için). `None` gövdesiz demek.
+    /// The body (for POST). `None` means no body.
     pub body: Option<Vec<u8>>,
 }
 
@@ -109,12 +111,12 @@ impl HttpRequest {
         }
     }
 
-    /// Form kodlu POST (`application/x-www-form-urlencoded`).
+    /// A form-encoded POST (`application/x-www-form-urlencoded`).
     ///
-    /// GET'in yetmediği yer için: bir Chromaprint parmak izi base64'e
-    /// çevrildiğinde binlerce karakter tutar ve pek çok sunucu/aracı URL'yi
-    /// 8 KB civarında keser. Kesilen bir URL "eşleşme yok" gibi görünür —
-    /// yani tanısı en zor başarısızlık türü (K9). Gövdede böyle bir sınır yok.
+    /// For where GET is not enough: a Chromaprint fingerprint takes thousands of
+    /// characters once turned into base64, and many servers/proxies cut URLs at
+    /// around 8 KB. A cut URL looks like "no match" — that is, the hardest kind
+    /// of failure to diagnose (K9). The body has no such limit.
     #[must_use]
     pub fn post_form(url: impl Into<String>, body: impl Into<Vec<u8>>) -> Self {
         Self {
@@ -135,7 +137,7 @@ impl HttpRequest {
     }
 }
 
-/// Dönen yanıt.
+/// The response that came back.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HttpResponse {
     pub status: u16,
@@ -149,7 +151,7 @@ impl HttpResponse {
         (200..300).contains(&self.status)
     }
 
-    /// Bir başlığı (büyük/küçük harf duyarsız) okur.
+    /// Reads a header (case-insensitively).
     #[must_use]
     pub fn header(&self, name: &str) -> Option<&str> {
         self.headers
@@ -158,19 +160,20 @@ impl HttpResponse {
             .map(|h| h.value.as_str())
     }
 
-    /// Gövdeyi metin olarak verir (UTF-8 değilse kayıpsız değil, tanı içindir).
+    /// Returns the body as text (lossy if it is not UTF-8; it is for
+    /// diagnostics).
     #[must_use]
     pub fn text_lossy(&self) -> String {
         String::from_utf8_lossy(&self.body).into_owned()
     }
 
-    /// 2xx değilse hata döndürür.
+    /// Returns an error if not 2xx.
     ///
-    /// Gövdenin başı hata mesajına giriyor: "500 döndü" demek bir tanı
-    /// değil, sunucunun ne dediği tanıdır (K9).
+    /// The start of the body goes into the error message: "it returned 500" is
+    /// not a diagnosis, what the server said is (K9).
     ///
     /// # Errors
-    /// Durum kodu 2xx dışındaysa.
+    /// If the status code is outside 2xx.
     pub fn error_for_status(&self, url: &str) -> Result<()> {
         if self.is_success() {
             return Ok(());
@@ -186,22 +189,23 @@ impl HttpResponse {
     }
 }
 
-/// Hata ayrıntısına alınan gövde uzunluğu (bayt).
+/// How much of the body (in bytes) is taken into the error detail.
 const DETAIL_LIMIT: usize = 200;
 
-/// Çağrılar arasında en az `interval` geçmesini sağlayan kısıtlayıcı.
+/// A limiter that makes sure at least `interval` passes between calls.
 ///
-/// Kotası olan her servis için: MusicBrainz saniyede bir istek, AcoustID
-/// saniyede üç. Servis başına bir örnek tutulur — sınır ortak değil, her
-/// servisin kendi kotası kendi sayacıyla ölçülür.
+/// For every service with a quota: MusicBrainz one request per second,
+/// AcoustID three per second. One instance is kept per service — the limit is
+/// not shared, each service's quota is measured with its own counter.
 ///
-/// ## Neden `thread::sleep`, `async` bir uykuya rağmen
+/// ## Why `thread::sleep` rather than an `async` sleep
 ///
-/// Çekirdek çalışma zamanı kurmaz (K7 / konvansiyon: "çalışma zamanını çağıran
-/// seçsin") ve bu yüzden `tokio::time::sleep` çağıramaz — bağımlılık olarak
-/// `tokio` çekirdekte yok. Altımızdaki HTTP istemcisi (`ureq`) zaten senkron:
-/// her istek çağıran iş parçacığını bloklar. Kısıtlayıcının aynı iş parçacığını
-/// bloklaması bu yüzden yeni bir kısıt getirmiyor, var olanla tutarlı.
+/// The core does not set up a runtime (K7 / convention: "let the caller pick
+/// the runtime") and so cannot call `tokio::time::sleep` — `tokio` is not a
+/// dependency of the core. The HTTP client beneath us (`ureq`) is synchronous
+/// anyway: every request blocks the calling thread. So the limiter blocking
+/// the same thread adds no new constraint; it is consistent with the existing
+/// one.
 #[derive(Debug)]
 pub(crate) struct RateLimiter {
     interval: Duration,
@@ -216,14 +220,14 @@ impl RateLimiter {
         }
     }
 
-    /// Sıra gelene kadar bekler ve çıkarken damgayı günceller.
+    /// Waits until its turn and updates the stamp on the way out.
     ///
-    /// Kilit uyku boyunca **tutulmaz**: iki iş parçacığı aynı anda girerse
-    /// ikisi de bekler, ama biri diğerinin uykusunu uzatmaz.
+    /// The lock is **not held** during the sleep: if two threads come in at once
+    /// both wait, but one does not lengthen the other's sleep.
     pub(crate) fn acquire(&self) {
         let wait = {
-            // Kilit zehirlenmişse (başka bir iş parçacığı panikledi) kısıtlamayı
-            // düşürmüyoruz: `unwrap` yerine "bilmiyorum, tam aralık bekle".
+            // If the lock is poisoned (another thread panicked) we do not drop the
+            // limit: instead of `unwrap`, "I don't know, wait the full interval".
             let Ok(mut last) = self.last.lock() else {
                 std::thread::sleep(self.interval);
                 return;
@@ -232,8 +236,8 @@ impl RateLimiter {
             let wait = last
                 .map(|prev| self.interval.saturating_sub(now.duration_since(prev)))
                 .unwrap_or_default();
-            // Damgayı şimdiden ileri al: sıradaki çağıran bizim uyumamızı da
-            // hesaba katsın, yoksa ikisi birlikte uyanır.
+            // Move the stamp forward now: the next caller should account for our sleep
+            // too, otherwise both wake up together.
             *last = Some(now + wait);
             wait
         };
@@ -243,11 +247,11 @@ impl RateLimiter {
     }
 }
 
-/// Metni en fazla `limit` bayta kırpar — **karakter sınırında**.
+/// Clips text to at most `limit` bytes — **on a character boundary**.
 ///
-/// `String::truncate` sınır ortasına düşerse panikler; sunucunun Türkçe
-/// (ya da herhangi bir çok baytlı) hata mesajı `headshell`'u düşürebilirdi.
-/// K8: çekirdekte panik yok.
+/// `String::truncate` panics if it lands in the middle of a character; a
+/// server's Turkish (or any multi-byte) error message could bring
+/// `headshell` down. K8: no panics in the core.
 pub(crate) fn clip(text: &str, limit: usize) -> String {
     if text.len() <= limit {
         return text.to_owned();
@@ -259,14 +263,15 @@ pub(crate) fn clip(text: &str, limit: usize) -> String {
     text[..end].to_owned()
 }
 
-/// Bir HTTP durum kodunun hangi aşamaya ait olduğu (D-023).
+/// Which stage an HTTP status code belongs to (D-023).
 ///
-/// `401`/`403` **taşıma hatası değildir**: bağlantı kuruldu, istek gitti,
-/// sunucu okudu ve reddetti. Bunu `NETWORK_REQUEST` diye raporlamak
-/// kullanıcıyı ağını kontrol etmeye gönderir; oysa yapması gereken şey
-/// kimliğini düzeltmek. K9'un "ulaşamadım ≠ hayır dedi" ayrımı burada da
-/// geçerli. Geri kalan kodlar (404, 5xx, 429…) taşıma katmanında kalıyor:
-/// onlarda hangi katmanın hata verdiği gövdeden okunmadan bilinemez.
+/// `401`/`403` **are not transport errors**: the connection was made, the
+/// request went out, the server read it and refused. Reporting this as
+/// `NETWORK_REQUEST` sends the user off to check their network, when what they
+/// need to do is fix their credentials. K9's "could not reach ≠ said no"
+/// distinction holds here too. The remaining codes (404, 5xx, 429…) stay in
+/// the transport layer: for those, which layer failed cannot be known without
+/// reading the body.
 pub(crate) fn stage_for_status(status: u16) -> Stage {
     match status {
         401 | 403 => Stage::ProviderCall,
@@ -274,58 +279,60 @@ pub(crate) fn stage_for_status(status: u16) -> Stage {
     }
 }
 
-/// Bir HTTP çağrısının dönüşü.
+/// The return value of an HTTP call.
 ///
-/// `async fn` yerine kutulanmış future: trait'in `dyn` uyumlu olması gerekiyor
-/// (K7 / D-006 ile aynı gerekçe).
+/// A boxed future instead of `async fn`: the trait has to be `dyn`
+/// compatible (the same reasoning as K7 / D-006).
 pub type HttpFuture<'a> = Pin<Box<dyn Future<Output = Result<HttpResponse>> + Send + 'a>>;
 
-/// Ağa çıkabilen her şey.
+/// Anything that can go online.
 ///
-/// Yanıt gövdesi **tamamen belleğe alınır**: bu trait üstveri çağrıları
-/// (arama, ping, parça bilgisi) içindir. Ses baytları buradan geçmez —
-/// akış [`crate::playback`] tarafında ilerlemeli okunur, yoksa 40 MB'lık
-/// bir FLAC çalmaya başlamadan önce tamamen inmek zorunda kalırdı.
+/// The response body is **taken into memory whole**: this trait is for
+/// metadata calls (search, ping, track info). Audio bytes do not go through
+/// here — the stream is read progressively on the [`crate::playback`] side,
+/// otherwise a 40 MB FLAC would have to download completely before it
+/// started playing.
 pub trait HttpClient: Send + Sync {
     fn send<'a>(&'a self, request: &'a HttpRequest) -> HttpFuture<'a>;
 }
 
-/// Bu derlemenin varsayılan HTTP istemcisi.
+/// This build's default HTTP client.
 ///
 /// # Errors
-/// `http-client` feature'ı kapalıysa: çağıran kendi istemcisini vermeli.
-/// Sessizce "ağ yok" demek yerine hangi derleme kararının bunu yaptığını
-/// söylüyoruz.
+/// If the `http-client` feature is off: the caller must supply its own
+/// client. Rather than silently saying "no network" we say which build
+/// decision caused it.
 #[cfg(feature = "http-client")]
 pub fn default_http_client() -> Result<Arc<dyn HttpClient>> {
     Ok(Arc::new(UreqClient::new()))
 }
 
-/// Bu derlemenin varsayılan HTTP istemcisi.
+/// This build's default HTTP client.
 ///
 /// # Errors
-/// Bu derlemede `http-client` kapalı olduğu için **her zaman** hata döner.
+/// In this build `http-client` is off, so it **always** returns an error.
 #[cfg(not(feature = "http-client"))]
 pub fn default_http_client() -> Result<Arc<dyn HttpClient>> {
     Err(no_http_client())
 }
 
-/// Eklentilere verilen HTTP istemcisi: **yönlendirme izlemeyen** (D-069).
+/// The HTTP client given to plugins: one that **does not follow redirects**
+/// (D-069).
 ///
-/// Motor her yönlendirmeyi kendisi izleyip izin listesinde yeniden sorar;
-/// yönlendirmeyi kendisi izleyen bir istemci bu denetimi delerdi.
+/// The engine follows every redirect itself and asks the allow list again; a
+/// client that followed redirects itself would punch through that check.
 ///
 /// # Errors
-/// `http-client` feature'ı kapalıysa.
+/// If the `http-client` feature is off.
 #[cfg(feature = "http-client")]
 pub fn plugin_http_client() -> Result<Arc<dyn HttpClient>> {
     Ok(Arc::new(UreqClient::without_redirects()))
 }
 
-/// Eklentilere verilen HTTP istemcisi.
+/// The HTTP client given to plugins.
 ///
 /// # Errors
-/// Bu derlemede `http-client` kapalı olduğu için **her zaman** hata döner.
+/// In this build `http-client` is off, so it **always** returns an error.
 #[cfg(not(feature = "http-client"))]
 pub fn plugin_http_client() -> Result<Arc<dyn HttpClient>> {
     Err(no_http_client())
@@ -337,16 +344,16 @@ fn no_http_client() -> Error {
         Stage::NetworkRequest,
         ErrorKind::Unsupported {
             provider: "net".to_owned(),
-            what: "HTTP istemcisi (`http-client` feature'ı kapalı derleme)".to_owned(),
+            what: "HTTP client (a build with the `http-client` feature off)".to_owned(),
             capabilities: "NONE".to_owned(),
         },
     )
 }
 
-/// Yanıt gövdesini JSON olarak çözer.
+/// Decodes the response body as JSON.
 ///
-/// `pub(crate)`: generic bir imza dışa açılırsa K7 kırılır. Çağıranlar
-/// tiplenmiş sağlayıcı yüzeyini görür, bu yardımcıyı değil.
+/// `pub(crate)`: if a generic signature were public, K7 would break. Callers
+/// see the typed provider surface, not this helper.
 pub(crate) fn parse_json<T: serde::de::DeserializeOwned>(
     response: &HttpResponse,
     what: &str,
@@ -362,11 +369,12 @@ pub(crate) fn parse_json<T: serde::de::DeserializeOwned>(
     })
 }
 
-/// Ağ katmanı hatası üretir (bağlantı kurulamadı, zaman aşımı, TLS…).
+/// Produces a network-layer error (could not connect, timeout, TLS…).
 ///
-/// Yalnızca gerçekten sokete dokunan derlemelerde var: somut istemci
-/// (`http-client`) ve testlerdeki sahte istemci. Varsayılan feature'larla
-/// derlenen çekirdekte çağıranı yok — orada durması ölü kod uyarısıydı.
+/// It exists only in builds that really touch a socket: the concrete client
+/// (`http-client`) and the fake client in tests. In a core built with the
+/// default features it has no caller — keeping it there was a dead-code
+/// warning.
 #[cfg(any(feature = "http-client", test))]
 pub(crate) fn network_err(url: &str, detail: impl std::fmt::Display) -> Error {
     Error::new(
@@ -378,11 +386,11 @@ pub(crate) fn network_err(url: &str, detail: impl std::fmt::Display) -> Error {
     )
 }
 
-/// Bir sorgu parametresini yüzde kodlar.
+/// Percent-encodes a query parameter.
 ///
-/// Kendi yazıyoruz: tek kullanım için bir kodlama crate'i eklemek ağacı
-/// büyütür. Kural RFC 3986'nın `unreserved` kümesi — geri kalan her bayt
-/// `%XX` olur, böylece boşluklu ve Türkçe karakterli aramalar bozulmaz.
+/// We write it ourselves: adding an encoding crate for a single use grows the
+/// tree. The rule is RFC 3986's `unreserved` set — every other byte becomes
+/// `%XX`, so searches with spaces and Turkish characters are not mangled.
 pub(crate) fn encode_query(value: &str) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let mut out = String::with_capacity(value.len());
@@ -426,12 +434,15 @@ mod tests {
             .error_for_status("http://ev/rest/ping")
             .unwrap_err();
         let text = err.chain_text();
-        assert!(text.starts_with("ADIM: NETWORK_REQUEST"), "{text}");
+        assert!(text.starts_with("STEP: NETWORK_REQUEST"), "{text}");
         assert!(text.contains("500"), "{text}");
-        assert!(text.contains("nope"), "sunucunun dediği görünmeli: {text}");
+        assert!(
+            text.contains("nope"),
+            "what the server said must be visible: {text}"
+        );
     }
 
-    /// D-023: reddedilmek ağ hatası değildir — aşama onu söylemeli.
+    /// D-023: being refused is not a network error — the stage must say so.
     #[test]
     fn a_rejected_request_is_reported_at_the_provider_stage_not_the_network() {
         for status in [401, 403] {
@@ -445,14 +456,14 @@ mod tests {
                 .unwrap_err()
                 .chain_text();
             assert!(
-                text.starts_with("ADIM: PROVIDER_CALL"),
-                "{status} kimlik reddi: {text}"
+                text.starts_with("STEP: PROVIDER_CALL"),
+                "{status} credential refusal: {text}"
             );
             assert!(text.contains(&status.to_string()), "{text}");
         }
 
-        // Geri kalanı taşıma katmanında kalıyor: hangi katmanın hata verdiği
-        // gövde okunmadan bilinemez.
+        // The rest stay in the transport layer: which layer failed cannot be known
+        // without reading the body.
         for status in [404, 429, 500, 502] {
             let response = HttpResponse {
                 status,
@@ -464,16 +475,17 @@ mod tests {
                 .unwrap_err()
                 .chain_text();
             assert!(
-                text.starts_with("ADIM: NETWORK_REQUEST"),
+                text.starts_with("STEP: NETWORK_REQUEST"),
                 "{status}: {text}"
             );
         }
     }
 
-    /// Sunucunun çok baytlı hata mesajı `headshell`'u **düşürmemeli** (K8).
+    /// A server's multi-byte error message must **not bring `headshell` down**
+    /// (K8).
     #[test]
     fn a_long_multibyte_body_is_clipped_without_panicking() {
-        // "ğ" 2 bayt: 200 baytlık sınır karakterin ortasına denk geliyor.
+        // "ğ" is 2 bytes: the 200-byte limit lands in the middle of a character.
         let response = HttpResponse {
             status: 500,
             headers: Vec::new(),
@@ -485,9 +497,9 @@ mod tests {
             .chain_text();
         assert!(text.contains('ğ'), "{text}");
 
-        assert_eq!(clip("kısa", 200), "kısa");
+        assert_eq!(clip("short", 200), "short");
         assert_eq!(clip(&"ğ".repeat(300), 200).len(), 200);
-        // Tek karakter geri gidilmeli, sınır ortada kalmamalı.
+        // It must step back one character; the boundary must not stay in the middle.
         assert_eq!(clip(&"ğ".repeat(300), 201).len(), 200);
     }
 
@@ -503,18 +515,18 @@ mod tests {
         assert_eq!(response.header("etag"), None);
     }
 
-    /// Kısıtlayıcı gerçekten bekletiyor mu — süre ölçülerek.
+    /// Does the limiter really make callers wait — measured by time.
     #[test]
     fn the_rate_limiter_actually_spaces_calls_apart() {
         let limiter = RateLimiter::new(Duration::from_millis(40));
         let start = Instant::now();
-        limiter.acquire(); // ilki beklemez
+        limiter.acquire(); // the first one does not wait
         limiter.acquire();
         limiter.acquire();
         let elapsed = start.elapsed();
         assert!(
             elapsed >= Duration::from_millis(80),
-            "iki aralık beklenmeliydi, {elapsed:?} geçti"
+            "it should have waited two intervals, {elapsed:?} passed"
         );
     }
 }

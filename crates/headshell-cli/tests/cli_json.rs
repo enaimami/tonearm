@@ -1,16 +1,16 @@
-//! CLI'nin `--json` çıktısının snapshot testleri.
+//! Snapshot tests of the CLI's `--json` output.
 //!
-//! Amaç iki katlı: (1) betiklenebilirlik sözleşmesi kazara bozulmasın,
-//! (2) GUI'nin aynı veriyi alacağının kanıtı dursun.
+//! The goal is twofold: (1) the scripting contract must not break by
+//! accident, (2) it stands as proof that the GUI gets the same data.
 //!
-//! Snapshot'ları güncellemek için: `UPDATE_SNAPSHOTS=1 cargo test -p headshell-cli`
+//! To update the snapshots: `UPDATE_SNAPSHOTS=1 cargo test -p headshell-cli`
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Çalıştırmadan çalıştırmaya değişen alanlar — karşılaştırma öncesi sabitlenir.
+/// Fields that change from run to run — pinned before comparing.
 const VOLATILE_KEYS: &[&str] = &[
     "started_at",
     "finished_at",
@@ -20,11 +20,12 @@ const VOLATILE_KEYS: &[&str] = &[
     "arch",
     "command",
     "source",
-    // Sunucu kayıt dosyasının yolu geçici dizine bağlı.
+    // The server record file's path depends on the temporary directory.
     "path",
-    // Eklenti dizini de öyle.
+    // So does the plugin directory.
     "dir",
-    // Araç durumunun ölçüldüğü platform: koşan makineye bağlı (D-071).
+    // The platform the tool state was measured for: depends on the running
+    // machine (D-071).
     "platform",
 ];
 
@@ -32,11 +33,12 @@ fn fixtures() -> PathBuf {
     PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures"))
 }
 
-/// Kendini silen geçici dizin — düşen bir testte de (`Drop` panikte koşar).
+/// A temporary directory that deletes itself — in a failing test too (`Drop`
+/// runs during a panic).
 ///
-/// Kök Cargo'nun `CARGO_TARGET_TMPDIR`'i (`target/tmp`), işletim sisteminin
-/// ortak `/tmp`'si değil: testler bir zamanlar orada dizin bırakıyordu ve bir
-/// geliştirme makinesinde 1,2 GB birikmişti (D-070).
+/// The root is Cargo's `CARGO_TARGET_TMPDIR` (`target/tmp`), not the
+/// operating system's shared `/tmp`: tests once left directories there, and
+/// 1.2 GB piled up on a development machine (D-070).
 struct TempDir(PathBuf);
 
 impl std::ops::Deref for TempDir {
@@ -65,7 +67,7 @@ impl Drop for TempDir {
             && err.kind() != std::io::ErrorKind::NotFound
         {
             eprintln!(
-                "uyarı: geçici dizin silinemedi ({}): {err}",
+                "warning: could not delete the temporary directory ({}): {err}",
                 self.0.display()
             );
         }
@@ -76,7 +78,7 @@ fn temp_dir(label: &str) -> TempDir {
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let base = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
-    std::fs::create_dir_all(&base).expect("test kökü açılmalı");
+    std::fs::create_dir_all(&base).expect("the test root must open");
     loop {
         let dir = base.join(format!(
             "cli-{label}-{}-{}",
@@ -86,22 +88,27 @@ fn temp_dir(label: &str) -> TempDir {
         match std::fs::create_dir(&dir) {
             Ok(()) => return TempDir(dir),
             Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(err) => panic!("geçici dizin açılamadı ({}): {err}", dir.display()),
+            Err(err) => panic!(
+                "could not open a temporary directory ({}): {err}",
+                dir.display()
+            ),
         }
     }
 }
 
-/// Test edilen `headshell` ikilisi için komut — Windows'ta **konsolsuz** (D-070).
+/// The command for the `headshell` binary under test — **without a console**
+/// on Windows (D-070).
 ///
-/// Birkaç test "terminal yoksa ne olur" sorusunu soruyor: parola istemi
-/// `HEADSHELL_PASSWORD`'u önermeli, `--tui` açılmayı reddetmeli. crossterm
-/// terminali standart girişten değil doğrudan açıyor — Windows'ta konsol
-/// arabelleğini (`CONIN$`), Unix'te `/dev/tty`'yi — ve standart giriş boru
-/// olsa da çocuk süreç ebeveyninin terminaline ulaşıyor. GitHub'ın Windows
-/// koşucusunda süreçlerin bir konsolu var: istem hiç gelmeyecek bir tuşu
-/// **sonsuza kadar** bekledi, CI'ın ilk Windows koşumu bir saati aşkın bu
-/// yüzden takıldı. `DETACHED_PROCESS` çocuğu konsolsuz başlatıyor; çıktı
-/// boruları etkilenmiyor. Unix'teki karşılığı: [`child_is_terminalless`].
+/// A few tests ask "what happens without a terminal": the password prompt
+/// must suggest `HEADSHELL_PASSWORD`, `--tui` must refuse to open. crossterm
+/// opens the terminal directly, not through standard input — the console
+/// buffer (`CONIN$`) on Windows, `/dev/tty` on Unix — so even with standard
+/// input a pipe, the child process reaches its parent's terminal. On GitHub's
+/// Windows runner the processes have a console: the prompt waited **forever**
+/// for a key that would never come, and CI's first Windows run hung for over
+/// an hour because of it. `DETACHED_PROCESS` starts the child without a
+/// console; the output pipes are not affected. The Unix counterpart:
+/// [`child_is_terminalless`].
 fn cli_command() -> Command {
     #[cfg_attr(not(windows), allow(unused_mut))]
     let mut command = Command::new(env!("CARGO_BIN_EXE_headshell"));
@@ -114,16 +121,18 @@ fn cli_command() -> Command {
     command
 }
 
-/// Çocuk süreç bir terminale ulaşamıyor mu — terminalsiz testlerin ön koşulu.
+/// Can the child process not reach a terminal — the precondition of the
+/// terminal-less tests.
 ///
-/// Windows'ta her zaman evet: [`cli_command`] konsoldan ayrık başlatıyor.
-/// Unix'te çocuk, test sürecinin denetleyici terminalini miras alıyor;
-/// terminalden `cargo test` koşan bir geliştiricide istem gerçekten açılır
-/// ve bir tuş bekler (sahte terminalle ölçüldü, D-070 eki). Çocuğu
-/// terminalden koparmanın güvenli bir std yolu yok: `CommandExt::setsid`
-/// kararsız (`process_setsid`), `pre_exec` `unsafe` ister ve workspace onu
-/// yasaklıyor. Ön koşul sağlanamazsa test **atlanıyor** ve sebebini söylüyor;
-/// CI'da denetleyici terminal yok, test orada gerçekten koşuyor.
+/// Always yes on Windows: [`cli_command`] starts it detached from the
+/// console. On Unix the child inherits the test process's controlling
+/// terminal; for a developer running `cargo test` from a terminal the prompt
+/// really opens and waits for a key (measured with a pseudo-terminal, D-070
+/// addendum). There is no safe std way to detach the child from the
+/// terminal: `CommandExt::setsid` is unstable (`process_setsid`), `pre_exec`
+/// needs `unsafe` and the workspace forbids it. If the precondition cannot be
+/// met the test **is skipped** and says why; CI has no controlling terminal,
+/// and the test really runs there.
 fn child_is_terminalless(test: &str) -> bool {
     let reachable = cfg!(unix)
         && std::fs::OpenOptions::new()
@@ -133,19 +142,20 @@ fn child_is_terminalless(test: &str) -> bool {
             .is_ok();
     if reachable {
         eprintln!(
-            "{test}: denetleyici terminal var, çocuk süreç ona ulaşır — atlanıyor \
-             (terminalsiz bir koşum, örneğin CI, bunu sınıyor)"
+            "{test}: there is a controlling terminal and the child process reaches it — skipped \
+             (a terminal-less run, CI for example, tests this)"
         );
     }
     !reachable
 }
 
-/// `headshell` ikilisini çalıştırır; `(stdout, stderr, başarılı_mı)`.
+/// Runs the `headshell` binary; `(stdout, stderr, succeeded)`.
 fn run(data_dir: &Path, args: &[&str]) -> (String, String, bool) {
     run_with_music(data_dir, None, args)
 }
 
-/// Parolayı ortamdan vererek çalıştırır (§1.3: parola argüman olmaz).
+/// Runs it with the password given through the environment (§1.3: the
+/// password is never an argument).
 fn run_with_password(data_dir: &Path, password: &str, args: &[&str]) -> (String, String, bool) {
     let mut command = cli_command();
     command
@@ -153,8 +163,8 @@ fn run_with_password(data_dir: &Path, password: &str, args: &[&str]) -> (String,
         .arg(data_dir)
         .args(args)
         .env("HEADSHELL_PASSWORD", password)
-        .env("HEADSHELL_MUSIC_DIRS", "/olmayan/dizin/headshell-test");
-    let output = command.output().expect("headshell ikilisi çalışmalı");
+        .env("HEADSHELL_MUSIC_DIRS", "/nonexistent/dir/headshell-test");
+    let output = command.output().expect("the headshell binary must run");
     (
         String::from_utf8_lossy(&output.stdout).into_owned(),
         String::from_utf8_lossy(&output.stderr).into_owned(),
@@ -162,7 +172,7 @@ fn run_with_password(data_dir: &Path, password: &str, args: &[&str]) -> (String,
     )
 }
 
-/// `HEADSHELL_MUSIC_DIRS` ayarlayarak çalıştırır (yerel sağlayıcı testleri için).
+/// Runs it with `HEADSHELL_MUSIC_DIRS` set (for the local provider tests).
 fn run_with_music(data_dir: &Path, music: Option<&Path>, args: &[&str]) -> (String, String, bool) {
     let mut command = cli_command();
     command.arg("--data-dir").arg(data_dir).args(args);
@@ -171,11 +181,11 @@ fn run_with_music(data_dir: &Path, music: Option<&Path>, args: &[&str]) -> (Stri
             command.env("HEADSHELL_MUSIC_DIRS", dir);
         }
         None => {
-            // Geliştiricinin kendi müzik dizini testlere sızmasın.
-            command.env("HEADSHELL_MUSIC_DIRS", "/olmayan/dizin/headshell-test");
+            // The developer's own music directory must not leak into the tests.
+            command.env("HEADSHELL_MUSIC_DIRS", "/nonexistent/dir/headshell-test");
         }
     }
-    let output = command.output().expect("headshell ikilisi çalışmalı");
+    let output = command.output().expect("the headshell binary must run");
     (
         String::from_utf8_lossy(&output.stdout).into_owned(),
         String::from_utf8_lossy(&output.stderr).into_owned(),
@@ -187,13 +197,14 @@ fn audio_fixtures() -> PathBuf {
     PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/audio"))
 }
 
-/// Değişken alanları sabitler, böylece snapshot yalnızca anlamlı farkta kırılır.
+/// Pins the variable fields, so the snapshot only breaks on a meaningful
+/// difference.
 fn normalize(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(map) => {
             for (key, child) in map.iter_mut() {
                 if VOLATILE_KEYS.contains(&key.as_str()) {
-                    *child = serde_json::Value::String("<değişken>".to_owned());
+                    *child = serde_json::Value::String("<variable>".to_owned());
                 } else {
                     normalize(child);
                 }
@@ -206,7 +217,7 @@ fn normalize(value: &mut serde_json::Value) {
 
 fn assert_snapshot(name: &str, stdout: &str) {
     let mut value: serde_json::Value = serde_json::from_str(stdout)
-        .unwrap_or_else(|err| panic!("{name}: çıktı geçerli JSON olmalı ({err}):\n{stdout}"));
+        .unwrap_or_else(|err| panic!("{name}: the output must be valid JSON ({err}):\n{stdout}"));
     normalize(&mut value);
     let actual = format!("{}\n", serde_json::to_string_pretty(&value).unwrap());
 
@@ -214,59 +225,60 @@ fn assert_snapshot(name: &str, stdout: &str) {
         .join(format!("{name}.json"));
 
     if std::env::var("UPDATE_SNAPSHOTS").is_ok() {
-        std::fs::write(&path, &actual).expect("snapshot yazılmalı");
+        std::fs::write(&path, &actual).expect("the snapshot must be written");
         return;
     }
 
     let expected = std::fs::read_to_string(&path).unwrap_or_else(|err| {
         panic!(
-            "{}: snapshot yok ({err}). UPDATE_SNAPSHOTS=1 ile oluştur.",
+            "{}: no snapshot ({err}). Create it with UPDATE_SNAPSHOTS=1.",
             path.display()
         )
     });
     assert_eq!(
         actual, expected,
-        "\n{name} snapshot'ı değişti. Kasıtlıysa: UPDATE_SNAPSHOTS=1 cargo test -p headshell-cli\n"
+        "\nthe {name} snapshot changed. If this is intended: UPDATE_SNAPSHOTS=1 cargo test -p headshell-cli\n"
     );
 }
 
-/// Bütün komutlar tek bir veri dizini üzerinde sırayla koşar; sıra önemli
-/// (önce içe aktar, sonra istatistik).
+/// All the commands run in order on a single data directory; the order
+/// matters (import first, then statistics).
 #[test]
 fn json_output_is_stable_across_subcommands() {
     let dir = temp_dir("json");
     let zip = fixtures().join("spotify_extended_mini.zip");
 
     let (stdout, stderr, ok) = run(&dir, &["--json", "import", zip.to_str().unwrap()]);
-    assert!(ok, "import başarısız: {stderr}");
+    assert!(ok, "import failed: {stderr}");
     assert_snapshot("import", &stdout);
 
     let (stdout, stderr, ok) = run(&dir, &["--json", "stats", "--top", "3"]);
-    assert!(ok, "stats başarısız: {stderr}");
+    assert!(ok, "stats failed: {stderr}");
     assert_snapshot("stats", &stdout);
 
     let (stdout, stderr, ok) = run(&dir, &["--json", "stats", "--year", "2024", "--top", "2"]);
-    assert!(ok, "stats --year başarısız: {stderr}");
+    assert!(ok, "stats --year failed: {stderr}");
     assert_snapshot("stats_2024", &stdout);
 
     let (stdout, stderr, ok) = run(&dir, &["--json", "resolve", "Radiohead - Creep"]);
-    assert!(ok, "resolve başarısız: {stderr}");
+    assert!(ok, "resolve failed: {stderr}");
     assert_snapshot("resolve", &stdout);
 
     let (stdout, stderr, ok) = run(&dir, &["--json", "library", "search", "radio"]);
-    assert!(ok, "search başarısız: {stderr}");
+    assert!(ok, "search failed: {stderr}");
     assert_snapshot("search", &stdout);
 
     let (stdout, stderr, ok) = run(&dir, &["--json", "sleeve", "--year", "2024"]);
-    assert!(ok, "sleeve başarısız: {stderr}");
+    assert!(ok, "sleeve failed: {stderr}");
     assert_snapshot("sleeve_2024", &stdout);
 
     let (stdout, stderr, ok) = run(&dir, &["--json", "diag"]);
-    assert!(ok, "diag başarısız: {stderr}");
+    assert!(ok, "diag failed: {stderr}");
     assert_snapshot("diag", &stdout);
 }
 
-/// Faz 0.5'in bitti ölçütü: `headshell sleeve --out kart.png` gerçek bir PNG üretmeli.
+/// Phase 0.5's done criterion: `headshell sleeve --out card.png` must
+/// produce a real PNG.
 #[test]
 fn sleeve_writes_a_real_png_and_svg() {
     let dir = temp_dir("sleeve");
@@ -274,14 +286,14 @@ fn sleeve_writes_a_real_png_and_svg() {
     let (_, stderr, ok) = run(&dir, &["import", zip.to_str().unwrap()]);
     assert!(ok, "{stderr}");
 
-    let png = dir.join("kart.png");
+    let png = dir.join("card.png");
     let (stdout, stderr, ok) = run(&dir, &["sleeve", "--out", png.to_str().unwrap()]);
-    assert!(ok, "sleeve --out png başarısız: {stderr}");
-    assert!(stdout.contains("yazıldı"), "{stdout}");
-    let bytes = std::fs::read(&png).expect("png dosyası yazılmalı");
-    assert_eq!(&bytes[0..8], b"\x89PNG\r\n\x1a\n", "gerçek PNG olmalı");
+    assert!(ok, "sleeve --out png failed: {stderr}");
+    assert!(stdout.contains("written"), "{stdout}");
+    let bytes = std::fs::read(&png).expect("the png file must be written");
+    assert_eq!(&bytes[0..8], b"\x89PNG\r\n\x1a\n", "it must be a real PNG");
 
-    let svg = dir.join("kart.svg");
+    let svg = dir.join("card.svg");
     let (_, stderr, ok) = run(
         &dir,
         &[
@@ -292,12 +304,13 @@ fn sleeve_writes_a_real_png_and_svg() {
             svg.to_str().unwrap(),
         ],
     );
-    assert!(ok, "sleeve --out svg başarısız: {stderr}");
-    let text = std::fs::read_to_string(&svg).expect("svg dosyası yazılmalı");
-    assert!(text.contains("height=\"1920\""), "story ölçüsü: {text}");
+    assert!(ok, "sleeve --out svg failed: {stderr}");
+    let text = std::fs::read_to_string(&svg).expect("the svg file must be written");
+    assert!(text.contains("height=\"1920\""), "the story size: {text}");
 }
 
-/// Tanınmayan uzantı sessizce yanlış biçim yazmamalı; aşamayı söyleyerek düşmeli.
+/// An unrecognised extension must not silently write the wrong format; it
+/// must fail, saying the stage.
 #[test]
 fn sleeve_rejects_an_unknown_extension() {
     let dir = temp_dir("sleeveext");
@@ -305,57 +318,60 @@ fn sleeve_rejects_an_unknown_extension() {
     let (_, stderr, ok) = run(&dir, &["import", zip.to_str().unwrap()]);
     assert!(ok, "{stderr}");
 
-    let bad = dir.join("kart.gif");
+    let bad = dir.join("card.gif");
     let (_, stderr, ok) = run(&dir, &["sleeve", "--out", bad.to_str().unwrap()]);
-    assert!(!ok, "tanınmayan uzantı başarısız olmalı");
-    assert!(stderr.contains("ADIM: SLEEVE_RENDER"), "{stderr}");
-    assert!(!bad.exists(), "hatalı biçimde dosya yazılmamalı");
+    assert!(!ok, "an unrecognised extension must fail");
+    assert!(stderr.contains("STEP: SLEEVE_RENDER"), "{stderr}");
+    assert!(!bad.exists(), "no file must be written in the wrong format");
 }
 
-/// Faz 1'in bitti ölçütü: yerel dosya çalınıyor ve bir `listen` kaydı üretiyor.
+/// Phase 1's done criterion: a local file plays and produces a `listen`
+/// record.
 ///
-/// Ses aygıtı yoksa test kendini atlar — susturmak değil, koşulun
-/// sağlanmadığını söyleyip geçmek.
+/// Without an audio device the test skips itself — not silencing it, but
+/// saying the condition is not met and moving on.
 #[test]
 fn playing_a_local_file_records_a_listen_in_the_same_table_as_imports() {
     let dir = temp_dir("play");
     let music = audio_fixtures();
 
-    // Önce indeks: tarama ne bulduğunu saymalı.
+    // The index first: the scan must count what it found.
     let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["provider", "scan"]);
-    assert!(ok, "tarama başarısız: {stderr}");
-    assert!(stdout.contains("indekslenen"), "{stdout}");
+    assert!(ok, "the scan failed: {stderr}");
+    assert!(stdout.contains("indexed"), "{stdout}");
 
-    // Sonra çal.
+    // Then play.
     let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["play", "sine"]);
     if !ok {
-        // Ses aygıtı olmayan ortamda çalma kurulamaz; bunu ayırt et.
+        // Without an audio device playback cannot be set up; tell that apart.
         if stderr.contains("PLAYBACK_OUTPUT") {
-            eprintln!("ses çıkışı yok — çalma testi atlanıyor:\n{stderr}");
+            eprintln!("no audio output — skipping the playback test:\n{stderr}");
             return;
         }
-        panic!("çalma başarısız: {stderr}");
+        panic!("playback failed: {stderr}");
     }
-    assert!(stdout.contains("kuyruğa alındı"), "{stdout}");
-    assert!(stdout.contains("kaydedilen dinleme: 1"), "{stdout}");
+    assert!(stdout.contains("queued"), "{stdout}");
+    assert!(stdout.contains("listens recorded: 1"), "{stdout}");
 
-    // §1.6'nın asıl iddiası: scrobble import verisiyle aynı tabloda.
+    // §1.6's real claim: the scrobble is in the same table as the imported
+    // data.
     let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["stats"]);
     assert!(ok, "{stderr}");
     assert!(
         stdout.contains("Test Artist"),
-        "çalınan parça istatistikte görünmeli:\n{stdout}"
+        "the played track must show up in the statistics:\n{stdout}"
     );
-    assert!(stdout.contains("1 çalma"), "{stdout}");
+    assert!(stdout.contains("1 play"), "{stdout}");
 }
 
-/// Kuyruktaki her parça çalınır, her biri bir dinleme üretir ve
-/// `stats` **aynı sayıyı** gösterir (D-024 gapless + §1.6).
+/// Every track in the queue plays, each one produces a listen, and `stats`
+/// shows **the same number** (D-024 gapless + §1.6).
 ///
-/// Buradaki asıl tuzak tutarlılık: etiketsiz fixture'ların süresi katalogda
-/// bilinmiyordu, `PlayRule` "parçanın yarısı" kolunu kullanamayıp 30 sn
-/// eşiğine düşüyordu. Sonuç, CLI'nin "4 dinleme kaydedildi" deyip
-/// istatistiğin 2 göstermesiydi. Süre artık kaptan okunuyor.
+/// The real trap here is consistency: the duration of the untagged fixtures
+/// was unknown in the catalog, so `PlayRule` could not use its "half the
+/// track" arm and fell back to the 30 s threshold. The result was the CLI
+/// saying "4 listens recorded" while the statistics showed 2. The duration is
+/// now read from the container.
 #[test]
 fn every_queued_track_produces_a_listen_that_stats_also_counts() {
     let dir = temp_dir("gapless");
@@ -364,21 +380,21 @@ fn every_queued_track_produces_a_listen_that_stats_also_counts() {
     let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["provider", "scan"]);
     assert!(ok, "{stderr}");
 
-    // "Artist" dört fixture'ın hepsiyle eşleşiyor: ikisinde etiket var
-    // (`Test Artist`), ikisi etiketsiz ve adından türüyor (`Other Artist`,
-    // üst dizinden `Dir Artist`).
+    // "Artist" matches all four fixtures: two have tags (`Test Artist`),
+    // two are untagged and derived from their names (`Other Artist`, and
+    // `Dir Artist` from the parent directory).
     let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["play", "Artist", "--all"]);
     if !ok {
         if stderr.contains("PLAYBACK_OUTPUT") {
-            eprintln!("ses çıkışı yok — gapless testi atlanıyor:\n{stderr}");
+            eprintln!("no audio output — skipping the gapless test:\n{stderr}");
             return;
         }
-        panic!("çalma başarısız: {stderr}");
+        panic!("playback failed: {stderr}");
     }
-    assert!(stdout.contains("4 parça kuyruğa alındı"), "{stdout}");
+    assert!(stdout.contains("4 tracks queued"), "{stdout}");
     assert!(
-        stdout.contains("kaydedilen dinleme: 4"),
-        "kuyruktaki her parça bir dinleme üretmeli:\n{stdout}"
+        stdout.contains("listens recorded: 4"),
+        "every track in the queue must produce a listen:\n{stdout}"
     );
 
     let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["stats", "--json"]);
@@ -388,35 +404,40 @@ fn every_queued_track_produces_a_listen_that_stats_also_counts() {
     assert_eq!(
         report["plays"],
         serde_json::json!(4),
-        "CLI'nin saydığı ile istatistiğin saydığı aynı olmalı: {report}"
+        "what the CLI counted and what the statistics counted must be the same: {report}"
     );
     assert_eq!(
         report["skipped_short"],
         serde_json::json!(0),
-        "baştan sona çalınan parça 'kısa' sayılmamalı: {report}"
+        "a track played from start to end must not count as 'short': {report}"
     );
 }
 
-/// `--if-stale` değişmemiş dizini taramaz, değişmişi tarar (D-025).
+/// `--if-stale` does not scan an unchanged directory, and scans a changed
+/// one (D-025).
 ///
-/// Bağımlılıksız yol: dizin damgalarına bakılıyor, `notify` yok.
+/// The dependency-free route: directory stamps are looked at, no `notify`.
 #[test]
 fn scanning_if_stale_skips_an_unchanged_library_and_notices_a_new_file() {
-    let dir = temp_dir("bayat");
-    let music = temp_dir("bayat-muzik");
+    let dir = temp_dir("stale");
+    let music = temp_dir("stale-music");
     std::fs::copy(
         audio_fixtures().join("tagged.flac"),
         music.join("tagged.flac"),
     )
-    .expect("fixture kopyalanmalı");
+    .expect("the fixture must be copied");
 
-    // Hiç taranmamışken bayat sayılmalı: "bilmiyorum" atlamak için yeterli değil.
+    // Never scanned counts as stale: "I don't know" is not enough to skip.
     let (stdout, stderr, ok) =
         run_with_music(&dir, Some(&music), &["provider", "scan", "--if-stale"]);
     assert!(ok, "{stderr}");
-    assert!(stdout.contains("tarandı"), "ilk kez taranmalı:\n{stdout}");
+    assert!(
+        stdout.contains("scanned"),
+        "it must be scanned the first time:\n{stdout}"
+    );
 
-    // Hemen ardından: dizin değişmedi, tarama atlanmalı — ve bunu söylemeli.
+    // Right after: the directory did not change, the scan must be skipped —
+    // and it must say so.
     let (stdout, stderr, ok) = run_with_music(
         &dir,
         Some(&music),
@@ -427,22 +448,22 @@ fn scanning_if_stale_skips_an_unchanged_library_and_notices_a_new_file() {
     assert_eq!(
         value["scanned"],
         serde_json::json!(false),
-        "değişmemiş kütüphane yeniden taranmamalı: {value}"
+        "an unchanged library must not be rescanned: {value}"
     );
     assert!(
         value["reason"]
             .as_str()
-            .is_some_and(|reason| reason.contains("değişmemiş")),
-        "atlama sebebi söylenmeli: {value}"
+            .is_some_and(|reason| reason.contains("unchanged")),
+        "the reason for skipping must be given: {value}"
     );
 
-    // Yeni dosya: dizin damgası değişir, tarama koşmalı.
+    // A new file: the directory stamp changes, the scan must run.
     std::thread::sleep(std::time::Duration::from_millis(1100));
     std::fs::copy(
         audio_fixtures().join("Test Artist - Mp3 Track.mp3"),
-        music.join("yeni.mp3"),
+        music.join("new.mp3"),
     )
-    .expect("yeni dosya");
+    .expect("new file");
 
     let (stdout, stderr, ok) = run_with_music(
         &dir,
@@ -454,103 +475,106 @@ fn scanning_if_stale_skips_an_unchanged_library_and_notices_a_new_file() {
     assert_eq!(
         value["scanned"],
         serde_json::json!(true),
-        "yeni dosya taramayı tetiklemeli: {value}"
+        "a new file must trigger a scan: {value}"
     );
     assert_eq!(
         value["write"]["inserted"],
         serde_json::json!(1),
-        "yeni dosya kataloğa girmeli: {}",
+        "the new file must go into the catalog: {}",
         value["write"]
     );
 }
 
-/// İndeks kalıcı: `play` tarama yapmaz, bir kez taranmış katalogdan okur.
+/// The index is persistent: `play` does not scan, it reads from the catalog
+/// scanned once.
 #[test]
 fn the_catalog_persists_so_play_does_not_rescan() {
-    let dir = temp_dir("katalog");
+    let dir = temp_dir("catalog");
     let music = audio_fixtures();
 
-    // Bir kez tara.
+    // Scan once.
     let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["provider", "scan", "--json"]);
     assert!(ok, "{stderr}");
     let first: serde_json::Value = serde_json::from_str(&stdout).expect("JSON");
     assert!(
         first["write"]["inserted"].as_u64().unwrap_or(0) >= 3,
-        "ilk tarama katalog satırı yazmalı: {}",
+        "the first scan must write catalog rows: {}",
         first["write"]
     );
 
-    // İkinci tarama: damgalar değişmedi, hiçbir dosya yeniden okunmamalı.
+    // The second scan: the stamps did not change, no file must be read again.
     let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["provider", "scan", "--json"]);
     assert!(ok, "{stderr}");
     let second: serde_json::Value = serde_json::from_str(&stdout).expect("JSON");
     assert_eq!(
         second["write"]["inserted"],
         serde_json::json!(0),
-        "değişmemiş dosyalar yeniden yazılmamalı"
+        "unchanged files must not be rewritten"
     );
     assert!(
         second["summary"]["unchanged"].as_u64().unwrap_or(0) >= 3,
-        "damga eşleşmesi sayılmalı: {}",
+        "stamp matches must be counted: {}",
         second["summary"]
     );
 
-    // Asıl sınav: müzik dizini **verilmeden** arama çalışmalı.
-    // Katalog diskte olduğu için `play` taramaya ihtiyaç duymuyor.
+    // The real test: search must work **without** a music directory being
+    // given. Since the catalog is on disk, `play` does not need a scan.
     let (stdout, stderr, ok) = run(&dir, &["play", "sine", "--dry-run", "--json"]);
-    assert!(ok, "katalog kalıcı olmalıydı: {stderr}");
+    assert!(ok, "the catalog should have been persistent: {stderr}");
     let value: serde_json::Value = serde_json::from_str(&stdout).expect("JSON");
     assert_eq!(
         value["queued"].as_array().map(Vec::len),
         Some(1),
-        "taranmış katalogdan bulunmalı"
+        "it must be found in the scanned catalog"
     );
 }
 
-/// Diskten silinen dosya katalogdan düşer ama **geçmişi** silinmez.
+/// A file deleted from disk drops out of the catalog, but its **history** is
+/// not deleted.
 #[test]
 fn a_deleted_file_leaves_the_catalog_but_keeps_its_history() {
-    let dir = temp_dir("silinen");
-    let music = temp_dir("silinen-muzik");
+    let dir = temp_dir("deleted");
+    let music = temp_dir("deleted-music");
     std::fs::copy(
         audio_fixtures().join("tagged.flac"),
         music.join("tagged.flac"),
     )
-    .expect("fixture kopyalanmalı");
+    .expect("the fixture must be copied");
 
     let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["provider", "scan"]);
     assert!(ok, "{stderr}");
 
-    // Çal ki geçmişi olsun.
+    // Play it so it has a history.
     let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["play", "sine"]);
     if !ok && stderr.contains("PLAYBACK_OUTPUT") {
-        eprintln!("ses çıkışı yok — test atlanıyor");
+        eprintln!("no audio output — skipping the test");
         return;
     }
     assert!(ok, "{stderr}");
 
-    // Dosyayı sil ve yeniden tara.
-    std::fs::remove_file(music.join("tagged.flac")).expect("silinmeli");
+    // Delete the file and scan again.
+    std::fs::remove_file(music.join("tagged.flac")).expect("must be deleted");
     let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["provider", "scan", "--json"]);
     assert!(ok, "{stderr}");
     let value: serde_json::Value = serde_json::from_str(&stdout).expect("JSON");
     assert_eq!(
         value["write"]["removed"],
         serde_json::json!(1),
-        "silinen dosya katalogdan düşmeli"
+        "the deleted file must drop out of the catalog"
     );
 
-    // Katalogda yok...
+    // It is not in the catalog...
     let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["play", "sine", "--dry-run"]);
-    assert!(!ok, "silinen dosya çalınabilir görünmemeli");
+    assert!(!ok, "a deleted file must not look playable");
     assert!(stderr.contains("PLAYBACK_RESOLVE"), "{stderr}");
 
-    // ...ama geçmiş duruyor. Diskten sildiğin dosya geçmişini silmez.
+    // ...but the history remains. A file you delete from disk does not delete
+    // its history.
     let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["stats"]);
     assert!(ok, "{stderr}");
     assert!(
         stdout.contains("Test Artist"),
-        "dinleme geçmişi korunmalı:\n{stdout}"
+        "the listening history must be kept:\n{stdout}"
     );
 }
 
@@ -559,7 +583,8 @@ fn dry_run_queues_without_playing() {
     let dir = temp_dir("dryrun");
     let music = audio_fixtures();
 
-    // Katalog kalıcı; `play` taramıyor, önce bir kez taranmalı.
+    // The catalog is persistent; `play` does not scan, it must be scanned once
+    // first.
     let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["provider", "scan"]);
     assert!(ok, "{stderr}");
 
@@ -573,7 +598,7 @@ fn dry_run_queues_without_playing() {
     assert_eq!(
         value["queued"].as_array().map(Vec::len),
         Some(1),
-        "tek parça kuyruğa alınmalı"
+        "a single track must be queued"
     );
 }
 
@@ -585,13 +610,17 @@ fn provider_commands_report_capabilities_and_scan_counts() {
     let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["provider", "list"]);
     assert!(ok, "{stderr}");
     assert!(stdout.contains("local"), "{stdout}");
-    assert!(stdout.contains("STREAM"), "yetenekler görünmeli: {stdout}");
+    assert!(
+        stdout.contains("STREAM"),
+        "the capabilities must be visible: {stdout}"
+    );
     assert!(
         !stdout.contains("CONTROL"),
-        "yerel sağlayıcı kumanda edilemez: {stdout}"
+        "the local provider cannot be remote-controlled: {stdout}"
     );
 
-    // Tarama K9'a uygun rapor vermeli: bozuk fixture sayılmalı, yutulmamalı.
+    // The scan must give a K9-style report: the corrupt fixture must be counted,
+    // not swallowed.
     let (stdout, stderr, ok) = run_with_music(&dir, Some(&music), &["provider", "scan", "--json"]);
     assert!(ok, "{stderr}");
     let value: serde_json::Value = serde_json::from_str(&stdout).expect("JSON");
@@ -600,24 +629,26 @@ fn provider_commands_report_capabilities_and_scan_counts() {
     assert_eq!(
         summary["failed"],
         serde_json::json!(1),
-        "corrupt.flac sayılmalı: {summary}"
+        "corrupt.flac must be counted: {summary}"
     );
     assert!(summary["indexed"].as_u64().unwrap_or(0) >= 3, "{summary}");
 }
 
-/// §1.3'ün CLI yüzeyi: uzak sunucu kaydediliyor, listeleniyor, siliniyor —
-/// ve kimlik bilgisi hiçbir aşamada çıktıya ya da diske düz düşmüyor (D-021).
+/// §1.3's CLI surface: a remote server is registered, listed, deleted —
+/// and at no stage do the credentials end up in plain text in the output or
+/// on disk (D-021).
 ///
-/// Ağa çıkmıyor (`--no-verify`); taşıma katmanı `headshell-core`'un
-/// `remote_http.rs` entegrasyon testinde gerçek soketle sınanıyor (D-022).
+/// It does not go online (`--no-verify`); the transport layer is tested with
+/// a real socket in `headshell-core`'s `remote_http.rs` integration test
+/// (D-022).
 #[test]
 fn remote_servers_are_registered_listed_and_removed_without_leaking_credentials() {
-    let dir = temp_dir("sunucu");
+    let dir = temp_dir("server");
 
-    // Boşken kullanıcıya ne yapacağını söylemeli.
+    // When empty it must tell the user what to do.
     let (stdout, stderr, ok) = run(&dir, &["provider", "servers"]);
     assert!(ok, "{stderr}");
-    assert!(stdout.contains("kayıtlı uzak sunucu yok"), "{stdout}");
+    assert!(stdout.contains("no registered remote servers"), "{stdout}");
     assert!(stdout.contains("provider add"), "{stdout}");
 
     let add_args = [
@@ -625,112 +656,122 @@ fn remote_servers_are_registered_listed_and_removed_without_leaking_credentials(
         "add",
         "subsonic",
         "--url",
-        "https://muzik.ev",
+        "https://music.home",
         "--user",
         "enai",
         "--name",
-        "ev",
+        "home",
         "--no-verify",
     ];
-    let (stdout, stderr, ok) = run_with_password(&dir, "susam", &add_args);
-    assert!(ok, "kayıt başarısız: {stderr}");
-    assert!(stdout.contains("kaydedildi: ev"), "{stdout}");
+    let (stdout, stderr, ok) = run_with_password(&dir, "sesame", &add_args);
+    assert!(ok, "registration failed: {stderr}");
+    assert!(stdout.contains("registered: home"), "{stdout}");
     assert!(
-        !stdout.contains("susam"),
-        "parola çıktıya düşmemeli:\n{stdout}"
+        !stdout.contains("sesame"),
+        "the password must not end up in the output:\n{stdout}"
     );
 
-    // Diske ne yazıldı? Parola değil, türetilmiş token (D-021).
+    // What was written to disk? Not the password, but the derived token
+    // (D-021).
     let servers = dir.join("servers.json");
-    let text = std::fs::read_to_string(&servers).expect("servers.json yazılmalı");
-    assert!(!text.contains("susam"), "parola diske yazılmamalı:\n{text}");
+    let text = std::fs::read_to_string(&servers).expect("servers.json must be written");
+    assert!(
+        !text.contains("sesame"),
+        "the password must not be written to disk:\n{text}"
+    );
     assert!(text.contains("subsonic_token"), "{text}");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let mode = std::fs::metadata(&servers)
-            .expect("izinler okunmalı")
+            .expect("the permissions must be readable")
             .permissions()
             .mode();
-        assert_eq!(mode & 0o777, 0o600, "kimlik dosyası herkese açık olmamalı");
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "the credentials file must not be open to everyone"
+        );
     }
 
-    // `--json` sözleşmesi: özet token taşımıyor. `--json` çıktısı boru
-    // hattına, log'a ya da hata raporuna girebilir.
+    // The `--json` contract: the summary carries no token. `--json` output
+    // can end up in a pipeline, a log or an error report.
     let stored: serde_json::Value =
-        serde_json::from_str(&text).expect("servers.json geçerli JSON olmalı");
+        serde_json::from_str(&text).expect("servers.json must be valid JSON");
     let token = stored["servers"][0]["auth"]["token"]
         .as_str()
-        .expect("token saklanmalı")
+        .expect("the token must be stored")
         .to_owned();
 
     let (stdout, stderr, ok) = run(&dir, &["--json", "provider", "servers"]);
     assert!(ok, "{stderr}");
     assert!(
         !stdout.contains(&token),
-        "JSON çıktısı token taşımamalı:\n{stdout}"
+        "the JSON output must not carry the token:\n{stdout}"
     );
     assert_snapshot("provider_servers", &stdout);
 
-    // Kayıtlı sunucu sağlayıcı listesine giriyor.
+    // A registered server goes into the provider list.
     let (stdout, stderr, ok) = run(&dir, &["provider", "list"]);
     assert!(ok, "{stderr}");
     assert!(
-        stdout.contains("ev"),
-        "uzak sağlayıcı listelenmeli:\n{stdout}"
+        stdout.contains("home"),
+        "the remote provider must be listed:\n{stdout}"
     );
     assert!(
         stdout.contains("local"),
-        "yerel sağlayıcı kalmalı:\n{stdout}"
+        "the local provider must stay:\n{stdout}"
     );
 
-    // Aynı adla ikinci kayıt sessizce üzerine yazmamalı.
-    let (_, stderr, ok) = run_with_password(&dir, "susam", &add_args);
-    assert!(!ok, "aynı ad ikinci kez kabul edilmemeli");
-    assert!(stderr.contains("zaten kayıtlı"), "{stderr}");
+    // A second registration with the same name must not silently overwrite.
+    let (_, stderr, ok) = run_with_password(&dir, "sesame", &add_args);
+    assert!(!ok, "the same name must not be accepted twice");
+    assert!(stderr.contains("already registered"), "{stderr}");
 
-    let (stdout, stderr, ok) = run(&dir, &["provider", "remove", "ev"]);
+    let (stdout, stderr, ok) = run(&dir, &["provider", "remove", "home"]);
     assert!(ok, "{stderr}");
-    assert!(stdout.contains("silindi: ev"), "{stdout}");
+    assert!(stdout.contains("removed: home"), "{stdout}");
 
-    // Olmayanı silmek "sildim" dememeli: yazım hatasını gizler.
-    let (_, stderr, ok) = run(&dir, &["provider", "remove", "ev"]);
-    assert!(!ok, "kayıtlı olmayan ad hata olmalı");
-    assert!(stderr.contains("ADIM: CONFIG_LOAD"), "{stderr}");
+    // Deleting something that does not exist must not say "removed": it would
+    // hide a typo.
+    let (_, stderr, ok) = run(&dir, &["provider", "remove", "home"]);
+    assert!(!ok, "an unregistered name must be an error");
+    assert!(stderr.contains("STEP: CONFIG_LOAD"), "{stderr}");
 }
 
-/// Bilinmeyen sunucu türü sessizce Subsonic varsayılmamalı.
+/// An unknown server type must not silently be taken as Subsonic.
 #[test]
 fn an_unknown_server_kind_is_rejected_not_guessed() {
-    let dir = temp_dir("turhata");
+    let dir = temp_dir("kind-error");
     let (_, stderr, ok) = run_with_password(
         &dir,
-        "susam",
+        "sesame",
         &[
             "provider",
             "add",
             "plex",
             "--url",
-            "https://muzik.ev",
+            "https://music.home",
             "--user",
             "enai",
         ],
     );
-    assert!(!ok, "tanınmayan tür başarısız olmalı");
+    assert!(!ok, "an unrecognised type must fail");
     assert!(
         stderr.contains("subsonic"),
-        "seçenekler söylenmeli:\n{stderr}"
+        "the options must be given:\n{stderr}"
     );
 }
 
-/// Tty yoksa parola sessizce ekrana basılmamalı; ne yapılacağı söylenmeli.
+/// Without a tty the password must not be silently echoed to the screen;
+/// what to do must be said.
 #[test]
 fn without_a_terminal_the_password_prompt_points_at_the_env_var() {
     if !child_is_terminalless("without_a_terminal_the_password_prompt_points_at_the_env_var") {
         return;
     }
-    let dir = temp_dir("parolaistem");
-    // `run` HEADSHELL_PASSWORD ayarlamıyor.
+    let dir = temp_dir("password-prompt");
+    // `run` does not set HEADSHELL_PASSWORD.
     let (_, stderr, ok) = run(
         &dir,
         &[
@@ -738,19 +779,19 @@ fn without_a_terminal_the_password_prompt_points_at_the_env_var() {
             "add",
             "subsonic",
             "--url",
-            "https://muzik.ev",
+            "https://music.home",
             "--user",
             "enai",
         ],
     );
-    assert!(!ok, "parola okunamadan kayıt yapılmamalı");
+    assert!(!ok, "no registration without reading the password");
     assert!(
         stderr.contains("HEADSHELL_PASSWORD"),
-        "kullanıcıya çıkış yolu gösterilmeli:\n{stderr}"
+        "the user must be shown a way out:\n{stderr}"
     );
     assert!(
         !dir.join("servers.json").exists(),
-        "yarım kayıt yazılmamalı"
+        "no half record must be written"
     );
 }
 
@@ -758,32 +799,33 @@ fn without_a_terminal_the_password_prompt_points_at_the_env_var() {
 fn testing_an_unknown_provider_lists_the_known_ones() {
     let dir = temp_dir("providertest");
     let (_, stderr, ok) = run(&dir, &["provider", "test", "spotify"]);
-    assert!(!ok, "olmayan sağlayıcı başarısız olmalı");
+    assert!(!ok, "a missing provider must fail");
     assert!(stderr.contains("PROVIDER_CALL"), "{stderr}");
     assert!(
         stderr.contains("local"),
-        "kullanıcıya kayıtlı sağlayıcılar söylenmeli:\n{stderr}"
+        "the user must be told the registered providers:\n{stderr}"
     );
 }
 
 #[test]
 fn playing_with_no_match_says_what_to_do() {
-    let dir = temp_dir("eslesmeyen");
+    let dir = temp_dir("no-match");
     let music = audio_fixtures();
     let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["play", "nosuchtrackexists"]);
 
-    assert!(!ok, "eşleşme yoksa başarısız olmalı");
+    assert!(!ok, "it must fail when there is no match");
     assert!(stderr.contains("PLAYBACK_RESOLVE"), "{stderr}");
     assert!(
         stderr.contains("provider scan"),
-        "kullanıcıya ne yapacağı söylenmeli:\n{stderr}"
+        "the user must be told what to do:\n{stderr}"
     );
 }
 
-/// TUI gerçek bir terminal ister; olmayan ortamda **aşamayı söyleyerek** düşmeli.
+/// The TUI needs a real terminal; where there is none it must fail **saying
+/// the stage**.
 ///
-/// Sessizce metin kipine düşmek daha kötü olurdu: kullanıcı `--tui` yazdığını
-/// bilir, arayüzün neden açılmadığını da bilmeli.
+/// Silently falling back to text mode would be worse: the user knows they
+/// typed `--tui`, and should know why the interface did not open.
 #[test]
 fn the_tui_refuses_to_start_without_a_terminal() {
     if !child_is_terminalless("the_tui_refuses_to_start_without_a_terminal") {
@@ -795,73 +837,73 @@ fn the_tui_refuses_to_start_without_a_terminal() {
     assert!(ok, "{stderr}");
 
     let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["play", "sine", "--tui"]);
-    assert!(!ok, "terminalsiz TUI başarısız olmalı");
+    assert!(!ok, "a TUI without a terminal must fail");
     assert!(stderr.contains("PLAYBACK_OUTPUT"), "{stderr}");
     assert!(
-        stderr.contains("terminal arayüzü"),
-        "hata neyin başarısız olduğunu söylemeli:\n{stderr}"
+        stderr.contains("terminal interface"),
+        "the error must say what failed:\n{stderr}"
     );
 }
 
 #[test]
 fn human_output_names_the_stage_on_failure() {
-    let dir = temp_dir("hata");
-    let missing = dir.join("olmayan.zip");
+    let dir = temp_dir("error");
+    let missing = dir.join("missing.zip");
     let (_, stderr, ok) = run(&dir, &["import", missing.to_str().unwrap()]);
 
-    assert!(!ok, "olmayan dosya başarısız olmalı");
+    assert!(!ok, "a missing file must fail");
     assert!(
-        stderr.contains("ADIM: IMPORT_READ"),
-        "aşama basılmalı:\n{stderr}"
+        stderr.contains("STEP: IMPORT_READ"),
+        "the stage must be printed:\n{stderr}"
     );
     assert!(
         stderr.contains("headshell diag"),
-        "kullanıcı diag'a yönlendirilmeli:\n{stderr}"
+        "the user must be pointed to diag:\n{stderr}"
     );
 }
 
 #[test]
 fn diag_without_any_run_is_not_an_error() {
-    let dir = temp_dir("bosdiag");
+    let dir = temp_dir("empty-diag");
     let (stdout, _, ok) = run(&dir, &["diag"]);
     assert!(ok);
-    assert!(stdout.contains("henüz"), "{stdout}");
+    assert!(stdout.contains("yet"), "{stdout}");
 }
 
 #[test]
 fn human_stats_output_is_readable() {
-    let dir = temp_dir("insan");
+    let dir = temp_dir("human");
     let zip = fixtures().join("spotify_account_mini.zip");
     let (_, stderr, ok) = run(&dir, &["import", zip.to_str().unwrap()]);
     assert!(ok, "{stderr}");
 
     let (stdout, _, ok) = run(&dir, &["stats"]);
     assert!(ok);
-    assert!(stdout.contains("en çok dinlenen sanatçılar"), "{stdout}");
+    assert!(stdout.contains("top artists"), "{stdout}");
     assert!(stdout.contains("Portishead"), "{stdout}");
 }
 
-/// Eklenti yaşam döngüsü CLI'den görünüyor mu (Faz 2 §2.1).
+/// Is the plugin lifecycle visible from the CLI (Phase 2 §2.1)?
 ///
-/// Kabuğun işi yalnızca göstermek: onay kararı, izin karşılaştırması ve
-/// sürüm denetimi çekirdekte. Buradaki iddia "CLI aynı veriyi alıyor" —
-/// yani GUI de alacak (Altın Kural).
+/// The shell's job is only to show: the consent decision, the permission
+/// comparison and the version check are in the core. The claim here is "the
+/// CLI gets the same data" — that is, the GUI will too (the Golden Rule).
 #[test]
 fn plugin_lifecycle_is_visible_from_the_cli() {
-    let dir = temp_dir("eklenti");
+    let dir = temp_dir("plugin");
     install_echo_plugin(&dir);
 
-    // Kurulu ama onaysız: görünüyor, yüklenmiyor.
+    // Installed but not approved: visible, not loaded.
     let (stdout, stderr, ok) = run(&dir, &["--json", "plugin", "list"]);
-    assert!(ok, "plugin list başarısız: {stderr}");
+    assert!(ok, "plugin list failed: {stderr}");
     assert_snapshot("plugin_list", &stdout);
 
     let (stdout, stderr, ok) = run(&dir, &["plugin", "approve", "echo"]);
-    assert!(ok, "approve başarısız: {stderr}");
-    assert!(stdout.contains("onaylı"), "{stdout}");
+    assert!(ok, "approve failed: {stderr}");
+    assert!(stdout.contains("approved"), "{stdout}");
     assert!(
-        stdout.contains("izinler zorlanıyor") && stdout.contains("sınırın dışındadır"),
-        "onay çıktısı neyin garanti edildiğini **ve neyin edilmediğini** söylemeli \
+        stdout.contains("permissions are enforced") && stdout.contains("outside this boundary"),
+        "the consent output must say what is guaranteed **and what is not** \
          (D-040, D-069):\n{stdout}"
     );
 
@@ -869,76 +911,79 @@ fn plugin_lifecycle_is_visible_from_the_cli() {
     assert!(ok, "{stderr}");
     assert_snapshot("plugin_list_approved", &stdout);
 
-    // Onaylı eklenti sağlayıcı listesine giriyor — süreç açılmadan.
+    // An approved plugin goes into the provider list — without starting a
+    // process.
     let (stdout, stderr, ok) = run(&dir, &["provider", "list"]);
     assert!(ok, "{stderr}");
     assert!(stdout.contains("echo"), "{stdout}");
 
-    // Kapatma ve yeniden açma onay sormuyor.
+    // Disabling and re-enabling do not ask for consent.
     let (stdout, _, ok) = run(&dir, &["plugin", "disable", "echo"]);
     assert!(ok);
-    assert!(stdout.contains("kapalı"), "{stdout}");
+    assert!(stdout.contains("disabled"), "{stdout}");
     let (stdout, _, ok) = run(&dir, &["provider", "list"]);
     assert!(ok);
     assert!(
         !stdout.contains("echo"),
-        "kapalı eklenti yüklenmemeli:\n{stdout}"
+        "a disabled plugin must not be loaded:\n{stdout}"
     );
     let (stdout, _, ok) = run(&dir, &["plugin", "enable", "echo"]);
     assert!(ok);
-    assert!(stdout.contains("onaylı"), "{stdout}");
+    assert!(stdout.contains("approved"), "{stdout}");
 }
 
-/// Sır deposu: değer hiçbir çıktıda görünmüyor (D-042).
+/// The secret store: the value appears in no output (D-042).
 #[test]
 fn secrets_are_listed_by_name_and_never_by_value() {
-    let dir = temp_dir("sir");
+    let dir = temp_dir("secret");
 
     let mut command = cli_command();
     let output = command
         .arg("--data-dir")
         .arg(&dir)
         .args(["secret", "set", "plugin:echo", "token"])
-        .env("HEADSHELL_SECRET", "cok-gizli-deger")
-        .env("HEADSHELL_MUSIC_DIRS", "/olmayan/dizin/headshell-test")
+        .env("HEADSHELL_SECRET", "very-secret-value")
+        .env("HEADSHELL_MUSIC_DIRS", "/nonexistent/dir/headshell-test")
         .output()
-        .expect("headshell ikilisi çalışmalı");
+        .expect("the headshell binary must run");
     assert!(
         output.status.success(),
-        "secret set başarısız: {}",
+        "secret set failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
     let (stdout, stderr, ok) = run(&dir, &["--json", "secret", "list"]);
     assert!(ok, "{stderr}");
     assert!(
-        !stdout.contains("cok-gizli-deger"),
-        "sır değeri çıktıya sızmamalı:\n{stdout}"
+        !stdout.contains("very-secret-value"),
+        "the secret value must not leak into the output:\n{stdout}"
     );
     assert_snapshot("secret_list", &stdout);
 
-    // Tanı raporu da değeri taşımamalı: kopyalanıp paylaşılan metin bu.
+    // The diagnostics report must not carry the value either: it is the text
+    // that gets copied and shared.
     let (stdout, _, ok) = run(&dir, &["diag"]);
     assert!(ok);
-    assert!(!stdout.contains("cok-gizli-deger"), "{stdout}");
+    assert!(!stdout.contains("very-secret-value"), "{stdout}");
 
     let (stdout, _, ok) = run(&dir, &["secret", "remove", "plugin:echo", "token"]);
     assert!(ok);
-    assert!(stdout.contains("silindi"), "{stdout}");
+    assert!(stdout.contains("removed"), "{stdout}");
 }
 
-/// Eklenti **boş bir `PATH` ile** çalışıyor mu (D-069).
+/// Does a plugin work **with an empty `PATH`** (D-069)?
 ///
-/// api 1'in bütün derdi buydu: eklenti `python3`'ü `PATH`'te arıyordu ve
-/// "kime göndersem bir sorun" çıkıyordu. api 2'de motor ikilinin içinde;
-/// ortam boşaltıldığında da eklenti cevap vermeli. Test ikiliyi ortamı
-/// tamamen silerek çalıştırıyor — hiçbir yorumlayıcı, hiçbir araç yok.
+/// This was api 1's whole trouble: the plugin looked for `python3` on `PATH`,
+/// and "whoever I sent it to had a problem". In api 2 the engine is inside
+/// the binary; the plugin must answer even when the environment is emptied.
+/// The test runs the binary with its environment wiped completely — no
+/// interpreter, no tool.
 #[test]
 fn a_plugin_runs_with_nothing_on_the_path() {
-    let dir = temp_dir("bos-path");
+    let dir = temp_dir("empty-path");
     install_echo_plugin(&dir);
     let (_, stderr, ok) = run(&dir, &["plugin", "approve", "echo"]);
-    assert!(ok, "approve başarısız: {stderr}");
+    assert!(ok, "approve failed: {stderr}");
 
     let mut command = cli_command();
     command
@@ -946,22 +991,22 @@ fn a_plugin_runs_with_nothing_on_the_path() {
         .arg(&*dir)
         .args(["--json", "provider", "test", "echo"])
         .env_clear()
-        .env("HEADSHELL_MUSIC_DIRS", "/olmayan/dizin/headshell-test");
-    // Windows'ta tamamen boş bir ortam fazla boş: bazı sistem DLL'leri
-    // (soket yığını gibi) `SystemRoot` olmadan başlamıyor. O bir yorumlayıcı
-    // ya da araç değil, işletim sisteminin kendisi — geri konuyor, `PATH`
-    // konmuyor.
+        .env("HEADSHELL_MUSIC_DIRS", "/nonexistent/dir/headshell-test");
+    // On Windows a completely empty environment is too empty: some system DLLs
+    // (like the socket stack) do not start without `SystemRoot`. That is not an
+    // interpreter or a tool but the operating system itself — it is put back,
+    // `PATH` is not.
     #[cfg(windows)]
     for key in ["SystemRoot", "windir"] {
         if let Some(value) = std::env::var_os(key) {
             command.env(key, value);
         }
     }
-    let output = command.output().expect("headshell ikilisi çalışmalı");
+    let output = command.output().expect("the headshell binary must run");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         output.status.success(),
-        "boş ortamda provider test başarısız:\n{}",
+        "provider test failed in an empty environment:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
     let report: serde_json::Value = serde_json::from_str(&stdout).expect("JSON");
@@ -973,17 +1018,18 @@ fn a_plugin_runs_with_nothing_on_the_path() {
     assert_eq!(report["health"]["track_count"], 2, "{stdout}");
 }
 
-/// Katalog: indeks üretimi, kurulum, onay, güncelleme ve kaldırma — gerçek
-/// ikiliyle, bu makinede açılan bir sunucuya karşı (D-071).
+/// The catalog: building the index, installing, consent, updating and
+/// removing — with the real binary, against a server opened on this machine
+/// (D-071).
 ///
-/// Sınanan şey kabuğun **aynı veriyi** aldığı: indeksi bakımcının komutu
-/// üretiyor, katalog `HEADSHELL_PLUGIN_INDEX` ile o sunucuyu gösteriyor ve
-/// kurulan eklentiyi motor çalıştırıyor. Kuralların kendisi çekirdeğin birim
-/// testlerinde (`plugin::catalog`).
+/// What is tested is that the shell gets **the same data**: the maintainer's
+/// command produces the index, the catalog points at that server through
+/// `HEADSHELL_PLUGIN_INDEX`, and the engine runs the installed plugin. The
+/// rules themselves are in the core's unit tests (`plugin::catalog`).
 #[test]
 fn a_plugin_goes_from_the_catalog_through_approval_and_update_to_removal() {
-    let dir = temp_dir("katalog");
-    let repo = temp_dir("katalog-depo");
+    let dir = temp_dir("catalog");
+    let repo = temp_dir("catalog-repo");
     let source = fixtures().join("plugins/echo");
     std::fs::create_dir_all(repo.join("echo")).unwrap();
     for file in ["plugin.json", "main.js"] {
@@ -992,11 +1038,14 @@ fn a_plugin_goes_from_the_catalog_through_approval_and_update_to_removal() {
     let repo_arg = repo.to_str().unwrap();
     let server = FileServer::serve(repo.to_path_buf());
     let index = server.url("index.json");
-    // Sunucu çalışma ağacını sunuyor; sürüm yine adrese giriyor çünkü
-    // şablonda `{version}` zorunlu.
-    let template = format!("http://{}/{{name}}/{{path}}?surum={{version}}", server.addr);
+    // The server serves the working tree; the version still goes into the
+    // address because `{version}` is mandatory in the template.
+    let template = format!(
+        "http://{}/{{name}}/{{path}}?version={{version}}",
+        server.addr
+    );
 
-    // 1. Bakımcının yolu: indeksi çekirdeğin doğrulaması üretiyor.
+    // 1. The maintainer's route: the core's validation produces the index.
     let (stdout, stderr, ok) = run(
         &dir,
         &[
@@ -1008,49 +1057,52 @@ fn a_plugin_goes_from_the_catalog_through_approval_and_update_to_removal() {
             &template,
         ],
     );
-    assert!(ok, "plugin index başarısız: {stderr}");
+    assert!(ok, "plugin index failed: {stderr}");
     let report = json(&stdout);
     assert_eq!(report["written"], true, "{stdout}");
     assert_eq!(report["plugins"][0]["name"], "echo", "{stdout}");
     let (_, stderr, ok) = run(&dir, &["plugin", "index", repo_arg, "--check"]);
-    assert!(ok, "yeni üretilen indeks güncel sayılmalı: {stderr}");
+    assert!(
+        ok,
+        "a freshly built index must count as up to date: {stderr}"
+    );
 
-    // 2. Katalog: listede, kurulu değil.
+    // 2. The catalog: listed, not installed.
     let (stdout, stderr, ok) = run_with_index(&dir, &index, &["--json", "plugin", "catalog"]);
-    assert!(ok, "plugin catalog başarısız: {stderr}");
+    assert!(ok, "plugin catalog failed: {stderr}");
     assert_snapshot(
         "plugin_catalog",
         &stdout.replace(&server.addr.to_string(), "127.0.0.1:<port>"),
     );
 
-    // 3. Kurulum: katalogdan iniyor ve onay bekliyor (D-040).
+    // 3. Installing: it comes down from the catalog and awaits consent (D-040).
     let (stdout, stderr, ok) = run_with_index(&dir, &index, &["plugin", "install", "echo"]);
-    assert!(ok, "plugin install başarısız: {stderr}");
-    assert!(stdout.contains("katalog : 0.2.0 indirildi"), "{stdout}");
+    assert!(ok, "plugin install failed: {stderr}");
+    assert!(stdout.contains("catalog    : 0.2.0 downloaded"), "{stdout}");
     assert!(
-        stdout.contains("onay bekliyor"),
-        "katalogdan gelmek onay değildir:\n{stdout}"
+        stdout.contains("awaiting consent"),
+        "coming from the catalog is not consent:\n{stdout}"
     );
     assert!(dir.join("plugins/echo/origin.json").exists());
 
-    // 4. Onaylanınca motor onu çalıştırıyor.
+    // 4. Once approved, the engine runs it.
     let (_, stderr, ok) = run(&dir, &["plugin", "approve", "echo"]);
     assert!(ok, "{stderr}");
     let (stdout, stderr, ok) = run(&dir, &["--json", "provider", "test", "echo"]);
     assert!(ok, "{stderr}");
     assert_eq!(json(&stdout)["health"]["reachable"], true, "{stdout}");
 
-    // 5. Yeni sürüm: eskiyen indeks `--check`'ten geçmiyor ve neyin
-    // eskidiğini söylüyor; şablon verilmeden yeniden üretiliyor.
+    // 5. A new version: the outdated index does not pass `--check` and says
+    // what is out of date; it is rebuilt without giving the template.
     let manifest = std::fs::read_to_string(repo.join("echo/plugin.json"))
         .unwrap()
         .replace("\"0.2.0\"", "\"0.3.0\"");
     std::fs::write(repo.join("echo/plugin.json"), manifest).unwrap();
     let (_, stderr, ok) = run(&dir, &["plugin", "index", repo_arg, "--check"]);
-    assert!(!ok, "eskiyen indeks --check'ten geçmemeli");
-    assert!(stderr.contains("echo: girdisi değişti"), "{stderr}");
+    assert!(!ok, "an outdated index must not pass --check");
+    assert!(stderr.contains("echo: its entry changed"), "{stderr}");
     let (_, stderr, ok) = run(&dir, &["plugin", "index", repo_arg]);
-    assert!(ok, "şablon index.json'dan okunmalı: {stderr}");
+    assert!(ok, "the template must be read from index.json: {stderr}");
 
     let (stdout, _, ok) = run_with_index(&dir, &index, &["--json", "plugin", "catalog"]);
     assert!(ok);
@@ -1060,36 +1112,41 @@ fn a_plugin_goes_from_the_catalog_through_approval_and_update_to_removal() {
         "{stdout}"
     );
 
-    // 6. Güncelleme; izinler aynı kaldığı için onay yerinde duruyor.
+    // 6. Updating; the permissions stayed the same, so the consent stays in
+    // place.
     let (stdout, stderr, ok) = run_with_index(&dir, &index, &["plugin", "update"]);
-    assert!(ok, "plugin update başarısız: {stderr}");
-    assert!(stdout.contains("güncellendi: 0.2.0 → 0.3.0"), "{stdout}");
+    assert!(ok, "plugin update failed: {stderr}");
+    assert!(stdout.contains("updated: 0.2.0 → 0.3.0"), "{stdout}");
     let (stdout, _, ok) = run(&dir, &["plugin", "list"]);
     assert!(ok);
-    assert!(stdout.contains("onaylı"), "{stdout}");
+    assert!(stdout.contains("approved"), "{stdout}");
 
-    // 7. Kaldırma: dizin gidiyor, onay unutuluyor.
+    // 7. Removing: the directory goes, the consent is forgotten.
     let (stdout, stderr, ok) = run(&dir, &["plugin", "remove", "echo"]);
-    assert!(ok, "plugin remove başarısız: {stderr}");
-    assert!(stdout.contains("unutuldu"), "{stdout}");
+    assert!(ok, "plugin remove failed: {stderr}");
+    assert!(stdout.contains("forgotten"), "{stdout}");
     assert!(!dir.join("plugins/echo").exists());
     let (stdout, _, ok) = run(&dir, &["plugin", "list"]);
     assert!(ok);
-    assert!(stdout.contains("kurulu eklenti yok"), "{stdout}");
+    assert!(stdout.contains("no plugins installed"), "{stdout}");
 }
 
-/// Katalogda olmayan bir ad: ne olduğu ve katalogda ne olduğu söyleniyor.
+/// A name that is not in the catalog: what it is and what is in the catalog
+/// are said.
 #[test]
 fn installing_a_name_the_catalog_does_not_have_lists_what_it_has() {
-    let dir = temp_dir("katalog-yok");
-    let repo = temp_dir("katalog-yok-depo");
+    let dir = temp_dir("catalog-missing");
+    let repo = temp_dir("catalog-missing-repo");
     let source = fixtures().join("plugins/echo");
     std::fs::create_dir_all(repo.join("echo")).unwrap();
     for file in ["plugin.json", "main.js"] {
         std::fs::copy(source.join(file), repo.join("echo").join(file)).unwrap();
     }
     let server = FileServer::serve(repo.to_path_buf());
-    let template = format!("http://{}/{{name}}/{{path}}?surum={{version}}", server.addr);
+    let template = format!(
+        "http://{}/{{name}}/{{path}}?version={{version}}",
+        server.addr
+    );
     let (_, stderr, ok) = run(
         &dir,
         &[
@@ -1107,19 +1164,16 @@ fn installing_a_name_the_catalog_does_not_have_lists_what_it_has() {
         &server.url("index.json"),
         &["plugin", "install", "Echo"],
     );
-    assert!(!ok, "olmayan ad kurulmamalı");
-    assert!(stderr.contains("ADIM: PLUGIN_CATALOG"), "{stderr}");
-    assert!(
-        stderr.contains("bunu mu demek istediniz: `echo`"),
-        "{stderr}"
-    );
+    assert!(!ok, "a missing name must not be installed");
+    assert!(stderr.contains("STEP: PLUGIN_CATALOG"), "{stderr}");
+    assert!(stderr.contains("did you mean `echo`"), "{stderr}");
 }
 
 fn json(stdout: &str) -> serde_json::Value {
-    serde_json::from_str(stdout).unwrap_or_else(|err| panic!("JSON değil ({err}):\n{stdout}"))
+    serde_json::from_str(stdout).unwrap_or_else(|err| panic!("not JSON ({err}):\n{stdout}"))
 }
 
-/// Kataloğu `index` adresinden okuyarak çalıştırır (D-071).
+/// Runs it reading the catalog from the `index` address (D-071).
 fn run_with_index(data_dir: &Path, index: &str, args: &[&str]) -> (String, String, bool) {
     let mut command = cli_command();
     command
@@ -1127,8 +1181,8 @@ fn run_with_index(data_dir: &Path, index: &str, args: &[&str]) -> (String, Strin
         .arg(data_dir)
         .args(args)
         .env("HEADSHELL_PLUGIN_INDEX", index)
-        .env("HEADSHELL_MUSIC_DIRS", "/olmayan/dizin/headshell-test");
-    let output = command.output().expect("headshell ikilisi çalışmalı");
+        .env("HEADSHELL_MUSIC_DIRS", "/nonexistent/dir/headshell-test");
+    let output = command.output().expect("the headshell binary must run");
     (
         String::from_utf8_lossy(&output.stdout).into_owned(),
         String::from_utf8_lossy(&output.stderr).into_owned(),
@@ -1136,12 +1190,13 @@ fn run_with_index(data_dir: &Path, index: &str, args: &[&str]) -> (String, Strin
     )
 }
 
-/// Bir dizini `127.0.0.1`'de düz HTTP ile sunan küçük sunucu — katalog
-/// komutlarını ağa çıkmadan sınamak için. Çekirdek düz HTTP'yi yalnızca bu
-/// makinenin kendisine kabul ediyor (D-071); sunucu tam orada.
+/// A small server that serves a directory over plain HTTP on `127.0.0.1` —
+/// for testing the catalog commands without going online. The core only
+/// accepts plain HTTP to this machine itself (D-071); the server is exactly
+/// there.
 ///
-/// Değer düşünce durur: bayrak kalkar ve bekleyen `accept` bir bağlantıyla
-/// uyandırılır.
+/// It stops when dropped: the flag goes down and the waiting `accept` is
+/// woken up with a connection.
 struct FileServer {
     addr: std::net::SocketAddr,
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -1153,8 +1208,8 @@ impl FileServer {
         use std::io::{BufRead as _, Write as _};
         use std::sync::atomic::Ordering;
 
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("dinleyici açılmalı");
-        let addr = listener.local_addr().expect("adres");
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("the listener must open");
+        let addr = listener.local_addr().expect("address");
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let flag = std::sync::Arc::clone(&stop);
         let thread = std::thread::spawn(move || {
@@ -1171,7 +1226,7 @@ impl FileServer {
                 if reader.read_line(&mut request).is_err() {
                     continue;
                 }
-                // Başlıklar boş satıra kadar okunup atılıyor.
+                // The headers are read up to the empty line and thrown away.
                 loop {
                     let mut line = String::new();
                     match reader.read_line(&mut line) {
@@ -1188,7 +1243,7 @@ impl FileServer {
                     .fold(root.clone(), |path, part| path.join(part));
                 let (status, body) = match std::fs::read(&file) {
                     Ok(body) => ("200 OK", body),
-                    Err(_) => ("404 Not Found", b"yok".to_vec()),
+                    Err(_) => ("404 Not Found", b"none".to_vec()),
                 };
                 let _ = write!(
                     stream,
@@ -1220,13 +1275,13 @@ impl Drop for FileServer {
     }
 }
 
-/// Fixture eklentisini veri dizinine kurar — kullanıcının yapacağı gibi,
-/// dizini kopyalayarak.
+/// Installs the fixture plugin into the data directory — the way the user
+/// would, by copying the directory.
 fn install_echo_plugin(data_dir: &Path) {
     let source = fixtures().join("plugins/echo");
     let target = data_dir.join("plugins/echo");
-    std::fs::create_dir_all(&target).expect("eklenti dizini");
+    std::fs::create_dir_all(&target).expect("plugin directory");
     for file in ["plugin.json", "main.js"] {
-        std::fs::copy(source.join(file), target.join(file)).expect("eklenti dosyası");
+        std::fs::copy(source.join(file), target.join(file)).expect("plugin file");
     }
 }

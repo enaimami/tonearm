@@ -1,14 +1,15 @@
-//! MD5 (RFC 1321) — Subsonic kimlik token'ı için (D-021).
+//! MD5 (RFC 1321) — for the Subsonic authentication token (D-021).
 //!
-//! **Bu bir güvenlik primitifi değil.** MD5 kırık bir özet fonksiyonu; burada
-//! olmasının tek sebebi Subsonic protokolünün `t=md5(parola+salt)` diye
-//! dayatması. Parolayı diskte düz tutmamak için kullanılıyor, bir şeyi
-//! korumak için değil.
+//! **This is not a security primitive.** MD5 is a broken hash function; the
+//! only reason it is here is that the Subsonic protocol imposes
+//! `t=md5(password+salt)`. It is used to avoid keeping the password in plain
+//! text on disk, not to protect anything.
 //!
-//! Bağımlılık eklenmedi: 100 satırlık, tam tanımlı, RFC'nin kendi test
-//! vektörleriyle kilitlenebilir bir algoritma için ağaç büyütmeye değmez.
+//! No dependency was added: growing the tree is not worth it for a
+//! 100-line, fully specified algorithm that can be locked down with the
+//! RFC's own test vectors.
 
-/// Bayt dizisinin MD5 özetini onaltılık küçük harfle döndürür.
+/// Returns the MD5 digest of a byte sequence in lower-case hex.
 #[must_use]
 pub fn md5_hex(input: &[u8]) -> String {
     let digest = md5(input);
@@ -19,7 +20,7 @@ pub fn md5_hex(input: &[u8]) -> String {
     out
 }
 
-/// RFC 1321 §3.4'teki `T[i]` tablosu: `floor(2^32 * abs(sin(i)))`.
+/// The `T[i]` table from RFC 1321 §3.4: `floor(2^32 * abs(sin(i)))`.
 const T: [u32; 64] = [
     0xd76a_a478,
     0xe8c7_b756,
@@ -87,7 +88,7 @@ const T: [u32; 64] = [
     0xeb86_d391,
 ];
 
-/// Tur başına kaydırma miktarları.
+/// The shift amounts per round.
 const S: [u32; 64] = [
     7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, //
     5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, //
@@ -98,7 +99,7 @@ const S: [u32; 64] = [
 fn md5(input: &[u8]) -> [u8; 16] {
     let mut state: [u32; 4] = [0x6745_2301, 0xefcd_ab89, 0x98ba_dcfe, 0x1032_5476];
 
-    // Dolgu: 0x80, sonra 56 mod 64 olana kadar sıfır, sonra bit uzunluğu (LE).
+    // Padding: 0x80, then zeros until 56 mod 64, then the bit length (LE).
     let mut message = input.to_vec();
     let bit_len = (input.len() as u64).wrapping_mul(8);
     message.push(0x80);
@@ -155,8 +156,9 @@ fn md5(input: &[u8]) -> [u8; 16] {
 mod tests {
     use super::*;
 
-    /// RFC 1321 Ek A.5'teki test paketi. Bu testler düşerse token yanlıştır
-    /// ve sunucu her seferinde 401 döner — sessiz bir hata olurdu.
+    /// The test suite from RFC 1321 Appendix A.5. If these tests fail the token is
+    /// wrong and the server returns 401 every time — that would be a silent
+    /// failure.
     #[test]
     fn rfc1321_test_suite() {
         let cases: &[(&str, &str)] = &[
@@ -178,19 +180,20 @@ mod tests {
             ),
         ];
         for (input, expected) in cases {
-            assert_eq!(md5_hex(input.as_bytes()), *expected, "girdi: {input:?}");
+            assert_eq!(md5_hex(input.as_bytes()), *expected, "input: {input:?}");
         }
     }
 
     #[test]
     fn subsonic_token_shape() {
-        // Subsonic belgesindeki örnek: parola "sesame", salt "c19b2d".
+        // The example from the Subsonic documentation: password "sesame", salt
+        // "c19b2d".
         assert_eq!(md5_hex(b"sesamec19b2d"), "26719a1196d2a940705a59634eb18eab");
     }
 
     #[test]
     fn block_boundaries_are_handled() {
-        // 55/56/64 bayt: dolgunun ek blok açtığı sınırlar.
+        // 55/56/64 bytes: the boundaries where padding opens an extra block.
         assert_eq!(
             md5_hex(&b"a".repeat(55)),
             "ef1772b6dff9a122358552954ad0df65"

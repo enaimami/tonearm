@@ -1,10 +1,10 @@
-//! Canlı Torznab sınaması (D-043'ün kuralıyla).
+//! The live Torznab test (under D-043's rule).
 //!
-//! Torznab'ın herkese açık bir örneği yok — kullanıcının kendi Prowlarr ya da
-//! Jackett'ı gerekiyor. Bu yüzden "ulaşamamak" gibi burada bir de
-//! "yapılandırılmamış" hâli var, ve **ikisi de başarısızlık değil**: test
-//! kendini atlar ve sebebini `stderr`'e yazar. Ulaşıp beklenmeyeni alırsa
-//! düşer.
+//! Torznab has no public instance — the user's own Prowlarr or Jackett is
+//! needed. So besides "cannot reach it" there is also a "not configured" state
+//! here, and **neither is a failure**: the test skips itself and writes the
+//! reason to `stderr`. If it reaches the indexer and gets the unexpected, it
+//! fails.
 //!
 //! ```bash
 //! HEADSHELL_TORZNAB_URL=http://127.0.0.1:9696/1/api \
@@ -18,8 +18,8 @@ use headshell_plugin_torrent::torznab::Torznab;
 fn client_or_skip(test: &str) -> Option<Torznab> {
     let Ok(url) = std::env::var("HEADSHELL_TORZNAB_URL") else {
         eprintln!(
-            "{test}: atlandı — HEADSHELL_TORZNAB_URL yok. \
-             Canlı sınama kullanıcının kendi Prowlarr/Jackett'ını ister."
+            "{test}: skipped — no HEADSHELL_TORZNAB_URL. \
+             The live test needs the user's own Prowlarr/Jackett."
         );
         return None;
     };
@@ -27,16 +27,17 @@ fn client_or_skip(test: &str) -> Option<Torznab> {
     match Torznab::new(&url, &key) {
         Ok(client) => Some(client),
         Err(error) => {
-            // Adresin biçimi yanlışsa bu bir yapılandırma hatasıdır ve
-            // atlanacak bir şey değil: kullanıcı canlı sınama istedi.
-            panic!("{test}: HEADSHELL_TORZNAB_URL geçersiz: {error}");
+            // If the address is malformed, that is a configuration error and
+            // not something to skip: the user asked for a live test.
+            panic!("{test}: HEADSHELL_TORZNAB_URL is invalid: {error}");
         }
     }
 }
 
-/// Ağ hatası mı, yoksa indeksin verdiği bir cevap mı? İkisi ayrı tanı (K9).
+/// Is it a network error, or an answer the indexer gave? They are separate
+/// diagnoses (K9).
 fn is_unreachable(message: &str) -> bool {
-    message.contains("ulaşılamadı") || message.contains("cevabı okunamadı")
+    message.contains("could not reach") || message.contains("could not read the Torznab answer")
 }
 
 #[tokio::test]
@@ -46,15 +47,15 @@ async fn the_indexer_answers_a_capabilities_request() {
     };
     match client.caps().await {
         Ok(detail) => {
-            assert!(detail.contains("kategori"), "{detail}");
+            assert!(detail.contains("categories"), "{detail}");
         }
         Err(error) => {
             let message = error.to_string();
             assert!(
                 is_unreachable(&message),
-                "indeks cevap verdi ama beklenmeyen bir şey söyledi: {message}"
+                "the indexer answered but said something unexpected: {message}"
             );
-            eprintln!("caps: atlandı — indekse ulaşılamadı: {message}");
+            eprintln!("caps: skipped — could not reach the indexer: {message}");
         }
     }
 }
@@ -72,17 +73,17 @@ async fn a_real_search_returns_releases_that_carry_an_infohash() {
             let message = error.to_string();
             assert!(
                 is_unreachable(&message),
-                "indeks cevap verdi ama beklenmeyen bir şey söyledi: {message}"
+                "the indexer answered but said something unexpected: {message}"
             );
-            eprintln!("search: atlandı — indekse ulaşılamadı: {message}");
+            eprintln!("search: skipped — could not reach the indexer: {message}");
             return;
         }
     };
 
-    // Sıfır sonuç bir başarısızlık **değil**: kullanıcının indeksinde o
-    // sorgunun karşılığı olmayabilir. Sınanan şey biçim, katalog değil.
+    // Zero results is **not** a failure: the user's indexer may have nothing
+    // for that query. What is tested is the format, not the catalog.
     eprintln!(
-        "search: {} yayım, {} kayıt kimliksiz olduğu için düştü",
+        "search: {} releases, {} records dropped for having no id",
         outcome.releases.len(),
         outcome.dropped_unidentifiable
     );
@@ -91,50 +92,50 @@ async fn a_real_search_returns_releases_that_carry_an_infohash() {
         assert_eq!(
             release.infohash.len(),
             40,
-            "infohash 40 hane olmalı: {release:?}"
+            "an infohash must be 40 digits: {release:?}"
         );
         assert!(
             release.source_url().is_some(),
-            "çalınamayacak bir yayım listeye girmemeli: {release:?}"
+            "a release that cannot be played must not get into the list: {release:?}"
         );
         assert!(!release.title.trim().is_empty(), "{release:?}");
     }
 }
 
-/// Anahtar yanlışken **boş sonuç değil hata** almalıyız.
+/// With a wrong key we must get **an error, not an empty result**.
 ///
-/// Bu, D-046'nın AcoustID'de öğrendiği dersin torrent tarafındaki karşılığı:
-/// reddedilmeyi "bulunamadı" diye okumak, kullanıcıya yanlış şeyi tamir
-/// ettirir. Anahtar gerektirmeyen bir kurulumda atlanır.
+/// This is the torrent-side counterpart of the lesson D-046 learned at
+/// AcoustID: reading a refusal as "not found" makes the user fix the wrong
+/// thing. On an install that needs no key it is skipped.
 #[tokio::test]
 async fn a_rejected_key_is_an_error_not_an_empty_result() {
     let Ok(url) = std::env::var("HEADSHELL_TORZNAB_URL") else {
-        eprintln!("reddedilen anahtar: atlandı — HEADSHELL_TORZNAB_URL yok");
+        eprintln!("rejected key: skipped — no HEADSHELL_TORZNAB_URL");
         return;
     };
     if std::env::var("HEADSHELL_TORZNAB_KEY").is_err() {
-        eprintln!("reddedilen anahtar: atlandı — kurulum anahtar istemiyor");
+        eprintln!("rejected key: skipped — the install asks for no key");
         return;
     }
-    let Ok(client) = Torznab::new(&url, "kesinlikle-yanlis-bir-anahtar") else {
-        panic!("HEADSHELL_TORZNAB_URL geçersiz");
+    let Ok(client) = Torznab::new(&url, "definitely-a-wrong-key") else {
+        panic!("HEADSHELL_TORZNAB_URL is invalid");
     };
 
     match client.search("radiohead", 5).await {
         Ok(outcome) => panic!(
-            "yanlış anahtar kabul edildi ve {} sonuç döndü — reddedilme sessizce \
-             boş sonuca çevrilmiş olabilir",
+            "a wrong key was accepted and {} results came back — a refusal may have been \
+             silently turned into an empty result",
             outcome.releases.len()
         ),
         Err(error) => {
             let message = error.to_string();
             if is_unreachable(&message) {
-                eprintln!("reddedilen anahtar: atlandı — indekse ulaşılamadı: {message}");
+                eprintln!("rejected key: skipped — could not reach the indexer: {message}");
                 return;
             }
             assert!(
-                message.contains("reddetti") || message.contains("HTTP"),
-                "reddedilme açıkça söylenmeli: {message}"
+                message.contains("refused") || message.contains("HTTP"),
+                "the refusal must be said clearly: {message}"
             );
         }
     }

@@ -1,38 +1,41 @@
-//! Eklenti sınırı: gömülü QuickJS'te koşan sağlayıcılar (K5, D-069).
+//! The plugin boundary: providers running in embedded QuickJS (K5, D-069).
 //!
-//! Bir eklenti `<data_dir>/plugins/<ad>/` dizinidir; içinde `plugin.json`
-//! (bkz. [`manifest`]) ve bir JS betiği vardır. Betik çekirdeğin içindeki
-//! motorda koşar — kullanıcının makinesinde **hiçbir şey kurulu olması
-//! gerekmez**. api 1'de eklenti Python'la yazılmış bir alt süreçti ve "kime
-//! göndersem bir sorun çıktı"nın sebebi buydu: Windows'ta Python yok,
-//! Debian'da `venv` ayrı paket, sürümler tutmuyor.
+//! A plugin is the directory `<data_dir>/plugins/<name>/`; it contains a
+//! `plugin.json` (see [`manifest`]) and a JS script. The script runs in the
+//! engine inside the core — **nothing has to be installed** on the user's
+//! machine. In api 1 a plugin was a subprocess written in Python, and that
+//! was why "whoever I sent it to had a problem": Windows has no Python,
+//! Debian packages `venv` separately, versions don't line up.
 //!
-//! Eklentiler ana depoda durmaz: `headshell/plugins` deposunda yaşarlar ve
-//! uygulama onları o deponun indeksinden kurar ve günceller ([`catalog`],
-//! D-071). Elle konmuş bir dizin de eklentidir; katalog ona dokunmaz.
+//! Plugins do not live in the main repository: they live in the
+//! `headshell/plugins` repository, and the app installs and updates them
+//! from that repository's index ([`catalog`], D-071). A directory put there
+//! by hand is a plugin too; the catalog leaves it alone.
 //!
-//! ## Yaşam döngüsü
+//! ## Lifecycle
 //!
-//! 1. **Keşif** ([`discover`]) — motoru açmadan: manifest okunur, izin onayı
-//!    ([`consent`]) sorulur, protokol sürümü ve eserlerin durumu ölçülür.
-//!    `headshell plugin list` bu kadarını kullanır.
-//! 2. **Başlatma** — **ilk çağrıda**, tembel: eklentinin iş parçacığı açılır,
-//!    betik değerlendirilir ve beyan edilen yeteneklerin fonksiyonları
-//!    dışa aktarılmış mı diye bakılır ([`script`]).
-//! 3. **Çağrı** — her çağrının süresi var; takılan eklenti çekirdeği
-//!    takmaz.
-//! 4. **Düşme** — zaman aşımı ya da düşen iş parçacığı motoru bırakır ve bir
-//!    sonraki çağrı yeniden başlatır. [`MAX_STARTS`] denemeden sonra
-//!    vazgeçilir; sonsuz yeniden başlatma bir çökme döngüsünü gizler.
+//! 1. **Discovery** ([`discover`]) — without starting the engine: the
+//!    manifest is read, consent ([`consent`]) is checked, and the protocol
+//!    version and the state of the artifacts are measured. `headshell plugin
+//!    list` uses only this much.
+//! 2. **Start** — **on the first call**, lazily: the plugin's thread is
+//!    started, the script is evaluated, and the functions for the declared
+//!    capabilities are checked to be exported ([`script`]).
+//! 3. **Call** — every call has a time limit; a stuck plugin does not stall
+//!    the core.
+//! 4. **Failure** — a timeout or a dead thread drops the engine and the next
+//!    call restarts it. After [`MAX_STARTS`] attempts it gives up; endless
+//!    restarts would hide a crash loop.
 //!
-//! ## Sınır neyi tutar
+//! ## What the boundary holds
 //!
-//! Kimlik alanı (eklenti başka sağlayıcının kimliğini uyduramaz), sır alanı
-//! (yalnızca kendi ad alanı, D-042), zaman, bellek, **ağ** (her istek ve her
-//! yönlendirme `permissions.net`'e göre denetlenir) ve **dosya sistemi**
-//! (eklentinin dosyaya erişimi yok). Tutmadığı tek kapı motorun kurduğu
-//! araçlar: `host.tools.run` ile çalışan yt-dlp gibi bir eser kullanıcının
-//! yetkisiyle çalışır ve bu `headshell plugin list`'te yazar ([`host`]).
+//! The identity namespace (a plugin cannot make up another provider's ids),
+//! the secret namespace (only its own, D-042), time, memory, **the network**
+//! (every request and every redirect is checked against `permissions.net`)
+//! and **the file system** (the plugin has no file access). The one gate it
+//! does not hold is the tools the engine installs: an artifact like yt-dlp
+//! run through `host.tools.run` runs with the user's privileges, and
+//! `headshell plugin list` says so ([`host`]).
 
 pub mod artifact;
 pub mod catalog;
@@ -72,54 +75,56 @@ use script::ScriptWorker;
 #[cfg(not(feature = "plugin-engine"))]
 use unavailable::ScriptWorker;
 
-/// İzin beyanı zorlanıyor mu (D-040 → D-069).
+/// Is the permission declaration enforced (D-040 → D-069).
 ///
-/// api 1'de `false`'tu: eklenti ayrı bir süreçti ve kullanıcının bütün
-/// yetkisiyle çalışıyordu. api 2'de eklenti dışarıya yalnızca motorun
-/// kapılarından çıkabiliyor ve motor her kapıda beyana bakıyor. **Tek
-/// istisna** motorun kurduğu araçlar (yt-dlp): onlar ayrı süreçtir ve
-/// hapsedilmez — çıktılar bunu ayrıca söyler.
+/// It was `false` in api 1: the plugin was a separate process running with
+/// all of the user's privileges. In api 2 a plugin can only get out through
+/// the engine's gates, and the engine checks the declaration at every gate.
+/// **The one exception** is the tools the engine installs (yt-dlp): they are
+/// separate processes and are not confined — the outputs say so separately.
 pub const PERMISSIONS_ENFORCED: bool = true;
 
-/// Bir eklentinin kaç kez başlatılacağı. Aşılırsa vazgeçilir ve sebebi
-/// söylenir — sonsuz yeniden başlatma çökme döngüsünü sessiz kılar.
+/// How many times a plugin is started. Beyond that it gives up and says why
+/// — endless restarts would make a crash loop silent.
 pub const MAX_STARTS: u32 = 3;
 
-/// Betiği değerlendirmeye tanınan süre. Kısa: yükleme ağa çıkamaz
-/// (motor bunu reddeder), yalnızca kendini kurar.
+/// Time allowed to evaluate the script. Short: loading cannot go online
+/// (the engine refuses it), it only sets itself up.
 pub const START_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Bir çağrıya tanınan süre. Ağ gerektiren bir arama ya da yt-dlp'nin imza
-/// çözümü bu kadar sürebilir.
+/// Time allowed for one call. A search that needs the network, or yt-dlp's
+/// signature solving, can take this long.
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// Keşifte görülen bir eklenti. Çalıştırılamayanlar da burada — sessizce
-/// atlanan eklenti, kullanıcının kurduğunu sandığı eklentidir (K9).
+/// A plugin seen by discovery. Those that cannot run are here too — a plugin
+/// skipped silently is a plugin the user thinks is installed (K9).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PluginEntry {
-    /// Dizin adı = kimlik.
+    /// Directory name = identity.
     pub name: String,
     pub dir: PathBuf,
-    /// Manifest okunabildiyse ondan gelen alanlar.
+    /// Fields from the manifest, if it could be read.
     pub display_name: Option<String>,
     pub version: Option<String>,
     pub api: Option<u32>,
     pub permissions: Permissions,
-    /// Onay durumu (manifest okunabildiyse).
+    /// Consent state (if the manifest could be read).
     pub consent: Option<ConsentStatus>,
-    /// Motordan istenen eserlerin durumu (D-055, D-069). **Ağa çıkılmadan**
-    /// ölçülür: bu platform için yayın var mı, diskte mi, karması tutuyor mu.
+    /// The state of the artifacts asked of the engine (D-055, D-069). Measured
+    /// **without going online**: is there a release for this platform, is it on
+    /// disk, does its hash match.
     #[serde(default)]
     pub requires: Vec<artifact::RequirementStatus>,
-    /// Yüklenemiyorsa sebebi — tek satır, kopyalanabilir.
+    /// Why it cannot load, if it cannot — one line, copyable.
     pub problem: Option<String>,
 }
 
 impl PluginEntry {
-    /// Bu eklenti başlatılabilir mi.
+    /// Can this plugin be started.
     ///
-    /// Eksik bir eser yüklemeyi **engeller**: eseri olmayan bir eklentiyi
-    /// başlatmak, onu ilk aramada anlaşılmaz bir hatayla düşürmek olurdu.
+    /// A missing artifact **blocks** loading: starting a plugin without its
+    /// artifact would make it fail with an incomprehensible error on its first
+    /// search.
     #[must_use]
     pub fn is_loadable(&self) -> bool {
         self.problem.is_none()
@@ -130,7 +135,8 @@ impl PluginEntry {
                 .is_some_and(consent::ConsentStatus::is_approved)
     }
 
-    /// Hazır olmayan eserler. Boşsa motor tarafında eksik yok.
+    /// Artifacts that are not ready. Empty means nothing is missing on the
+    /// engine's side.
     #[must_use]
     pub fn missing_requirements(&self) -> Vec<&artifact::RequirementStatus> {
         self.requires
@@ -139,7 +145,7 @@ impl PluginEntry {
             .collect()
     }
 
-    /// Kullanıcıya gösterilecek tek satırlık durum.
+    /// A one-line status to show the user.
     #[must_use]
     pub fn status_text(&self) -> String {
         if let Some(problem) = &self.problem {
@@ -159,49 +165,51 @@ impl PluginEntry {
                 })
                 .collect::<Vec<_>>()
                 .join("; ");
-            // Platform desteği yoksa kurulum komutu önermek yanlış tavsiye.
+            // Without platform support, suggesting the install command is wrong advice.
             let unsupported = missing.iter().all(|status| {
                 matches!(status.state, artifact::RequirementState::Unsupported { .. })
             });
             return if unsupported {
-                format!("motorun kurması gereken eser bu platformda yok ({detail})")
+                format!(
+                    "the artifact the engine must install does not exist for this platform ({detail})"
+                )
             } else {
                 format!(
-                    "motorun kurması gereken eser eksik ({detail}) — `headshell plugin install {}`",
+                    "an artifact the engine must install is missing ({detail}) — `headshell plugin install {}`",
                     self.name
                 )
             };
         }
         match &self.consent {
             Some(status) => status.describe(),
-            None => "durum bilinmiyor".to_owned(),
+            None => "state unknown".to_owned(),
         }
     }
 }
 
-/// Keşfin özeti (K9: kaç geldi, kaçı ne oldu).
+/// Discovery summary (K9: how many came, what happened to them).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PluginSummary {
-    /// Dizinde görülen eklenti sayısı.
+    /// Number of plugins seen in the directory.
     pub discovered: usize,
-    /// Yüklenmeye hazır (onaylı, sürümü uygun, eserleri kurulu).
+    /// Ready to load (approved, compatible version, artifacts installed).
     pub ready: usize,
-    /// Onay bekliyor ya da yeni izin istiyor.
+    /// Awaiting consent, or asking for new permissions.
     pub awaiting_approval: usize,
-    /// Kullanıcı kapatmış.
+    /// Disabled by the user.
     pub disabled: usize,
-    /// Protokol sürümü uyuşmuyor.
+    /// Protocol version mismatch.
     pub incompatible: usize,
-    /// Manifesti okunamadı/geçersiz.
+    /// Manifest unreadable or invalid.
     pub broken: usize,
-    /// Motorun kurması gereken bir eseri eksik (D-055). `ready`'den ayrı:
-    /// kullanıcının yapacağı şey farklı — onay değil kurulum.
+    /// An artifact the engine must install is missing (D-055). Separate from
+    /// `ready`: what the user has to do is different — install, not approve.
     #[serde(default)]
     pub needs_install: usize,
 }
 
 impl PluginSummary {
-    /// Sayaçları tanı kaydediciye aktarır.
+    /// Copies the counters into the diagnostics recorder.
     pub fn record_into(&self, recorder: &mut crate::diag::Recorder) {
         let n = |value: usize| i64::try_from(value).unwrap_or(i64::MAX);
         recorder.set("plugins.discovered", n(self.discovered));
@@ -214,14 +222,15 @@ impl PluginSummary {
     }
 }
 
-/// Eklenti dizinini tarar. **Hiçbir eklentiyi başlatmaz.**
+/// Scans the plugin directory. **Starts no plugin.**
 ///
-/// Bozuk bir eklenti taramayı durdurmaz: sebebi [`PluginEntry::problem`]'e
-/// yazılır ve gerisi taranmaya devam eder.
+/// A broken plugin does not stop the scan: its reason is written to
+/// [`PluginEntry::problem`] and the rest of the scan continues.
 ///
 /// # Errors
-/// Eklenti dizini okunamazsa (var ama izin yok gibi) ya da onay defteri
-/// bozuksa. Dizin **yoksa** hata değil: boş liste.
+/// If the plugin directory cannot be read (it exists but there is no
+/// permission, say) or the consent ledger is corrupt. A **missing**
+/// directory is not an error: an empty list.
 pub fn discover(config: &Config) -> Result<(Vec<PluginEntry>, PluginSummary)> {
     let dir = config.plugins_dir();
     let consents = ConsentStore::load(&config.plugin_consent_path())?;
@@ -244,7 +253,7 @@ pub fn discover(config: &Config) -> Result<(Vec<PluginEntry>, PluginSummary)> {
         }
         found.push(describe_plugin(&path, &consents, &store));
     }
-    // Dizin sırası dosya sistemine göre değişir; çıktı kararlı olmalı.
+    // Directory order depends on the file system; the output must be stable.
     found.sort_by(|a, b| a.name.cmp(&b.name));
 
     let summary = summarize(&found);
@@ -296,11 +305,11 @@ fn describe_plugin(dir: &Path, consents: &ConsentStore, store: &ArtifactStore) -
             };
             let problem = match err.kind() {
                 ErrorKind::PluginIncompatible { plugin_api, .. } => format!(
-                    "protokol sürümü uyuşmuyor: eklenti api {plugin_api}, çekirdek api \
+                    "protocol version mismatch: plugin api {plugin_api}, core api \
                      {PLUGIN_API}{}",
                     if *plugin_api == 1 {
-                        " — api 1 eski Python/alt süreç eklentisiydi; eklentinin api 2 \
-                         (QuickJS) sürümünü kurun"
+                        " — api 1 was the old Python/subprocess plugin; install the plugin's api 2 \
+                         (QuickJS) version"
                     } else {
                         ""
                     }
@@ -321,8 +330,9 @@ fn describe_plugin(dir: &Path, consents: &ConsentStore, store: &ArtifactStore) -
         }
     };
 
-    // Eser durumu diskten okunuyor; okunamazsa bu da bir `problem` — sessizce
-    // "eksik yok" demek, eksik bir eseri hazır göstermek olurdu.
+    // Artifact state is read from disk; if it cannot be read that is a
+    // `problem` too — silently saying "nothing missing" would show a missing
+    // artifact as ready.
     let (requires, problem) = match store.statuses(&manifest.requires) {
         Ok(requires) => (requires, None),
         Err(err) => (Vec::new(), Some(err.chain_text().replace('\n', " "))),
@@ -341,11 +351,11 @@ fn describe_plugin(dir: &Path, consents: &ConsentStore, store: &ArtifactStore) -
     }
 }
 
-/// Onaylı eklentileri sağlayıcı olarak kurar. **Motor açılmaz** — her
-/// sağlayıcı ilk çağrısında kendi motorunu açar.
+/// Sets up the approved plugins as providers. **No engine is started** —
+/// each provider starts its own engine on its first call.
 ///
 /// # Errors
-/// Keşif başarısız olursa ya da sır dosyası bozuksa.
+/// If discovery fails or the secret file is corrupt.
 pub fn load(config: &Config) -> Result<(Vec<Arc<dyn Provider>>, PluginSummary)> {
     let (entries, summary) = discover(config)?;
     let secrets = Secrets::load(&config.secrets_path())?;
@@ -353,19 +363,19 @@ pub fn load(config: &Config) -> Result<(Vec<Arc<dyn Provider>>, PluginSummary)> 
     let mut providers: Vec<Arc<dyn Provider>> = Vec::new();
     for entry in &entries {
         if !entry.is_loadable() {
-            tracing::debug!(plugin = %entry.name, durum = %entry.status_text(), "eklenti yüklenmedi");
+            tracing::debug!(plugin = %entry.name, status = %entry.status_text(), "plugin not loaded");
             continue;
         }
-        // Keşif manifesti bir kez okudu; kurulum için yeniden okuyoruz
-        // çünkü `PluginEntry` uniffi'ye taşınabilir dar bir görünüm (K7),
-        // manifestin tamamı değil.
+        // Discovery already read the manifest once; we read it again for setup
+        // because `PluginEntry` is a narrow view that can cross to uniffi (K7),
+        // not the whole manifest.
         let manifest = match PluginManifest::load(&entry.dir) {
             Ok(manifest) => manifest,
             Err(err) => {
                 tracing::warn!(
                     plugin = %entry.name,
                     error = %err.chain_text().replace('\n', " "),
-                    "eklenti manifesti keşiften sonra okunamadı"
+                    "the plugin manifest could not be read after discovery"
                 );
                 continue;
             }
@@ -377,33 +387,34 @@ pub fn load(config: &Config) -> Result<(Vec<Arc<dyn Provider>>, PluginSummary)> 
     Ok((providers, summary))
 }
 
-/// Bir eklentinin motoru başlatmak için gereken her şey.
+/// Everything needed to start a plugin's engine.
 ///
-/// Değer olarak taşınıyor, çünkü motor kendi iş parçacığında kuruluyor ve
-/// her yeniden başlatma aynı tariften yapılıyor.
+/// Carried by value, because the engine is set up on its own thread and
+/// every restart uses the same recipe.
 ///
-/// Motor kapalı bir derlemede alanların çoğunu okuyan kimse yok — yedek
-/// yalnızca adı kullanıp "motor yok" diyor. Tarif yine de kuruluyor, çünkü
-/// sağlayıcının keşif, onay ve yetenek yüzü motordan bağımsız ve aynı kalmalı.
+/// In a build without the engine, nobody reads most of the fields — the
+/// fallback only uses the name to say "no engine". The recipe is built
+/// anyway, because the provider's discovery, consent and capability surface
+/// is independent of the engine and must stay the same.
 #[derive(Clone)]
 #[cfg_attr(not(feature = "plugin-engine"), allow(dead_code))]
 pub(crate) struct ScriptSpec {
     pub(crate) plugin: String,
-    /// Betiğin mutlak yolu.
+    /// Absolute path of the script.
     pub(crate) main: PathBuf,
-    /// Yığın izlerinde görünecek ad: manifestteki `main`.
+    /// The name shown in stack traces: the manifest's `main`.
     pub(crate) module_name: String,
     pub(crate) capabilities: Capabilities,
     pub(crate) permissions: Permissions,
     pub(crate) secrets: BTreeMap<String, String>,
     pub(crate) state_dir: PathBuf,
-    /// Eklentinin HTTP istemcisi; yoksa **neden** olmadığı (K9).
+    /// The plugin's HTTP client; if there is none, **why** (K9).
     pub(crate) http: std::result::Result<Arc<dyn HttpClient>, String>,
     pub(crate) store: ArtifactStore,
     pub(crate) requires: Vec<Requirement>,
 }
 
-/// Gömülü motorda yaşayan bir sağlayıcı.
+/// A provider living in the embedded engine.
 pub struct PluginProvider {
     id: ProviderId,
     display_name: String,
@@ -419,7 +430,7 @@ pub struct PluginProvider {
 struct SessionState {
     worker: Option<ScriptWorker>,
     starts: u32,
-    /// Bir daha denemeye değmeyen bir sebep (sözleşme ihlali gibi).
+    /// A reason not worth retrying (such as a contract violation).
     give_up: Option<String>,
 }
 
@@ -433,11 +444,11 @@ impl std::fmt::Debug for PluginProvider {
 }
 
 impl PluginProvider {
-    /// Manifestten kurar, bu derlemenin eklenti HTTP istemcisiyle. Motor
-    /// açılmaz.
+    /// Sets it up from the manifest, with this build's plugin HTTP client. The
+    /// engine is not started.
     ///
     /// # Errors
-    /// Eklentinin durum dizini oluşturulamazsa.
+    /// If the plugin's state directory cannot be created.
     pub fn from_manifest(
         config: &Config,
         manifest: &PluginManifest,
@@ -446,21 +457,22 @@ impl PluginProvider {
     ) -> Result<Self> {
         let http = crate::net::plugin_http_client().map_err(|err| {
             format!(
-                "bu derlemede eklentiler ağa çıkamaz: {}",
+                "plugins cannot go online in this build: {}",
                 err.chain_text().replace('\n', " ")
             )
         });
         Self::with_http(config, manifest, dir, secrets, http)
     }
 
-    /// Manifestten kurar; HTTP istemcisini çağıran verir. Motor açılmaz.
+    /// Sets it up from the manifest; the caller supplies the HTTP client. The
+    /// engine is not started.
     ///
-    /// Testler ve kendi HTTP yığınını taşıyan kabuklar için. Verilen istemci
-    /// **yönlendirme izlememeli**: izleyen bir istemci izin denetiminin
-    /// etrafından dolanmanın yolunu açar ([`host`]).
+    /// For tests and for shells that bring their own HTTP stack. The client
+    /// given **must not follow redirects**: a client that follows them opens a
+    /// way around the permission check ([`host`]).
     ///
     /// # Errors
-    /// Eklentinin durum dizini oluşturulamazsa.
+    /// If the plugin's state directory cannot be created.
     pub fn with_http(
         config: &Config,
         manifest: &PluginManifest,
@@ -477,7 +489,7 @@ impl PluginProvider {
             tracing::warn!(
                 plugin = %manifest.name,
                 unknown = %unknown.join(", "),
-                "manifest tanınmayan yetenek adı içeriyor, yok sayıldı"
+                "the manifest contains an unrecognised capability name; ignored"
             );
         }
         let unmapped = capabilities.contains(Capabilities::BROWSE)
@@ -485,7 +497,7 @@ impl PluginProvider {
         if unmapped {
             tracing::warn!(
                 plugin = %manifest.name,
-                "`browse`/`control` api 2'de bir fonksiyona karşılık gelmiyor; beyan yalnızca listede görünür"
+                "`browse`/`control` do not map to a function in api 2; the declaration only shows in the list"
             );
         }
 
@@ -514,8 +526,8 @@ impl PluginProvider {
         })
     }
 
-    /// Süreleri değiştirir. Yalnızca sınama için: zaman aşımını sınayan bir
-    /// test 20 saniye beklememeli.
+    /// Changes the time limits. For testing only: a test of the timeout must not
+    /// wait 20 seconds.
     #[must_use]
     pub fn with_timeouts(mut self, start: Duration, call: Duration) -> Self {
         self.start_timeout = start;
@@ -523,12 +535,11 @@ impl PluginProvider {
         self
     }
 
-    /// Motoru hazırlar (gerekirse başlatır) ve bir fonksiyonu çağırır.
+    /// Prepares the engine (starting it if needed) and calls a function.
     ///
-    /// Zaman aşımı ve düşen iş parçacığı motoru bırakır: bir sonraki çağrı
-    /// yeniden başlatır. Eklentinin fırlattığı hata motoru bırakmaz —
-    /// reddedilen bir istek bozulmuş bir motor değildir (D-023'ün eklenti
-    /// hâli).
+    /// A timeout and a dead thread drop the engine: the next call restarts it.
+    /// An error the plugin throws does not drop the engine — a rejected request
+    /// is not a broken engine (the plugin version of D-023).
     fn call(
         &self,
         function: &'static str,
@@ -539,7 +550,8 @@ impl PluginProvider {
                 Stage::ProviderCall,
                 ErrorKind::PluginCrashed {
                     plugin: self.id.as_str().to_owned(),
-                    detail: "eklenti durumu kilidi bozuldu (önceki çağrı panikledi)".to_owned(),
+                    detail: "the plugin state lock is poisoned (an earlier call panicked)"
+                        .to_owned(),
                 },
             )
         })?;
@@ -562,7 +574,7 @@ impl PluginProvider {
                 Stage::PluginStart,
                 ErrorKind::PluginCrashed {
                     plugin: self.id.as_str().to_owned(),
-                    detail: "eklenti başlatılamadı".to_owned(),
+                    detail: "the plugin could not be started".to_owned(),
                 },
             ));
         };
@@ -574,8 +586,8 @@ impl PluginProvider {
                 ErrorKind::PluginCrashed { .. } | ErrorKind::PluginTimeout { .. }
             )
         {
-            // Süresi dolan bir çağrının yarım bıraktığı durumla devam
-            // edilmiyor: motor bırakılır, sıradaki çağrı temiz başlar.
+            // We do not carry on with the state a timed-out call left half done:
+            // the engine is dropped and the next call starts clean.
             state.worker = None;
         }
         outcome
@@ -583,7 +595,8 @@ impl PluginProvider {
 
     fn start(&self, state: &mut SessionState) -> Result<()> {
         if state.starts >= MAX_STARTS {
-            let reason = format!("{MAX_STARTS} kez başlatıldı ve her seferinde düştü, vazgeçildi");
+            let reason =
+                format!("started {MAX_STARTS} times and it fell over every time; giving up");
             state.give_up = Some(reason.clone());
             return Err(Error::new(
                 Stage::PluginStart,
@@ -601,7 +614,7 @@ impl PluginProvider {
                 Ok(())
             }
             Err(err) => {
-                // Sözleşme ihlali ve eksik motor tekrarla düzelmez.
+                // A contract violation and a missing engine are not fixed by retrying.
                 if matches!(
                     err.kind(),
                     ErrorKind::PluginContract { .. } | ErrorKind::Unsupported { .. }
@@ -613,7 +626,7 @@ impl PluginProvider {
         }
     }
 
-    /// Motoru kapatır. Bir sonraki çağrı yeniden başlatır.
+    /// Shuts the engine down. The next call restarts it.
     pub fn shutdown(&self) {
         match self.state.lock() {
             Ok(mut state) => {
@@ -621,7 +634,7 @@ impl PluginProvider {
                     worker.shutdown();
                 }
             }
-            Err(_) => tracing::warn!(plugin = %self.id, "kapatma sırasında kilit bozuktu"),
+            Err(_) => tracing::warn!(plugin = %self.id, "the lock was poisoned during shutdown"),
         }
     }
 
@@ -652,14 +665,14 @@ impl PluginProvider {
         serde_json::from_value(value).map_err(|err| {
             self.contract(
                 export::HEALTH,
-                format!("`{{ reachable, detail?, track_count? }}` bekleniyordu: {err}"),
+                format!("expected `{{ reachable, detail?, track_count? }}`: {err}"),
             )
         })
     }
 
     fn search_now(&self, query: &str, limit: usize) -> Result<Vec<ProviderTrack>> {
         if !self.capabilities.contains(Capabilities::SEARCH) {
-            return Err(self.unsupported("arama"));
+            return Err(self.unsupported("search"));
         }
         let value = self.call(
             export::SEARCH,
@@ -668,7 +681,7 @@ impl PluginProvider {
         let wires: Vec<WireTrack> = serde_json::from_value(value).map_err(|err| {
             self.contract(
                 export::SEARCH,
-                format!("`{{ id, artist, title, … }}` dizisi bekleniyordu: {err}"),
+                format!("expected an array of `{{ id, artist, title, … }}`: {err}"),
             )
         })?;
 
@@ -682,11 +695,11 @@ impl PluginProvider {
             tracks.push(track);
         }
         if dropped_isrc > 0 {
-            // Sayıp raporluyoruz, yutmuyoruz (K9).
+            // We count and report, we do not swallow (K9).
             tracing::warn!(
                 plugin = %self.id,
                 dropped = dropped_isrc,
-                "eklenti biçimsiz ISRC gönderdi, o alanlar düşürüldü"
+                "the plugin sent malformed ISRCs; those fields were dropped"
             );
         }
         Ok(tracks)
@@ -694,13 +707,16 @@ impl PluginProvider {
 
     fn resolve_now(&self, id: &ProviderTrackId) -> Result<Option<AudioSource>> {
         if !self.capabilities.contains(Capabilities::STREAM) {
-            return Err(self.unsupported("kaynak çözme"));
+            return Err(self.unsupported("resolving sources"));
         }
         if id.provider != self.id {
             return Err(Error::new(
                 Stage::PlaybackResolve,
                 ErrorKind::InvalidInput {
-                    detail: format!("{} kimliği {} eklentisine sorulamaz", id.provider, self.id),
+                    detail: format!(
+                        "a {} id cannot be asked of the {} plugin",
+                        id.provider, self.id
+                    ),
                 },
             ));
         }
@@ -708,9 +724,7 @@ impl PluginProvider {
         let source: SourceResult = serde_json::from_value(value).map_err(|err| {
             self.contract(
                 export::RESOLVE_SOURCE,
-                format!(
-                    "`{{ kind: \"http_stream\", url, headers }}` ya da `null` bekleniyordu: {err}"
-                ),
+                format!("expected `{{ kind: \"http_stream\", url, headers }}` or `null`: {err}"),
             )
         })?;
         if let Some(source) = &source
@@ -739,8 +753,8 @@ impl Provider for PluginProvider {
                 track_count: health.track_count,
                 detail: health.detail,
             },
-            // Ulaşılamamak bir sağlık **cevabıdır** (uzak sağlayıcıyla aynı
-            // kural): `provider test` sebebi göstermeli.
+            // Being unreachable is a health **answer** (the same rule as a remote
+            // provider): `provider test` must show the reason.
             Err(err) => ProviderHealth {
                 id: self.id.clone(),
                 reachable: false,
@@ -768,22 +782,22 @@ impl Provider for PluginProvider {
 
 impl Drop for PluginProvider {
     fn drop(&mut self) {
-        // Sağlayıcı düşerse arkasında iş parçacığı ve sır dosyası kalmaz.
+        // If the provider is dropped, no thread or secret file is left behind.
         self.shutdown();
     }
 }
 
-/// Bir future'ı çağıran iş parçacığında bitirir.
+/// Runs a future to completion on the calling thread.
 ///
-/// Çekirdek bir çalışma zamanı kurmuyor (konvansiyon: çalışma zamanını
-/// çağıran seçer), ama motorun iki yeri eşzamanlı: eklentinin iş
-/// parçacığındaki `host.http` ve kurulum komutu. `HttpClient::send` ise
-/// `async`. Aradaki boşluk burada kapanıyor.
+/// The core does not set up a runtime (convention: the caller chooses the
+/// runtime), but two places in the engine are synchronous: `host.http` on
+/// the plugin's thread and the install command. `HttpClient::send` is
+/// `async`. The gap between them closes here.
 ///
-/// Bekleme **meşgul değil**: future hazır değilse iş parçacığı uyutulur ve
-/// uyandırıcı onu kaldırır. `ureq` istemcisi zaten ilk yoklamada hazır
-/// dönüyor; kendi eşzamansız istemcisini veren bir kabuk (mobil) da işlemci
-/// yakmadan beklenir.
+/// The wait is **not busy**: if the future is not ready the thread sleeps
+/// and the waker wakes it. The `ureq` client is ready on the first poll
+/// anyway; a shell that supplies its own asynchronous client (mobile) is
+/// waited for without burning the CPU.
 pub(crate) fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
     use std::pin::pin;
     use std::task::{Context, Poll, Wake, Waker};
@@ -809,11 +823,12 @@ pub(crate) fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
     }
 }
 
-/// Motorun olmadığı derlemenin yedeği: aynı yüzey, her başlatma bir hata.
+/// The fallback for a build without the engine: the same surface, every
+/// start an error.
 ///
-/// Eklentiler bu derlemede de keşfedilir, listelenir ve onaylanır —
-/// kullanıcı neyin kurulu olduğunu görmeli. Yalnızca **çalıştırılamazlar**
-/// ve ilk çağrı bunu söyler (K9).
+/// In this build plugins are still discovered, listed and approved — the
+/// user should see what is installed. They just **cannot run**, and the
+/// first call says so (K9).
 #[cfg(not(feature = "plugin-engine"))]
 mod unavailable {
     use std::time::Duration;
@@ -830,8 +845,7 @@ mod unavailable {
             Stage::PluginStart,
             ErrorKind::Unsupported {
                 provider: plugin.to_owned(),
-                what: "eklenti çalıştırma (`plugin-engine` feature'ı kapalı bir derleme)"
-                    .to_owned(),
+                what: "running plugins (a build with the `plugin-engine` feature off)".to_owned(),
                 capabilities: "NONE".to_owned(),
             },
         )

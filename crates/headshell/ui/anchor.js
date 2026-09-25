@@ -1,25 +1,27 @@
-// Çapadan pozisyon tahmini — formülün JS kopyası (D-015, D-033).
+// Estimating the position from the anchor — the JS copy of the formula
+// (D-015, D-033).
 //
-// Bu dosya `headshell_core::playback::anchor::PlaybackAnchor::position_at`'in
-// ikinci kopyasıdır. İkinci kopya olduğunu bilerek yazıyoruz: webview
-// pozisyonu çekirdeğe sormadan yürütmek zorunda, yoksa IPC her duraksadığında
-// ilerleme çubuğu donardı.
+// This file is the second copy of
+// `headshell_core::playback::anchor::PlaybackAnchor::position_at`. We write it
+// knowing it is a second copy: the webview has to advance the position
+// without asking the core, otherwise the progress bar would freeze every
+// time IPC stalls.
 //
-// İki kopya zamanla kayar ve kayma kimsenin fark etmediği yerde başlar.
-// Kilit: `fixtures/anchor/position_cases.json` — iki tarafın da okuduğu tek
-// doğruluk kaynağı. Rust tarafını `headshell-core/tests/anchor_parity.rs`,
-// bu tarafı `headshell/tests/anchor_parity_js.rs` bağlıyor — dosyayı gömülü
-// QuickJS'te değerlendirerek, `node` istemeden (D-070).
+// Two copies drift over time, and the drift starts where nobody notices. The
+// lock: `fixtures/anchor/position_cases.json` — the single source of truth
+// both sides read. `headshell-core/tests/anchor_parity.rs` binds the Rust
+// side, `headshell/tests/anchor_parity_js.rs` this side — by evaluating the
+// file in embedded QuickJS, without needing `node` (D-070).
 //
-// **`Math.floor`, `Math.round` değil.** Çekirdek `as u64` ile kırpıyor:
-// `rate 1.001` ile 100 sn'de 100100 değil 100099 ms çıkıyor
-// (100000 × 1.001 ikilik tabanda 100099.999… ediyor). `Math.round` iki kopyayı
-// tam buradan ayırırdı. Faz 4'te aynı formül oda senkronunu sürecek.
+// **`Math.floor`, not `Math.round`.** The core truncates with `as u64`: with
+// `rate 1.001`, 100 s gives 100099 ms, not 100100 (100000 × 1.001 comes to
+// 100099.999… in binary). `Math.round` would split the two copies exactly
+// here. In Phase 4 the same formula will drive room sync.
 
-/// `wall_time` RFC 3339 metninden milisaniye.
+/// Milliseconds from the `wall_time` RFC 3339 text.
 ///
-/// Çekirdek `Timestamp::as_millisecond()` diyor, yani milisaniye altını
-/// kırpıyor. `Date.parse` de öyle yapıyor.
+/// The core says `Timestamp::as_millisecond()`, which truncates below the
+/// millisecond. `Date.parse` does the same.
 function wallClockMs(wallTime) {
   return Date.parse(wallTime);
 }
@@ -31,19 +33,19 @@ function clampToDuration(position, durationMs) {
   return Math.min(position, durationMs);
 }
 
-/// Verilen an için pozisyon (ms).
+/// The position for the given moment (ms).
 ///
-/// `anchor` çekirdekten geldiği gibi: `{ track, wall_time, position_ms,
-/// rate, state, duration_ms }`.
+/// `anchor` as it came from the core: `{ track, wall_time, position_ms, rate,
+/// state, duration_ms }`.
 export function positionAt(anchor, nowMs) {
-  // Zaman yalnızca `playing` iken ilerler. `buffering` ayrı bir durum:
-  // ses çıkmıyor, sayaç da yürümemeli — "duraklatıldı" demek kullanıcıyı
-  // yanıltır ama sayacı yürütmek de yalan söyler.
+  // Time only advances while `playing`. `buffering` is a separate state:
+  // no sound comes out, so the counter must not move either — saying
+  // "paused" misleads the user, but moving the counter lies too.
   if (anchor.state !== "playing" || anchor.rate <= 0) {
     return clampToDuration(anchor.position_ms, anchor.duration_ms);
   }
   const elapsed = nowMs - wallClockMs(anchor.wall_time);
-  // Geriye giden saat pozisyonu geri sarmaz.
+  // A clock going backwards does not rewind the position.
   if (elapsed <= 0) {
     return clampToDuration(anchor.position_ms, anchor.duration_ms);
   }
@@ -51,12 +53,12 @@ export function positionAt(anchor, nowMs) {
   return clampToDuration(anchor.position_ms + advanced, anchor.duration_ms);
 }
 
-/// Şu andaki pozisyon.
+/// The position right now.
 export function positionNow(anchor) {
   return positionAt(anchor, Date.now());
 }
 
-/// Milisaniyeyi `3:07` biçimine çevirir.
+/// Turns milliseconds into the `3:07` format.
 export function clock(ms) {
   const seconds = Math.floor(ms / 1000);
   const minutes = Math.floor(seconds / 60);

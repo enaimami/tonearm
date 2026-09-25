@@ -1,32 +1,32 @@
-//! Çalma kuyruğu (PLAN §1.5).
+//! The play queue (PLAN §1.5).
 //!
-//! Durum çekirdekte tutulur; CLI ve GUI yalnızca gösterir. Kuyruk saf bir
-//! veri yapısıdır — ses hattını bilmez, `audio` feature'ından bağımsız
-//! derlenir ve testleri ses aygıtı gerektirmez.
+//! The state is kept in the core; the CLI and the GUI only show it. The queue
+//! is a pure data structure — it knows nothing of the audio pipeline, compiles
+//! independently of the `audio` feature, and its tests need no audio device.
 
 use serde::{Deserialize, Serialize};
 
 use crate::ids::ProviderTrackId;
 use crate::model::TrackRef;
 
-/// Kuyruktaki bir öğe.
+/// An item in the queue.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QueueItem {
-    /// Hangi sağlayıcıdan, hangi parça.
+    /// Which track, from which provider.
     pub id: ProviderTrackId,
     pub track: TrackRef,
 }
 
-/// Tekrar kipi.
+/// The repeat mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RepeatMode {
-    /// Kuyruk bitince durur.
+    /// Stops when the queue ends.
     #[default]
     Off,
-    /// Kuyruk bitince başa döner.
+    /// Goes back to the start when the queue ends.
     All,
-    /// Aynı parçayı tekrarlar.
+    /// Repeats the same track.
     One,
 }
 
@@ -47,36 +47,36 @@ impl std::fmt::Display for RepeatMode {
     }
 }
 
-/// Kuyruğun okunabilir görünümü — **çalma sırasına göre**.
+/// A readable view of the queue — **in play order**.
 ///
-/// Kabukların (TUI, GUI) tek seferde alıp çizdiği şey. Ayrı bir "IPC tipi"
-/// değil: çekirdekte yaşıyor, `serde` ile olduğu gibi geçiyor ve TUI de
-/// aynısını kullanıyor (D-033).
+/// What the shells (TUI, GUI) take in one go and draw. Not a separate "IPC
+/// type": it lives in the core, crosses as it is with `serde`, and the TUI
+/// uses the same thing (D-033).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QueueView {
-    /// Öğeler, çalma sırasında.
+    /// The items, in play order.
     pub items: Vec<QueueItem>,
-    /// `items` içindeki çalan konum. Kuyruk boşsa anlamsız.
+    /// The playing position within `items`. Meaningless if the queue is empty.
     pub position: usize,
     pub repeat: RepeatMode,
     pub shuffle: bool,
 }
 
-/// Çalma kuyruğu ve içindeki konum.
+/// The play queue and the position within it.
 ///
-/// Karıştırma **sırayı bozmaz**, ayrı bir çalma sırası tutar: karıştırmayı
-/// kapatınca kullanıcı listesini kaybetmez ve "sıradaki ne" sorusu iki kipte
-/// de aynı yerden cevaplanır.
+/// Shuffling **does not disturb the order**; it keeps a separate play order:
+/// turning shuffle off does not lose the user's list, and "what's next" is
+/// answered from the same place in both modes.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Queue {
     items: Vec<QueueItem>,
-    /// `order[position]` → `items` indeksi.
+    /// `order[position]` → an index into `items`.
     order: Vec<usize>,
-    /// `order` içindeki konum. Kuyruk boşsa anlamsız.
+    /// The position within `order`. Meaningless if the queue is empty.
     position: usize,
     repeat: RepeatMode,
     shuffle: bool,
-    /// Karıştırma için deterministik üreteç durumu (test edilebilirlik).
+    /// The deterministic generator state for shuffling (testability).
     rng_state: u64,
 }
 
@@ -89,7 +89,7 @@ impl Queue {
         }
     }
 
-    /// Kuyruğu verilen parçalarla değiştirir ve başa alır.
+    /// Replaces the queue with the given tracks and moves to the start.
     pub fn replace(&mut self, items: Vec<QueueItem>) {
         self.items = items;
         self.order = (0..self.items.len()).collect();
@@ -99,7 +99,7 @@ impl Queue {
         }
     }
 
-    /// Kuyruğun sonuna ekler.
+    /// Appends to the end of the queue.
     pub fn append(&mut self, items: impl IntoIterator<Item = QueueItem>) {
         for item in items {
             self.items.push(item);
@@ -113,7 +113,7 @@ impl Queue {
         self.position = 0;
     }
 
-    /// Çalma sırasına göre öğeler.
+    /// The items in play order.
     #[must_use]
     pub fn items(&self) -> Vec<QueueItem> {
         self.order
@@ -122,12 +122,12 @@ impl Queue {
             .collect()
     }
 
-    /// Kuyruğun dışarıya gösterilen hâli.
+    /// The form of the queue shown to the outside.
     ///
-    /// `Queue`'nun kendisi kabuğa gönderilmiyor: içinde `order` ve
-    /// `rng_state` var, yani tüketici çalma sırasını **kendisi** kurmak
-    /// zorunda kalırdı — sıralama mantığının ikinci bir kopyası JS'te yaşardı.
-    /// Bu görünüm sırayı zaten uygulanmış verir.
+    /// The `Queue` itself is not sent to the shell: it contains `order` and
+    /// `rng_state`, so the consumer would have to build the play order
+    /// **itself** — a second copy of the ordering logic would live in JS. This
+    /// view gives the order already applied.
     #[must_use]
     pub fn view(&self) -> QueueView {
         QueueView {
@@ -148,14 +148,14 @@ impl Queue {
         self.items.is_empty()
     }
 
-    /// Şu an çalması gereken öğe.
+    /// The item that should be playing right now.
     #[must_use]
     pub fn current(&self) -> Option<&QueueItem> {
         let index = *self.order.get(self.position)?;
         self.items.get(index)
     }
 
-    /// Çalma sırasındaki konum (0 tabanlı).
+    /// The position in the play order (0-based).
     #[must_use]
     pub const fn position(&self) -> usize {
         self.position
@@ -175,11 +175,12 @@ impl Queue {
         self.shuffle
     }
 
-    /// Karıştırmayı açar/kapatır.
+    /// Turns shuffle on/off.
     ///
-    /// Açarken **çalan parça yerinde kalır** — altından çekilmez; kalanlar
-    /// karıştırılır. Kapatırken özgün sıraya dönülür ve konum çalan parçaya
-    /// göre düzeltilir.
+    /// When turning it on, **the playing track stays where it is** — it is not
+    /// pulled out from under the user; the rest are shuffled. When turning it
+    /// off, the original order comes back and the position is corrected to the
+    /// playing track.
     pub fn set_shuffle(&mut self, shuffle: bool) {
         if shuffle == self.shuffle {
             return;
@@ -191,7 +192,7 @@ impl Queue {
         } else {
             self.order = (0..self.items.len()).collect();
         }
-        // Konumu çalan parçanın yeni sırasına taşı.
+        // Move the position to the playing track's new place in the order.
         if let Some(index) = current_index {
             if let Some(new_position) = self.order.iter().position(|&i| i == index) {
                 self.position = new_position;
@@ -199,10 +200,11 @@ impl Queue {
         }
     }
 
-    /// Belirli bir konuma atlar.
+    /// Jumps to a given position.
     ///
-    /// Sınır dışıysa `false` döner ve kuyruk değişmez — sessizce başa
-    /// sarmaz, çünkü çağıran hata yaptığını bilmeli.
+    /// If it is out of range it returns `false` and the queue does not change —
+    /// it does not silently wrap to the start, because the caller should know it
+    /// made a mistake.
     pub fn jump_to(&mut self, position: usize) -> bool {
         if position >= self.order.len() {
             return false;
@@ -211,16 +213,16 @@ impl Queue {
         true
     }
 
-    /// Sıradaki parçaya geçer.
+    /// Moves on to the next track.
     ///
-    /// `RepeatMode::One` **kendiliğinden tekrar etmez** — bu, parça doğal
-    /// olarak bittiğinde [`Queue::advance_after_finish`] ile ayrılır.
-    /// Kullanıcı "sonraki" derse tekrar kipinde de sıradakine geçilir;
-    /// aksi halde tuş çalışmıyormuş gibi görünür.
+    /// `RepeatMode::One` **does not repeat on its own here** — that is split off
+    /// with [`Queue::advance_after_finish`] when the track ends naturally. If the
+    /// user says "next", the queue moves on to the next track in repeat mode too;
+    /// otherwise the key would look broken.
     #[expect(
         clippy::should_implement_trait,
-        reason = "kuyruk bir iterator değil: konumu vardır, geriye de gider (previous). \
-                  `next` burada kullanıcının bastığı tuşun adı."
+        reason = "the queue is not an iterator: it has a position and also goes backwards (previous). \
+                  `next` here is the name of the key the user pressed."
     )]
     pub fn next(&mut self) -> Option<&QueueItem> {
         if self.order.is_empty() {
@@ -239,7 +241,7 @@ impl Queue {
         self.current()
     }
 
-    /// Önceki parçaya döner.
+    /// Goes back to the previous track.
     pub fn previous(&mut self) -> Option<&QueueItem> {
         if self.order.is_empty() {
             return None;
@@ -254,16 +256,19 @@ impl Queue {
         self.current()
     }
 
-    /// Doğal bitişte hangi parçanın geleceğini **imleci oynatmadan** söyler.
+    /// Says which track comes next on a natural end **without moving the
+    /// cursor**.
     ///
-    /// Gapless önden okuması için (D-024): sıradaki parça, bugünkü parça hâlâ
-    /// çalarken çözülmeye başlanmalı. İmleç ancak geçiş **duyulduğunda**
-    /// ilerler, yoksa arayüz olmayan bir parçayı çalıyor gösterirdi.
+    /// For gapless read-ahead (D-024): the next track must start decoding while
+    /// today's track is still playing. The cursor only advances when the
+    /// transition is **heard**; otherwise the interface would show a track as
+    /// playing that is not.
     ///
-    /// Kuyruğun sonunda `RepeatMode::All` ile başa sarma durumunda **`None`**
-    /// döner: sarma karıştırmayı yeniden üretiyor ([`Queue::reshuffle`]) ve
-    /// hangi parçanın geleceği imleç oynamadan bilinemez. Bedeli, tur başına
-    /// bir kez boşluk; uydurulmuş bir parçayı önden çözmekten iyidir.
+    /// At the end of the queue, when wrapping to the start with `RepeatMode::All`,
+    /// it returns **`None`**: wrapping regenerates the shuffle
+    /// ([`Queue::reshuffle`]), and which track comes next cannot be known without
+    /// moving the cursor. The price is one gap per round; better than decoding a
+    /// made-up track ahead.
     #[must_use]
     pub fn peek_after_finish(&self) -> Option<&QueueItem> {
         if self.repeat == RepeatMode::One {
@@ -278,11 +283,11 @@ impl Queue {
             .and_then(|index| self.items.get(*index))
     }
 
-    /// Parça **doğal olarak bittiğinde** sıradakini seçer.
+    /// Picks the next track when the track **ends naturally**.
     ///
-    /// [`Queue::next`]'ten farkı: `RepeatMode::One` burada aynı parçayı
-    /// yeniden verir. Kullanıcı isteğiyle otomatik geçişin ayrılması gereken
-    /// tek yer burası.
+    /// The difference from [`Queue::next`]: here `RepeatMode::One` gives the same
+    /// track again. This is the one place where a user request and an automatic
+    /// transition must be told apart.
     pub fn advance_after_finish(&mut self) -> Option<&QueueItem> {
         if self.repeat == RepeatMode::One {
             return self.current();
@@ -290,14 +295,14 @@ impl Queue {
         self.next()
     }
 
-    /// Kalanları karıştırır; çalan parça (varsa) başta kalır.
+    /// Shuffles the rest; the playing track (if any) stays first.
     fn reshuffle(&mut self) {
         let current = self.order.get(self.position).copied();
         let mut rest: Vec<usize> = (0..self.items.len())
             .filter(|index| Some(*index) != current)
             .collect();
 
-        // Fisher-Yates, deterministik üreteçle (xorshift64*).
+        // Fisher-Yates, with a deterministic generator (xorshift64*).
         for i in (1..rest.len()).rev() {
             let j = (self.next_random() % (i as u64 + 1)) as usize;
             rest.swap(i, j);
@@ -310,7 +315,7 @@ impl Queue {
         self.position = 0;
     }
 
-    /// xorshift64* — kriptografik değil, yalnızca tekrarlanabilir karıştırma.
+    /// xorshift64* — not cryptographic, only a repeatable shuffle.
     fn next_random(&mut self) -> u64 {
         let mut x = self.rng_state;
         x ^= x >> 12;
@@ -320,7 +325,7 @@ impl Queue {
         x.wrapping_mul(0x2545_F491_4F6C_DD1D)
     }
 
-    /// Karıştırma üretecini sabitler. Yalnızca testler için.
+    /// Fixes the shuffle generator. For tests only.
     #[doc(hidden)]
     pub fn seed_rng(&mut self, seed: u64) {
         self.rng_state = seed | 1;
@@ -357,7 +362,7 @@ mod tests {
             queue.next().map(|i| i.track.title.clone()).as_deref(),
             Some("b")
         );
-        assert!(queue.next().is_none(), "repeat kapalıyken kuyruk bitmeli");
+        assert!(queue.next().is_none(), "with repeat off the queue must end");
     }
 
     #[test]
@@ -377,7 +382,7 @@ mod tests {
         let mut queue = queue_of(&["a", "b"]);
         queue.set_repeat(RepeatMode::One);
 
-        // Parça kendiliğinden bitti: aynı parça tekrar.
+        // The track ended on its own: the same track again.
         assert_eq!(
             queue
                 .advance_after_finish()
@@ -385,8 +390,8 @@ mod tests {
                 .as_deref(),
             Some("a")
         );
-        // Kullanıcı "sonraki" dedi: tekrar kipinde bile ilerlemeli, yoksa
-        // tuş bozukmuş gibi görünür.
+        // The user said "next": it must move on even in repeat mode, otherwise the
+        // key looks broken.
         assert_eq!(
             queue.next().map(|i| i.track.title.clone()).as_deref(),
             Some("b")
@@ -401,7 +406,7 @@ mod tests {
         assert_eq!(
             queue.previous().map(|i| i.track.title.clone()).as_deref(),
             Some("b"),
-            "repeat all başta geriye giderken sona sarmalı"
+            "repeat all must wrap to the end when going backwards at the start"
         );
     }
 
@@ -409,16 +414,16 @@ mod tests {
     fn shuffle_keeps_the_current_track_playing() {
         let mut queue = queue_of(&["a", "b", "c", "d", "e"]);
         queue.seed_rng(42);
-        queue.next(); // "b" çalıyor
+        queue.next(); // "b" is playing
         assert_eq!(current_title(&queue).as_deref(), Some("b"));
 
         queue.set_shuffle(true);
         assert_eq!(
             current_title(&queue).as_deref(),
             Some("b"),
-            "karıştırma çalan parçayı altından çekmemeli"
+            "shuffling must not pull the playing track out from under the user"
         );
-        assert_eq!(queue.len(), 5, "hiçbir parça kaybolmamalı");
+        assert_eq!(queue.len(), 5, "no track must be lost");
     }
 
     #[test]
@@ -449,8 +454,11 @@ mod tests {
             .iter()
             .map(|i| i.track.title.clone())
             .collect();
-        assert_ne!(shuffled, titles, "50 parça aynı sırada kalmamalı");
-        // Aynı küme olmalı, yalnızca sıra değişmeli.
+        assert_ne!(
+            shuffled, titles,
+            "50 tracks must not stay in the same order"
+        );
+        // It must be the same set; only the order may change.
         let mut sorted = shuffled.clone();
         sorted.sort();
         let mut expected = titles.clone();
@@ -461,8 +469,12 @@ mod tests {
     #[test]
     fn jump_to_rejects_out_of_range_instead_of_wrapping() {
         let mut queue = queue_of(&["a", "b"]);
-        assert!(!queue.jump_to(5), "sınır dışı atlama reddedilmeli");
-        assert_eq!(queue.position(), 0, "başarısız atlama konumu bozmamalı");
+        assert!(!queue.jump_to(5), "an out-of-range jump must be refused");
+        assert_eq!(
+            queue.position(),
+            0,
+            "a failed jump must not disturb the position"
+        );
         assert!(queue.jump_to(1));
         assert_eq!(current_title(&queue).as_deref(), Some("b"));
     }

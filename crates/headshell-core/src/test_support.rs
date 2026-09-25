@@ -1,22 +1,23 @@
-//! Birim testlerinin ortak yardımcıları. Yalnızca `cfg(test)` derlenir.
+//! Shared helpers for unit tests. Compiled only under `cfg(test)`.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::config::Config;
 
-/// Kendini silen geçici dizin.
+/// A temporary directory that deletes itself.
 ///
-/// Testler geçici dizinlerini **siler**, düşen bir test de: `Drop` panik
-/// sırasında da koşar. Bir zamanlar silmiyorlardı ve bir geliştirme
-/// makinesinin `/tmp`'sinde — orada bir tmpfs, yani bellek — 1.100 dizin,
-/// 1,2 GB birikmişti (D-070).
+/// Tests **delete** their temporary directories, even a failing test: `Drop`
+/// runs during a panic too. Once they did not, and 1,100 directories, 1.2 GB,
+/// piled up in a development machine's `/tmp` — a tmpfs there, that is,
+/// memory (D-070).
 ///
-/// Ad `headshell-<etiket>-<süreç>-<sıra>`. Sıra süreç içinde artan bir sayı,
-/// saat değil: Windows'un saat çözünürlüğü iki paralel testi aynı ada
-/// düşürebilirdi. Aynı adlı eski bir dizin (öldürülmüş bir koşumdan) varsa
-/// **kullanılmaz**, bir sonraki sıraya geçilir — test başkasının artığını
-/// kendi verisi sanmasın.
+/// The name is `headshell-<label>-<process>-<seq>`. The sequence is a counter
+/// that grows within the process, not the clock: Windows' clock resolution
+/// could give two parallel tests the same name. If an old directory with the
+/// same name exists (from a killed run) it **is not used**, the next sequence
+/// number is taken — so a test does not mistake someone else's leftovers for
+/// its own data.
 pub(crate) struct TempDir(PathBuf);
 
 impl TempDir {
@@ -32,7 +33,10 @@ impl TempDir {
             match std::fs::create_dir(&dir) {
                 Ok(()) => return Self(dir),
                 Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(err) => panic!("geçici dizin açılamadı ({}): {err}", dir.display()),
+                Err(err) => panic!(
+                    "could not open a temporary directory ({}): {err}",
+                    dir.display()
+                ),
             }
         }
     }
@@ -58,23 +62,24 @@ impl std::ops::Deref for TempDir {
 
 impl Drop for TempDir {
     fn drop(&mut self) {
-        // Silinemezse (Windows'ta açık kalmış bir dosya) test düşürülmez;
-        // ama sessiz de kalınmaz, geride ne kaldığı yazılır.
+        // If it cannot be deleted (a file left open on Windows) the test is not
+        // failed; but it does not stay silent either, what was left behind is
+        // written out.
         if let Err(err) = std::fs::remove_dir_all(&self.0)
             && err.kind() != std::io::ErrorKind::NotFound
         {
             eprintln!(
-                "uyarı: geçici dizin silinemedi ({}): {err}",
+                "warning: could not delete the temporary directory ({}): {err}",
                 self.0.display()
             );
         }
     }
 }
 
-/// Kendini silen bir veri dizini üstünde `Config`.
+/// A `Config` on top of a data directory that deletes itself.
 ///
-/// `Config`'e deref ediyor: `&Config` bekleyen her yere `&test_config`
-/// verilebilir, ve değer düştüğünde dizin de gider.
+/// It derefs to `Config`: `&test_config` can be passed anywhere a `&Config`
+/// is expected, and when the value is dropped the directory goes too.
 pub(crate) struct TestConfig {
     _dir: TempDir,
     config: Config,
@@ -102,12 +107,16 @@ mod tests {
 
     #[test]
     fn a_temp_dir_is_unique_and_gone_after_drop() {
-        let first = TempDir::new("destek");
-        let second = TempDir::new("destek");
+        let first = TempDir::new("support");
+        let second = TempDir::new("support");
         assert_ne!(first.path(), second.path());
-        std::fs::write(first.join("dosya"), "x").unwrap();
+        std::fs::write(first.join("file"), "x").unwrap();
         let path = first.path().to_path_buf();
         drop(first);
-        assert!(!path.exists(), "dizin silinmedi: {}", path.display());
+        assert!(
+            !path.exists(),
+            "the directory was not deleted: {}",
+            path.display()
+        );
     }
 }

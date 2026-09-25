@@ -1,14 +1,15 @@
-//! Hareket katmanının (`ui/motion.js`) saf hesabı (D-072).
+//! The pure calculation of the motion layer (`ui/motion.js`) (D-072).
 //!
-//! Webview'de tip denetimi yok ve bir yay formülündeki işaret hatası
-//! derleyiciye görünmez: öğe hedefinden uzaklaşıp ekrandan çıkar, ya da
-//! `NaN` bir `transform` yazar ve hiç görünmez. Bu dosya formülleri,
-//! `anchor_parity_js.rs` ile aynı yoldan — gömülü QuickJS'te, dışarıdan hiçbir
-//! şey istemeden (D-070) — sınıyor.
+//! The webview has no type checking, and a sign error in a spring formula is
+//! invisible to the compiler: the element moves away from its target and
+//! leaves the screen, or `NaN` writes a `transform` and it never shows up.
+//! This file tests the formulas the same way as `anchor_parity_js.rs` — in
+//! embedded QuickJS, needing nothing from outside (D-070).
 //!
-//! Sınanan şey DOM'a dokunmayan kısım: yay çözümü, momentum izdüşümü, lastik
-//! bant, hız ölçümü ve tema süresinin okunması. `motion.js`'in üst düzeyi bu
-//! yüzden saf tutuluyor; `document` yalnızca çağrılan fonksiyonların içinde.
+//! What is tested is the part that does not touch the DOM: the spring
+//! solution, momentum projection, the rubber band, velocity measurement and
+//! reading the theme's duration. That is why the top level of `motion.js` is
+//! kept pure; `document` only appears inside the functions that are called.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -23,10 +24,10 @@ fn source() -> String {
             .join("ui")
             .join("motion.js"),
     )
-    .expect("ADIM: MOTION_JS — ui/motion.js okunamadı")
+    .expect("STEP: MOTION_JS — could not read ui/motion.js")
 }
 
-/// Modülü değerlendirir ve `check`'e dışa aktarımlarını verir.
+/// Evaluates the module and hands its exports to `check`.
 fn with_module<R>(check: impl for<'js> FnOnce(&Ctx<'js>, Object<'js>) -> R) -> R {
     let runtime = Runtime::new().unwrap();
     let context = Context::full(&runtime).unwrap();
@@ -37,7 +38,7 @@ fn with_module<R>(check: impl for<'js> FnOnce(&Ctx<'js>, Object<'js>) -> R) -> R
         let module = match evaluated {
             Ok(module) => module,
             Err(err) => panic!(
-                "ADIM: MOTION_JS — motion.js değerlendirilemedi (üst düzeyde DOM'a mı dokunuyor?): {}",
+                "STEP: MOTION_JS — could not evaluate motion.js (does it touch the DOM at the top level?): {}",
                 CaughtError::from_error(&ctx, err)
             ),
         };
@@ -52,7 +53,7 @@ fn with_module<R>(check: impl for<'js> FnOnce(&Ctx<'js>, Object<'js>) -> R) -> R
         ] {
             let function: Function = module
                 .get(name)
-                .unwrap_or_else(|_| panic!("motion.js `{name}` dışa aktarmıyor"));
+                .unwrap_or_else(|_| panic!("motion.js does not export `{name}`"));
             exports.set(name, function).unwrap();
         }
         check(&ctx, exports)
@@ -64,7 +65,8 @@ fn call2(exports: &Object<'_>, name: &str, args: (f64, f64)) -> f64 {
     function.call(args).unwrap()
 }
 
-/// Yayı `seconds` boyunca 60 Hz karelerle ilerletir; `[konum farkı, hız]`.
+/// Advances the spring for `seconds` in 60 Hz frames; `[position offset,
+/// velocity]`.
 fn run_spring(
     exports: &Object<'_>,
     offset: f64,
@@ -79,7 +81,7 @@ fn run_spring(
         let next: Vec<f64> = step.call((x, v, 1.0 / 60.0, damping, 0.36)).unwrap();
         assert!(
             next.iter().all(|n| n.is_finite()),
-            "yay sonlu olmayan bir değer üretti (sönüm {damping}): {next:?}"
+            "the spring produced a non-finite value (damping {damping}): {next:?}"
         );
         (x, v) = (next[0], next[1]);
     }
@@ -89,8 +91,9 @@ fn run_spring(
 #[test]
 fn every_spring_settles_on_its_target_without_producing_nan() {
     with_module(|_, exports| {
-        // Aşmayan (1), aşan (0.8) ve aşırı sönümlü (1.4) yay; biri hızla
-        // fırlatılmış. Hepsi iki saniyede hedefin 0.1 birim yakınına oturmalı.
+        // A non-overshooting (1), an overshooting (0.8) and an overdamped (1.4)
+        // spring; one of them thrown with velocity. All must settle within 0.1
+        // units of the target in two seconds.
         for (damping, offset, velocity) in [
             (1.0, 240.0, 0.0),
             (0.8, 240.0, 0.0),
@@ -100,7 +103,7 @@ fn every_spring_settles_on_its_target_without_producing_nan() {
             let (x, v) = run_spring(&exports, offset, velocity, damping, 2.0);
             assert!(
                 x.abs() < 0.1 && v.abs() < 1.0,
-                "sönüm {damping}: iki saniyede oturmadı (fark {x}, hız {v})"
+                "damping {damping}: did not settle in two seconds (offset {x}, velocity {v})"
             );
         }
     });
@@ -108,48 +111,57 @@ fn every_spring_settles_on_its_target_without_producing_nan() {
 
 #[test]
 fn a_critically_damped_spring_never_overshoots() {
-    // Varsayılan yay 1.0: menü, panel, seçim göstergesi hedefini geçmez.
-    // Geçseydi sebepsiz bir zıplama olurdu — fırlatılmamış bir şey sekmez.
+    // The default spring is 1.0: a menu, a panel, the selection indicator do not
+    // overshoot their target. If they did it would be a pointless bounce —
+    // something that was not thrown does not bounce.
     with_module(|_, exports| {
         let step: Function = exports.get("springStep").unwrap();
         let (mut x, mut v) = (100.0_f64, 0.0_f64);
         for _ in 0..240 {
             let next: Vec<f64> = step.call((x, v, 1.0 / 120.0, 1.0, 0.36)).unwrap();
             (x, v) = (next[0], next[1]);
-            assert!(x >= -1e-9, "1.0 sönümlü yay hedefi geçti: {x}");
+            assert!(
+                x >= -1e-9,
+                "a spring with 1.0 damping overshot its target: {x}"
+            );
         }
     });
 }
 
 #[test]
 fn the_spring_starts_with_the_velocity_it_was_handed() {
-    // Sürüklemeden yaya geçişte dikiş olmamalı: bırakılan hız yayın ilk
-    // hızı. Kapalı biçim çözümün türevi burada kolayca işaret kaybeder.
+    // There must be no seam going from a drag to the spring: the release
+    // velocity is the spring's initial velocity. The derivative of the closed-
+    // form solution easily loses its sign here.
     with_module(|_, exports| {
         let step: Function = exports.get("springStep").unwrap();
         for damping in [0.8_f64, 1.0, 1.4] {
             let next: Vec<f64> = step.call((50.0, 1200.0, 1e-6, damping, 0.36)).unwrap();
             assert!(
                 (next[1] - 1200.0).abs() < 1.0,
-                "sönüm {damping}: başlangıç hızı 1200 olmalıydı, {} bulundu",
+                "damping {damping}: the initial velocity should have been 1200, found {}",
                 next[1]
             );
-            assert!((next[0] - 50.0).abs() < 0.01, "konum sıçradı: {}", next[0]);
+            assert!(
+                (next[0] - 50.0).abs() < 0.01,
+                "the position jumped: {}",
+                next[0]
+            );
         }
     });
 }
 
 #[test]
 fn a_big_frame_does_not_throw_the_spring_off() {
-    // Kapalı biçimin kazancı: tek bir 0.5 sn'lik adım, 30 küçük adımla aynı
-    // yere varır. Sayısal entegrasyon büyük adımda patlardı.
+    // The gain of the closed form: a single 0.5 s step lands in the same place
+    // as 30 small steps. Numerical integration would blow up on a big step.
     with_module(|_, exports| {
         let step: Function = exports.get("springStep").unwrap();
         let once: Vec<f64> = step.call((200.0, 0.0, 0.5, 0.8, 0.36)).unwrap();
         let (x, _) = run_spring(&exports, 200.0, 0.0, 0.8, 0.5);
         assert!(
             (once[0] - x).abs() < 1e-6,
-            "tek adım {} ≠ küçük adımlar {x}",
+            "a single step {} ≠ small steps {x}",
             once[0]
         );
     });
@@ -158,10 +170,10 @@ fn a_big_frame_does_not_throw_the_spring_off() {
 #[test]
 fn projection_is_apples_exponential_decay() {
     with_module(|_, exports| {
-        // 1000 px/sn, 0.998 → (1000/1000)·0.998/0.002 = 499 px.
+        // 1000 px/s, 0.998 → (1000/1000)·0.998/0.002 = 499 px.
         let projected = call2(&exports, "project", (1000.0, 0.998));
         assert!((projected - 499.0).abs() < 1e-6, "{projected}");
-        // Yön korunur.
+        // The direction is kept.
         assert!(call2(&exports, "project", (-1000.0, 0.998)) < 0.0);
     });
 }
@@ -171,15 +183,15 @@ fn the_rubber_band_resists_more_the_further_it_is_pulled() {
     with_module(|_, exports| {
         let band: Function = exports.get("rubberband").unwrap();
         let at = |overshoot: f64| -> f64 { band.call((overshoot, 300.0)).unwrap() };
-        // Az çekilince kabaca 0.55 oranında izler…
+        // Pulled a little, it follows at roughly 0.55…
         assert!((at(1.0) - 0.55).abs() < 0.01, "{}", at(1.0));
-        // …çekildikçe oran düşer…
+        // …the more it is pulled, the lower the ratio…
         assert!(at(400.0) / 400.0 < at(40.0) / 40.0);
-        // …ve ne kadar çekilirse çekilsin boyutu geçmez.
+        // …and however far it is pulled, it does not exceed the size.
         assert!(at(1.0e9) < 300.0);
-        // İşaret korunur: sola çekilen sola gider.
+        // The sign is kept: pulled left, it goes left.
         assert!(at(-50.0) < 0.0);
-        // Boyutu olmayan bir öğe hiç izlemez (sıfıra bölme yok).
+        // An element without a size does not follow at all (no division by zero).
         let zero: f64 = band.call((50.0, 0.0)).unwrap();
         assert_eq!(zero, 0.0);
     });
@@ -201,18 +213,18 @@ fn the_duration_token_is_read_the_way_css_reads_it() {
         assert_eq!(
             read(" 120ms "),
             Some(120.0),
-            "getPropertyValue boşluk bırakır"
+            "getPropertyValue leaves whitespace"
         );
         assert_eq!(read("0.2s"), Some(200.0));
         assert_eq!(read("0ms"), Some(0.0));
-        assert_eq!(read("0"), Some(0.0), "birimsiz sıfır CSS'te geçerli");
+        assert_eq!(read("0"), Some(0.0), "a unitless zero is valid in CSS");
         assert_eq!(
             read("120"),
             None,
-            "birimsiz sıfır dışı sayı CSS'te geçersiz"
+            "a unitless non-zero number is invalid in CSS"
         );
         assert_eq!(read("-5ms"), None);
-        assert_eq!(read("hızlı"), None);
+        assert_eq!(read("fast"), None);
         assert_eq!(read(""), None);
     });
 }
@@ -233,16 +245,17 @@ fn zero_duration_stops_all_motion_and_reduced_motion_keeps_only_fades() {
                 value.get("response").unwrap(),
             )
         };
-        // Yüksek Karşıtlık teması: `--headshell-duration: 0ms` → hiçbir şey.
+        // The High Contrast theme: `--headshell-duration: 0ms` → nothing.
         assert_eq!(read(Some(0.0), false), (false, false, 0.0));
-        // Sistem "hareketi azalt" diyor: konum yok, opaklık var.
+        // The system says "reduce motion": no position, opacity yes.
         let (enabled, spatial, _) = read(Some(120.0), true);
         assert!(enabled && !spatial);
-        // Varsayılan: tepki süre × 3.
+        // The default: response = duration × 3.
         let (enabled, spatial, response) = read(Some(120.0), false);
         assert!(enabled && spatial);
         assert!((response - 0.36).abs() < 1e-9, "{response}");
-        // Okunamayan token varsayılana düşer, hareketi kapatmaz.
+        // An unreadable token falls back to the default, it does not turn motion
+        // off.
         let (enabled, _, response) = read(None, false);
         assert!(enabled);
         assert!((response - 0.36).abs() < 1e-9, "{response}");
@@ -262,24 +275,24 @@ fn velocity_comes_from_the_recent_samples_only() {
         };
         let speed = || -> f64 { velocity.call((This(tracker.clone()),)).unwrap() };
 
-        // Tek örnekle hız yok.
+        // No velocity with a single sample.
         sample(0.0, 0.0);
         assert_eq!(speed(), 0.0);
 
-        // 16 ms'de bir 8 px: 500 px/sn.
+        // 8 px every 16 ms: 500 px/s.
         for i in 1..=6 {
             sample(f64::from(i) * 16.0, f64::from(i) * 8.0);
         }
         let v = speed();
         assert!((v - 500.0).abs() < 1.0, "{v}");
 
-        // Parmak durdu, 300 ms sonra bıraktı: eski hızlı örnekler pencereden
-        // düştü, hız neredeyse sıfır.
+        // The finger stopped and released 300 ms later: the old fast samples fell
+        // out of the window, the velocity is almost zero.
         sample(396.0, 48.0);
         let v = speed();
         assert!(
             v.abs() < 50.0,
-            "durmuş bir parmak hâlâ hızlı sayılıyor: {v}"
+            "a finger that stopped still counts as fast: {v}"
         );
     });
 }

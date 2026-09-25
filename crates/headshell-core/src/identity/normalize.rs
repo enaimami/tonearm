@@ -1,13 +1,13 @@
-//! Metin normalizasyonu — bulanık eşleşmenin girdisi.
+//! Text normalisation — the input of fuzzy matching.
 //!
-//! "Radiohead - Creep (Remastered 2011)" ile "radiohead - creep" aynı parçadır.
-//! Buradaki her kural bir doğruluk kararıdır; değiştirirsen
-//! `fixtures/identity/cases.json` üzerindeki oranı yeniden ölç.
+//! "Radiohead - Creep (Remastered 2011)" and "radiohead - creep" are the same
+//! track. Every rule here is an accuracy decision; if you change one,
+//! re-measure the rate on `fixtures/identity/cases.json`.
 
-/// Bir sanatçı/başlık dizgisini karşılaştırılabilir hâle getirir.
+/// Makes an artist/title string comparable.
 ///
-/// Sırayla: aksan katlama → küçük harf → parantezli/tireli ekler → `feat.` →
-/// noktalama → boşluk sadeleştirme.
+/// In order: diacritic folding → lower case → parenthesised/dashed suffixes →
+/// `feat.` → punctuation → whitespace simplification.
 #[must_use]
 pub fn normalize_text(input: &str) -> String {
     let folded = fold_diacritics(input);
@@ -17,7 +17,7 @@ pub fn normalize_text(input: &str) -> String {
     collapse(&strip_punctuation(&without_feat))
 }
 
-/// Sanatçı adını normalize eder; başlıktan farklı olarak `the` öneki atılır.
+/// Normalises an artist name; unlike a title, a `the` prefix is dropped.
 #[must_use]
 pub fn normalize_artist(input: &str) -> String {
     let base = normalize_text(input);
@@ -25,16 +25,16 @@ pub fn normalize_artist(input: &str) -> String {
         .map_or(base.clone(), ToOwned::to_owned)
 }
 
-/// Bir parçanın yerel gruplama anahtarı: `sanatçı\u{1}başlık`.
+/// A track's local grouping key: `artist\u{1}title`.
 #[must_use]
 pub fn track_key(artist: &str, title: &str) -> String {
     format!("{}\u{1}{}", normalize_artist(artist), normalize_text(title))
 }
 
-/// Türkçe ve yaygın Latin aksanlarını ASCII'ye katlar.
+/// Folds Turkish and common Latin diacritics to ASCII.
 ///
-/// Kütüphane eklemek yerine elle: liste küçük ve tam olarak neyin katlandığı
-/// görünür olsun istiyoruz.
+/// By hand rather than with a library: the list is small and we want it to be
+/// visible exactly what gets folded.
 fn fold_diacritics(input: &str) -> String {
     input
         .chars()
@@ -63,10 +63,10 @@ fn fold_diacritics(input: &str) -> String {
         .collect()
 }
 
-/// Aynı kaydın yeniden yayımını gösteren etiketler — atılırlar.
+/// Labels marking a re-release of the same recording — they are dropped.
 ///
-/// Bunlar kaydın kendisini değiştirmez: `Creep` ile `Creep (Remastered 2011)`
-/// aynı performanstır.
+/// They do not change the recording itself: `Creep` and `Creep (Remastered
+/// 2011)` are the same performance.
 const REISSUE_MARKERS: [&str; 13] = [
     "remaster",
     "remastered",
@@ -83,12 +83,14 @@ const REISSUE_MARKERS: [&str; 13] = [
     "expanded",
 ];
 
-/// Parçanın **başka bir kaydı** olduğunu söyleyen etiketler — atılmazlar.
+/// Labels saying the track is **a different recording** — they are not
+/// dropped.
 ///
-/// D-009: canlı kayıt stüdyo kaydından, remix orijinalinden ayrı olmalı.
-/// Bu etiketler eskiden [`REISSUE_MARKERS`] içindeydi ve `Creep (Live at
-/// Glastonbury)` stüdyo kaydına %100 güvenle bağlanıyordu. Artık hem metinde
-/// kalırlar hem de [`variant_markers`] üzerinden skoru düşürürler.
+/// D-009: a live recording must stay apart from the studio one, a remix from
+/// the original. These labels used to be in [`REISSUE_MARKERS`], and `Creep
+/// (Live at Glastonbury)` was being tied to the studio recording with 100%
+/// confidence. Now they both stay in the text and lower the score through
+/// [`variant_markers`].
 pub(crate) const VARIANT_MARKERS: [&str; 9] = [
     "live",
     "remix",
@@ -101,11 +103,11 @@ pub(crate) const VARIANT_MARKERS: [&str; 9] = [
     "reprise",
 ];
 
-/// Normalize edilmiş bir başlıkta geçen varyant etiketleri (sıralı, tekil).
+/// The variant labels found in a normalised title (sorted, unique).
 ///
-/// İki tarafın kümesi farklıysa bu iki kayıt aynı performans değildir.
-/// Karşılaştırma **kelime** bazında: `"live"`, `"delivered"` içinde geçtiği
-/// için alt dizi araması yanlış pozitif üretir.
+/// If the two sides' sets differ, the two recordings are not the same
+/// performance. The comparison is by **word**: `"live"` occurs inside
+/// `"delivered"`, so a substring search produces false positives.
 #[must_use]
 pub fn variant_markers(normalized_title: &str) -> Vec<&'static str> {
     let mut found: Vec<&'static str> = VARIANT_MARKERS
@@ -123,14 +125,14 @@ pub fn variant_markers(normalized_title: &str) -> Vec<&'static str> {
     found
 }
 
-/// Yeniden yayım eklerini atar: `(Remastered 2011)`, `- 2011 Remaster`,
+/// Drops re-release suffixes: `(Remastered 2011)`, `- 2011 Remaster`,
 /// `[Deluxe Edition]`.
 ///
-/// Yalnızca [`REISSUE_MARKERS`] atılır. İçinde bir [`VARIANT_MARKERS`] geçen
-/// ek **korunur** — `(Live Version)` hem "live" hem "version" içerir ve
-/// atılırsa canlı kayıt stüdyo kaydıyla birleşir. Parçanın gerçek adının
-/// parçası olan ekler de (`(Reprise)`) korunur; farklı parçaları birleştirmek
-/// kaçırılan eşleşmeden daha kötüdür.
+/// Only [`REISSUE_MARKERS`] are dropped. A suffix containing one of the
+/// [`VARIANT_MARKERS`] **is kept** — `(Live Version)` contains both "live" and
+/// "version", and if it were dropped the live recording would merge with the
+/// studio one. Suffixes that are part of the track's real name (`(Reprise)`)
+/// are kept too; merging different tracks is worse than a missed match.
 fn strip_edition_suffixes(input: &str) -> String {
     let droppable = |text: &str| {
         !VARIANT_MARKERS.iter().any(|m| text.contains(m))
@@ -158,7 +160,7 @@ fn strip_edition_suffixes(input: &str) -> String {
     }
     out.push_str(rest);
 
-    // " - Remastered 2011" biçimindeki tireli ekler.
+    // Dashed suffixes of the form " - Remastered 2011".
     if let Some(dash) = out.rfind(" - ") {
         if droppable(&out[dash + 3..]) {
             out.truncate(dash);
@@ -167,7 +169,7 @@ fn strip_edition_suffixes(input: &str) -> String {
     out
 }
 
-/// `feat. X`, `ft. X`, `featuring X` eklerini atar.
+/// Drops `feat. X`, `ft. X`, `featuring X` suffixes.
 fn strip_featuring(input: &str) -> String {
     const MARKERS: [&str; 4] = ["feat.", "feat ", "ft.", "featuring "];
     let mut out = input.to_owned();
@@ -179,7 +181,7 @@ fn strip_featuring(input: &str) -> String {
     out
 }
 
-/// Alfanümerik ve boşluk dışındaki her şeyi boşluğa çevirir.
+/// Turns everything other than alphanumerics and whitespace into spaces.
 fn strip_punctuation(input: &str) -> String {
     input
         .chars()
@@ -187,7 +189,7 @@ fn strip_punctuation(input: &str) -> String {
         .collect()
 }
 
-/// Ardışık boşlukları teke indirir ve kırpar.
+/// Collapses runs of whitespace into one and trims.
 fn collapse(input: &str) -> String {
     input.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -219,7 +221,7 @@ mod tests {
 
     #[test]
     fn variant_labels_are_kept_not_stripped() {
-        // D-009: canlı/remix kaydı stüdyo kaydıyla birleşmemeli.
+        // D-009: a live/remix recording must not merge with the studio one.
         assert_eq!(
             normalize_text("Creep (Live at Glastonbury)"),
             "creep live at glastonbury"
@@ -228,8 +230,8 @@ mod tests {
             normalize_text("Wish You Were Here - Live"),
             "wish you were here live"
         );
-        // "Live Version" hem varyant hem yeniden yayım etiketi içerir;
-        // varyant kazanır.
+        // "Live Version" contains both a variant and a re-release label; the variant
+        // wins.
         assert_eq!(normalize_text("Numb (Live Version)"), "numb live version");
         assert_eq!(
             normalize_text("Aerodynamic (Slum Village Remix)"),
@@ -241,7 +243,8 @@ mod tests {
     fn variant_markers_match_whole_words_only() {
         assert_eq!(variant_markers(&normalize_text("Creep (Live)")), ["live"]);
         assert_eq!(variant_markers(&normalize_text("Creep")), [] as [&str; 0]);
-        // "live", "delivered" içinde geçer — alt dizi araması yanlış pozitif verir.
+        // "live" occurs inside "delivered" — a substring search gives a false
+        // positive.
         assert_eq!(
             variant_markers(&normalize_text("Delivered")),
             [] as [&str; 0]

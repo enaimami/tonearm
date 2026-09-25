@@ -33,8 +33,8 @@
       "icons/icon.ico"
     ],
     "category": "Music",
-    "shortDescription": "Sağlayıcıdan bağımsız müzik dinleme katmanı",
-    "longDescription": "Dinleme geçmişi, istatistikler ve çalma listeleri kullanıcıya ait olur, sağlayıcıya değil. Ses nereden gelirse gelsin (yerel dosya, Subsonic, Jellyfin, eklentiler) üstteki katman aynı kalır.",
+    "shortDescription": "A provider-independent music listening layer",
+    "longDescription": "Listening history, statistics and playlists belong to the user, not to the provider. Wherever the audio comes from (local files, Subsonic, Jellyfin, plugins), the layer on top stays the same.",
     "copyright": "MIT OR Apache-2.0",
     "licenseFile": "../../LICENSE-MIT",
     "windows": {

@@ -1,13 +1,13 @@
-// PLAN §3.1 GO/NO-GO — ATILABILIR ölçüm koşumu.
+// PLAN §3.1 GO/NO-GO — a THROWAWAY measurement run.
 //
-// Ölçülen dört şey:
-//   1. 50.000 satırlık sanallaştırılmış listede kaydırma akıcılığı
-//   2. Aynı anda dönen CSS animasyonunun bedeli
-//   3. IPC gidiş-dönüş gecikmesi (§3.2'nin "saniyede yüzlerce mesaj" korkusu)
-//   4. Rust -> JS olay akış hızı
+// The four things measured:
+//   1. scrolling smoothness in a virtualised list of 50,000 rows
+//   2. the cost of a CSS animation running at the same time
+//   3. IPC round-trip latency (§3.2's fear of "hundreds of messages a second")
+//   4. the Rust -> JS event stream rate
 //
-// Arayüz raporu `save_report` ile diske yazar ve uygulama kendi kapanır;
-// ölçüm ekrana bakmayı gerektirmesin, tekrarlanabilir olsun diye.
+// The interface writes the report to disk with `save_report` and the app closes
+// itself; so the measurement needs no one watching the screen and can be repeated.
 
 use serde::Serialize;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -22,7 +22,7 @@ struct Row {
     ms: u64,
 }
 
-/// Faz 4'ün oda primitifiyle (D-015) aynı şekil — gerçekçi yük olsun diye.
+/// The same shape as Phase 4's room primitive (D-015) — so it is a realistic load.
 #[derive(Serialize, Clone)]
 struct Anchor {
     track: u64,
@@ -39,13 +39,13 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// En küçük yük: saf gidiş-dönüş maliyeti.
+/// The smallest load: the bare round-trip cost.
 #[tauri::command]
 fn ping(seq: u64) -> u64 {
     seq
 }
 
-/// Gerçekçi küçük yük: GUI'nin pozisyon için soracağı şey.
+/// A realistic small load: what the GUI will ask for the position.
 #[tauri::command]
 fn anchor(track: u64, position_ms: u64) -> Anchor {
     Anchor {
@@ -57,21 +57,21 @@ fn anchor(track: u64, position_ms: u64) -> Anchor {
     }
 }
 
-/// Gerçekçi büyük yük: listenin bir sayfası.
+/// A realistic large load: a page of the list.
 #[tauri::command]
 fn page(offset: u64, limit: u64) -> Vec<Row> {
     (offset..offset + limit)
         .map(|id| Row {
             id,
-            title: format!("Parça {id}"),
-            artist: format!("Sanatçı {}", id % 997),
-            album: format!("Albüm {}", id % 313),
+            title: format!("Track {id}"),
+            artist: format!("Artist {}", id % 997),
+            album: format!("Album {}", id % 313),
             ms: 120_000 + (id % 240_000),
         })
         .collect()
 }
 
-/// Rust -> JS olay akışı. Ayrı iş parçacığında, çağrıyı bloklamadan.
+/// The Rust -> JS event stream. On a separate thread, without blocking the call.
 #[tauri::command]
 fn emit_burst(app: AppHandle, count: u64) {
     std::thread::spawn(move || {
@@ -83,96 +83,98 @@ fn emit_burst(app: AppHandle, count: u64) {
     });
 }
 
-/// Ölçüm nerede takılırsa takılsın run.log'da görünsün diye (K9 ruhu:
-/// başarısızlık hangi aşamada olduğunu söylemeli).
+/// So wherever the measurement hangs, it shows in run.log (the spirit of K9: a
+/// failure must say which stage it is in).
 #[tauri::command]
 fn mark(msg: String) {
-    eprintln!("ADIM: {msg}");
+    eprintln!("STEP: {msg}");
 }
 
-/// Her adımdan sonra çağrılır. Rapor **artımlı** yazılıyor: 7. adım asılırsa
-/// 1-6'nın sayıları kaybolmasın. Kısmi başarı da rapor verir.
+/// Called after every step. The report is written **incrementally**: if step 7
+/// hangs, the numbers of 1-6 must not be lost. Partial success reports too.
 #[tauri::command]
 fn save_report(json: String) {
     let path = std::env::current_dir()
         .unwrap_or_else(|_| ".".into())
         .join("report.json");
     if let Err(e) = std::fs::write(&path, json) {
-        eprintln!("RAPOR YAZILAMADI: {e}");
+        eprintln!("REPORT NOT WRITTEN: {e}");
     }
 }
 
 #[tauri::command]
 fn quit(app: AppHandle) {
-    eprintln!("BITTI");
+    eprintln!("DONE");
     app.exit(0);
 }
 
-/// D-029: ortam düzeltmesini uygulamanın kendisi kurar.
+/// D-029: the app sets up the environment fix-up itself.
 ///
-/// Varsayım değil, sınanan şey: GDK `GDK_BACKEND`'i `gtk_init` sırasında,
-/// WebKit `WEBKIT_DISABLE_DMABUF_RENDERER`'ı web süreci doğarken okur —
-/// ikisi de Tauri kurulumundan sonra. `main()`'in ilk satırı yeterince erken mi?
+/// Not an assumption but what is being tested: GDK reads `GDK_BACKEND` during
+/// `gtk_init`, WebKit reads `WEBKIT_DISABLE_DMABUF_RENDERER` when the web process
+/// is born — both after Tauri's setup. Is the first line of `main()` early enough?
 ///
-/// Kullanıcının kendi ayarı **ezilmiyor**: bilerek Wayland'da koşmak isteyen
-/// biri `GDK_BACKEND=wayland` verdiğinde ona karışmıyoruz.
+/// The user's own setting **is not overridden**: when someone who wants to run on
+/// Wayland on purpose sets `GDK_BACKEND=wayland`, we leave it alone.
 #[cfg(target_os = "linux")]
-fn ortami_duzelt() {
+fn fix_environment() {
     use std::os::unix::process::CommandExt;
 
-    const DUZELTME: [(&str, &str); 2] = [
+    const FIXUP: [(&str, &str); 2] = [
         ("GDK_BACKEND", "x11"),
         ("WEBKIT_DISABLE_DMABUF_RENDERER", "1"),
     ];
 
-    // Eksik olanları topla. Hiçbiri eksik değilse zaten düzeltilmiş bir
-    // süreçteyiz — ya kullanıcı kurdu ya da aşağıdaki exec'in çocuğuyuz.
-    // Döngü koruması bu: çocuğun gözünde eksik yok.
-    let eksik: Vec<_> = DUZELTME
+    // Collect the missing ones. If none is missing we are already in a fixed-up
+    // process — either the user set it up, or we are the child of the exec below.
+    // That is the loop guard: in the child's eyes nothing is missing.
+    let missing: Vec<_> = FIXUP
         .iter()
-        .filter(|(ad, _)| std::env::var_os(ad).is_none())
+        .filter(|(name, _)| std::env::var_os(name).is_none())
         .collect();
-    if eksik.is_empty() {
-        eprintln!("ORTAM: düzeltme gerekmedi");
+    if missing.is_empty() {
+        eprintln!("ENV: no fix-up needed");
         return;
     }
 
-    let Ok(kendi) = std::env::current_exe() else {
-        eprintln!("ORTAM: kendi yolum bulunamadı, düzeltme atlandı");
+    let Ok(own_path) = std::env::current_exe() else {
+        eprintln!("ENV: could not find my own path, fix-up skipped");
         return;
     };
 
-    // `set_var` Rust 2024'te `unsafe` ve workspace `unsafe_code = "forbid"`
-    // diyor — `forbid` paket düzeyinde `allow` ile geçersiz kılınamaz.
-    // `exec` güvenli bir çağrı: süreç imajını değiştirir, PID korunur,
-    // yeni ortam çocuğa doğar. Tek maliyeti bir kez yeniden başlama.
-    let mut komut = std::process::Command::new(kendi);
-    komut.args(std::env::args_os().skip(1));
-    for (ad, deger) in &eksik {
-        komut.env(ad, deger);
-        eprintln!("ORTAM: {ad}={deger} kurulup yeniden başlatılıyor");
+    // `set_var` is `unsafe` in Rust 2024 and the workspace says
+    // `unsafe_code = "forbid"` — `forbid` cannot be overridden with `allow` at the
+    // package level. `exec` is a safe call: it replaces the process image, keeps
+    // the PID, and the new environment is born into the child. Its only cost is
+    // one restart.
+    let mut command = std::process::Command::new(own_path);
+    command.args(std::env::args_os().skip(1));
+    for (name, value) in &missing {
+        command.env(name, value);
+        eprintln!("ENV: setting {name}={value} and restarting");
     }
-    // `exec` yalnızca **başarısızsa** döner.
-    let hata = komut.exec();
-    eprintln!("ORTAM: yeniden başlatılamadı ({hata}), düzeltmesiz devam");
+    // `exec` only returns **if it fails**.
+    let error = command.exec();
+    eprintln!("ENV: could not restart ({error}), carrying on without the fix-up");
 }
 
 #[cfg(not(target_os = "linux"))]
-fn ortami_duzelt() {}
+fn fix_environment() {}
 
 fn main() {
-    ortami_duzelt();
+    fix_environment();
     let started = std::time::Instant::now();
     tauri::Builder::default()
         .setup(move |app| {
-            // Pencere gerçekten görününce ölç: "başlatma" kullanıcı için budur.
-            // Odak şart: WebKitGTK görünmeyen pencerede rAF'ı kısar,
-            // kısılmış rAF ölçümü değil kısılmayı ölçer.
+            // Measure when the window really shows: that is what "start-up" is
+            // for the user. Focus is a must: WebKitGTK throttles rAF in an
+            // invisible window, and throttled rAF measures the throttling, not
+            // the thing.
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.show();
                 let _ = w.set_focus();
             }
-            eprintln!("KURULUM_MS: {}", started.elapsed().as_millis());
+            eprintln!("SETUP_MS: {}", started.elapsed().as_millis());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -185,5 +187,5 @@ fn main() {
             quit
         ])
         .run(tauri::generate_context!())
-        .expect("tauri koşumu başlatılamadı");
+        .expect("could not start the tauri run");
 }

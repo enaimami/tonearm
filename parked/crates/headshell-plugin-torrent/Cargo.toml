@@ -1,6 +1,6 @@
 [package]
 name = "headshell-plugin-torrent"
-description = "Torrent sağlayıcı eklentisi: Torznab'da arar, librqbit ile sıralı akıtır. Alt süreç (D-047)."
+description = "The torrent provider plugin: searches Torznab, streams sequentially with librqbit. A subprocess (D-047)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,35 +8,35 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-# `librqbit` hatalarını sebep zinciriyle taşımak için; ayrıca eklenti
-# `headshell-core`'un `thiserror` tiplerini kullanmıyor (o çekirdeğin sözleşmesi).
+# To carry `librqbit` errors with their chain of causes; the plugin does not use
+# `headshell-core`'s `thiserror` types either (those are the core's contract).
 anyhow = "1.0"
 
-# Protokol tipleri. Eklenti çekirdeğin *kütüphanesini* kullanıyor ama
-# çekirdek eklentiyi kullanmıyor — bağımlılık tek yönlü. Tel biçimini
-# ikinci kez yazmamak için: iki taraf aynı `serde` türevlerini paylaşınca
-# sürüklenme (drift) mümkün olmuyor. Feature yok: yalnızca `plugin::protocol`
-# ve `provider::AudioSource` gerekiyor, ses/HTTP/parmak izi değil.
+# The protocol types. The plugin uses the core's *library*, but the core does
+# not use the plugin — the dependency goes one way. So the wire format is not
+# written twice: when both sides share the same `serde` derives, drift is not
+# possible. No features: only `plugin::protocol` and `provider::AudioSource` are
+# needed, not audio/HTTP/fingerprinting.
 headshell-core = { path = "../headshell-core", default-features = false }
 
-# D-047: torrent motoru. `rust-tls` çünkü sistemde OpenSSL aramasın.
+# D-047: the torrent engine. `rust-tls` so it does not look for OpenSSL on the system.
 librqbit = { version = "9.0.1", default-features = false, features = ["rust-tls"] }
 
-# Torznab'a giden istekler. `librqbit` zaten aynı sürümü getiriyor.
+# Requests to Torznab. `librqbit` already brings the same version.
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "charset", "http2"] }
-# Torznab RSS'i. Salt okunur DOM: akış tabanlı bir ayrıştırıcıdan daha az
-# durum, dolayısıyla daha az sessiz hata. Kilitte resvg üzerinden zaten var.
+# Torznab's RSS. A read-only DOM: less state than a streaming parser, and so fewer
+# silent errors. Already in the lock file through resvg.
 roxmltree = "0.20"
 
-# Yerel akış adresindeki jeton için. `librqbit` aynı sürümü zaten getiriyor.
+# For the token in the local stream address. `librqbit` already brings the same version.
 rand = "0.10"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "io-util", "io-std", "time", "sync"] }
 tracing = "0.1.44"
-# stdout **yalnızca** protokol satırlarıdır; her günlük kaydı stderr'e gider.
-# Çekirdek eklenti stderr'ini `tracing`'e aktarıyor (transport.rs), yani
-# librqbit'in "peer yok / tracker cevap vermiyor" teşhisi `headshell diag`'a ulaşır.
+# stdout is **only** protocol lines; every log record goes to stderr. The core
+# forwards the plugin's stderr into `tracing` (transport.rs), so librqbit's
+# "no peers / the tracker does not answer" diagnosis reaches `headshell diag`.
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "env-filter"] }
 
 [lints]

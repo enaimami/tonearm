@@ -1,22 +1,25 @@
-//! Eklenti manifesti (`plugin.json`, api 2) ve izin beyanı (D-040, D-069).
+//! Plugin manifest (`plugin.json`, api 2) and permission declaration
+//! (D-040, D-069).
 //!
-//! Bir eklenti, içinde `plugin.json` olan bir dizindir; **dizin adı
-//! kimliktir** (tema sisteminin kuralı, D-037). Manifestteki `name` dizin
-//! adıyla uyuşmak zorunda: uyuşmazsa reddedilir, sessizce dizin adı
-//! kullanılmaz — hangi adın kazandığı tahmin edilmemeli (K9).
+//! A plugin is a directory with a `plugin.json` in it; **the directory name
+//! is the identity** (the theme system's rule, D-037). The manifest's `name`
+//! must match the directory name: if it does not, it is rejected — the
+//! directory name is not used silently, because which name wins must not be
+//! a guess (K9).
 //!
 //! ## api 1 → api 2
 //!
-//! api 1'de manifest bir **komut** gösteriyordu (`exec`), eklenti alt süreçti
-//! ve izin beyanı yalnızca bir sözleşmeydi. api 2'de manifest bir **betik**
-//! gösterir (`main`), betik çekirdeğin içindeki QuickJS'te koşar ve ağ izni
-//! **zorlanır**: eklenti dış dünyaya yalnızca motorun verdiği kapılardan
-//! çıkabilir ve motor her kapıda beyana bakar (D-069).
+//! In api 1 the manifest pointed at a **command** (`exec`), the plugin was a
+//! subprocess and the permission declaration was only a contract. In api 2
+//! the manifest points at a **script** (`main`), the script runs in QuickJS
+//! inside the core, and the network permission is **enforced**: the plugin
+//! can reach the outside world only through the gates the engine provides,
+//! and the engine checks the declaration at every gate (D-069).
 //!
-//! api 1'in iki alanı api 2'de anlamını yitirdi ve **sessizce yok
-//! sayılmıyor**: `exec` ve `permissions.fs` görülürse manifest reddedilir.
-//! Yok sayılsalardı eski bir eklenti "yüklendi" görünüp ilk çağrıda
-//! anlaşılmaz biçimde düşerdi.
+//! Two api 1 fields lost their meaning in api 2 and are **not silently
+//! ignored**: if `exec` or `permissions.fs` is seen, the manifest is
+//! rejected. Ignored, an old plugin would look "loaded" and then fail
+//! incomprehensibly on its first call.
 
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
@@ -29,40 +32,39 @@ use crate::error::{Error, ErrorKind, Result, io_err};
 use super::artifact::PLATFORMS;
 use super::protocol::PLUGIN_API;
 
-/// Manifest dosyasının adı.
+/// Name of the manifest file.
 pub const MANIFEST_FILE: &str = "plugin.json";
 
-/// Bir eklentinin beyan ettiği izinler.
+/// The permissions a plugin declares.
 ///
-/// Boş küme "hiçbir yere çıkmıyorum" demektir ve geçerlidir.
+/// The empty set means "I don't go anywhere" and is valid.
 ///
-/// Dosya izni **yok**: api 2'de eklenti dosya sistemine hiç dokunamaz.
-/// Kalıcı bir şey saklaması gerekiyorsa motorun verdiği `host.storage`'ı
-/// kullanır, ve o depo zaten yalnızca onundur.
+/// There is **no** file permission: in api 2 a plugin cannot touch the file
+/// system at all. If it needs to keep something, it uses the `host.storage`
+/// the engine provides, and that store is its own anyway.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Permissions {
-    /// Bağlanılacak ana bilgisayarlar: `api.soundcloud.com` ya da
-    /// `*.googlevideo.com`.
+    /// Hosts to connect to: `api.soundcloud.com` or `*.googlevideo.com`.
     ///
-    /// Joker yalnızca en solda ve yalnızca **alt alan adları** için:
-    /// `*.sndcdn.com`, `cf-media.sndcdn.com`'u kapsar ama `sndcdn.com`'un
-    /// kendisini kapsamaz. Çıplak `*` ve `*.com` gibi tek etiketli joker
-    /// reddedilir — "her yere çıkarım" diyen bir eklenti bunu tek tek
-    /// yazmalı ya da kullanıcı onu reddetmeli (D-040).
+    /// A wildcard only on the far left and only for **subdomains**:
+    /// `*.sndcdn.com` covers `cf-media.sndcdn.com` but not `sndcdn.com` itself.
+    /// A bare `*` and single-label wildcards like `*.com` are rejected — a plugin
+    /// that says "I go everywhere" must spell it out one by one, or the user
+    /// must reject it (D-040).
     #[serde(default)]
     pub net: Vec<String>,
 }
 
 impl Permissions {
-    /// Hiçbir izin istemiyor mu.
+    /// Does it ask for no permissions at all.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.net.is_empty()
     }
 
-    /// Küçük harfe indirilmiş, sıralanmış ve tekilleştirilmiş kopya.
-    /// Karşılaştırma bunun üstünden yapılır ki manifestteki sıra ya da harf
-    /// büyüklüğü değişince yeniden onay istenmesin.
+    /// A lower-cased, sorted and deduplicated copy. Comparisons are made on it,
+    /// so that a change in the manifest's order or letter case does not ask for
+    /// consent again.
     #[must_use]
     pub fn normalized(&self) -> Self {
         let mut net: Vec<String> = self
@@ -76,18 +78,18 @@ impl Permissions {
         Self { net }
     }
 
-    /// Bu küme `granted`'ın içinde mi kalıyor?
+    /// Does this set stay within `granted`?
     ///
-    /// Onay büyümeyi yakalamak için var: eklenti izinlerini **küçültürse**
-    /// yeniden sorulmaz, büyütürse sorulur (D-040). Joker hesaba katılır:
-    /// onaylanmış `*.x.com`, sonradan istenen `a.x.com`'u kapsar.
+    /// It exists to catch consent growth: if a plugin **shrinks** its
+    /// permissions it is not asked again, if it grows them it is (D-040).
+    /// Wildcards count: an approved `*.x.com` covers a later `a.x.com`.
     #[must_use]
     pub fn is_covered_by(&self, granted: &Self) -> bool {
         self.beyond(granted).is_empty()
     }
 
-    /// `granted`'ın kapsamadığı istekler — kullanıcıya "bunlar yeni" diye
-    /// gösterilecek olan liste.
+    /// The requests `granted` does not cover — the list shown to the user as
+    /// "these are new".
     #[must_use]
     pub fn beyond(&self, granted: &Self) -> Self {
         let granted = granted.normalized();
@@ -106,7 +108,7 @@ impl Permissions {
         }
     }
 
-    /// Bir ana bilgisayara bağlanmaya izin var mı.
+    /// Is connecting to a host allowed.
     #[must_use]
     pub fn allows_host(&self, host: &str) -> bool {
         let host = normalize_host(host);
@@ -117,24 +119,24 @@ impl Permissions {
                 .any(|pattern| host_matches(&normalize_host(pattern), &host))
     }
 
-    /// Bir adrese gitmeye izin var mı; yoksa **neden** olmadığı.
+    /// Is going to an address allowed; if not, **why**.
     ///
-    /// Motor bunu eklentinin her isteğinde, izlediği her yönlendirmede ve
-    /// eklentinin döndürdüğü akış adresinde sorar (D-069).
+    /// The engine asks this on every request the plugin makes, on every redirect
+    /// it follows, and on the stream address the plugin returns (D-069).
     ///
     /// # Errors
-    /// Adres ayrıştırılamazsa, `http`/`https` değilse ya da ana bilgisayarı
-    /// beyan edilmemişse — mesaj kullanıcıya olduğu gibi gösterilir.
+    /// If the address cannot be parsed, is not `http`/`https`, or its host was
+    /// not declared — the message is shown to the user as is.
     pub fn check_url(&self, url: &str) -> std::result::Result<(), String> {
         let host = url_host(url)?;
         if self.allows_host(&host) {
             Ok(())
         } else {
             Err(format!(
-                "izin yok: `{host}` eklentinin beyan ettiği ağ izinleri arasında değil \
+                "not allowed: `{host}` is not among the plugin's declared network permissions \
                  (permissions.net: {})",
                 if self.net.is_empty() {
-                    "boş".to_owned()
+                    "empty".to_owned()
                 } else {
                     self.normalized().net.join(", ")
                 }
@@ -142,7 +144,7 @@ impl Permissions {
         }
     }
 
-    /// Her girdinin biçimi geçerli mi.
+    /// Is every entry well formed.
     fn validate(&self) -> std::result::Result<(), String> {
         for entry in &self.net {
             validate_host_pattern(entry)?;
@@ -150,14 +152,15 @@ impl Permissions {
         Ok(())
     }
 
-    /// İnsan okunur özet. `headshell plugin list` ve `headshell diag` bunu basar.
+    /// Human-readable summary. `headshell plugin list` and `headshell diag` print
+    /// it.
     #[must_use]
     pub fn describe(&self) -> String {
         let normalized = self.normalized();
         if normalized.is_empty() {
-            return "ağa çıkmıyor".to_owned();
+            return "does not go online".to_owned();
         }
-        format!("ağ: {}", normalized.net.join(", "))
+        format!("network: {}", normalized.net.join(", "))
     }
 }
 
@@ -166,18 +169,18 @@ fn normalize_host(host: &str) -> String {
     host.trim().trim_end_matches('.').to_ascii_lowercase()
 }
 
-/// Normalize edilmiş bir desen normalize edilmiş bir ana bilgisayarla eşleşiyor mu.
+/// Does a normalised pattern match a normalised host.
 fn host_matches(pattern: &str, host: &str) -> bool {
     match pattern.strip_prefix("*.") {
-        // Alt alan adı şart: `*.x.com` `x.com`'u kapsamıyor. Sonek
-        // karşılaştırması noktayla birlikte yapılıyor ki `kotux.com`
-        // `*.x.com`'a uymasın.
+        // A subdomain is required: `*.x.com` does not cover `x.com`. The suffix is
+        // compared together with the dot so that `evilx.com` does not fit
+        // `*.x.com`.
         Some(base) => host.len() > base.len() + 1 && host.ends_with(&format!(".{base}")),
         None => host == pattern,
     }
 }
 
-/// Onaylanmış `granted` deseni istenen `wanted` desenini kapsıyor mu.
+/// Does the approved `granted` pattern cover the requested `wanted` pattern.
 fn pattern_covers(granted: &str, wanted: &str) -> bool {
     if granted == wanted {
         return true;
@@ -187,12 +190,12 @@ fn pattern_covers(granted: &str, wanted: &str) -> bool {
         (Some(_), Some(inner)) => host_matches(granted, inner),
         // `*.x.com` ⊇ `a.x.com`
         (Some(_), None) => host_matches(granted, wanted),
-        // Çıplak bir ad hiçbir jokeri kapsamaz.
+        // A bare name covers no wildcard.
         (None, _) => false,
     }
 }
 
-/// Bir izin girdisinin biçimini denetler.
+/// Checks the form of a permission entry.
 fn validate_host_pattern(entry: &str) -> std::result::Result<(), String> {
     let normalized = normalize_host(entry);
     let (wildcard, host) = match normalized.strip_prefix("*.") {
@@ -201,8 +204,8 @@ fn validate_host_pattern(entry: &str) -> std::result::Result<(), String> {
     };
     if host.is_empty() || host.contains('*') {
         return Err(format!(
-            "`permissions.net` girdisi `{entry}`: joker yalnızca en solda, `*.alan.adi` \
-             biçiminde olabilir; çıplak `*` kabul edilmez"
+            "`permissions.net` entry `{entry}`: the wildcard can only be leftmost, in the form `*.domain.name`; \
+             a bare `*` is not accepted"
         ));
     }
     if let Some(bad) = host
@@ -210,8 +213,8 @@ fn validate_host_pattern(entry: &str) -> std::result::Result<(), String> {
         .find(|c| !(c.is_ascii_alphanumeric() || *c == '.' || *c == '-'))
     {
         return Err(format!(
-            "`permissions.net` girdisi `{entry}`: `{bad}` bir ana bilgisayar adında olamaz — \
-             şema, port ya da yol yazılmaz, yalnızca ad (`api.ornek.com`)"
+            "`permissions.net` entry `{entry}`: `{bad}` cannot be in a host name — \
+             no scheme, port or path, just the name (`api.example.com`)"
         ));
     }
     let labels: Vec<&str> = host.split('.').collect();
@@ -220,37 +223,36 @@ fn validate_host_pattern(entry: &str) -> std::result::Result<(), String> {
         .any(|label| label.is_empty() || label.starts_with('-') || label.ends_with('-'))
     {
         return Err(format!(
-            "`permissions.net` girdisi `{entry}`: ana bilgisayar adı geçersiz"
+            "`permissions.net` entry `{entry}`: invalid host name"
         ));
     }
     if wildcard && labels.len() < 2 {
         return Err(format!(
-            "`permissions.net` girdisi `{entry}`: tek etiketli joker bütün bir üst alan \
-             adına (`.{host}`) izin vermek demek; en az `*.ornek.{host}` yazılmalı"
+            "`permissions.net` entry `{entry}`: a single-label wildcard would allow a whole top-level \
+             domain (`.{host}`); write at least `*.example.{host}`"
         ));
     }
     Ok(())
 }
 
-/// Bir adresin ana bilgisayarını çıkarır — **yalnızca** `http` ve `https`.
+/// Extracts an address's host — **only** for `http` and `https`.
 ///
-/// Bir URL crate'i eklenmedi (ağaç küçük kalmalı); yerine dar ve kuşkucu bir
-/// ayrıştırıcı var. Kuşkucu olması şart: burada okunan ana bilgisayar ile
-/// HTTP istemcisinin bağlandığı ana bilgisayar **aynı** olmalı. İki
-/// ayrıştırıcının anlaşamadığı her biçim (ters bölü, boşluk, yüzde
-/// kodlaması, IPv6 köşeli ayracı) izin kontrolünün etrafından dolanmak için
-/// bir kapıdır; bu yüzden anlaşılmayan her şey **reddedilir**, tahmin
-/// edilmez.
+/// No URL crate was added (the tree must stay small); instead there is a
+/// narrow, suspicious parser. Being suspicious is essential: the host read
+/// here and the host the HTTP client connects to must be **the same**. Every
+/// form two parsers could disagree on (backslash, space, percent-encoding,
+/// IPv6 brackets) is a door around the permission check; so anything not
+/// understood is **rejected**, not guessed.
 ///
 /// # Errors
-/// Adres bu kurallara uymuyorsa, nedeniyle.
+/// If the address does not follow these rules, with the reason.
 pub fn url_host(url: &str) -> std::result::Result<String, String> {
     let Some((scheme, rest)) = url.split_once("://") else {
-        return Err(format!("adres anlaşılamadı (şema yok): {url}"));
+        return Err(format!("address not understood (no scheme): {url}"));
     };
     if !scheme.eq_ignore_ascii_case("https") && !scheme.eq_ignore_ascii_case("http") {
         return Err(format!(
-            "yalnızca http ve https adreslerine gidilebilir (bulunan şema: `{scheme}`)"
+            "only http and https addresses can be reached (scheme found: `{scheme}`)"
         ));
     }
     let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
@@ -260,17 +262,19 @@ pub fn url_host(url: &str) -> std::result::Result<String, String> {
             .chars()
             .any(|c| c.is_whitespace() || c.is_control())
     {
-        return Err(format!("adresin ana bilgisayar kısmı anlaşılamadı: {url}"));
+        return Err(format!(
+            "the address's host part could not be understood: {url}"
+        ));
     }
-    // Kullanıcı bilgisi (`kullanici@`) atılıyor; ana bilgisayar **son**
-    // `@`'dan sonra başlar. `izinli.com@kotu.com` burada `kotu.com` okunur,
-    // tıpkı istemcinin okuyacağı gibi.
+    // User info (`user@`) is dropped; the host starts after the **last** `@`.
+    // `allowed.com@evil.com` reads as `evil.com` here, exactly as the client
+    // would read it.
     let host_port = authority
         .rsplit_once('@')
         .map_or(authority, |(_, host)| host);
     if host_port.starts_with('[') {
         return Err(format!(
-            "IPv6 adresine doğrudan gidilemez; izinler ana bilgisayar adıyla yazılır: {url}"
+            "an IPv6 address cannot be reached directly; permissions are written with host names: {url}"
         ));
     }
     let host = host_port
@@ -282,54 +286,63 @@ pub fn url_host(url: &str) -> std::result::Result<String, String> {
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
     {
-        return Err(format!("adresin ana bilgisayar kısmı anlaşılamadı: {url}"));
+        return Err(format!(
+            "the address's host part could not be understood: {url}"
+        ));
     }
     Ok(host)
 }
 
-/// Bir eserin bir platform için yayını: nereden inecek, karması ne.
+/// An artifact's release for one platform: where it downloads from, what its
+/// hash is.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Asset {
-    /// İndirileceği adres. `https://` şart.
+    /// Where to download it from. `https://` is required.
     pub url: String,
-    /// Beklenen sha256, onaltılık. Tutmuyorsa eser **yerine konmaz**.
+    /// Expected sha256, hex. If it does not match, the artifact is **not put in
+    /// place**.
     pub sha256: String,
 }
 
-/// Eklentinin motordan istediği bir eser (D-050 S2, D-055, D-069).
+/// An artifact the plugin asks the engine for (D-050 S2, D-055, D-069).
 ///
-/// Eklenti **beyan eder, kurmaz.** İndirmeyi, karma doğrulamasını ve yerine
-/// koymayı motor yapar; eklenti çalışırken yalnızca `host.tools.run` ile onu
-/// çağırabilir. D-049'un "elleri uzun olmasın" şartı tam olarak budur.
+/// The plugin **declares, it does not install.** The engine does the
+/// download, the hash check and putting it in place; while running, the
+/// plugin can only call it through `host.tools.run`. That is exactly D-049's
+/// "no long arms" condition.
 ///
-/// api 2'de eser **platform başına** beyan edilir: yt-dlp Windows, macOS ve
-/// Linux için ayrı ikililer yayımlıyor ve her biri kendi Python'unu içinde
-/// taşıyor — kullanıcıdan hiçbir şey kurmasını istemeyen yol bu. Motor
-/// çalıştığı platformun anahtarını ([`super::artifact::current_platform`])
-/// haritada arar; bulamazsa eksikliği **söyler**, başka bir platformun
-/// ikilisini denemez.
+/// In api 2 an artifact is declared **per platform**: yt-dlp publishes
+/// separate binaries for Windows, macOS and Linux, each carrying its own
+/// Python — the route that asks the user to install nothing. The engine looks
+/// up the key of the platform it runs on
+/// ([`super::artifact::current_platform`]) in the map; if it is missing it
+/// **says so**, and does not try another platform's binary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Requirement {
-    /// Eserin adı (`yt-dlp`). `host.tools.run`'ın ilk argümanı bu.
+    /// The artifact's name (`yt-dlp`). This is `host.tools.run`'s first
+    /// argument.
     pub name: String,
-    /// Sabitlenmiş sürüm. Dosya adına girer; sürüm değişince yeni bir
-    /// dosya olur, eskisi yerinde durur.
+    /// The pinned version. It goes into the file name; when the version changes
+    /// there is a new file and the old one stays where it is.
     pub version: String,
-    /// Platform anahtarı → yayın. Anahtarlar [`PLATFORMS`]'tan.
+    /// Platform key → release. The keys come from [`PLATFORMS`].
     pub assets: BTreeMap<String, Asset>,
 }
 
 impl Requirement {
-    /// Diskteki dosyanın adı: `<ad>-<sürüm>-<platform>` (+ Windows'ta `.exe`).
+    /// The file name on disk: `<name>-<version>-<platform>` (+ `.exe` on
+    /// Windows).
     ///
-    /// Sürüm ada giriyor ki iki eklenti aynı eserin iki sürümünü isteyince
-    /// birbirinin dosyasını ezmesin; platform giriyor ki paylaşılan bir veri
-    /// dizininde (iki makine, tek ev dizini) bir platformun ikilisi ötekinin
-    /// yerine geçmesin. Uzantı Windows'ta şart: `CreateProcess` uzantısız
-    /// bir dosyayı çalıştırılabilir saymaz.
+    /// The version is in the name so that two plugins asking for two versions of
+    /// the same artifact do not overwrite each other's file; the platform is in
+    /// it so that in a shared data directory (two machines, one home directory)
+    /// one platform's binary does not take the other's place. The extension is
+    /// required on Windows: `CreateProcess` does not treat a file without one as
+    /// executable.
     ///
-    /// Uzantı **platform anahtarından** geliyor, derlendiği makineden değil:
-    /// aynı eserin adı hangi makinede hesaplanırsa hesaplansın aynı çıksın.
+    /// The extension comes from the **platform key**, not the machine it was
+    /// built on: the same artifact's name comes out the same whichever machine
+    /// computes it.
     #[must_use]
     pub fn file_name(&self, platform: &str) -> String {
         let suffix = if platform.starts_with("windows-") {
@@ -345,49 +358,53 @@ impl Requirement {
         )
     }
 
-    /// Verilen platformun yayını.
+    /// The release for the given platform.
     #[must_use]
     pub fn asset_for(&self, platform: &str) -> Option<&Asset> {
         self.assets.get(platform)
     }
 
-    /// Beyan kendi içinde tutarlı mı.
+    /// Is the declaration consistent in itself.
     fn validate(&self) -> std::result::Result<(), String> {
         if self.name.trim().is_empty() {
-            return Err("`requires` girdisinin `name`'i boş".to_owned());
+            return Err("the `name` of a `requires` entry is empty".to_owned());
         }
         if self.version.trim().is_empty() {
-            return Err(format!("`requires` girdisi `{}`: `version` boş", self.name));
+            return Err(format!(
+                "`requires` entry `{}`: `version` is empty",
+                self.name
+            ));
         }
         if self.assets.is_empty() {
             return Err(format!(
-                "`requires` girdisi `{}`: `assets` boş — hiçbir platform için yayın yok",
+                "`requires` entry `{}`: `assets` is empty — no release for any platform",
                 self.name
             ));
         }
         for (platform, asset) in &self.assets {
             if !PLATFORMS.contains(&platform.as_str()) {
                 return Err(format!(
-                    "`requires` girdisi `{}`: `{platform}` tanınan bir platform değil. \
-                     Geçerli anahtarlar: {}",
+                    "`requires` entry `{}`: `{platform}` is not a recognised platform. \
+                     Valid keys: {}",
                     self.name,
                     PLATFORMS.join(", ")
                 ));
             }
-            // `https` şartı: karma doğrulaması indirileni sonradan denetler ama
-            // düz HTTP üzerinden **hangi** adresten indirildiği de doğrulanmaz.
+            // The `https` requirement: the hash check verifies what was downloaded
+            // afterwards, but over plain HTTP **which** address it came from is not
+            // verified either.
             if !asset.url.starts_with("https://") {
                 return Err(format!(
-                    "`requires` girdisi `{}` ({platform}): `url` https:// ile başlamalı \
-                     (bulunan: {})",
+                    "`requires` entry `{}` ({platform}): `url` must start with https:// \
+                     (found: {})",
                     self.name, asset.url
                 ));
             }
             let hash = asset.sha256.trim();
             if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
                 return Err(format!(
-                    "`requires` girdisi `{}` ({platform}): `sha256` 64 haneli onaltılık \
-                     olmalı (bulunan: {} hane)",
+                    "`requires` entry `{}` ({platform}): `sha256` must be 64 hex \
+                     digits (found: {} digits)",
                     self.name,
                     hash.len()
                 ));
@@ -397,10 +414,10 @@ impl Requirement {
     }
 }
 
-/// Dosya adına girecek metni zararsızlaştırır.
+/// Makes text that goes into a file name harmless.
 ///
-/// Manifest kullanıcının indirdiği bir dosya: içindeki bir ad `../` taşırsa
-/// eser veri dizininin dışına yazılırdı.
+/// The manifest is a file the user downloaded: if a name in it carried `../`
+/// the artifact would be written outside the data directory.
 fn sanitize(value: &str) -> String {
     value
         .chars()
@@ -417,44 +434,46 @@ fn sanitize(value: &str) -> String {
 /// `plugin.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PluginManifest {
-    /// Dizin adıyla aynı olmak zorunda. Sağlayıcı kimliği bu.
+    /// Must be the same as the directory name. This is the provider id.
     pub name: String,
-    /// Kullanıcıya gösterilecek ad.
+    /// The name shown to the user.
     pub display_name: String,
-    /// Eklentinin kendi sürümü. Protokol sürümü değil.
+    /// The plugin's own version. Not the protocol version.
     #[serde(default)]
     pub version: Option<String>,
-    /// Konuştuğu protokol sürümü ([`PLUGIN_API`]).
+    /// The protocol version it speaks ([`PLUGIN_API`]).
     pub api: u32,
-    /// Eklenti dizinine göre betiğin yolu (`main.js`). ES modülü olarak
-    /// değerlendirilir; dışa aktardığı fonksiyonlar eklentinin yüzüdür.
+    /// The script's path relative to the plugin directory (`main.js`). It is
+    /// evaluated as an ES module; the functions it exports are the plugin's
+    /// face.
     pub main: String,
-    /// Yetenek adları (`search`, `stream`).
+    /// Capability names (`search`, `stream`).
     ///
-    /// **Tek kaynak bu.** api 1'de el sıkışma da yetenek bildiriyordu ve
-    /// çelişkide o kazanıyordu; api 2'de el sıkışma yok. Motor eklentiyi
-    /// başlatırken beyanın karşılığı olan fonksiyonların dışa aktarıldığını
-    /// denetler: `stream` diyen ama `resolve_source` vermeyen bir eklenti
-    /// başlamaz (K9).
+    /// **This is the only source.** In api 1 the handshake declared capabilities
+    /// too and won in a conflict; api 2 has no handshake. When starting the
+    /// plugin, the engine checks that the functions matching the declaration are
+    /// exported: a plugin that says `stream` but provides no `resolve_source`
+    /// does not start (K9).
     #[serde(default)]
     pub capabilities: Vec<String>,
     #[serde(default)]
     pub permissions: Permissions,
-    /// Motordan istenen eserler (D-055, D-069). Boş liste "hiçbir şey istemiyorum".
+    /// Artifacts asked of the engine (D-055, D-069). An empty list means "I need
+    /// nothing".
     #[serde(default)]
     pub requires: Vec<Requirement>,
-    /// İsteğe bağlı bir cümlelik açıklama.
+    /// An optional one-sentence description.
     #[serde(default)]
     pub description: Option<String>,
 }
 
-/// Manifestin, doğrulamadan önce okunabilen en küçük hâli.
+/// The smallest form of the manifest that can be read before validation.
 ///
-/// Keşif sürüm uyuşmazlığını **ayrı bir tanı** olarak göstermek istiyor:
-/// api 1 bir manifest `main` taşımadığı için tam ayrıştırma "`main` alanı
-/// yok" diye düşerdi — doğru ama yanlış yönlendiren bir cevap. Önce sürüme
-/// bakılıyor; uymuyorsa söylenecek şey "bu eklenti eski protokolü
-/// konuşuyor"dur.
+/// Discovery wants to show a version mismatch as **a separate diagnosis**: an
+/// api 1 manifest carries no `main`, so a full parse would fail with "no
+/// `main` field" — correct, but misleading. The version is checked first;
+/// if it does not fit, the thing to say is "this plugin speaks the old
+/// protocol".
 #[derive(Debug, Clone, Deserialize)]
 struct ManifestProbe {
     #[serde(default)]
@@ -462,12 +481,13 @@ struct ManifestProbe {
 }
 
 impl PluginManifest {
-    /// Bir eklenti dizininden okur ve doğrular.
+    /// Reads a plugin directory and validates it.
     ///
     /// # Errors
-    /// Dosya yoksa/okunamazsa, JSON bozuksa, protokol sürümü uymuyorsa
-    /// ([`ErrorKind::PluginIncompatible`]), ad dizin adıyla uyuşmuyorsa, `main`
-    /// geçersizse ya da api 1'den kalma bir alan varsa.
+    /// If the file is missing or unreadable, the JSON is broken, the protocol
+    /// version does not match ([`ErrorKind::PluginIncompatible`]), the name does
+    /// not match the directory name, `main` is invalid, or a field left over from
+    /// api 1 is present.
     pub fn load(dir: &Path) -> Result<Self> {
         let path = dir.join(MANIFEST_FILE);
         let raw =
@@ -475,18 +495,18 @@ impl PluginManifest {
         Self::parse(&raw, &dir_name(dir), &path)
     }
 
-    /// Diskte olmayan bir manifesti okur ve doğrular — katalogdan inen
-    /// `plugin.json` gibi (D-071).
+    /// Reads and validates a manifest that is not on disk — like a `plugin.json`
+    /// downloaded from the catalog (D-071).
     ///
-    /// `expected_name` dizin adının yerini tutar: manifest onun adına
-    /// kurulacak ve kimlik dizin adıdır. `origin` yalnızca hata mesajında
-    /// görünür (indeks adresi ya da dosya yolu).
+    /// `expected_name` stands for the directory name: the manifest will be
+    /// installed under it, and the identity is the directory name. `origin` only
+    /// appears in error messages (the index address or a file path).
     ///
-    /// [`Self::load`] ile **aynı** doğrulamadan geçer; katalog kendi kuralını
-    /// yazmıyor. Kopyalanan kural kayar (D-057).
+    /// It goes through **the same** validation as [`Self::load`]; the catalog does
+    /// not write its own rule. A copied rule drifts (D-057).
     ///
     /// # Errors
-    /// [`Self::load`]'un dosya okuma dışındaki bütün sebepleri.
+    /// Every reason [`Self::load`] has, except reading the file.
     pub fn parse(raw: &str, expected_name: &str, origin: &Path) -> Result<Self> {
         let path = origin;
         let json_err = |source| {
@@ -521,9 +541,9 @@ impl PluginManifest {
         Ok(manifest)
     }
 
-    /// Betiğin eklenti dizinindeki yolu, baştaki `./` atılmış ve `/`
-    /// ayırıcılı: `./src/main.js` → `src/main.js`. Katalog dosya listesi bu
-    /// biçimi kullanır (D-071).
+    /// The script's path in the plugin directory, with a leading `./` dropped
+    /// and `/`-separated: `./src/main.js` → `src/main.js`. The catalog's file
+    /// list uses this form (D-071).
     #[must_use]
     pub fn main_file(&self) -> String {
         Path::new(&self.main)
@@ -548,16 +568,16 @@ impl PluginManifest {
         };
 
         if self.name.trim().is_empty() {
-            return invalid("`name` boş".to_owned());
+            return invalid("`name` is empty".to_owned());
         }
         if self.name != expected_name {
             return invalid(format!(
-                "`name` ({}) dizin adıyla ({expected_name}) uyuşmuyor — kimlik dizin adıdır",
+                "`name` ({}) does not match the directory name ({expected_name}) — the identity is the directory name",
                 self.name
             ));
         }
         if self.display_name.trim().is_empty() {
-            return invalid("`display_name` boş".to_owned());
+            return invalid("`display_name` is empty".to_owned());
         }
         if let Err(detail) = validate_main(&self.main) {
             return invalid(detail);
@@ -565,9 +585,9 @@ impl PluginManifest {
         if let Err(detail) = self.permissions.validate() {
             return invalid(detail);
         }
-        // Beyan **yüklemede** doğrulanıyor, kurulumda değil: geçersiz bir
-        // `requires` ile eklenti hiç listelenmemeli. Kurulum anına bırakılsaydı
-        // kusur ancak kullanıcı komutu yazınca çıkardı.
+        // The declaration is validated **at load**, not at install: a plugin with an
+        // invalid `requires` must not be listed at all. Left to install time, the
+        // defect would only show once the user typed the command.
         for requirement in &self.requires {
             if let Err(detail) = requirement.validate() {
                 return invalid(detail);
@@ -579,17 +599,17 @@ impl PluginManifest {
         names.dedup();
         if names.len() != count {
             return invalid(
-                "`requires` aynı adı iki kez içeriyor — hangisinin kazandığı tahmin edilmemeli"
+                "`requires` contains the same name twice — which one wins must not be guessed"
                     .to_owned(),
             );
         }
         Ok(())
     }
 
-    /// Betiğin eklenti dizini içindeki yolu.
+    /// The script's path inside the plugin directory.
     ///
-    /// Doğrulama `main`'in dizinin dışına çıkamayacağını zaten garanti etti;
-    /// burada yalnızca birleştiriliyor.
+    /// Validation already guaranteed that `main` cannot leave the directory;
+    /// here it is only joined.
     #[must_use]
     pub fn main_path(&self, dir: &Path) -> PathBuf {
         dir.join(&self.main)
@@ -602,18 +622,19 @@ fn dir_name(dir: &Path) -> String {
         .unwrap_or_default()
 }
 
-/// Bir eklenti adı **tek bir dizin adı** mı: ayırıcı yok, `.`/`..` değil,
-/// boş değil.
+/// Is a plugin name **a single directory name**: no separator, not `.`/`..`,
+/// not empty.
 ///
-/// Adı yola ekleyen her yerel işlem (kurulum, kaldırma) önce bunu sorar:
-/// `../` taşıyan bir ad veri dizininin dışına uzanırdı ve kaldırma
-/// komutunda bu, kullanıcının başka bir dizinini silmek demekti.
+/// Every local operation that joins the name to a path (install, removal)
+/// asks this first: a name carrying `../` would reach outside the data
+/// directory, and in the remove command that would mean deleting another of
+/// the user's directories.
 ///
-/// Elle kurulmuş bir eklentinin adı bundan fazlasına uymak zorunda değil;
-/// dar kural katalog için ([`validate_catalog_name`]).
+/// A plugin installed by hand does not have to follow more than this; the
+/// narrow rule is for the catalog ([`validate_catalog_name`]).
 ///
 /// # Errors
-/// Ad tek bir dizin adı değilse, nedeniyle.
+/// If the name is not a single directory name, with the reason.
 pub fn validate_local_name(name: &str) -> std::result::Result<(), String> {
     let mut components = Path::new(name).components();
     let single = matches!(
@@ -622,24 +643,26 @@ pub fn validate_local_name(name: &str) -> std::result::Result<(), String> {
     );
     if !single || name.contains(['/', '\\']) {
         return Err(format!(
-            "`{name}` bir eklenti adı değil: ad tek bir dizin adıdır — ayırıcı, `.` ya da `..` \
-             içeremez"
+            "`{name}` is not a plugin name: a name is a single directory name — it cannot contain \
+             a separator, `.` or `..`"
         ));
     }
     Ok(())
 }
 
-/// Katalogdaki bir eklentinin adı (D-071): küçük harf ASCII harf, rakam,
-/// `-`, `_`, `.`; harf ya da rakamla başlar, en çok 64 karakter.
+/// The name of a plugin in the catalog (D-071): lower-case ASCII letters,
+/// digits, `-`, `_`, `.`; starts with a letter or digit, at most 64
+/// characters.
 ///
-/// Yerel addan dar, çünkü bu ad **başkasının diskinde** bir dizin olacak ve
-/// bir adrese girecek: büyük/küçük harf Windows'ta ve macOS'ta aynı dizindir
-/// (`SoundCloud` ile `soundcloud` çakışır), sondaki nokta Windows'ta atılır,
-/// `con` ya da `nul` Windows'ta bir aygıttır, ve `{name}` indeks adresinin
-/// içinde yüzde kodlaması gerektirmemeli.
+/// Narrower than a local name, because this name will be a directory **on
+/// someone else's disk** and will go into an address: upper and lower case
+/// are the same directory on Windows and macOS (`SoundCloud` and
+/// `soundcloud` collide), a trailing dot is dropped on Windows, `con` or
+/// `nul` is a device on Windows, and `{name}` must not need percent-encoding
+/// inside the index address.
 ///
 /// # Errors
-/// Ad bu kurallara uymuyorsa, hangisine uymadığıyla.
+/// If the name does not follow these rules, with the one it breaks.
 pub fn validate_catalog_name(name: &str) -> std::result::Result<(), String> {
     const RESERVED: &[&str] = &[
         "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8",
@@ -647,7 +670,7 @@ pub fn validate_catalog_name(name: &str) -> std::result::Result<(), String> {
     ];
     if name.is_empty() || name.len() > 64 {
         return Err(format!(
-            "katalog adı `{name}` 1–64 karakter olmalı (bulunan: {})",
+            "catalog name `{name}` must be 1–64 characters (found: {})",
             name.len()
         ));
     }
@@ -656,31 +679,31 @@ pub fn validate_catalog_name(name: &str) -> std::result::Result<(), String> {
         .find(|c| !(c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_' | '.')))
     {
         return Err(format!(
-            "katalog adı `{name}`: `{bad}` kullanılamaz — küçük harf ASCII, rakam, `-`, `_`, `.`"
+            "catalog name `{name}`: `{bad}` cannot be used — lower-case ASCII, digits, `-`, `_`, `.`"
         ));
     }
     if !name.starts_with(|c: char| c.is_ascii_alphanumeric()) || name.ends_with('.') {
         return Err(format!(
-            "katalog adı `{name}` harf ya da rakamla başlamalı ve noktayla bitmemeli"
+            "catalog name `{name}` must start with a letter or digit and must not end with a dot"
         ));
     }
     let stem = name.split('.').next().unwrap_or(name);
     if RESERVED.contains(&stem) {
         return Err(format!(
-            "katalog adı `{name}` Windows'ta bir aygıt adı (`{stem}`); dizin olarak açılamaz"
+            "catalog name `{name}` is a device name on Windows (`{stem}`); it cannot be opened as a directory"
         ));
     }
     Ok(())
 }
 
-/// `main` eklenti dizininde duran bir `.js` dosyası mı.
+/// Is `main` a `.js` file inside the plugin directory.
 ///
-/// Mutlak yol ve `..` reddedilir: manifest indirilmiş bir dosya, ve betik
-/// yolu dizinin dışına çıkabilseydi bir eklenti başka bir eklentinin — ya da
-/// hiç eklenti olmayan bir dosyanın — kodunu çalıştırabilirdi.
+/// Absolute paths and `..` are rejected: the manifest is a downloaded file,
+/// and if the script path could leave the directory, one plugin could run
+/// another plugin's code — or a file that is no plugin at all.
 fn validate_main(main: &str) -> std::result::Result<(), String> {
     if main.trim().is_empty() {
-        return Err("`main` boş — çalıştırılacak bir betik yok".to_owned());
+        return Err("`main` is empty — there is no script to run".to_owned());
     }
     let path = Path::new(main);
     let escapes = path
@@ -688,23 +711,23 @@ fn validate_main(main: &str) -> std::result::Result<(), String> {
         .any(|component| !matches!(component, Component::Normal(_) | Component::CurDir));
     if escapes || main.contains('\\') {
         return Err(format!(
-            "`main` ({main}) eklenti dizininin içinde, göreli bir yol olmalı"
+            "`main` ({main}) must be a relative path inside the plugin directory"
         ));
     }
     if !main.ends_with(".js") {
         return Err(format!(
-            "`main` ({main}) bir `.js` dosyası olmalı — eklentiler QuickJS'te koşar (D-069)"
+            "`main` ({main}) must be a `.js` file — plugins run in QuickJS (D-069)"
         ));
     }
     Ok(())
 }
 
-/// api 1'den kalan ve api 2'de anlamı olmayan alanları reddeder.
+/// Rejects fields left over from api 1 that mean nothing in api 2.
 ///
-/// `serde` tanımadığı alanı yok sayar ve bu çoğu zaman doğrudur (ileride
-/// eklenen bir alan eski çekirdeği kırmamalı). Bu iki alan ise **anlam
-/// taşıyordu**: yok sayılsalar, `exec`'li bir manifest yüklenmiş görünür
-/// ve `fs` isteyen bir eklenti dosyaya erişebileceğini sanardı.
+/// `serde` ignores fields it does not know, and that is usually right (a
+/// field added later must not break an old core). These two fields, however,
+/// **carried meaning**: ignored, a manifest with `exec` would look loaded,
+/// and a plugin asking for `fs` would think it could access files.
 fn reject_api1_leftovers(value: &serde_json::Value, path: &Path) -> Result<()> {
     let invalid = |detail: &str| {
         Err(Error::new(
@@ -717,8 +740,8 @@ fn reject_api1_leftovers(value: &serde_json::Value, path: &Path) -> Result<()> {
     };
     if value.get("exec").is_some() {
         return invalid(
-            "`exec` api 2'de yok: eklenti bir komut değil bir betiktir — `\"main\": \"main.js\"` \
-             yazın (D-069)",
+            "`exec` does not exist in api 2: a plugin is a script, not a command — write `\"main\": \"main.js\"` \
+             (D-069)",
         );
     }
     let fs = value
@@ -727,8 +750,8 @@ fn reject_api1_leftovers(value: &serde_json::Value, path: &Path) -> Result<()> {
         .and_then(serde_json::Value::as_array);
     if fs.is_some_and(|entries| !entries.is_empty()) {
         return invalid(
-            "`permissions.fs` api 2'de yok: eklenti dosya sistemine erişemez; kalıcı veri \
-             için `host.storage` kullanılır (D-069)",
+            "`permissions.fs` does not exist in api 2: a plugin cannot access the file system; persistent data \
+             uses `host.storage` (D-069)",
         );
     }
     Ok(())
@@ -738,8 +761,8 @@ fn reject_api1_leftovers(value: &serde_json::Value, path: &Path) -> Result<()> {
 mod tests {
     use super::*;
 
-    /// `<geçici>/<ad>`: manifest testleri dizin adının eklenti adıyla aynı
-    /// olmasını istiyor. Kök dizin değer düşünce silinir.
+    /// `<temp>/<name>`: the manifest tests want the directory name to match the
+    /// plugin name. The root directory is deleted when the value is dropped.
     struct PluginDir {
         _root: crate::test_support::TempDir,
         path: PathBuf,
@@ -772,7 +795,7 @@ mod tests {
 
     fn asset_json() -> String {
         format!(
-            r#"{{"url":"https://ornek.gecersiz/arac","sha256":"{}"}}"#,
+            r#"{{"url":"https://example.invalid/tool","sha256":"{}"}}"#,
             "a".repeat(64)
         )
     }
@@ -804,25 +827,25 @@ mod tests {
         let dir = temp_dir("soundcloud");
         write_manifest(
             &dir,
-            r#"{"name":"baska","display_name":"X","api":2,"main":"main.js"}"#,
+            r#"{"name":"other","display_name":"X","api":2,"main":"main.js"}"#,
         );
         let err = PluginManifest::load(&dir).unwrap_err();
         assert_eq!(err.stage(), Stage::PluginLoad);
         assert!(
-            err.chain_text().contains("dizin adıyla"),
+            err.chain_text().contains("the directory name"),
             "{}",
             err.chain_text()
         );
     }
 
-    /// api 1 bir manifest "`main` yok" diye değil, **sürüm uyuşmazlığı**
-    /// olarak reddedilmeli — kullanıcıya söylenecek şey o.
+    /// An api 1 manifest must be rejected as **a version mismatch**, not as "no
+    /// `main`" — that is what the user needs to be told.
     #[test]
     fn an_api1_manifest_is_reported_as_incompatible_not_as_broken() {
-        let dir = temp_dir("eski");
+        let dir = temp_dir("old");
         write_manifest(
             &dir,
-            r#"{"name":"eski","display_name":"Eski","api":1,"exec":["python3","./main.py"]}"#,
+            r#"{"name":"old","display_name":"Old","api":1,"exec":["python3","./main.py"]}"#,
         );
         let err = PluginManifest::load(&dir).unwrap_err();
         match err.kind() {
@@ -834,7 +857,7 @@ mod tests {
                 assert_eq!(*plugin_api, 1);
                 assert_eq!(*host_api, PLUGIN_API);
             }
-            other => panic!("beklenmeyen hata: {other:?}"),
+            other => panic!("unexpected error: {other:?}"),
         }
     }
 
@@ -843,12 +866,12 @@ mod tests {
         for (manifest, expected) in [
             (
                 r#"{"name":"p","display_name":"P","api":2,"main":"main.js","exec":["x"]}"#,
-                "`exec` api 2'de yok",
+                "`exec` does not exist in api 2",
             ),
             (
                 r#"{"name":"p","display_name":"P","api":2,"main":"main.js",
-                    "permissions":{"net":[],"fs":["/ev"]}}"#,
-                "`permissions.fs` api 2'de yok",
+                    "permissions":{"net":[],"fs":["/home"]}}"#,
+                "`permissions.fs` does not exist in api 2",
             ),
         ] {
             let dir = temp_dir("p");
@@ -861,11 +884,11 @@ mod tests {
     #[test]
     fn main_must_stay_inside_the_plugin_directory_and_be_javascript() {
         for (main, expected) in [
-            ("", "`main` boş"),
-            ("../baska/main.js", "göreli bir yol"),
-            ("/etc/passwd.js", "göreli bir yol"),
-            ("alt\\\\main.js", "göreli bir yol"),
-            ("main.py", "`.js` dosyası"),
+            ("", "`main` is empty"),
+            ("../other/main.js", "a relative path"),
+            ("/etc/passwd.js", "a relative path"),
+            ("alt\\\\main.js", "a relative path"),
+            ("main.py", "a `.js` file"),
         ] {
             let dir = temp_dir("p");
             write_manifest(
@@ -875,11 +898,11 @@ mod tests {
             let err = PluginManifest::load(&dir).unwrap_err();
             assert!(
                 err.chain_text().contains(expected),
-                "{main}: beklenen {expected:?} yok: {}",
+                "{main}: expected {expected:?} missing from: {}",
                 err.chain_text()
             );
         }
-        // Alt dizin serbest.
+        // A subdirectory is fine.
         let dir = temp_dir("p");
         write_manifest(
             &dir,
@@ -894,15 +917,15 @@ mod tests {
         let cases = [
             (
                 format!(r#"{{"name":"yt-dlp","version":"","assets":{{"linux-x86_64":{good}}}}}"#),
-                "`version` boş",
+                "`version` is empty",
             ),
             (
                 r#"{"name":"yt-dlp","version":"1","assets":{}}"#.to_owned(),
-                "`assets` boş",
+                "`assets` is empty",
             ),
             (
                 format!(r#"{{"name":"yt-dlp","version":"1","assets":{{"linux-amd64":{good}}}}}"#),
-                "tanınan bir platform değil",
+                "is not a recognised platform",
             ),
             (
                 r#"{"name":"yt-dlp","version":"1","assets":{"linux-x86_64":{"url":"http://a/b","sha256":"aa"}}}"#
@@ -910,9 +933,9 @@ mod tests {
                 "https://",
             ),
             (
-                r#"{"name":"yt-dlp","version":"1","assets":{"linux-x86_64":{"url":"https://a/b","sha256":"kisa"}}}"#
+                r#"{"name":"yt-dlp","version":"1","assets":{"linux-x86_64":{"url":"https://a/b","sha256":"short"}}}"#
                     .to_owned(),
-                "64 haneli",
+                "64 hex digits",
             ),
         ];
         for (entry, expected) in cases {
@@ -926,7 +949,7 @@ mod tests {
             let err = PluginManifest::load(&dir).unwrap_err();
             assert!(
                 err.chain_text().contains(expected),
-                "beklenen {expected:?} yok: {}",
+                "expected {expected:?} missing from: {}",
                 err.chain_text()
             );
         }
@@ -946,7 +969,7 @@ mod tests {
             ),
         );
         let err = PluginManifest::load(&dir).unwrap_err();
-        assert!(err.chain_text().contains("iki kez"), "{}", err.chain_text());
+        assert!(err.chain_text().contains("twice"), "{}", err.chain_text());
     }
 
     #[test]
@@ -959,8 +982,8 @@ mod tests {
         let name = requirement.file_name("linux-x86_64");
         assert!(!name.contains('/'), "{name}");
         assert!(name.ends_with("-1-linux-x86_64"), "{name}");
-        // Uzantı makineden değil platformdan: bu test hangi sistemde koşarsa
-        // koşsun aynı iki adı görmeli.
+        // The extension comes from the platform, not the machine: this test must see
+        // the same two names whatever system it runs on.
         assert!(
             requirement
                 .file_name("windows-x86_64")
@@ -973,17 +996,17 @@ mod tests {
     #[test]
     fn bad_permission_entries_are_refused_with_the_reason() {
         for (entry, expected) in [
-            ("*", "çıplak `*`"),
-            ("*.com", "tek etiketli joker"),
-            ("https://api.ornek.com", "şema, port ya da yol"),
-            ("api.ornek.com:443", "şema, port ya da yol"),
-            ("api.*.ornek.com", "yalnızca en solda"),
-            ("-kotu.ornek.com", "geçersiz"),
+            ("*", "a bare `*`"),
+            ("*.com", "single-label wildcard"),
+            ("https://api.example.com", "no scheme, port or path"),
+            ("api.example.com:443", "no scheme, port or path"),
+            ("api.*.example.com", "can only be leftmost"),
+            ("-evil.example.com", "invalid host name"),
         ] {
             let err = validate_host_pattern(entry).unwrap_err();
             assert!(err.contains(expected), "{entry}: {err}");
         }
-        assert!(validate_host_pattern("API.Ornek.COM.").is_ok());
+        assert!(validate_host_pattern("API.Example.COM.").is_ok());
         assert!(validate_host_pattern("*.googlevideo.com").is_ok());
     }
 
@@ -992,56 +1015,62 @@ mod tests {
         let permissions = net(&["*.sndcdn.com", "soundcloud.com"]);
         assert!(permissions.allows_host("cf-media.sndcdn.com"));
         assert!(permissions.allows_host("A-V2.SNDCDN.COM."));
-        assert!(!permissions.allows_host("sndcdn.com"), "apex kapsanmamalı");
-        assert!(!permissions.allows_host("kotusndcdn.com"), "sonek taklidi");
+        assert!(
+            !permissions.allows_host("sndcdn.com"),
+            "the apex must not be covered"
+        );
+        assert!(
+            !permissions.allows_host("evilsndcdn.com"),
+            "suffix impersonation"
+        );
         assert!(permissions.allows_host("soundcloud.com"));
         assert!(
             !permissions.allows_host("api.soundcloud.com"),
-            "çıplak ad alt alanı kapsamaz"
+            "a bare name does not cover a subdomain"
         );
     }
 
-    /// İzin denetimi, istemcinin bağlanacağı ana bilgisayarı okumalı —
-    /// ayrıştırıcıların anlaşamadığı her biçim bir kaçış kapısı.
+    /// The permission check must read the host the client will connect to —
+    /// every form the parsers disagree on is an escape hatch.
     #[test]
     fn url_host_reads_what_the_client_would_connect_to_and_refuses_the_rest() {
         assert_eq!(
-            url_host("https://API.ornek.com/yol?q=1").unwrap(),
-            "api.ornek.com"
+            url_host("https://API.example.com/path?q=1").unwrap(),
+            "api.example.com"
         );
-        assert_eq!(url_host("http://ornek.com:8080").unwrap(), "ornek.com");
-        assert_eq!(url_host("https://ornek.com#frag").unwrap(), "ornek.com");
+        assert_eq!(url_host("http://example.com:8080").unwrap(), "example.com");
+        assert_eq!(url_host("https://example.com#frag").unwrap(), "example.com");
         assert_eq!(
-            url_host("https://izinli.com@kotu.com/").unwrap(),
-            "kotu.com",
-            "kullanıcı bilgisi ana bilgisayar değildir"
+            url_host("https://allowed.com@evil.com/").unwrap(),
+            "evil.com",
+            "user info is not the host"
         );
         assert_eq!(
-            url_host("https://kotu.com#@izinli.com").unwrap(),
-            "kotu.com",
-            "parça, ana bilgisayarın parçası değildir"
+            url_host("https://evil.com#@allowed.com").unwrap(),
+            "evil.com",
+            "the fragment is not part of the host"
         );
         for bad in [
-            "ftp://ornek.com/",
+            "ftp://example.com/",
             "file:///etc/passwd",
-            "ornek.com/yol",
-            "https://izinli.com\\@kotu.com/",
+            "example.com/path",
+            "https://allowed.com\\@evil.com/",
             "https://[::1]/",
-            "https://ornek com/",
-            "https:///yol",
+            "https://example com/",
+            "https:///path",
             "https://%6b%6f%74%75.com/",
         ] {
-            assert!(url_host(bad).is_err(), "{bad} kabul edildi");
+            assert!(url_host(bad).is_err(), "{bad} was accepted");
         }
     }
 
     #[test]
     fn check_url_names_the_host_that_was_not_declared() {
-        let permissions = net(&["api.ornek.com"]);
-        assert!(permissions.check_url("https://api.ornek.com/x").is_ok());
-        let err = permissions.check_url("https://kotu.com/x").unwrap_err();
-        assert!(err.contains("`kotu.com`"), "{err}");
-        assert!(err.contains("api.ornek.com"), "{err}");
+        let permissions = net(&["api.example.com"]);
+        assert!(permissions.check_url("https://api.example.com/x").is_ok());
+        let err = permissions.check_url("https://evil.com/x").unwrap_err();
+        assert!(err.contains("`evil.com`"), "{err}");
+        assert!(err.contains("api.example.com"), "{err}");
     }
 
     #[test]
@@ -1055,18 +1084,18 @@ mod tests {
 
     #[test]
     fn a_granted_wildcard_covers_narrower_requests_but_not_the_other_way() {
-        let granted = net(&["*.ornek.com"]);
-        assert!(net(&["a.ornek.com"]).is_covered_by(&granted));
-        assert!(net(&["*.alt.ornek.com"]).is_covered_by(&granted));
+        let granted = net(&["*.example.com"]);
+        assert!(net(&["a.example.com"]).is_covered_by(&granted));
+        assert!(net(&["*.sub.example.com"]).is_covered_by(&granted));
         assert!(
-            !net(&["ornek.com"]).is_covered_by(&granted),
-            "apex kapsanmaz"
+            !net(&["example.com"]).is_covered_by(&granted),
+            "the apex is not covered"
         );
 
-        let narrow = net(&["a.ornek.com"]);
+        let narrow = net(&["a.example.com"]);
         assert!(
-            !net(&["*.ornek.com"]).is_covered_by(&narrow),
-            "joker genişlemesi yeniden onay istemeli"
+            !net(&["*.example.com"]).is_covered_by(&narrow),
+            "widening to a wildcard must ask for consent again"
         );
     }
 
@@ -1076,14 +1105,15 @@ mod tests {
         assert!(net(&["A.example", "b.example.", " "]).is_covered_by(&granted));
     }
 
-    /// Kaldırma komutu adı yola ekliyor: `../` bir başka dizini silmek olurdu.
+    /// The remove command joins the name to a path: `../` would delete another
+    /// directory.
     #[test]
     fn a_local_name_is_a_single_directory_name() {
         for bad in ["", ".", "..", "../x", "a/b", "a\\b", "/etc"] {
-            assert!(validate_local_name(bad).is_err(), "{bad:?} kabul edildi");
+            assert!(validate_local_name(bad).is_err(), "{bad:?} was accepted");
         }
         for good in ["soundcloud", "My Plugin", "ytmusic.dev"] {
-            assert!(validate_local_name(good).is_ok(), "{good:?} reddedildi");
+            assert!(validate_local_name(good).is_ok(), "{good:?} was rejected");
         }
     }
 
@@ -1091,32 +1121,33 @@ mod tests {
     fn a_catalog_name_is_narrow_enough_to_be_a_directory_everywhere() {
         for (bad, why) in [
             ("", "1–64"),
-            ("SoundCloud", "`S` kullanılamaz"),
-            ("-x", "harf ya da rakamla"),
-            ("x.", "noktayla bitmemeli"),
-            ("con", "aygıt adı"),
-            ("nul.js", "aygıt adı"),
-            ("a/b", "`/` kullanılamaz"),
-            ("ş", "`ş` kullanılamaz"),
+            ("SoundCloud", "`S` cannot be used"),
+            ("-x", "start with a letter or digit"),
+            ("x.", "must not end with a dot"),
+            ("con", "a device name"),
+            ("nul.js", "a device name"),
+            ("a/b", "`/` cannot be used"),
+            ("ş", "`ş` cannot be used"),
         ] {
             let err = validate_catalog_name(bad).unwrap_err();
             assert!(err.contains(why), "{bad:?}: {err}");
         }
         for good in ["soundcloud", "ytmusic", "echo", "my-plugin_2.1", "console"] {
-            assert!(validate_catalog_name(good).is_ok(), "{good:?} reddedildi");
+            assert!(validate_catalog_name(good).is_ok(), "{good:?} was rejected");
         }
     }
 
-    /// Katalogdan inen manifest dizinden okunanla **aynı** kurallardan geçer.
+    /// A manifest downloaded from the catalog goes through **the same** rules as
+    /// one read from a directory.
     #[test]
     fn parse_applies_the_same_rules_as_load() {
-        let origin = Path::new("https://katalog.ornek/index.json");
+        let origin = Path::new("https://catalog.example/index.json");
         let raw = r#"{"name":"echo","display_name":"E","api":2,"main":"main.js"}"#;
         assert!(PluginManifest::parse(raw, "echo", origin).is_ok());
 
-        let err = PluginManifest::parse(raw, "baska", origin).unwrap_err();
+        let err = PluginManifest::parse(raw, "other", origin).unwrap_err();
         assert!(
-            err.chain_text().contains("dizin adıyla"),
+            err.chain_text().contains("the directory name"),
             "{}",
             err.chain_text()
         );
@@ -1146,8 +1177,8 @@ mod tests {
     fn describe_says_what_is_asked_for_in_turkish() {
         assert_eq!(
             net(&["api.soundcloud.com"]).describe(),
-            "ağ: api.soundcloud.com"
+            "network: api.soundcloud.com"
         );
-        assert_eq!(Permissions::default().describe(), "ağa çıkmıyor");
+        assert_eq!(Permissions::default().describe(), "does not go online");
     }
 }

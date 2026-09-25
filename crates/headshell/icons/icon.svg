@@ -1,29 +1,30 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Uygulama ikonu: plak ve pikap kolu. Ad buradan geliyor — kol plağı
-     seçmez, ne koyarsan onu okur (D-058).
+<!-- The app icon: a record and a tonearm. The name comes from here — the
+     arm does not pick the record, it reads whatever you put on (D-058).
 
-     Renkler varsayılan temanın token değerleriyle aynı (bkz. `ui/style.css`
-     içindeki headshell-bg, headshell-surface, headshell-accent). İkon temanın
-     parçası değil — tema değişince değişmez — ama aynı paletten çıkması
-     gerekiyor.
+     The colours are the same as the default theme's token values (see
+     headshell-bg, headshell-surface, headshell-accent in `ui/style.css`).
+     The icon is not part of the theme — it does not change when the theme
+     does — but it has to come from the same palette.
 
-     32×32'de okunmak zorunda olduğu için biçim dört kütleye indirgendi: plak,
-     tek oluk halkası, etiket, kol. İnce oluk çizgileri o boyutta gri bir
-     bulanıklığa dönüşüyor. Kol plağın ortasına değil oluk alanına iner;
-     merkeze inen bir kol, iğnesi etikete oturmuş bir pikaptır.
+     Since it must read at 32×32, the shape was reduced to four masses: the
+     record, a single groove ring, the label, the arm. Thin groove lines turn
+     into a grey blur at that size. The arm lands on the grooves, not the
+     centre of the record; an arm landing in the centre is a turntable with
+     its needle sitting on the label.
 
-     PNG/ICO/ICNS dosyaları bundan üretilir: `icons/README.md`. -->
+     The PNG/ICO/ICNS files are generated from this: `icons/README.md`. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
   <rect width="512" height="512" rx="112" fill="#12100e"/>
   <rect x="56" y="56" width="400" height="400" rx="80" fill="#1b1815"/>
 
-  <!-- Plak -->
+  <!-- The record -->
   <circle cx="220" cy="306" r="144" fill="#0d0b0a"/>
   <circle cx="220" cy="306" r="104" fill="none" stroke="#2e2822" stroke-width="13"/>
   <circle cx="220" cy="306" r="50" fill="#8a5f2c"/>
   <circle cx="220" cy="306" r="14" fill="#12100e"/>
 
-  <!-- Pikap kolu: mil, kol, kafa -->
+  <!-- The tonearm: pivot, arm, head -->
   <path d="M398 126 L300 224" stroke="#ffb454" stroke-width="30" stroke-linecap="round" fill="none"/>
   <g fill="#ffb454">
     <circle cx="404" cy="120" r="42"/>

@@ -1,16 +1,16 @@
-//! Uzak sağlayıcılar: Subsonic ve Jellyfin (PLAN §1.3, D-019).
+//! Remote providers: Subsonic and Jellyfin (PLAN §1.3, D-019).
 //!
-//! Ortak olan burada, ayrışan alt modüllerde:
+//! What they share is here, what differs is in the submodules:
 //!
-//! | Ortak | Ayrışan |
+//! | Shared | Different |
 //! |---|---|
-//! | sunucu kaydı, kimlik saklama (D-021) | uç nokta adresleri |
-//! | HTTP taşıma sınırı (D-020) | JSON şekli |
-//! | `AudioSource::HttpStream` üretimi | kimlik doğrulama biçimi |
+//! | server records, credential storage (D-021) | endpoint addresses |
+//! | the HTTP transport boundary (D-020) | JSON shape |
+//! | producing `AudioSource::HttpStream` | authentication scheme |
 //!
-//! **K2 hatırlatması:** buradan **geçmiş çekilmez.** Uzak sunucu bir ses
-//! kaynağıdır; dinleme geçmişi kullanıcının kendi export dosyalarından ve
-//! `headshell play`'in ürettiği scrobble'lardan gelir.
+//! **K2 reminder:** **no history is pulled** from here. A remote server is an
+//! audio source; the listening history comes from the user's own export
+//! files and the scrobbles `headshell play` produces.
 
 pub mod jellyfin;
 pub mod md5;
@@ -28,10 +28,11 @@ use crate::net::HttpClient;
 
 use super::Provider;
 
-/// Kayıt dosyasının biçim sürümü. Şekil değişirse burası artar ve göç yazılır.
+/// The format version of the record file. If the shape changes this goes up
+/// and a migration is written.
 const SERVERS_FILE_VERSION: u32 = 1;
 
-/// Hangi protokol.
+/// Which protocol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ServerKind {
@@ -48,11 +49,11 @@ impl ServerKind {
         }
     }
 
-    /// Metinden okur (CLI argümanı, config dosyası).
+    /// Reads it from text (a CLI argument, a config file).
     ///
     /// # Errors
-    /// Tanınmayan bir değer verilirse — sessizce Subsonic varsaymak,
-    /// kullanıcının yazım hatasını "sunucu cevap vermiyor" hatasına çevirir.
+    /// If an unrecognised value is given — silently assuming Subsonic would turn
+    /// the user's typo into a "server does not answer" error.
     pub fn parse(raw: &str) -> Result<Self> {
         match raw.trim().to_ascii_lowercase().as_str() {
             "subsonic" | "opensubsonic" | "navidrome" | "airsonic" => Ok(Self::Subsonic),
@@ -60,7 +61,7 @@ impl ServerKind {
             other => Err(Error::new(
                 Stage::ConfigLoad,
                 ErrorKind::InvalidInput {
-                    detail: format!("bilinmeyen sunucu türü: {other:?} (subsonic | jellyfin)"),
+                    detail: format!("unknown server type: {other:?} (subsonic | jellyfin)"),
                 },
             )),
         }
@@ -73,73 +74,74 @@ impl std::fmt::Display for ServerKind {
     }
 }
 
-/// Diske yazılan kimlik bilgisi.
+/// The credentials written to disk.
 ///
-/// **Parola hiçbir varyantta düz durmaz** (D-021): Subsonic'te protokolün
-/// kendi salt/token yolu, Jellyfin'de bir erişim anahtarı saklanır.
+/// **In no variant is the password stored in plain text** (D-021): for
+/// Subsonic the protocol's own salt/token scheme is stored, for Jellyfin an
+/// access key.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StoredAuth {
-    /// `t=md5(parola+salt)&s=salt` — Subsonic 1.13+ kimlik yolu.
+    /// `t=md5(password+salt)&s=salt` — the Subsonic 1.13+ authentication scheme.
     SubsonicToken { salt: String, token: String },
-    /// Jellyfin erişim anahtarı (API key ya da oturum token'ı).
+    /// A Jellyfin access key (an API key or a session token).
     ApiKey { key: String },
 }
 
-/// Kayıtlı bir uzak sunucu.
+/// A registered remote server.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RemoteServer {
-    /// Sağlayıcı kimliği: `headshell provider test <bu>`.
+    /// The provider id: `headshell provider test <this>`.
     pub id: ProviderId,
     pub kind: ServerKind,
-    /// Taban adres, sondaki `/` olmadan.
+    /// The base address, without the trailing `/`.
     pub url: String,
     pub username: String,
     pub auth: StoredAuth,
-    /// Jellyfin'de `/Users/{id}/Items` için gereken kullanıcı kimliği.
-    /// Kayıt anında öğrenilir; Subsonic'te `None`.
+    /// The user id needed for `/Users/{id}/Items` on Jellyfin. Learned at
+    /// registration time; `None` for Subsonic.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_id: Option<String>,
 }
 
 impl RemoteServer {
-    /// Kullanıcıya gösterilecek ad.
+    /// The name shown to the user.
     #[must_use]
     pub fn display_name(&self) -> String {
         format!("{} ({})", self.url, self.kind)
     }
 }
 
-/// Yeni bir sunucu kaydı isteği (henüz kimliği çözülmemiş).
+/// A request to register a new server (its credentials not yet resolved).
 ///
-/// Parola **saklanmaz**; yalnızca token/anahtar türetmek için kullanılır.
+/// The password **is not stored**; it is only used to derive a token/key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewServer {
     pub id: ProviderId,
     pub kind: ServerKind,
     pub url: String,
     pub username: String,
-    /// Parola. Jellyfin'de `api_key` verildiyse gereksiz.
+    /// The password. Not needed on Jellyfin if an `api_key` was given.
     pub password: Option<String>,
-    /// Doğrudan verilen API anahtarı (yalnızca Jellyfin).
+    /// An API key given directly (Jellyfin only).
     pub api_key: Option<String>,
-    /// Kaydetmeden önce sunucuya bağlanıp kimliği doğrula.
+    /// Connect to the server and verify the credentials before saving.
     pub verify: bool,
 }
 
-/// Kayıt dosyasının kökü.
+/// The root of the record file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct ServersFile {
     version: u32,
     servers: Vec<RemoteServer>,
 }
 
-/// `servers.json`'u okur. Dosya yoksa boş liste — hata değil.
+/// Reads `servers.json`. If there is no file, an empty list — not an error.
 ///
 /// # Errors
-/// Dosya okunamazsa, JSON bozuksa ya da sürüm tanınmıyorsa. Bozuk dosyayı
-/// **yok sayıp boş liste dönmüyoruz**: kullanıcının sunucuları sessizce
-/// kaybolmuş görünürdü.
+/// If the file cannot be read, the JSON is corrupt or the version is not
+/// recognised. We **do not ignore a corrupt file and return an empty list**:
+/// the user's servers would look as if they had silently vanished.
 pub fn load_servers(path: &Path) -> Result<Vec<RemoteServer>> {
     let raw = match std::fs::read(path) {
         Ok(raw) => raw,
@@ -160,7 +162,7 @@ pub fn load_servers(path: &Path) -> Result<Vec<RemoteServer>> {
             Stage::ConfigLoad,
             ErrorKind::InvalidInput {
                 detail: format!(
-                    "{} sürüm {} ile yazılmış; bu derleme en fazla {} okuyor",
+                    "{} was written with version {}; this build reads at most {}",
                     path.display(),
                     file.version,
                     SERVERS_FILE_VERSION
@@ -171,10 +173,10 @@ pub fn load_servers(path: &Path) -> Result<Vec<RemoteServer>> {
     Ok(file.servers)
 }
 
-/// `servers.json`'u yazar. Unix'te izinler `0600`.
+/// Writes `servers.json`. Permissions `0600` on Unix.
 ///
 /// # Errors
-/// Dizin oluşturulamaz ya da dosya yazılamazsa.
+/// If the directory cannot be created or the file cannot be written.
 pub fn save_servers(path: &Path, servers: &[RemoteServer]) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
@@ -198,7 +200,7 @@ pub fn save_servers(path: &Path, servers: &[RemoteServer]) -> Result<()> {
     Ok(())
 }
 
-/// Dosyayı yalnızca sahibine açar (D-021).
+/// Opens the file only to its owner (D-021).
 #[cfg(unix)]
 fn restrict_permissions(path: &Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
@@ -206,29 +208,30 @@ fn restrict_permissions(path: &Path) -> Result<()> {
         .map_err(|err| crate::error::io_err(Stage::ConfigLoad, path, err))
 }
 
-/// Unix dışında izin kısıtlaması yok; sessiz kalmıyoruz, log'a düşüyor.
+/// No permission restriction outside Unix; we do not stay silent, it goes to
+/// the log.
 #[cfg(not(unix))]
 fn restrict_permissions(path: &Path) -> Result<()> {
     tracing::warn!(
         path = %path.display(),
-        "bu platformda dosya izni kısıtlanamıyor; kimlik bilgisi dosyasını korumak kullanıcıya kalıyor"
+        "file permissions cannot be restricted on this platform; protecting the credentials file is up to the user"
     );
     Ok(())
 }
 
-/// Taban adresi normalize eder: sondaki `/` gider, şema zorunlu.
+/// Normalises the base address: the trailing `/` goes, a scheme is required.
 ///
 /// # Errors
-/// Adres boşsa ya da `http://` / `https://` ile başlamıyorsa. Şemayı tahmin
-/// etmiyoruz: `https` varsaymak sessizce başarısız bir bağlantı, `http`
-/// varsaymak sessizce şifresiz bir parola demek olurdu.
+/// If the address is empty or does not start with `http://` / `https://`. We
+/// do not guess the scheme: assuming `https` would mean a silently failing
+/// connection, assuming `http` a silently unencrypted password.
 pub fn normalize_url(raw: &str) -> Result<String> {
     let trimmed = raw.trim().trim_end_matches('/');
     if trimmed.is_empty() {
         return Err(Error::new(
             Stage::ConfigLoad,
             ErrorKind::InvalidInput {
-                detail: "sunucu adresi boş".to_owned(),
+                detail: "the server address is empty".to_owned(),
             },
         ));
     }
@@ -237,7 +240,7 @@ pub fn normalize_url(raw: &str) -> Result<String> {
             Stage::ConfigLoad,
             ErrorKind::InvalidInput {
                 detail: format!(
-                    "{trimmed:?} şema taşımıyor — `http://` ya da `https://` ile başlamalı"
+                    "{trimmed:?} has no scheme — it must start with `http://` or `https://`"
                 ),
             },
         ));
@@ -245,22 +248,24 @@ pub fn normalize_url(raw: &str) -> Result<String> {
     Ok(trimmed.to_owned())
 }
 
-/// Adresten bir sağlayıcı adı önerir: `https://muzik.ev:4533` → `muzik`.
+/// Suggests a provider name from the address: `https://music.home:4533` →
+/// `music`.
 ///
-/// Çekirdekte, CLI'de değil: bu bir veri dönüşümü ve GUI de aynı öneriyi
-/// gösterecek (Altın Kural). Ad çıkarılamazsa protokolün adına düşer.
+/// In the core, not in the CLI: this is a data transformation and the GUI
+/// will show the same suggestion (the Golden Rule). If no name can be
+/// extracted it falls back to the protocol's name.
 #[must_use]
 pub fn suggest_id(url: &str, kind: ServerKind) -> ProviderId {
     let after_scheme = url.rsplit("://").next().unwrap_or(url);
     let authority = after_scheme.split(['/', '?', '#']).next().unwrap_or("");
-    // Port'u at. IPv6 köşeli parantezli adreslerde bu ayrım bozulur ama
-    // sonuç yalnızca bir **öneri**; kullanıcı `--name` ile ezebiliyor.
+    // Drop the port. This split breaks on bracketed IPv6 addresses, but the
+    // result is only a **suggestion**; the user can override it with `--name`.
     let host = authority.rsplit_once(':').map_or(authority, |(h, _)| h);
 
     let label = host.trim_start_matches("www.").split('.').next();
     match label {
-        // Sayısal etiket (IP adresi) ad olmaz: `192` diye bir sağlayıcı
-        // kullanıcıya hiçbir şey anlatmaz.
+        // A numeric label (an IP address) does not make a name: a provider
+        // called `192` tells the user nothing.
         Some(label) if !label.is_empty() && label.chars().any(|c| c.is_ascii_alphabetic()) => {
             ProviderId::new(label.to_ascii_lowercase())
         }
@@ -268,22 +273,24 @@ pub fn suggest_id(url: &str, kind: ServerKind) -> ProviderId {
     }
 }
 
-/// Rastgele salt üretir.
+/// Produces a random salt.
 ///
-/// Dönüşün ikinci ögesi entropinin işletim sisteminden gelip gelmediği.
+/// The second item of the return value is whether the entropy came from the
+/// operating system.
 ///
-/// Unix'te `/dev/urandom` okunuyor. O dosya Windows'ta yok ve ilk yazım orada
-/// sessizce olmasa da hep zayıf yedeğe düşüyordu (D-070). Artık ikinci yol
-/// standart kütüphanenin `RandomState`'i: anahtarlarını işletim sisteminin
-/// rastgele sayı üretecinden alıyor (Windows'ta `ProcessPrng`), ve o
-/// anahtarlarla karılmış bir sayaç dışarıdan tahmin edilemiyor. Salt'ın işi
-/// gizlilik değil — aynı parolanın iki kurulumda aynı token'a düşmemesi —
-/// ve bunun için yeterli. Saat + süreç kimliği yedeği yalnızca ikisi de
-/// olmazsa kalıyor, ve **söyleniyor** (K9).
+/// On Unix `/dev/urandom` is read. That file does not exist on Windows, and
+/// the first version always fell back to the weak fallback there — not
+/// silently, but always (D-070). Now the second route is the standard
+/// library's `RandomState`: it takes its keys from the operating system's
+/// random number generator (`ProcessPrng` on Windows), and a counter mixed
+/// with those keys cannot be predicted from outside. The salt's job is not
+/// secrecy — it is keeping the same password from landing on the same token
+/// in two installs — and for that this is enough. The clock + process id
+/// fallback only remains if both fail, and **it is said** (K9).
 #[must_use]
 pub fn random_salt() -> (String, bool) {
-    // `read` değil `read_exact`: `/dev/urandom` sonsuz bir akış, tamamını
-    // okumaya kalkmak süreci belleğe boğar.
+    // `read_exact`, not `read`: `/dev/urandom` is an endless stream; trying to
+    // read all of it would drown the process in memory.
     let mut bytes = [0u8; 12];
     if let Ok(mut file) = std::fs::File::open("/dev/urandom")
         && std::io::Read::read_exact(&mut file, &mut bytes).is_ok()
@@ -294,8 +301,9 @@ pub fn random_salt() -> (String, bool) {
     if let Some(hex) = os_seeded_hex() {
         return (hex, true);
     }
-    // Yedek: saat + süreç kimliği. Zayıf ama salt'ın işi gizlilik değil,
-    // aynı parolanın iki kurulumda aynı token'a düşmemesi.
+    // Fallback: the clock + the process id. Weak, but the salt's job is not
+    // secrecy, it is keeping the same password from landing on the same token
+    // in two installs.
     let seed = format!(
         "{}-{}",
         jiff::Timestamp::now().as_nanosecond(),
@@ -304,12 +312,12 @@ pub fn random_salt() -> (String, bool) {
     (md5::md5_hex(seed.as_bytes())[..24].to_owned(), false)
 }
 
-/// İşletim sisteminin rastgeleliğiyle anahtarlanmış 24 onaltılık hane.
+/// 24 hex digits keyed with the operating system's randomness.
 ///
-/// `RandomState::new()` anahtarlarını süreç başına bir kez işletim
-/// sisteminden alır; iki bağımsız 64 bitlik çıktı için iki farklı sayaç
-/// karılıyor. `Option` çünkü dönüşü imzada dürüst tutmak istiyoruz: bugün
-/// her zaman `Some`.
+/// `RandomState::new()` takes its keys from the operating system once per
+/// process; two different counters are mixed for two independent 64-bit
+/// outputs. `Option` because we want to keep the return value honest in the
+/// signature: today it is always `Some`.
 fn os_seeded_hex() -> Option<String> {
     use std::hash::{BuildHasher, RandomState};
     let state = RandomState::new();
@@ -320,16 +328,19 @@ fn os_seeded_hex() -> Option<String> {
     Some(hex)
 }
 
-/// Kayıt isteğini diske yazılabilir bir sunucu kaydına çevirir.
+/// Turns a registration request into a server record that can be written to
+/// disk.
 ///
-/// Subsonic'te ağa çıkmadan token türetilir; Jellyfin'de parola verildiyse
-/// `AuthenticateByName` ile bir erişim anahtarına çevrilir — yani orada ağ
-/// **zorunludur**, çünkü saklanacak şey parola değildir (D-021).
+/// For Subsonic a token is derived without going online; for Jellyfin, if a
+/// password was given, it is turned into an access key with
+/// `AuthenticateByName` — so there the network **is required**, because what
+/// gets stored is not the password (D-021).
 ///
-/// `notes` kullanıcıya gösterilecek gözlemler (zayıf entropi gibi).
+/// `notes` are observations to show the user (like weak entropy).
 ///
 /// # Errors
-/// Gerekli kimlik bilgisi eksikse, adres bozuksa ya da doğrulama başarısızsa.
+/// If a required credential is missing, the address is malformed or the
+/// verification fails.
 pub async fn prepare_server(
     spec: &NewServer,
     http: Arc<dyn HttpClient>,
@@ -341,7 +352,7 @@ pub async fn prepare_server(
         ServerKind::Subsonic => {
             if spec.api_key.is_some() {
                 notes.push(
-                    "Subsonic API anahtarı kabul etmiyor; parola üzerinden token türetiliyor"
+                    "Subsonic does not accept an API key; deriving a token from the password"
                         .to_owned(),
                 );
             }
@@ -349,13 +360,16 @@ pub async fn prepare_server(
                 Error::new(
                     Stage::ConfigLoad,
                     ErrorKind::InvalidInput {
-                        detail: "Subsonic için parola gerekli".to_owned(),
+                        detail: "a password is required for Subsonic".to_owned(),
                     },
                 )
             })?;
             let (salt, strong) = random_salt();
             if !strong {
-                notes.push("salt zayıf entropiyle üretildi (/dev/urandom okunamadı)".to_owned());
+                notes.push(
+                    "the salt was produced with weak entropy (/dev/urandom could not be read)"
+                        .to_owned(),
+                );
             }
             let token = md5::md5_hex(format!("{password}{salt}").as_bytes());
             RemoteServer {
@@ -381,11 +395,14 @@ pub async fn prepare_server(
                     Error::new(
                         Stage::ConfigLoad,
                         ErrorKind::InvalidInput {
-                            detail: "Jellyfin için parola ya da API anahtarı gerekli".to_owned(),
+                            detail: "a password or an API key is required for Jellyfin".to_owned(),
                         },
                     )
                 })?;
-                notes.push("parola erişim anahtarına çevrildi; parola saklanmıyor".to_owned());
+                notes.push(
+                    "the password was turned into an access key; the password is not stored"
+                        .to_owned(),
+                );
                 jellyfin::authenticate(&url, &spec.username, password, spec.id.clone(), &*http)
                     .await?
             }
@@ -396,21 +413,22 @@ pub async fn prepare_server(
         let provider = provider_for(&server, Arc::clone(&http));
         let health = provider.health().await?;
         if !health.reachable {
-            // "erişilemedi" **demiyoruz**: sağlıksızlığın iki ayrı sebebi var
-            // ve ikisi de buradan geçiyor — sunucuya ulaşılamamış olabilir
-            // (`NETWORK_REQUEST`) ya da ulaşılıp kimlik reddedilmiş olabilir
-            // (`PROVIDER_CALL`, "Wrong username or password"). Dıştaki cümle
-            // birini seçerse yarı zaman yalan söyler; sebebi `detail`
-            // taşıyor, biz yalnızca doğrulamanın geçmediğini söylüyoruz (K9).
+            // We **do not say** "unreachable": being unhealthy has two separate
+            // causes and both come through here — the server may not have been
+            // reached (`NETWORK_REQUEST`), or it may have been reached and the
+            // credentials refused (`PROVIDER_CALL`, "Wrong username or
+            // password"). If the outer sentence picked one it would lie half
+            // the time; `detail` carries the cause, and we only say that the
+            // verification did not pass (K9).
             return Err(Error::new(
                 Stage::ProviderCall,
                 ErrorKind::InvalidInput {
                     detail: format!(
-                        "{} doğrulanamadı: {}",
+                        "could not verify {}: {}",
                         server.url,
                         health
                             .detail
-                            .unwrap_or_else(|| "sebep bildirilmedi".to_owned())
+                            .unwrap_or_else(|| "no reason given".to_owned())
                     ),
                 },
             ));
@@ -420,15 +438,16 @@ pub async fn prepare_server(
         }
     }
 
-    // Jellyfin'in `/Users/{id}/Items` uçları kullanıcı kimliği istiyor.
-    // Anahtarla kaydedildiyse henüz bilmiyoruz; şimdi öğrenmek her aramada
-    // fazladan bir istek atmaktan iyidir. Öğrenilemezse kayıt yine geçerli:
-    // sağlayıcı çalışma anında tembel olarak sorar.
+    // Jellyfin's `/Users/{id}/Items` endpoints want a user id. If it was
+    // registered with a key we do not know it yet; learning it now is
+    // better than sending an extra request with every search. If it
+    // cannot be learned the record is still valid: the provider asks
+    // lazily at run time.
     if server.kind == ServerKind::Jellyfin && server.user_id.is_none() {
         match jellyfin::fetch_user_id(&server, &*http).await {
             Ok(id) => server.user_id = Some(id),
             Err(err) => notes.push(format!(
-                "kullanıcı kimliği şimdi öğrenilemedi, ilk aramada denenecek: {}",
+                "the user id could not be learned now; it will be tried on the first search: {}",
                 err.chain_text().replace('\n', " ")
             )),
         }
@@ -437,7 +456,7 @@ pub async fn prepare_server(
     Ok((server, notes))
 }
 
-/// Kayıttan çalışan bir sağlayıcı kurar.
+/// Sets up a working provider from a record.
 #[must_use]
 pub fn provider_for(server: &RemoteServer, http: Arc<dyn HttpClient>) -> Arc<dyn Provider> {
     match server.kind {
@@ -453,8 +472,8 @@ mod tests {
     #[test]
     fn urls_lose_their_trailing_slash_but_keep_their_scheme() {
         assert_eq!(
-            normalize_url("https://muzik.ev/ ").unwrap(),
-            "https://muzik.ev"
+            normalize_url("https://music.home/ ").unwrap(),
+            "https://music.home"
         );
         assert_eq!(
             normalize_url("http://127.0.0.1:4533").unwrap(),
@@ -464,7 +483,7 @@ mod tests {
 
     #[test]
     fn a_url_without_a_scheme_is_rejected_not_guessed() {
-        let err = normalize_url("muzik.ev").unwrap_err();
+        let err = normalize_url("music.home").unwrap_err();
         let text = err.chain_text();
         assert!(text.contains("http://"), "{text}");
     }
@@ -482,37 +501,40 @@ mod tests {
     #[test]
     fn suggested_names_come_from_the_host() {
         assert_eq!(
-            suggest_id("https://muzik.ev:4533", ServerKind::Subsonic).as_str(),
-            "muzik"
+            suggest_id("https://music.home:4533", ServerKind::Subsonic).as_str(),
+            "music"
         );
         assert_eq!(
-            suggest_id("https://www.Ornek.com/jellyfin", ServerKind::Jellyfin).as_str(),
-            "ornek"
+            suggest_id("https://www.Example.com/jellyfin", ServerKind::Jellyfin).as_str(),
+            "example"
         );
-        // IP adresi ad olmaz: protokolün adına düşer.
+        // An IP address does not make a name: it falls back to the protocol's name.
         assert_eq!(
             suggest_id("http://192.168.1.5:8096", ServerKind::Jellyfin).as_str(),
             "jellyfin"
         );
     }
 
-    /// `/dev/urandom` olmayan sistemlerin (Windows) yolu. Linux'ta
-    /// `random_salt` onu hiç çağırmıyor; bu test olmasa hiç koşmazdı.
+    /// The path of systems without `/dev/urandom` (Windows). On Linux
+    /// `random_salt` never calls it; without this test it would never run.
     #[test]
     fn os_seeded_salts_are_24_hex_digits_and_differ() {
         let a = os_seeded_hex().unwrap();
         let b = os_seeded_hex().unwrap();
         assert_eq!(a.len(), 24, "{a}");
         assert!(a.bytes().all(|byte| byte.is_ascii_hexdigit()), "{a}");
-        assert_ne!(a, b, "iki çağrı aynı tuzu verdi");
+        assert_ne!(a, b, "two calls gave the same salt");
     }
 
     #[test]
     fn salts_differ_between_calls() {
         let (a, _) = random_salt();
         let (b, _) = random_salt();
-        assert_ne!(a, b, "aynı salt iki kayıtta aynı token demek olurdu");
-        assert!(a.len() >= 24, "salt çok kısa: {a}");
+        assert_ne!(
+            a, b,
+            "the same salt would mean the same token in two records"
+        );
+        assert!(a.len() >= 24, "the salt is too short: {a}");
     }
 
     #[test]
@@ -523,7 +545,7 @@ mod tests {
         let servers = vec![RemoteServer {
             id: ProviderId::new("ev"),
             kind: ServerKind::Subsonic,
-            url: "https://muzik.ev".to_owned(),
+            url: "https://music.home".to_owned(),
             username: "enai".to_owned(),
             auth: StoredAuth::SubsonicToken {
                 salt: "c19b2d".to_owned(),
@@ -538,10 +560,14 @@ mod tests {
         {
             use std::os::unix::fs::PermissionsExt;
             let mode = std::fs::metadata(&path).unwrap().permissions().mode();
-            assert_eq!(mode & 0o777, 0o600, "kimlik dosyası herkese açık olmamalı");
+            assert_eq!(
+                mode & 0o777,
+                0o600,
+                "the credentials file must not be open to everyone"
+            );
         }
 
-        // Parola dosyaya hiç girmemeli.
+        // The password must never get into the file.
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(!text.contains("sesame"), "{text}");
     }
@@ -549,21 +575,21 @@ mod tests {
     #[test]
     fn a_missing_file_is_an_empty_list_but_a_broken_one_is_an_error() {
         let dir = crate::test_support::TempDir::new("servers-bad");
-        let missing = dir.join("yok.json");
+        let missing = dir.join("missing.json");
         assert!(load_servers(&missing).unwrap().is_empty());
 
-        let broken = dir.join("bozuk.json");
-        std::fs::write(&broken, "{ bu json değil").unwrap();
+        let broken = dir.join("broken.json");
+        std::fs::write(&broken, "{ this is not json").unwrap();
         assert!(
             load_servers(&broken).is_err(),
-            "bozuk kayıt dosyası sessizce boş sayılmamalı"
+            "a corrupt record file must not silently count as empty"
         );
 
-        let future = dir.join("gelecek.json");
+        let future = dir.join("future.json");
         std::fs::write(&future, r#"{"version":99,"servers":[]}"#).unwrap();
         assert!(
             load_servers(&future).is_err(),
-            "bilinmeyen sürüm okunmamalı"
+            "an unknown version must not be read"
         );
     }
 }

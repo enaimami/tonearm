@@ -1,8 +1,8 @@
-//! Tanılama: her başarısızlık hangi aşamada olduğunu söyler.
+//! Diagnostics: every failure says which stage it happened in.
 //!
-//! Bu modül projenin bash prototipinden miras aldığı tek şeydir — bir şey
-//! bozulduğunda *nerede* bozulduğunu tek blokta, kopyala-yapıştır edilebilir
-//! biçimde söylemek.
+//! This module is the one thing the project inherited from its bash
+//! prototype — when something breaks, saying *where* it broke in a single
+//! block that can be copied and pasted.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -10,71 +10,77 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-/// İşin hangi aşamasında olduğumuz. Her hata bir aşamaya bağlıdır.
+/// Which stage of the work we are in. Every error is tied to a stage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum Stage {
-    /// Yapılandırma/veri dizini çözümleme.
+    /// Resolving the configuration/data directory.
     ConfigLoad,
-    /// Export arşivini açma, içindekileri listeleme.
+    /// Opening the export archive, listing its contents.
     ImportRead,
-    /// Arşivin hangi sağlayıcıya ait olduğunu belirleme.
+    /// Determining which provider the archive belongs to.
     ImportDetect,
-    /// Kayıtları ayrıştırma (JSON/CSV → `Listen`).
+    /// Parsing the records (JSON/CSV → `Listen`).
     ImportParse,
-    /// Kanonik kimlik çözümleme zinciri.
+    /// The canonical identity resolution chain.
     IdentityResolve,
-    /// Kütüphane veritabanını açma/şema göçü.
+    /// Opening the library database/schema migration.
     LibraryOpen,
-    /// Kütüphaneye yazma.
+    /// Writing to the library.
     LibraryWrite,
-    /// Kütüphaneden okuma/arama.
+    /// Reading/searching the library.
     LibraryQuery,
-    /// İstatistik hesaplama.
+    /// Computing statistics.
     StatsCompute,
-    /// Sağlayıcı eklentisiyle konuşma.
+    /// Talking to a provider plugin.
     ProviderCall,
-    /// Eklenti keşfi: manifest okuma, doğrulama, izin onayı (Faz 2).
+    /// Plugin discovery: reading the manifest, validation, permission consent
+    /// (Phase 2).
     PluginLoad,
-    /// Eklenti motorunun eser tarafı: beyan edilen araçları (yt-dlp) bu
-    /// platform için çözme, indirme, doğrulama ve kurma (D-055, D-069).
+    /// The artifact side of the plugin engine: resolving the declared tools
+    /// (yt-dlp) for this platform, downloading, verifying and installing them
+    /// (D-055, D-069).
     ///
-    /// `PluginLoad`'dan ayrı: "manifest bozuk" ile "manifest doğru ama
-    /// istediği eser kurulu değil" farklı tanılardır ve farklı şeyler
-    /// gerektirir — biri eklentiyi düzeltmeyi, öteki bir kurulum adımını (K9).
+    /// Separate from `PluginLoad`: "the manifest is broken" and "the manifest is
+    /// fine but the artifact it wants is not installed" are different diagnoses
+    /// and need different things — one needs the plugin fixed, the other an
+    /// install step (K9).
     PluginRuntime,
-    /// Eklentiyi başlatma: betiği okuma, QuickJS'te değerlendirme ve dışa
-    /// aktardığı fonksiyonları beyanıyla karşılaştırma (D-069).
+    /// Starting the plugin: reading the script, evaluating it in QuickJS and
+    /// comparing the functions it exports with its declaration (D-069).
     ///
-    /// `ProviderCall`'dan ayrı: "eklenti hiç ayağa kalkmadı" ile "eklenti
-    /// ayakta ama bu çağrıya hayır dedi" farklı tanılardır (K9). Eski adı
-    /// `PLUGIN_HANDSHAKE`'ti; el sıkışan bir alt süreç artık yok.
+    /// Separate from `ProviderCall`: "the plugin never came up" and "the plugin is
+    /// up but said no to this call" are different diagnoses (K9). Its old name
+    /// was `PLUGIN_HANDSHAKE`; there is no longer a subprocess to shake hands
+    /// with.
     PluginStart,
-    /// Eklenti kataloğu: indeksi okuma ve doğrulama, eklenti dosyalarını
-    /// indirip karmasıyla yerine koyma, güncelleme ve kaldırma (D-071).
+    /// The plugin catalog: reading and validating the index, downloading plugin
+    /// files and putting them in place with their hashes, updating and removing
+    /// (D-071).
     ///
-    /// `PluginRuntime`'dan ayrı: orası eklentinin **istediği araçlar**
-    /// (yt-dlp), burası **eklentinin kendisi**. Ağa hiç ulaşılamaması ise
-    /// `NetworkRequest`'te kalır: "katalog bozuk" ile "kataloğa ulaşamadım"
-    /// farklı tanılardır (K9).
+    /// Separate from `PluginRuntime`: that one is about **the tools a plugin
+    /// wants** (yt-dlp), this one about **the plugin itself**. Not reaching the
+    /// network at all stays in `NetworkRequest`: "the catalog is broken" and "I
+    /// could not reach the catalog" are different diagnoses (K9).
     PluginCatalog,
-    /// HTTP taşıma katmanı: bağlanma, zaman aşımı, TLS, durum kodu.
+    /// The HTTP transport layer: connecting, timeouts, TLS, status codes.
     ///
-    /// `ProviderCall`'dan ayrı: "sunucuya ulaşamadım" ile "sunucu isteğimi
-    /// reddetti" farklı sorunlardır ve farklı çözümleri vardır (K9).
+    /// Separate from `ProviderCall`: "I could not reach the server" and "the
+    /// server refused my request" are different problems with different fixes
+    /// (K9).
     NetworkRequest,
-    /// Sleeve kartı üretimi veya yazımı.
+    /// Producing or writing the Sleeve card.
     SleeveRender,
-    /// Çalınacak kaynağı bulma (sağlayıcıdan `AudioSource` alma).
+    /// Finding the source to play (getting an `AudioSource` from a provider).
     PlaybackResolve,
-    /// Ses çözme (symphonia): kap açma, kod çözücü kurma.
+    /// Decoding audio (symphonia): opening the container, setting up the decoder.
     PlaybackDecode,
-    /// Ses çıkışı (cpal): aygıt açma, akış kurma.
+    /// Audio output (cpal): opening the device, setting up the stream.
     PlaybackOutput,
 }
 
 impl Stage {
-    /// Log ve rapor için sabit ad: `IDENTITY_RESOLVE`.
+    /// A fixed name for logs and reports: `IDENTITY_RESOLVE`.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -107,7 +113,7 @@ impl fmt::Display for Stage {
     }
 }
 
-/// Çalıştığımız ortam. Hata raporunun ilk bloğu.
+/// The environment we run in. The first block of an error report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EnvInfo {
     pub headshell_version: String,
@@ -117,7 +123,7 @@ pub struct EnvInfo {
 }
 
 impl EnvInfo {
-    /// Derleme zamanı bilinen ortam bilgisini toplar.
+    /// Collects the environment information known at build time.
     #[must_use]
     pub fn collect(data_dir: Option<PathBuf>) -> Self {
         Self {
@@ -129,68 +135,68 @@ impl EnvInfo {
     }
 }
 
-/// Son çalıştırmanın tanı raporu. `headshell diag` bunu basar.
+/// The diagnostics report of the last run. `headshell diag` prints it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiagReport {
-    /// Hangi komut çalıştı (`import fixtures/spotify.zip`).
+    /// Which command ran (`import fixtures/spotify.zip`).
     pub command: String,
     pub started_at: jiff::Timestamp,
     pub finished_at: jiff::Timestamp,
     pub env: EnvInfo,
-    /// Komut hata ile bittiyse hangi aşamada.
+    /// If the command ended with an error, at which stage.
     pub failed_at: Option<Stage>,
-    /// Hata zinciri: en dıştaki hata önce, `source()` sırasıyla.
+    /// The error chain: the outermost error first, in `source()` order.
     pub error_chain: Vec<String>,
-    /// Sayılar: `records.total`, `identity.by_isrc`, ...
+    /// Counts: `records.total`, `identity.by_isrc`, ...
     pub counters: BTreeMap<String, i64>,
-    /// Hata olmayan ama kaydedilmeye değer gözlemler.
+    /// Observations that are not errors but are worth recording.
     pub notes: Vec<String>,
 }
 
 impl DiagReport {
-    /// Komut başarıyla bitti mi.
+    /// Did the command finish successfully.
     #[must_use]
     pub fn succeeded(&self) -> bool {
         self.failed_at.is_none()
     }
 
-    /// Kopyalanıp yapıştırılabilir tek blok. GUI de aynı metni gösterecek,
-    /// bu yüzden biçimleme CLI'de değil burada.
+    /// A single block that can be copied and pasted. The GUI shows the same
+    /// text, which is why the formatting lives here and not in the CLI.
     #[must_use]
     pub fn render(&self) -> String {
         use fmt::Write as _;
         let mut out = String::new();
         let _ = writeln!(out, "── headshell diag ───────────────────────────────");
-        let _ = writeln!(out, "komut     : {}", self.command);
+        let _ = writeln!(out, "command   : {}", self.command);
         let _ = writeln!(
             out,
-            "sonuç     : {}",
+            "result    : {}",
             if self.succeeded() {
-                "BAŞARILI"
+                "SUCCEEDED"
             } else {
-                "BAŞARISIZ"
+                "FAILED"
             }
         );
-        let _ = writeln!(out, "başlangıç : {}", self.started_at);
-        let _ = writeln!(out, "bitiş     : {}", self.finished_at);
+        let _ = writeln!(out, "started   : {}", self.started_at);
+        let _ = writeln!(out, "finished  : {}", self.finished_at);
         let _ = writeln!(
             out,
-            "sürüm     : headshell {} ({} {})",
+            "version   : headshell {} ({} {})",
             self.env.headshell_version, self.env.os, self.env.arch
         );
         if let Some(dir) = &self.env.data_dir {
-            let _ = writeln!(out, "veri dizini: {}", dir.display());
+            let _ = writeln!(out, "data dir  : {}", dir.display());
         }
 
         if let Some(stage) = self.failed_at {
-            let _ = writeln!(out, "\nADIM: {stage}");
+            let _ = writeln!(out, "\nSTEP: {stage}");
             for (depth, err) in self.error_chain.iter().enumerate() {
                 let _ = writeln!(out, "  {}{}", "  ".repeat(depth), err);
             }
         }
 
         if !self.counters.is_empty() {
-            let _ = writeln!(out, "\nsayılar:");
+            let _ = writeln!(out, "\ncounts:");
             let width = self.counters.keys().map(String::len).max().unwrap_or(0);
             for (key, value) in &self.counters {
                 let _ = writeln!(out, "  {key:<width$} = {value}");
@@ -198,7 +204,7 @@ impl DiagReport {
         }
 
         if !self.notes.is_empty() {
-            let _ = writeln!(out, "\nnotlar:");
+            let _ = writeln!(out, "\nnotes:");
             for note in &self.notes {
                 let _ = writeln!(out, "  - {note}");
             }
@@ -208,10 +214,10 @@ impl DiagReport {
     }
 }
 
-/// Bir çalıştırma boyunca tanı bilgisi biriktirir.
+/// Collects diagnostic information over a run.
 ///
-/// Çekirdeğin içindeki işlemler buna sayı yazar; komut bittiğinde
-/// [`Recorder::finish`] ile rapora dönüşür.
+/// Operations inside the core write counts to it; when the command ends it
+/// becomes a report with [`Recorder::finish`].
 #[derive(Debug)]
 pub struct Recorder {
     command: String,
@@ -233,28 +239,28 @@ impl Recorder {
         }
     }
 
-    /// Bir sayacı artırır. Yoksa oluşturur.
+    /// Increments a counter. Creates it if missing.
     pub fn count(&mut self, key: impl Into<String>, delta: i64) {
         *self.counters.entry(key.into()).or_insert(0) += delta;
     }
 
-    /// Bir sayacı mutlak değere ayarlar.
+    /// Sets a counter to an absolute value.
     pub fn set(&mut self, key: impl Into<String>, value: i64) {
         self.counters.insert(key.into(), value);
     }
 
-    /// Hataya dönüşmeyen ama rapora girmesi gereken gözlem.
+    /// An observation that does not become an error but belongs in the report.
     pub fn note(&mut self, note: impl Into<String>) {
         self.notes.push(note.into());
     }
 
-    /// Şu ana kadar biriken sayaçlar.
+    /// The counters collected so far.
     #[must_use]
     pub fn counters(&self) -> &BTreeMap<String, i64> {
         &self.counters
     }
 
-    /// Çalıştırmayı kapatır ve raporu üretir.
+    /// Closes the run and produces the report.
     #[must_use]
     pub fn finish(self, outcome: Result<(), &crate::Error>) -> DiagReport {
         let (failed_at, error_chain) = match outcome {
@@ -274,12 +280,12 @@ impl Recorder {
     }
 }
 
-/// Hatanın **nedenlerini** düz metin listesine açar.
+/// Unfolds the error's **causes** into a list of plain text.
 ///
-/// Zincir kasten `err`'in kendisinden değil `err.source()`'tan başlar:
-/// [`crate::Error`]'un `Display`'i `"ADIM: {stage}"` olduğu için ilk halka
-/// `failed_at`'ten zaten basılan başlığın kopyası olurdu (D-007).
-/// `error_chain` yalnızca gerçek nedenleri içerir.
+/// The chain deliberately starts at `err.source()`, not at `err` itself:
+/// since [`crate::Error`]'s `Display` is `"STEP: {stage}"`, the first link
+/// would be a copy of the heading already printed from `failed_at` (D-007).
+/// `error_chain` holds only the real causes.
 fn error_chain(err: &dyn std::error::Error) -> Vec<String> {
     let mut chain = Vec::new();
     let mut current = err.source();
@@ -290,10 +296,10 @@ fn error_chain(err: &dyn std::error::Error) -> Vec<String> {
     chain
 }
 
-/// Son çalıştırmanın raporunu diske yazar.
+/// Writes the last run's report to disk.
 ///
 /// # Errors
-/// Dosya yazılamazsa.
+/// If the file cannot be written.
 pub fn save_last_run(path: &std::path::Path, report: &DiagReport) -> crate::Result<()> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
@@ -314,12 +320,12 @@ pub fn save_last_run(path: &std::path::Path, report: &DiagReport) -> crate::Resu
         .map_err(|source| crate::error::io_err(Stage::ConfigLoad, path, source))
 }
 
-/// Son çalıştırmanın raporunu okur.
+/// Reads the last run's report.
 ///
-/// Dosya yoksa `Ok(None)` — henüz hiç komut çalışmamış olabilir.
+/// If there is no file, `Ok(None)` — no command may have run yet.
 ///
 /// # Errors
-/// Dosya okunamazsa ya da bozuksa.
+/// If the file cannot be read or is corrupt.
 pub fn load_last_run(path: &std::path::Path) -> crate::Result<Option<DiagReport>> {
     let body = match std::fs::read(path) {
         Ok(body) => body,
@@ -353,53 +359,53 @@ mod tests {
                 data_dir: None,
             },
             failed_at: Some(Stage::ImportParse),
-            // Zincir yalnızca nedenleri taşır; "ADIM: ..." başlığı
-            // `failed_at`'ten bir kez basılır (D-007).
+            // The chain carries only the causes; the "STEP: ..." heading is printed
+            // once, from `failed_at` (D-007).
             error_chain: vec![
-                "JSON ayrıştırılamadı: Streaming_History_Audio_0.json".to_owned(),
-                "beklenmeyen alan".to_owned(),
+                "could not parse JSON: Streaming_History_Audio_0.json".to_owned(),
+                "unexpected field".to_owned(),
             ],
             counters: BTreeMap::from([("records.total".to_owned(), 12)]),
-            notes: vec!["2 kayıt atlandı".to_owned()],
+            notes: vec!["2 records skipped".to_owned()],
         }
     }
 
     #[test]
     fn render_names_the_stage() {
         let text = sample().render();
-        assert!(text.contains("ADIM: IMPORT_PARSE"), "{text}");
+        assert!(text.contains("STEP: IMPORT_PARSE"), "{text}");
         assert!(text.contains("records.total = 12"), "{text}");
-        assert!(text.contains("BAŞARISIZ"), "{text}");
+        assert!(text.contains("FAILED"), "{text}");
     }
 
     #[test]
     fn error_chain_does_not_repeat_the_stage_header() {
-        // D-007: `Error`'un Display'i "ADIM: {stage}" olduğu için zincir
-        // ondan başlarsa başlık iki kez basılırdı.
+        // D-007: since `Error`'s Display is "STEP: {stage}", the heading would be
+        // printed twice if the chain started from it.
         let err = crate::error::io_err(
             Stage::ImportRead,
-            "/yok/dosya.zip",
+            "/missing/file.zip",
             std::io::Error::new(std::io::ErrorKind::NotFound, "no such file"),
         );
-        let report = Recorder::start("import /yok/dosya.zip", None).finish(Err(&err));
+        let report = Recorder::start("import /missing/file.zip", None).finish(Err(&err));
 
         assert_eq!(report.failed_at, Some(Stage::ImportRead));
         assert!(
             !report
                 .error_chain
                 .iter()
-                .any(|line| line.starts_with("ADIM:")),
-            "zincir başlığı tekrar etmemeli: {:?}",
+                .any(|line| line.starts_with("STEP:")),
+            "the chain must not repeat the heading: {:?}",
             report.error_chain
         );
         assert_eq!(
             report.error_chain,
             vec![
-                "dosya işlemi başarısız: /yok/dosya.zip".to_owned(),
+                "file operation failed: /missing/file.zip".to_owned(),
                 "no such file".to_owned(),
             ]
         );
-        assert_eq!(report.render().matches("ADIM: IMPORT_READ").count(), 1);
+        assert_eq!(report.render().matches("STEP: IMPORT_READ").count(), 1);
     }
 
     #[test]

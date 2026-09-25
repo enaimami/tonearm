@@ -1,14 +1,16 @@
-//! Eklenti sözleşmesi, **gerçek motorla ve depodaki fikstürle** (D-069).
+//! The plugin contract, **with the real engine and the fixture in the
+//! repository** (D-069).
 //!
-//! Birim testleri (`src/plugin/tests.rs`) motorun her kapısını test içinde
-//! yazılmış küçük betiklerle sınıyor. Burada sınanan şey başka: dışarıdan
-//! görülen yüzey — keşif, onay, sağlayıcı kaydı — ve `fixtures/plugins/echo`
-//! dosyasının, bir eklenti yazarının yazacağı biçimde, uçtan uca çalışması.
+//! The unit tests (`src/plugin/tests.rs`) test every gate of the engine with
+//! small scripts written inside the tests. What is tested here is something
+//! else: the surface seen from outside — discovery, consent, provider
+//! registration — and the `fixtures/plugins/echo` files working end to end,
+//! written the way a plugin author would write them.
 //!
-//! Faz 2'nin "bitti sayılır" ölçütünün ikisi de bu dosyada: **Rust olmayan
-//! bir eklenti çalışıyor** ve **çekirdek sürüm uyumsuzluğunda çökmeden
-//! reddediyor**. api 1'den farkı: hiçbir test "python3 yok" diye atlamıyor,
-//! çünkü eklenti çalıştırmak için dışarıda hiçbir şey gerekmiyor.
+//! Both of Phase 2's "counts as done" criteria are in this file: **a plugin
+//! not written in Rust works**, and **the core refuses a version mismatch
+//! without crashing**. The difference from api 1: no test skips because
+//! "there is no python3", since nothing outside is needed to run a plugin.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -33,8 +35,8 @@ fn temp_config(name: &str) -> support::TestConfig {
     support::TestConfig::new(&format!("plugin-script-{name}"))
 }
 
-/// Fikstür eklentisini veri dizinine kurar — kullanıcının yapacağı gibi:
-/// dizini kopyalayarak.
+/// Installs the fixture plugin into the data directory — the way the user
+/// would: by copying the directory.
 fn install_echo(config: &Config) -> PathBuf {
     let dir = config.plugins_dir().join("echo");
     std::fs::create_dir_all(&dir).unwrap();
@@ -61,11 +63,11 @@ fn provider_for(config: &Config, dir: &Path) -> PluginProvider {
 
 #[tokio::test]
 async fn a_script_plugin_answers_health_search_and_resolve() {
-    let config = temp_config("mutlu");
+    let config = temp_config("happy");
     let dir = install_echo(&config);
 
     let mut secrets = Secrets::default();
-    secrets.set("plugin:echo", "token", "gizli-anahtar");
+    secrets.set("plugin:echo", "token", "secret-key");
     secrets.save(&config.secrets_path()).unwrap();
 
     let provider = provider_for(&config, &dir);
@@ -79,77 +81,80 @@ async fn a_script_plugin_answers_health_search_and_resolve() {
     let health = provider.health().await.unwrap();
     assert!(health.reachable, "{:?}", health.detail);
     assert_eq!(health.track_count, Some(2));
-    // Eklenti sırrı gördü ama **değerini** raporlamadı.
-    assert_eq!(health.detail.as_deref(), Some("sır var"));
+    // The plugin saw the secret but did not report its **value**.
+    assert_eq!(health.detail.as_deref(), Some("has secret"));
 
     let tracks = provider.search("EZHEL", 10).await.unwrap();
     assert_eq!(tracks.len(), 1);
     assert_eq!(tracks[0].id.provider, ProviderId::new("echo"));
     assert_eq!(tracks[0].track.title, "Geceler");
-    assert!(tracks[0].track.isrc.is_some(), "geçerli ISRC korunmalı");
+    assert!(tracks[0].track.isrc.is_some(), "a valid ISRC must be kept");
 
     let tracks = provider.search("sezen", 10).await.unwrap();
     assert!(
         tracks[0].track.isrc.is_none(),
-        "biçimsiz ISRC kabul edilmemeli"
+        "a malformed ISRC must not be accepted"
     );
 
     let id = ProviderTrackId::new(ProviderId::new("echo"), "track-1");
     match provider.resolve_source(&id).await.unwrap() {
         Some(AudioSource::HttpStream { url, headers }) => {
             assert!(url.ends_with("track-1.mp3"), "{url}");
-            assert_eq!(headers[0].value, "gizli-anahtar");
+            assert_eq!(headers[0].value, "secret-key");
         }
-        other => panic!("beklenmeyen kaynak: {other:?}"),
+        other => panic!("unexpected source: {other:?}"),
     }
 
-    let missing = ProviderTrackId::new(ProviderId::new("echo"), "yok");
+    let missing = ProviderTrackId::new(ProviderId::new("echo"), "none");
     assert!(
         provider.resolve_source(&missing).await.unwrap().is_none(),
-        "`null` bir cevaptır, hata değil"
+        "`null` is an answer, not an error"
     );
 }
 
-/// api 1'in Python eklentisi **çökmeden** reddedilir ve kullanıcıya ne
-/// yapacağı söylenir — Faz 2 ölçütünün ikinci yarısı.
+/// api 1's Python plugin is refused **without crashing** and the user is told
+/// what to do — the second half of the Phase 2 criterion.
 #[tokio::test]
 async fn an_api1_plugin_is_refused_with_a_reason_and_the_core_keeps_going() {
-    let config = temp_config("eski");
+    let config = temp_config("old");
     install_echo(&config);
-    let old = config.plugins_dir().join("eski");
+    let old = config.plugins_dir().join("old");
     std::fs::create_dir_all(&old).unwrap();
     std::fs::write(
         old.join("plugin.json"),
-        r#"{"name":"eski","display_name":"Eski","api":1,"exec":["python3","./main.py"]}"#,
+        r#"{"name":"old","display_name":"Old","api":1,"exec":["python3","./main.py"]}"#,
     )
     .unwrap();
     approve(&config, "echo");
 
     let (entries, summary) = discover(&config).unwrap();
     assert_eq!(summary.incompatible, 1);
-    let eski = entries.iter().find(|entry| entry.name == "eski").unwrap();
+    let old_entry = entries.iter().find(|entry| entry.name == "old").unwrap();
     assert!(
-        eski.status_text().contains("api 1"),
+        old_entry.status_text().contains("api 1"),
         "{}",
-        eski.status_text()
+        old_entry.status_text()
     );
 
     let (providers, _) = load(&config).unwrap();
     assert_eq!(
         providers.len(),
         1,
-        "eski eklenti yüklenmemeli, echo yüklenmeli"
+        "the old plugin must not load, echo must load"
     );
     assert!(providers[0].health().await.unwrap().reachable);
 }
 
 #[tokio::test]
 async fn an_unapproved_plugin_is_not_loaded_but_is_visible() {
-    let config = temp_config("onay");
+    let config = temp_config("consent");
     install_echo(&config);
 
     let (providers, summary) = load(&config).unwrap();
-    assert!(providers.is_empty(), "onaysız eklenti yüklenmemeli");
+    assert!(
+        providers.is_empty(),
+        "a plugin without consent must not be loaded"
+    );
     assert_eq!(summary.discovered, 1);
     assert_eq!(summary.awaiting_approval, 1);
 
@@ -164,15 +169,15 @@ async fn an_unapproved_plugin_is_not_loaded_but_is_visible() {
 
 #[tokio::test]
 async fn a_plugin_asking_for_more_permissions_stops_loading_until_reapproved() {
-    let config = temp_config("izin");
+    let config = temp_config("permissions");
     let dir = install_echo(&config);
     approve(&config, "echo");
     assert_eq!(load(&config).unwrap().0.len(), 1);
 
-    // Eklenti güncellendi ve yeni bir ana bilgisayar istiyor.
+    // The plugin was updated and wants a new host.
     let mut manifest = PluginManifest::load(&dir).unwrap();
     manifest.permissions = Permissions {
-        net: vec!["ornek.gecersiz".to_owned(), "*.yeni.gecersiz".to_owned()],
+        net: vec!["example.invalid".to_owned(), "*.new.invalid".to_owned()],
     };
     std::fs::write(
         dir.join("plugin.json"),
@@ -190,29 +195,30 @@ async fn a_plugin_asking_for_more_permissions_stops_loading_until_reapproved() {
 
 #[tokio::test]
 async fn two_plugins_do_not_see_each_others_secrets() {
-    let config = temp_config("sir");
+    let config = temp_config("two-secrets");
     let dir = install_echo(&config);
 
     let mut secrets = Secrets::default();
-    secrets.set("plugin:baska", "token", "komsunun-anahtari");
+    secrets.set("plugin:other", "token", "neighbours-key");
     secrets.save(&config.secrets_path()).unwrap();
 
     let provider = provider_for(&config, &dir);
     assert_eq!(
         provider.health().await.unwrap().detail.as_deref(),
-        Some("sır yok")
+        Some("no secret")
     );
     let id = ProviderTrackId::new(ProviderId::new("echo"), "track-1");
     match provider.resolve_source(&id).await.unwrap() {
         Some(AudioSource::HttpStream { headers, .. }) => assert_eq!(headers[0].value, ""),
-        other => panic!("beklenmeyen kaynak: {other:?}"),
+        other => panic!("unexpected source: {other:?}"),
     }
 }
 
-/// Takılan bir eklenti çekirdeği takmaz; süresi dolunca hata döner.
+/// A hung plugin does not hang the core; when its time is up it returns an
+/// error.
 #[tokio::test]
 async fn a_hanging_plugin_times_out_instead_of_freezing_the_core() {
-    let config = temp_config("asili");
+    let config = temp_config("hung");
     let dir = install_echo(&config);
     std::fs::write(
         dir.join("main.js"),
@@ -228,10 +234,10 @@ async fn a_hanging_plugin_times_out_instead_of_freezing_the_core() {
     let health = provider.health().await.unwrap();
     assert!(!health.reachable);
     let detail = health.detail.unwrap_or_default();
-    assert!(detail.contains("cevap vermedi"), "{detail}");
+    assert!(detail.contains("did not answer"), "{detail}");
     assert!(
         started.elapsed() < Duration::from_secs(3),
-        "zaman aşımı işe yaramadı: {:?}",
+        "the timeout did not work: {:?}",
         started.elapsed()
     );
 }

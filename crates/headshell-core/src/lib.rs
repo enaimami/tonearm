@@ -1,9 +1,9 @@
-//! `headshell-core` — sağlayıcıdan bağımsız dinleme kimliği çekirdeği.
+//! `headshell-core` — the core of a provider-independent listening identity.
 //!
-//! **Altın Kural:** bütün mantık buradadır. CLI, GUI ve mobil bağlamalar
-//! yalnızca bu API'yi çağırır; hiçbiri kendi başına iş yapmaz.
+//! **The Golden Rule:** all logic lives here. The CLI, the GUI and the mobile
+//! bindings only call this API; none of them does any work on its own.
 
-// CLAUDE.md: çekirdekte `unwrap`/`expect`/`panic!` yok — **testler hariç**.
+// CLAUDE.md: no `unwrap`/`expect`/`panic!` in the core — **except in tests**.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 pub mod config;

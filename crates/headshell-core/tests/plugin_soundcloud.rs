@@ -1,27 +1,30 @@
-//! SoundCloud referans eklentisi, **gerçek SoundCloud'a karşı** (Faz 2 §2.2).
+//! The SoundCloud reference plugin, **against the real SoundCloud** (Phase 2
+//! §2.2).
 //!
-//! `plugin_script.rs` sözleşmeyi sabit kataloglu bir fixture'la sınıyor; burada
-//! sınanan şey başka: katalogdaki `soundcloud` gerçek bir servise bağlanıyor
-//! ve zincirin tamamı — client_id keşfi, arama, akış adresi çözümü — canlı
-//! olarak yürüyor. Eklenti bu depoda değil: `headshell/plugins`'ten, canlı
-//! katalogdan kuruluyor (D-071). D-069'dan beri eklenti gömülü QuickJS'te koşuyor: ağa yalnızca
-//! manifestin izin verdiği ana bilgisayarlardan çıkabiliyor, ve bu testler o
-//! iznin gerçek servis için **yeterli** olduğunun da kanıtı.
+//! `plugin_script.rs` tests the contract with a fixed-catalog fixture; what
+//! is tested here is something else: the `soundcloud` plugin in the catalog
+//! connects to a real service, and the whole chain — client_id discovery,
+//! search, resolving the stream address — runs live. The plugin is not in
+//! this repository: it is installed from `headshell/plugins`, from the live
+//! catalog (D-071). Since D-069 the plugin runs in embedded QuickJS: it can
+//! only go online to the hosts its manifest allows, and these tests are also
+//! the proof that this permission is **enough** for the real service.
 //!
-//! **Bu testler varsayılan koşuma dahildir** (D-043). Bilinçli bir seçim ve
-//! bir bedeli var: SoundCloud düştüğünde ya da web yüzeyini değiştirdiğinde
-//! paket kırmızı yanar, oysa kodumuzda hiçbir şey bozulmamıştır. Karşılığında
-//! eklentinin bozulduğu gün *o gün* öğreniliyor, aylar sonra değil.
+//! **These tests are part of the default run** (D-043). A deliberate choice,
+//! and it has a price: when SoundCloud is down or changes its web surface the
+//! suite turns red, although nothing in our code broke. In return, the day
+//! the plugin breaks is learned *that day*, not months later.
 //!
-//! Kırmızı yandığında ilk soru şu olmalı: **son commit'e mi baksam, yoksa
-//! `curl https://soundcloud.com/` mu çeksem?** İkincisi çalışıyorsa ve testler
-//! hâlâ kırmızıysa kusur bizdedir.
+//! When it turns red the first question should be: **should I look at the
+//! last commit, or run `curl https://soundcloud.com/`?** If the second works
+//! and the tests are still red, the fault is ours.
 //!
-//! İki başarısızlık ayrı tutuluyor (K9):
-//! - **Ulaşamamak** bir test başarısızlığı değil: ağ yoksa test kendini atlar
-//!   ve sebebini `stderr`'e yazar (ses aygıtı testlerinin yordamı).
-//! - **Ulaşıp beklenmeyeni almak** düşer. "Ulaşamadım" ile "hayır dedi"
-//!   farklı tanılardır ve farklı çözümleri vardır.
+//! Two failures are kept apart (K9):
+//! - **Not reaching it** is not a test failure: without a network the test
+//!   skips itself and writes the reason to `stderr` (the audio device tests'
+//!   procedure).
+//! - **Reaching it and getting the unexpected** fails. "I could not reach it"
+//!   and "it said no" are different diagnoses with different fixes.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -34,11 +37,11 @@ use headshell_core::plugin::manifest::PluginManifest;
 use headshell_core::provider::{AudioSource, Capabilities, Provider};
 use headshell_core::secrets::Secrets;
 
-/// SoundCloud'a TCP ile ulaşılabiliyor mu.
+/// Can SoundCloud be reached over TCP.
 ///
-/// Yalnızca DNS + bağlantı sınanıyor; HTTP'ye hiç girilmiyor. Amaç "ağ var mı"
-/// sorusunu cevaplamak, servisin sağlığını ölçmek değil — sağlığı ölçmek
-/// testlerin kendi işi.
+/// Only DNS + connect is tested; it never goes into HTTP. The goal is
+/// answering "is there a network", not measuring the service's health —
+/// measuring health is the tests' own job.
 fn soundcloud_reachable() -> bool {
     use std::net::ToSocketAddrs;
     let Ok(mut addrs) = ("soundcloud.com", 443).to_socket_addrs() else {
@@ -49,10 +52,10 @@ fn soundcloud_reachable() -> bool {
     })
 }
 
-/// Testin koşulup koşulamayacağını söyler; koşulamıyorsa sebebini yazar.
+/// Says whether the test can run; if it cannot, writes the reason.
 fn prerequisites_met(test: &str) -> bool {
     if !soundcloud_reachable() {
-        eprintln!("{test}: soundcloud.com:443'e ulaşılamadı — atlanıyor (ağ yok sayılıyor)");
+        eprintln!("{test}: could not reach soundcloud.com:443 — skipped (taken as no network)");
         return false;
     }
     true
@@ -62,13 +65,14 @@ fn temp_config(name: &str) -> support::TestConfig {
     support::TestConfig::new(&format!("soundcloud-{name}"))
 }
 
-/// Eklentiyi canlı katalogdan kurar — kullanıcının yaptığı şeyin aynısı
-/// (D-071). Kataloğa ulaşılamıyorsa `None`: test atlanır ve sebebi yazılır.
+/// Installs the plugin from the live catalog — the same thing the user does
+/// (D-071). `None` if the catalog cannot be reached: the test is skipped and
+/// the reason is written.
 async fn install(config: &Config, test: &str) -> Option<PluginProvider> {
     let dir = match support::install_from_catalog(config, "soundcloud").await {
         Ok(dir) => dir,
         Err(reason) => {
-            eprintln!("{test}: {reason} — atlanıyor (ağ yok sayılıyor)");
+            eprintln!("{test}: {reason} — skipped (taken as no network)");
             return None;
         }
     };
@@ -78,17 +82,19 @@ async fn install(config: &Config, test: &str) -> Option<PluginProvider> {
     Some(PluginProvider::from_manifest(config, &manifest, &dir, &secrets).unwrap())
 }
 
-/// Sırsız kurulumda eklenti client_id'yi kendisi keşfedip arama yapabilmeli.
+/// On an install without secrets the plugin must discover the client_id
+/// itself and be able to search.
 ///
-/// D-043'ün "yoksa keşfet" kolu budur ve kurulum sürtünmesini sıfırlayan
-/// şey de bu: kullanıcı hiçbir anahtar vermeden `headshell play` diyebiliyor.
+/// This is D-043's "discover if missing" arm, and it is what brings setup
+/// friction down to zero: the user can say `headshell play` without giving
+/// any key.
 #[tokio::test]
 async fn a_plugin_with_no_secret_discovers_a_client_id_and_searches() {
-    if !prerequisites_met("keşif+arama") {
+    if !prerequisites_met("discovery+search") {
         return;
     }
-    let config = temp_config("kesif");
-    let Some(provider) = install(&config, "keşif+arama").await else {
+    let config = temp_config("discovery");
+    let Some(provider) = install(&config, "discovery+search").await else {
         return;
     };
 
@@ -100,75 +106,77 @@ async fn a_plugin_with_no_secret_discovers_a_client_id_and_searches() {
     );
 
     let hits = provider.search("nujabes", 5).await.unwrap();
-    assert!(!hits.is_empty(), "canlı arama boş döndü");
+    assert!(!hits.is_empty(), "the live search came back empty");
 
     for hit in &hits {
         assert!(
             !hit.track.title.trim().is_empty(),
-            "başlıksız parça: {hit:?}"
+            "a track without a title: {hit:?}"
         );
         assert!(
             !hit.track.artist.trim().is_empty(),
-            "sanatçısız parça: {hit:?}"
+            "a track without an artist: {hit:?}"
         );
-        // Sağlayıcı adını çekirdek ekliyor; eklenti çıplak id gönderiyor.
+        // The core adds the provider name; the plugin sends a bare id.
         assert_eq!(
             hit.id.provider.as_str(),
             "soundcloud",
-            "kimlik yanlış ad alanında: {}",
+            "the id is in the wrong namespace: {}",
             hit.id
         );
     }
 }
 
-/// Sağlık cevabı, client_id'nin hangi kaynaktan geldiğini söylemeli.
+/// The health answer must say which source the client_id came from.
 ///
-/// D-043 üç kaynağa izin veriyor (sır → önbellek → keşif); hangisinin
-/// kullanıldığı görünmezse yanlış anahtarla çalışan bir kurulum sessizce
-/// doğru görünür.
+/// D-043 allows three sources (secret → cache → discovery); if which one was
+/// used is invisible, an install running with the wrong key silently looks
+/// right.
 #[tokio::test]
 async fn health_reports_which_client_id_source_was_used() {
-    if !prerequisites_met("sağlık") {
+    if !prerequisites_met("health") {
         return;
     }
-    let config = temp_config("saglik");
-    let Some(provider) = install(&config, "sağlık").await else {
+    let config = temp_config("health");
+    let Some(provider) = install(&config, "health").await else {
         return;
     };
 
     let health = provider.health().await.unwrap();
     assert!(
         health.reachable,
-        "SoundCloud'a ulaşıldı ama sağlık cevabı olumsuz: {:?}",
+        "SoundCloud was reached but the health answer is negative: {:?}",
         health.detail
     );
     let detail = health.detail.unwrap_or_default();
     assert!(
-        detail.contains("client_id kaynağı"),
-        "sağlık cevabı client_id kaynağını söylemiyor: {detail}"
+        detail.contains("client_id source"),
+        "the health answer does not say the client_id source: {detail}"
     );
-    // Katalog boyutu bilinmiyor; sıfır değil **bilinmiyor** denmeli.
+    // The catalog size is unknown; it must say **unknown**, not zero.
     assert_eq!(health.track_count, None);
 }
 
-/// Aramadan çıkan bir parça gerçekten çalınabilir bir adrese çözülmeli.
+/// A track from a search must really resolve to a playable address.
 ///
-/// Zincirin son halkası: kullanıcı için "çalıyor mu" sorusunun cevabı budur.
+/// The last link of the chain: for the user this is the answer to "does it
+/// play".
 #[tokio::test]
 async fn a_search_hit_resolves_to_a_playable_http_stream() {
-    if !prerequisites_met("kaynak çözümü") {
+    if !prerequisites_met("resolving the source") {
         return;
     }
-    let config = temp_config("cozum");
-    let Some(provider) = install(&config, "kaynak çözümü").await else {
+    let config = temp_config("resolve");
+    let Some(provider) = install(&config, "resolving the source").await else {
         return;
     };
 
     let hits = provider.search("lofi", 10).await.unwrap();
-    assert!(!hits.is_empty(), "canlı arama boş döndü");
+    assert!(!hits.is_empty(), "the live search came back empty");
 
-    // Parçaların ~%1'i yalnızca HLS sunuyor ve o durumda eklenti bilerek hata
-    // döndürüyor. Testin işi o %1'i kovalamak değil; ilk çözülen yeter.
+    // About 1% of tracks only offer HLS, and in that case the plugin returns an
+    // error on purpose. The test's job is not chasing that 1%; the first one
+    // that resolves is enough.
     let mut resolved = None;
     let mut refusals = Vec::new();
     for hit in hits.iter().take(5) {
@@ -177,41 +185,46 @@ async fn a_search_hit_resolves_to_a_playable_http_stream() {
                 resolved = Some(source);
                 break;
             }
-            Ok(None) => refusals.push(format!("{}: çalınamaz", hit.id)),
-            // `chain_text`: `Display` yalnızca `ADIM: X` basıyor (D-061'in dersi).
+            Ok(None) => refusals.push(format!("{}: cannot be played", hit.id)),
+            // `chain_text`: `Display` only prints `STEP: X` (D-061's lesson).
             Err(err) => refusals.push(format!("{}: {}", hit.id, err.chain_text())),
         }
     }
 
-    let source = resolved
-        .unwrap_or_else(|| panic!("beş adayın hiçbiri çözülmedi:\n  {}", refusals.join("\n  ")));
+    let source = resolved.unwrap_or_else(|| {
+        panic!(
+            "none of the five candidates resolved:\n  {}",
+            refusals.join("\n  ")
+        )
+    });
 
     match source {
         AudioSource::HttpStream { url, headers } => {
             assert!(
                 url.starts_with("https://"),
-                "akış adresi https değil: {url}"
+                "the stream address is not https: {url}"
             );
-            // K3: adres istemcinin kendi çekeceği bir kaynak. SoundCloud
-            // imzayı sorgu dizesinde taşıyor, başlık göndermiyoruz.
-            assert!(headers.is_empty(), "beklenmeyen başlık: {headers:?}");
+            // K3: the address is a source the client fetches itself. SoundCloud
+            // carries the signature in the query string; we send no headers.
+            assert!(headers.is_empty(), "unexpected header: {headers:?}");
         }
-        other => panic!("http akışı bekleniyordu, gelen: {other:?}"),
+        other => panic!("an http stream was expected, got: {other:?}"),
     }
 }
 
-/// Olmayan bir parça **hata değil**, "yok" cevabı vermeli.
+/// A track that does not exist must give a "none" answer, **not an error**.
 ///
-/// Bu ayrım eklentinin ilk canlı sürüşünde kırıldı: `api_get` 404'ü genel bir
-/// hataya çeviriyordu ve `resolve_source`'un "yok" kolu hiç çalışmıyordu.
-/// Sahte bir sunucu bunu gösteremezdi — 404'ü biz üretiyor olurduk (K9).
+/// This distinction broke on the plugin's first live run: `api_get` turned a
+/// 404 into a generic error and the "none" arm of `resolve_source` never ran.
+/// A fake server could not have shown this — we would have been producing
+/// the 404 ourselves (K9).
 #[tokio::test]
 async fn a_missing_track_is_an_answer_not_an_error() {
-    if !prerequisites_met("olmayan parça") {
+    if !prerequisites_met("a missing track") {
         return;
     }
-    let config = temp_config("yok");
-    let Some(provider) = install(&config, "olmayan parça").await else {
+    let config = temp_config("missing");
+    let Some(provider) = install(&config, "a missing track").await else {
         return;
     };
 
@@ -219,21 +232,22 @@ async fn a_missing_track_is_an_answer_not_an_error() {
     let source = provider
         .resolve_source(&id)
         .await
-        .expect("olmayan parça hata değil, cevap olmalı");
+        .expect("a missing track must be an answer, not an error");
     assert_eq!(source, None);
 }
 
-/// §2.2'nin asıl kanıtı: SoundCloud'dan gelen ses **gerçekten çalıyor**.
+/// §2.2's real proof: the audio coming from SoundCloud **really plays**.
 ///
-/// Arama ve adres çözümü kâğıt üstünde doğru olabilir; kullanıcı için soru
-/// "ses çıkıyor mu". Ses aygıtı olmayan ortamda test kendini atlar.
+/// Search and address resolution can be right on paper; for the user the
+/// question is "does sound come out". In an environment without an audio
+/// device the test skips itself.
 #[tokio::test]
 async fn a_soundcloud_track_actually_plays() {
-    if !prerequisites_met("çalma") {
+    if !prerequisites_met("playback") {
         return;
     }
-    let config = temp_config("calma");
-    let Some(provider) = install(&config, "çalma").await else {
+    let config = temp_config("playback");
+    let Some(provider) = install(&config, "playback").await else {
         return;
     };
 
@@ -253,11 +267,11 @@ async fn a_soundcloud_track_actually_plays() {
 
     let mut player = headshell_core::playback::Player::new(registry);
     if let Err(err) = player.play_items(vec![item]).await {
-        eprintln!("çalma: ses hattı açılamadı ({err}) — atlanıyor");
+        eprintln!("playback: could not open the audio pipeline ({err}) — skipped");
         return;
     }
 
-    // Sesin gerçekten ilerlediğini ölç: pozisyon artmalı.
+    // Measure that the audio really advances: the position must grow.
     let mut positions = Vec::new();
     for _ in 0..12 {
         std::thread::sleep(std::time::Duration::from_millis(500));
@@ -271,6 +285,6 @@ async fn a_soundcloud_track_actually_plays() {
     let best = positions.iter().map(|(_, ms)| *ms).max().unwrap_or(0);
     assert!(
         best > 1000,
-        "ses ilerlemedi; ölçülen durum/pozisyon dizisi: {positions:?}"
+        "the audio did not advance; the measured state/position sequence: {positions:?}"
     );
 }

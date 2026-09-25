@@ -1,29 +1,32 @@
-//! Kimlik zinciri, **gerçek MusicBrainz'e karşı** (Faz 2 §2.3).
+//! The identity chain, **against the real MusicBrainz** (Phase 2 §2.3).
 //!
-//! `identity_accuracy.rs` skorlamayı sentetik bir katalogla ölçüyor: orada
-//! sınanan şey mantık. Burada sınanan şey başka — sorgunun gerçekten kurulup
-//! gittiği, gelen yanıtın çözüldüğü ve zincirin `LocalKey`'e düşmeden
-//! **otoriteye** bağlandığı. Bu iki testin ikisi de gerekli: biri kuralları
-//! ölçer, öteki kuralların doğru veriye uygulandığını.
+//! `identity_accuracy.rs` measures scoring with a synthetic catalog: what is
+//! tested there is the logic. What is tested here is something else — that
+//! the query is really built and sent, that the response is decoded, and
+//! that the chain gets tied to an **authority** without falling back to
+//! `LocalKey`. Both tests are needed: one measures the rules, the other that
+//! the rules are applied to the right data.
 //!
-//! **Bu testler varsayılan koşuma dahildir** (D-043'ün SoundCloud için verdiği
-//! kararın aynısı). İki başarısızlık ayrı tutuluyor (K9):
-//! - **Ulaşamamak** başarısızlık değil: ağ yoksa test kendini atlar ve sebebini
-//!   `stderr`'e yazar. Bu, baştaki TCP yoklamasıyla **sınırlı değil** —
-//!   testin ortasında gelen zaman aşımı ya da tükenmiş `503` yeniden
-//!   denemesi de atlanır ([`skip_if_unreachable`], D-046). Yoğun bir koşumda
-//!   kotayı sunucunun o anki yüküyle de paylaşıyoruz ve bu ayrım olmadan
-//!   yeşil bir kapı ağ havasına bağlı kalırdı.
-//! - **Ulaşıp beklenmeyeni almak** düşer. `400`, `404`, ayrıştırma hatası ve
-//!   beklenmeyen gövde bu tarafta: onlar bizim kusurumuz olabilir.
+//! **These tests are part of the default run** (the same decision D-043 made
+//! for SoundCloud). Two failures are kept apart (K9):
+//! - **Not reaching it** is not a failure: without a network the test skips
+//!   itself and writes the reason to `stderr`. This is **not limited** to the
+//!   TCP probe at the start — a timeout arriving in the middle of the test or
+//!   an exhausted `503` retry is skipped too ([`skip_if_unreachable`],
+//!   D-046). In a busy run we share the quota with the server's load at that
+//!   moment too, and without this distinction a green gate would depend on
+//!   the network weather.
+//! - **Reaching it and getting the unexpected** fails. `400`, `404`, a parse
+//!   error and an unexpected body are on this side: they may be our fault.
 //!
-//! Kırmızı yandığında ilk soru: `curl -A 'x/1 ( y )'
+//! When it turns red, the first question: what does `curl -A 'x/1 ( y )'
 //! 'https://musicbrainz.org/ws/2/recording?query=recording:%22Creep%22&fmt=json'`
-//! ne diyor? Çalışıyorsa kusur bizde.
+//! say? If it works, the fault is ours.
 //!
-//! **Hız sınırı.** MusicBrainz anonim istemciye saniyede bir istek veriyor.
-//! Testler tek bir [`MusicBrainzLookup`] paylaşıyor ki paralel koşumda da aynı
-//! kısıtlayıcıdan geçsinler — ayrı örnekler kotayı test sayısıyla çarpardı.
+//! **Rate limit.** MusicBrainz gives an anonymous client one request per
+//! second. The tests share a single [`MusicBrainzLookup`] so they go through
+//! the same limiter in a parallel run too — separate instances would multiply
+//! the quota by the number of tests.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -34,17 +37,20 @@ use headshell_core::identity::{MetadataLookup, ResolveMethod, Resolver};
 use headshell_core::ids::{CanonicalKind, Isrc};
 use headshell_core::model::TrackRef;
 
-/// Gerçek bir ISRC ve bağlandığı kayıt (2026-09-01'de MusicBrainz'den ölçüldü).
+/// A real ISRC and the recording it is tied to (measured from MusicBrainz on
+/// 2026-09-01).
 ///
-/// Türkçe seçildi çünkü tek taşla iki kuş: ISRC halkası **ve** sorgunun
-/// yüzde kodlamasının çok baytlı karakterlerde bozulmadığı.
+/// A Turkish one was picked because it kills two birds with one stone: the
+/// ISRC link **and** that the query's percent-encoding does not break on
+/// multi-byte characters.
 const KNOWN_ISRC: &str = "TR0441211603";
 const KNOWN_ISRC_TITLE: &str = "Sil Baştan";
 
-/// MusicBrainz'e TCP ile ulaşılabiliyor mu.
+/// Can MusicBrainz be reached over TCP.
 ///
-/// Yalnızca DNS + bağlantı; HTTP'ye girilmiyor. Amaç "ağ var mı" sorusunu
-/// cevaplamak, servisin sağlığını ölçmek değil — sağlığı ölçmek testlerin işi.
+/// Only DNS + connect; it does not go into HTTP. The goal is answering "is
+/// there a network", not measuring the service's health — measuring health is
+/// the tests' job.
 fn musicbrainz_reachable() -> bool {
     use std::net::ToSocketAddrs;
     let Ok(mut addrs) = ("musicbrainz.org", 443).to_socket_addrs() else {
@@ -55,11 +61,11 @@ fn musicbrainz_reachable() -> bool {
     })
 }
 
-/// Bütün testlerin paylaştığı kaynak — tek kısıtlayıcı, tek kota.
+/// The source all tests share — one limiter, one quota.
 ///
-/// `User-Agent` testlere özel: MusicBrainz'in günlüğünde kotayı kimin
-/// harcadığı görünsün ve bir test koşumu gerçek dağıtımın kimliğine
-/// yazılmasın.
+/// The `User-Agent` is specific to the tests: so MusicBrainz's log shows who
+/// spent the quota, and a test run is not written under a real distribution's
+/// identity.
 fn shared_lookup() -> Option<Arc<dyn MetadataLookup>> {
     static LOOKUP: OnceLock<Option<Arc<dyn MetadataLookup>>> = OnceLock::new();
     LOOKUP
@@ -72,18 +78,19 @@ fn shared_lookup() -> Option<Arc<dyn MetadataLookup>> {
         .clone()
 }
 
-/// Ağa **ulaşamamak** başarısızlık değildir — sonucu atlamaya çevirir.
+/// **Not reaching** the network is not a failure — turns the result into a
+/// skip.
 ///
-/// Baştaki TCP yoklaması "ağ var mı" sorusunu cevaplıyor ama testin ortasında
-/// gelen zaman aşımını ya da tükenmiş `503` yeniden denemesini göremez.
-/// MusicBrainz anonim istemciye saniyede bir istek veriyor ve yoğun bir
-/// koşumda sınırı kendi kotamızla değil sunucunun o anki yüküyle de
-/// paylaşıyoruz. K9 / D-043'ün çizgisi burada da geçerli: **ulaşamamak
-/// atlanır, ulaşıp beklenmeyeni almak düşer.** Bu ayrım olmadan yeşil bir
-/// kapı ağ havasına bağlı kalırdı.
+/// The TCP probe at the start answers "is there a network", but it cannot see
+/// a timeout arriving in the middle of the test or an exhausted `503` retry.
+/// MusicBrainz gives an anonymous client one request per second, and in a
+/// busy run we share the limit not only with our own quota but with the
+/// server's load at that moment. The K9 / D-043 line holds here too: **not
+/// reaching it is skipped, reaching it and getting the unexpected fails.**
+/// Without this distinction a green gate would depend on the network weather.
 ///
-/// Yalnızca taşıma katmanı hataları atlanıyor. Ayrıştırma hatası, `400`, `404`
-/// ya da beklenmeyen bir gövde **düşer** — onlar bizim kusurumuz olabilir.
+/// Only transport-layer errors are skipped. A parse error, `400`, `404` or an
+/// unexpected body **fails** — they may be our fault.
 fn skip_if_unreachable<T>(test: &str, result: headshell_core::Result<T>) -> Option<T> {
     use headshell_core::error::ErrorKind;
     match result {
@@ -95,11 +102,11 @@ fn skip_if_unreachable<T>(test: &str, result: headshell_core::Result<T>) -> Opti
             );
             assert!(
                 unreachable,
-                "{test}: beklenmeyen hata (ulaşılamamak değil):\n{}",
+                "{test}: unexpected error (not a failure to reach it):\n{}",
                 err.chain_text()
             );
             eprintln!(
-                "{test}: MusicBrainz'e ulaşılamadı — atlanıyor (ağ ya da kota):\n{}",
+                "{test}: could not reach MusicBrainz — skipped (network or quota):\n{}",
                 err.chain_text()
             );
             None
@@ -107,23 +114,23 @@ fn skip_if_unreachable<T>(test: &str, result: headshell_core::Result<T>) -> Opti
     }
 }
 
-/// Testin koşulup koşulamayacağını söyler; koşulamıyorsa **sebebini yazar**.
+/// Says whether the test can run; if it cannot, **writes the reason**.
 fn lookup_or_skip(test: &str) -> Option<Arc<dyn MetadataLookup>> {
     let Some(lookup) = shared_lookup() else {
         eprintln!(
-            "{test}: `http-client` feature'ı kapalı derleme — atlanıyor \
-             (bu bir başarısızlık değil; `cargo test --workspace` ile açılır)"
+            "{test}: a build with the `http-client` feature off — skipped \
+             (this is not a failure; `cargo test --workspace` turns it on)"
         );
         return None;
     };
     if !musicbrainz_reachable() {
-        eprintln!("{test}: musicbrainz.org:443'e ulaşılamadı — atlanıyor (ağ yok sayılıyor)");
+        eprintln!("{test}: could not reach musicbrainz.org:443 — skipped (taken as no network)");
         return None;
     }
     Some(lookup)
 }
 
-/// Zincirin ortası artık gerçekten çalışıyor mu (D-045'in asıl sorusu).
+/// Does the middle of the chain really work now (D-045's actual question).
 #[tokio::test]
 async fn the_chain_reaches_an_authority_instead_of_falling_to_a_local_key() {
     let Some(lookup) = lookup_or_skip("the_chain_reaches_an_authority") else {
@@ -139,29 +146,29 @@ async fn the_chain_reaches_an_authority_instead_of_falling_to_a_local_key() {
         return;
     };
     eprintln!(
-        "çözüldü: {} ({}, güven {:.2})",
+        "resolved: {} ({}, confidence {:.2})",
         resolution.canonical_id, resolution.method, resolution.confidence
     );
 
     assert_ne!(
         resolution.method,
         ResolveMethod::LocalKey,
-        "`OfflineLookup` ile aynı sonucu verdiysek MusicBrainz hiç devreye girmemiş demektir"
+        "if we gave the same result as `OfflineLookup`, MusicBrainz never came into play"
     );
     assert_eq!(resolution.canonical_id.kind(), CanonicalKind::Mbid);
     let matched = resolution
         .matched
-        .expect("otoriteli eşleşmenin adayı olmalı");
+        .expect("an authoritative match must have a candidate");
     assert_eq!(matched.title, "Sil Baştan");
 }
 
-/// Birinci halka: ISRC doğrudan kayda götürmeli.
+/// The first link: the ISRC must lead straight to the recording.
 #[tokio::test]
 async fn a_real_isrc_resolves_through_the_first_link() {
     let Some(lookup) = lookup_or_skip("a_real_isrc_resolves") else {
         return;
     };
-    let isrc = Isrc::parse(KNOWN_ISRC).expect("sabit ISRC geçerli biçimde");
+    let isrc = Isrc::parse(KNOWN_ISRC).expect("the fixed ISRC is well-formed");
     let Some(found) = skip_if_unreachable(
         "a_real_isrc_resolves",
         lookup.recording_by_isrc(&isrc).await,
@@ -170,7 +177,7 @@ async fn a_real_isrc_resolves_through_the_first_link() {
     };
 
     let candidate = found.unwrap_or_else(|| {
-        panic!("{KNOWN_ISRC} MusicBrainz'de bulunamadı — kayıt birleştirilmiş olabilir")
+        panic!("{KNOWN_ISRC} was not found on MusicBrainz — the recording may have been merged")
     });
     eprintln!(
         "ISRC {KNOWN_ISRC} → {} ({})",
@@ -180,17 +187,17 @@ async fn a_real_isrc_resolves_through_the_first_link() {
     assert_eq!(candidate.artist, "Şebnem Ferah");
 }
 
-/// Lucene'in özel karakterleri: kaçırılmazsa MusicBrainz `400` döner.
+/// Lucene's special characters: unescaped, MusicBrainz returns `400`.
 ///
-/// Sahte istemciyle sınanan şey sorgunun *şekli*; burada sınanan şey
-/// MusicBrainz'in o şekli kabul ettiği. İkisi farklı iddialar.
+/// What is tested with the fake client is the query's *shape*; what is tested
+/// here is that MusicBrainz accepts that shape. They are different claims.
 #[tokio::test]
 async fn a_slash_in_the_artist_name_does_not_break_the_query() {
     let Some(lookup) = lookup_or_skip("a_slash_in_the_artist_name") else {
         return;
     };
-    // `400` **düşer**: Lucene kaçırması bizim işimiz. Yalnızca taşıma
-    // katmanı hataları atlanıyor.
+    // `400` **fails**: Lucene escaping is our job. Only transport-layer
+    // errors are skipped.
     let Some(found) = skip_if_unreachable(
         "a_slash_in_the_artist_name",
         lookup.search_recordings("AC/DC", "Back in Black").await,
@@ -198,24 +205,29 @@ async fn a_slash_in_the_artist_name_does_not_break_the_query() {
         return;
     };
 
-    assert!(!found.is_empty(), "AC/DC için aday dönmeliydi");
+    assert!(
+        !found.is_empty(),
+        "candidates should have come back for AC/DC"
+    );
     assert!(
         found.iter().any(|c| c.artist.contains("AC/DC")),
-        "dönen adaylar: {:?}",
+        "candidates returned: {:?}",
         found.iter().map(|c| &c.artist).collect::<Vec<_>>()
     );
 }
 
-/// D-045'in düzeltmesi gerçek katalogda tutuyor mu.
+/// Does D-045's fix hold on the real catalog.
 ///
-/// MusicBrainz'de "Radiohead — Creep" araması 190'dan fazla kayıt döndürüyor ve
-/// ilk sayfanın çoğu **canlı kayıt**; hiçbirinin başlığında "live" yazmıyor,
-/// hepsinin ayırt edici notunda yazıyor. Düzeltmeden önce ölçülen davranış: 1994
-/// Astoria kaydı 1.00 güvenle "tam isabet" sayılıyordu.
+/// On MusicBrainz, a search for "Radiohead — Creep" returns more than 190
+/// recordings, and most of the first page are **live recordings**; none of
+/// them says "live" in its title, all of them say it in their disambiguation
+/// note. The behaviour measured before the fix: the 1994 Astoria recording
+/// counted as a "perfect hit" with 1.00 confidence.
 ///
-/// Süre veriliyor (stüdyo kaydı 3:58) çünkü D-046'dan sonra ayrımı yapan iki
-/// kanıt var ve ikisi de gerçek katalogda sınanmalı: ayırt edici not **ve**
-/// süreye yakınlık.
+/// A duration is given (the studio recording is 3:58) because since D-046
+/// there are two pieces of evidence that make the distinction, and both must
+/// be tested on the real catalog: the disambiguation note **and** closeness
+/// in duration.
 #[tokio::test]
 async fn a_live_take_does_not_win_over_the_studio_take() {
     let Some(lookup) = lookup_or_skip("a_live_take_does_not_win") else {
@@ -229,46 +241,49 @@ async fn a_live_take_does_not_win_over_the_studio_take() {
     else {
         return;
     };
-    // Değişmez şu: **canlı kayıt kazanamaz.** Hiç kazanan çıkmaması da bu
-    // değişmezi bozmuyor ve gerçek katalogda olabiliyor — MusicBrainz aramayı
-    // birden çok indeks kopyasından sunuyor ve 238 sn'lik stüdyo kaydı her
-    // kopyanın ilk 25'inde bulunmuyor. O zaman D-046'nın kuralı devreye girip
-    // otorite iddia etmiyor, ki doğrusu da bu. Testi "her zaman bir aday
-    // dönmeli" diye yazmak, ölçtüğü şeyi ağın o anki kopyasına bağlardı.
+    // The invariant is this: **a live recording cannot win.** No winner at
+    // all does not break this invariant either, and it can happen on the real
+    // catalog — MusicBrainz serves searches from several index replicas, and
+    // the 238-second studio recording is not in the first 25 of every
+    // replica. Then D-046's rule steps in and claims no authority, which is
+    // also the right thing. Writing the test as "a candidate must always come
+    // back" would tie what it measures to whichever replica the network hits.
     let Some(matched) = resolution.matched else {
         assert_eq!(
             resolution.method,
             ResolveMethod::LocalKey,
-            "aday yoksa yöntem yerel anahtar olmalı"
+            "with no candidate the method must be the local key"
         );
         eprintln!(
-            "seçilen: yok — {} aday ayırt edilemedi, otorite iddia edilmedi",
+            "chosen: none — {} candidates could not be told apart, no authority claimed",
             resolution.tied_candidates
         );
         return;
     };
     eprintln!(
-        "seçilen: {} — {:?} ({}, güven {:.2})",
+        "chosen: {} — {:?} ({}, confidence {:.2})",
         matched.mbid, matched.disambiguation, resolution.method, resolution.confidence
     );
 
     let note = matched.disambiguation.unwrap_or_default().to_lowercase();
     assert!(
         !note.contains("live"),
-        "canlı kayıt stüdyo kaydının önüne geçti: {note:?}"
+        "a live recording got ahead of the studio recording: {note:?}"
     );
 }
 
-/// Süresiz belirsiz bir sorgu **hiç** otorite almamalı (D-046).
+/// An ambiguous query without a duration must get **no** authority at all
+/// (D-046).
 ///
-/// `Radiohead — Creep`, süre verilmeden, gerçek katalogda 9–10 adayı aynı
-/// skorda ve aynı rütbede bırakıyor. Aralarından seçim yapan her kural
-/// keyfidir ve MusicBrainz aramayı birden çok indeks kopyasından sunduğu için
-/// **koşumlar arası da kararsızdır**. Doğru cevap: kimlik uydurma.
+/// `Radiohead — Creep`, with no duration given, leaves 9–10 candidates with
+/// the same score and the same rank on the real catalog. Any rule that picks
+/// among them is arbitrary, and since MusicBrainz serves searches from
+/// several index replicas it is **unstable across runs** too. The right
+/// answer: do not make up an identity.
 ///
-/// Bu testin kardeşi olan `a_live_take_does_not_win_over_the_studio_take`
-/// aynı sorguyu süreyle soruyor ve orada otorite bekleniyor — ikisi birlikte
-/// kuralın hangi kanıtla açıldığını gösteriyor.
+/// This test's sibling, `a_live_take_does_not_win_over_the_studio_take`,
+/// asks the same query with a duration, and there an authority is expected —
+/// together the two show which evidence unlocks the rule.
 #[tokio::test]
 async fn an_ambiguous_query_without_duration_claims_no_authority() {
     let Some(lookup) = lookup_or_skip("an_ambiguous_query_without_duration") else {
@@ -284,34 +299,35 @@ async fn an_ambiguous_query_without_duration_claims_no_authority() {
         return;
     };
     eprintln!(
-        "süresiz sorgu: {} ({}, berabere {})",
+        "query without a duration: {} ({}, tied {})",
         resolution.canonical_id, resolution.method, resolution.tied_candidates
     );
 
     assert_eq!(
         resolution.method,
         ResolveMethod::LocalKey,
-        "ayırt edici kanıt yokken otorite iddia edildi"
+        "an authority was claimed without distinguishing evidence"
     );
     assert!(
         resolution.tied_candidates > 1,
-        "sebep 'aday yok' değil 'ayırt edilemedi' olmalı: {}",
+        "the reason must be 'could not be told apart', not 'no candidate': {}",
         resolution.tied_candidates
     );
 }
 
-/// Aynı sorgu her koşumda aynı kanonik kimliği vermeli.
+/// The same query must give the same canonical identity on every run.
 ///
-/// Bu test D-045'in canlı koşumunda **düştü ve düzeltmeyi doğurdu**: MusicBrainz
-/// 190'dan fazla `Creep` kaydı döndürüyor, onlarcası birebir aynı sanatçı ve
-/// başlığı taşıyor, süre bilinmediğinde hepsi aynı skoru alıyor. Seçim
-/// sunucunun gönderdiği sıraya kalmıştı ve o sıra sabit değil — iki koşum iki
-/// farklı MBID verdi. Kimlik katmanında bu, aynı parçanın yarın başka bir
-/// kimlik alması demekti.
+/// This test **failed in D-045's live run and gave rise to the fix**:
+/// MusicBrainz returns more than 190 `Creep` recordings, dozens of them
+/// carry exactly the same artist and title, and when the duration is unknown
+/// they all get the same score. The choice was left to the order the server
+/// sent, and that order is not fixed — two runs gave two different MBIDs. At
+/// the identity layer that meant the same track getting a different identity
+/// tomorrow.
 ///
-/// İki çağrı bilerek **ayrı** yapılıyor: [`Resolver`] tek çağrı içinde
-/// önbellek kullanıyor, oysa sınanan şey iki ayrı ağ yanıtının aynı sonuca
-/// varması.
+/// The two calls are made **separately** on purpose: [`Resolver`] uses a
+/// cache within a single call, whereas what is tested is two separate network
+/// responses arriving at the same result.
 #[tokio::test]
 async fn the_same_query_always_yields_the_same_canonical_id() {
     let Some(lookup) = lookup_or_skip("the_same_query_always_yields_the_same_id") else {
@@ -330,12 +346,13 @@ async fn the_same_query_always_yields_the_same_canonical_id() {
 
     assert_eq!(
         first.canonical_id, second.canonical_id,
-        "aynı sorgu iki farklı kimlik verdi: eşit skorlu adaylar arasındaki \
-         seçim sunucunun sırasına bağlı kalmış demektir"
+        "the same query gave two different identities: the choice among equally \
+         scored candidates must have depended on the server's order"
     );
 }
 
-/// Otorite uydurulmaz: karşılığı olmayan bir parça `LocalKey`'de kalmalı.
+/// No authority is made up: a track without a counterpart must stay at
+/// `LocalKey`.
 #[tokio::test]
 async fn nonsense_never_invents_an_authority() {
     let Some(lookup) = lookup_or_skip("nonsense_never_invents_an_authority") else {
@@ -353,7 +370,7 @@ async fn nonsense_never_invents_an_authority() {
     assert_eq!(
         resolution.method,
         ResolveMethod::LocalKey,
-        "eşleşmeyen parça otoriteye bağlanmamalı: {} (güven {:.2})",
+        "a track without a match must not be tied to an authority: {} (confidence {:.2})",
         resolution.canonical_id,
         resolution.confidence
     );

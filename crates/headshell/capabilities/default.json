@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Ana pencere: olay dinleme, sürükle-bırak ve yol seçtiren dosya diyaloğu. Dosya sistemi, kabuk ve ağ izni yok — diyalog bir yol döndürür, o yolu okuyup yazan taraf çekirdektir.",
+  "description": "The main window: listening to events, drag and drop, and the file dialog that picks a path. No file system, shell or network permission — the dialog returns a path, and the side that reads and writes that path is the core.",
   "windows": ["main"],
   "permissions": ["core:default", "dialog:allow-open", "dialog:allow-save"]
 }

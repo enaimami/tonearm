@@ -1,38 +1,41 @@
-// headshell — hareket katmanı (D-072).
+// headshell — the motion layer (D-072).
 //
-// Arayüzdeki her konum hareketi buradan geçer: yaylar, momentum izdüşümü,
-// lastik bant, hız ölçümü. Apple'ın "Designing Fluid Interfaces" (WWDC 2018)
-// konuşmasının web karşılığı; bağımlılık yok (bundler yok, npm yok).
+// Every positional motion in the interface goes through here: springs,
+// momentum projection, the rubber band, velocity measurement. The web
+// counterpart of Apple's "Designing Fluid Interfaces" (WWDC 2018) talk; no
+// dependencies (no bundler, no npm).
 //
-// Üç kural:
+// Three rules:
 //
-// 1. **Yalnızca `transform` ve `opacity`** (D-028). WebKitGTK'da başka bir
-//    özelliği canlandırmak kare hızını 58.8'den 47.6'ya düşürüyor.
-// 2. **Her hareket kesilebilir.** Yeni bir hedef öğenin *ekrandaki*
-//    değerinden ve hızından başlar; eski hareketin bitmesi beklenmez ve hız
-//    sıfırlanmaz. Yarıda yakalanan bir öğe zıplamaz, geri döndürülen bir
-//    hareket duvara çarpmaz.
-// 3. **Süre temanın.** Yayların tepkisi `--headshell-duration`'dan gelir
-//    (tepki = süre × 3; varsayılan 120ms → 0.36 sn). `0ms` hiç hareket yok
-//    demek — Yüksek Karşıtlık teması bunu kullanıyor. `prefers-reduced-motion`
-//    konum hareketini kapatır, opaklık geçişi kalır.
+// 1. **Only `transform` and `opacity`** (D-028). Animating any other
+//    property drops the frame rate from 58.8 to 47.6 in WebKitGTK.
+// 2. **Every motion can be interrupted.** A new target starts from the
+//    element's *on-screen* value and velocity; the old motion is not waited
+//    for, and the velocity is not reset. An element caught halfway does not
+//    jump, and a reversed motion does not hit a wall.
+// 3. **The duration belongs to the theme.** The springs' response comes from
+//    `--headshell-duration` (response = duration × 3; the default 120ms →
+//    0.36 s). `0ms` means no motion at all — the High Contrast theme uses
+//    that. `prefers-reduced-motion` turns off positional motion; the opacity
+//    transition stays.
 //
-// Dosyanın üst düzeyi saf: DOM'a yalnızca çağrılan fonksiyonların içinde
-// dokunuluyor. `tests/motion_js.rs` onu bu yüzden gömülü QuickJS'te
-// değerlendirebiliyor — `anchor.js` ile aynı yol (D-070).
+// The file's top level is pure: the DOM is only touched inside the functions
+// that get called. That is why `tests/motion_js.rs` can evaluate it in
+// embedded QuickJS — the same route as `anchor.js` (D-070).
 
-/// Yay tepkisinin tema süresine oranı. 120ms → 0.36 sn: Apple'ın taşıma ve
-/// yeniden konumlama için verdiği 0.3–0.4 sn aralığının içi.
+/// The ratio of a spring's response to the theme duration. 120ms → 0.36 s:
+/// inside the 0.3–0.4 s range Apple gives for moving and repositioning.
 export const RESPONSE_PER_DURATION = 3;
 
-/// Token okunamazsa kullanılan süre — `style.css`'teki varsayılanla aynı.
+/// The duration used if the token cannot be read — the same as the default in
+/// `style.css`.
 export const FALLBACK_DURATION_MS = 120;
 
-// ————————————————————————————————————— saf hesap
+// ————————————————————————————————————— pure arithmetic
 
-/// `"120ms"`, `"0.2s"`, `"0"` → milisaniye. Okunamazsa `null`.
+/// `"120ms"`, `"0.2s"`, `"0"` → milliseconds. `null` if unreadable.
 ///
-/// Birimsiz yalnızca `0` geçerli; CSS de öyle sayıyor.
+/// Unitless is only valid for `0`; CSS counts it the same way.
 export function parseDuration(text) {
   const value = String(text ?? "").trim();
   const match = /^(\d*\.?\d+)(ms|s)?$/.exec(value);
@@ -43,11 +46,12 @@ export function parseDuration(text) {
   return match[2] === "s" ? number * 1000 : number;
 }
 
-/// Tema süresi + erişilebilirlik tercihi → neyin canlanacağı.
+/// The theme duration + the accessibility preference → what gets animated.
 ///
-/// `enabled` opaklık dahil her şey için, `spatial` konum ve ölçek için.
-/// Okunamayan süre varsayılana düşer: tema yazarının yazım hatası arayüzü
-/// hareketsiz bırakmasın, ama hareketi açmak için de tahmin yürütülmesin.
+/// `enabled` is for everything including opacity, `spatial` for position and
+/// scale. An unreadable duration falls back to the default: a theme author's
+/// typo must not leave the interface motionless, but no guess is made to turn
+/// motion on either.
 export function motionSettings(durationMs, reducedMotion) {
   const ms = durationMs ?? FALLBACK_DURATION_MS;
   const enabled = ms > 0;
@@ -58,14 +62,16 @@ export function motionSettings(durationMs, reducedMotion) {
   };
 }
 
-/// Bir yayın `t` saniye sonraki hâli: `[konum farkı, hız]`.
+/// The state of a spring `t` seconds later: `[position offset, velocity]`.
 ///
-/// Apple'ın iki parametresi: **sönüm oranı** (1 = aşmadan oturur, 1'in altı
-/// hedefi geçip salınır) ve **tepki** (sn). Tepki bir süre değil — yayın
-/// sabit bir süresi yok, oturma zamanı ikisinden doğar.
+/// Apple's two parameters: **the damping ratio** (1 = settles without
+/// overshooting, below 1 goes past the target and oscillates) and **the
+/// response** (s). The response is not a duration — a spring has no fixed
+/// duration; the settling time comes from the two.
 ///
-/// `offset` hedefe göre konum (konum − hedef), `velocity` birim/sn. Kapalı
-/// biçim çözüm: kare atlasa da, adım ne kadar büyük olursa olsun sapmaz.
+/// `offset` is the position relative to the target (position − target),
+/// `velocity` in units/s. A closed-form solution: even if frames are skipped,
+/// however big the step, it does not drift.
 export function springStep(offset, velocity, t, dampingRatio, response) {
   const omega = (2 * Math.PI) / response;
   const zeta = dampingRatio;
@@ -86,7 +92,7 @@ export function springStep(offset, velocity, t, dampingRatio, response) {
     const b = velocity + omega * offset;
     return [decay * (offset + b * t), decay * (b - omega * (offset + b * t))];
   }
-  // Aşırı sönümlü: iki gerçek kök, salınım yok.
+  // Overdamped: two real roots, no oscillation.
   const root = Math.sqrt(zeta * zeta - 1);
   const r1 = -omega * (zeta - root);
   const r2 = -omega * (zeta + root);
@@ -97,30 +103,30 @@ export function springStep(offset, velocity, t, dampingRatio, response) {
   return [c1 * e1 + c2 * e2, c1 * r1 * e1 + c2 * r2 * e2];
 }
 
-/// Bırakılan bir hareketin nerede duracağı (px). Apple'ın örnek kodundaki
-/// üstel yavaşlama; fizik kitabının `v²/2a`'sı değil. `0.998` kaydırma
-/// hissi, `0.99` daha kısa.
+/// Where a released motion will stop (px). The exponential deceleration in
+/// Apple's sample code; not the physics textbook's `v²/2a`. `0.998` is the
+/// scrolling feel, `0.99` shorter.
 ///
-/// Hedef bırakılan noktaya göre değil **buna göre** seçilir: küçük bir fiske
-/// büyük bir sonuç doğurur.
+/// The target is chosen **by this**, not by the release point: a small flick
+/// has a big effect.
 export function project(velocity, decelerationRate = 0.998) {
   return ((velocity / 1000) * decelerationRate) / (1 - decelerationRate);
 }
 
-/// Sınırın ötesine çekilen mesafenin ne kadarının izleneceği.
+/// How much of the distance pulled past the boundary is followed.
 ///
-/// Sert duruş "dondu" diye okunur; artan direnç "duyuyorum ama burada başka
-/// bir şey yok" diye. Çekilen mesafe ne kadar büyürse büyüsün sonuç
-/// `dimension`'ı geçmez ve işaret korunur.
+/// A hard stop reads as "frozen"; growing resistance as "I hear you, but
+/// there is nothing more here". However far it is pulled the result does not
+/// exceed `dimension`, and the sign is kept.
 export function rubberband(overshoot, dimension, constant = 0.55) {
   if (!(dimension > 0)) return 0;
   return (overshoot * dimension * constant) / (dimension + constant * Math.abs(overshoot));
 }
 
-/// Son `windowMs` içindeki örneklerden hız (birim/sn).
+/// The velocity (units/s) from the samples within the last `windowMs`.
 ///
-/// Yalnızca son iki örneğe bakmak titrek bir hız verir; uzun bir pencere de
-/// parmak durduktan sonra bırakılan bir hareketi hâlâ hızlı sanır.
+/// Looking only at the last two samples gives a jittery velocity; a long
+/// window thinks a motion released after the finger stopped is still fast.
 export function createVelocityTracker(windowMs = 100) {
   const samples = [];
   return {
@@ -137,11 +143,12 @@ export function createVelocityTracker(windowMs = 100) {
   };
 }
 
-// ————————————————————————————————————— tema ve tercih
+// ————————————————————————————————————— theme and preference
 
 let settings = null;
 
-/// Şu anki hareket ayarı. Tema değişince [`invalidateMotion`] çağrılır.
+/// The current motion settings. [`invalidateMotion`] is called when the theme
+/// changes.
 export function currentMotion() {
   if (!settings) {
     const raw = getComputedStyle(document.documentElement).getPropertyValue(
@@ -153,24 +160,25 @@ export function currentMotion() {
   return settings;
 }
 
-/// Tema ya da sistem tercihi değişti: bir sonraki hareket yeniden okusun.
+/// The theme or the system preference changed: the next motion should read
+/// them again.
 export function invalidateMotion() {
   settings = null;
 }
 
-/// Sistemin hareket tercihini izler. Açılışta bir kez çağrılır.
+/// Watches the system's motion preference. Called once at startup.
 export function watchMotionPreference() {
   globalThis
     .matchMedia?.("(prefers-reduced-motion: reduce)")
     .addEventListener?.("change", invalidateMotion);
 }
 
-// ————————————————————————————————————— öğe yayları
+// ————————————————————————————————————— element springs
 //
-// Her öğenin ekrandaki değerleri burada tutulur (`x`, `y`, `scaleX`,
-// `scaleY`, `opacity`) ve tek bir `requestAnimationFrame` döngüsü koşan
-// bütün yayları ilerletir. Yeni bir hedef aynı özellikteki yayı **devralır**
-// (kural 2).
+// Each element's on-screen values are kept here (`x`, `y`, `scaleX`,
+// `scaleY`, `opacity`), and a single `requestAnimationFrame` loop advances
+// all the running springs. A new target **takes over** the spring on the same
+// property (rule 2).
 
 const RESTING = { x: 0, y: 0, scaleX: 1, scaleY: 1, opacity: 1 };
 const PRECISION = { x: 0.1, y: 0.1, scaleX: 0.0005, scaleY: 0.0005, opacity: 0.002 };
@@ -194,7 +202,7 @@ function bodyOf(el) {
   return body;
 }
 
-/// `scale` iki eksene birden yazmanın kısaltması.
+/// `scale` is shorthand for writing both axes at once.
 function expand(values) {
   const out = {};
   for (const [prop, value] of Object.entries(values)) {
@@ -210,12 +218,12 @@ function expand(values) {
 
 function write(body) {
   const { x, y, scaleX, scaleY, opacity } = body.values;
-  // Dinlenen öğe dönüşüm taşımaz: sürekli bir katman metni bazı motorlarda
-  // bulanıklaştırıyor. Bu yüzden yayla sürülen bir öğenin **stil
-  // dosyasında kendi `transform`'u olmamalı** — birim dönüşüme oturan öğe
-  // satır içi değeri bırakır ve stil dosyasınınkine geri düşer (tam boya
-  // varan bir çubuk `scaleX(0)`'a dönüp kayboluyordu). Başlangıç hâli
-  // `from` ile verilir.
+  // An element at rest carries no transform: a permanent layer blurs text in
+  // some engines. That is why an element driven by springs **must not have a
+  // `transform` of its own in the stylesheet** — an element settling on the
+  // identity transform drops its inline value and falls back to the
+  // stylesheet's (a bar reaching full width went back to `scaleX(0)` and
+  // disappeared). The starting state is given with `from`.
   const still = x === 0 && y === 0 && scaleX === 1 && scaleY === 1;
   body.el.style.transform = still
     ? ""
@@ -226,13 +234,14 @@ function write(body) {
 function cancel(body, prop) {
   const spring = body.springs.get(prop);
   if (spring) {
-    // Yarıda kalan yayın `onRest`'i çağrılmaz: hareket bitmedi, kesildi.
+    // The `onRest` of a spring left halfway is not called: the motion did not
+    // end, it was interrupted.
     active.delete(spring);
     body.springs.delete(prop);
   }
 }
 
-/// Ekrandaki değeri anında yazar; o özellikteki yay durur.
+/// Writes the on-screen value at once; the spring on that property stops.
 export function place(el, values) {
   const body = bodyOf(el);
   for (const [prop, value] of Object.entries(expand(values))) {
@@ -243,18 +252,18 @@ export function place(el, values) {
   write(body);
 }
 
-/// Özelliğin ekranda şu anki değeri.
+/// The property's current value on screen.
 export function presentation(el, prop) {
   return bodyOf(el).values[prop];
 }
 
-/// Özellikleri yayla hedefe götürür.
+/// Takes properties to their target on a spring.
 ///
-/// Seçenekler: `from` (başlangıç — verilmezse ekrandaki değer), `velocity`
-/// (birim/sn; bırakılan bir hareketin hızı buradan devredilir),
-/// `dampingRatio` (varsayılan 1: aşma yok — yalnızca momentum taşıyan bir
-/// hareketin ardından 1'in altı), `responseScale`, `onRest` (hepsi
-/// oturunca; hareket kesilirse çağrılmaz).
+/// Options: `from` (the start — the on-screen value if not given), `velocity`
+/// (units/s; a released motion's velocity is handed over here),
+/// `dampingRatio` (default 1: no overshoot — below 1 only after a motion that
+/// carries momentum), `responseScale`, `onRest` (when all have settled; not
+/// called if the motion is interrupted).
 export function animate(el, targets, options = {}) {
   const motion = currentMotion();
   const body = bodyOf(el);
@@ -302,8 +311,8 @@ export function animate(el, targets, options = {}) {
 
 function step(now) {
   frame = 0;
-  // Sekme arka plandayken biriken süre tek karede harcanmasın: öğe
-  // ışınlanmasın, yavaşlasın.
+  // Time piled up while the tab was in the background must not be spent in a
+  // single frame: the element should slow down, not teleport.
   const dt = Math.min(Math.max((now - lastTime) / 1000, 0), 1 / 24);
   lastTime = now;
 
@@ -338,8 +347,9 @@ function step(now) {
   if (active.size > 0) frame = requestAnimationFrame(step);
 }
 
-/// Düzen değişiminin öncesini ve sonrasını ölçer, farkı yayla kapatır
-/// (FLIP). Bir kardeş kalkınca ötekiler zıplamaz, yerine kayar.
+/// Measures before and after a layout change and closes the difference on a
+/// spring (FLIP). When a sibling goes, the others do not jump; they slide
+/// into place.
 export function flip(elements, mutate) {
   const before = new Map(elements.map((el) => [el, el.getBoundingClientRect().top]));
   mutate();
@@ -347,7 +357,7 @@ export function flip(elements, mutate) {
     if (!el.isConnected) continue;
     const delta = top - el.getBoundingClientRect().top;
     if (Math.abs(delta) < 0.5) continue;
-    // Devam eden bir hareketin üstüne eklenir: ekrandaki konum korunur.
+    // Added on top of a running motion: the on-screen position is kept.
     const body = bodyOf(el);
     body.values.y += delta;
     write(body);
@@ -355,17 +365,19 @@ export function flip(elements, mutate) {
   }
 }
 
-// ————————————————————————————————————— sürükleme
+// ————————————————————————————————————— dragging
 
-/// Yatay sürükleme: tutulan noktayı koruyarak 1:1 izler, bırakınca hızı verir.
+/// Horizontal dragging: follows 1:1, keeping the point that was grabbed, and
+/// hands over the velocity on release.
 ///
-/// `threshold` px geçilmeden sürükleme başlamaz — tıklama ve metin seçimi
-/// yolda kalmasın. Önce dikey hareket baskın çıkarsa sürükleme hiç başlamaz
-/// ve jest sayfaya kalır. `ignore` seçicisine uyan bir öğede başlayan basış
-/// (düğme, katlanan ayrıntı) sürüklemez.
+/// Dragging does not start before `threshold` px are passed — so clicks and
+/// text selection are not in the way. If vertical movement wins first,
+/// dragging never starts and the gesture is left to the page. A press that
+/// starts on an element matching the `ignore` selector (a button, a folding
+/// detail) does not drag.
 ///
-/// `onStart()` öğenin ekrandaki `x`'ini döndürür: hareketin ortasında
-/// yakalanan öğe olduğu yerden devam eder.
+/// `onStart()` returns the element's on-screen `x`: an element caught in the
+/// middle of a motion carries on from where it is.
 export function horizontalDrag(el, { threshold = 8, ignore, onStart, onMove, onEnd }) {
   let pointer = null;
 
@@ -396,7 +408,8 @@ export function horizontalDrag(el, { threshold = 8, ignore, onStart, onMove, onE
       pointer.dragging = true;
       el.setPointerCapture(event.pointerId);
       pointer.origin = onStart?.() ?? 0;
-      // Eşik aşıldığı an ölçü buradan başlar: öğe eşik kadar sıçramaz.
+      // The measurement starts here the moment the threshold is passed: the
+      // element does not jump by the threshold.
       pointer.startX = event.clientX;
     }
     pointer.tracker.add(event.timeStamp, event.clientX);

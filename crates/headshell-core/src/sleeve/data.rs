@@ -1,7 +1,8 @@
-//! Kartın girdi verisi: `StatsReport` + ham dinlemelerden türetilen
-//! kart-özel toplamlar (ilk dinleme, arşiv kapsamı, keşifler).
+//! The card's input data: `StatsReport` + card-specific totals derived from
+//! raw listens (the first listen, the archive span, discoveries).
 //!
-//! Hesap saf ve yereldir: ağaç yok, girdi dilimi + rapor → kart verisi.
+//! The calculation is pure and local: no tree, an input slice + a report →
+//! card data.
 
 use serde::{Deserialize, Serialize};
 
@@ -9,13 +10,14 @@ use crate::identity::normalize::normalize_artist;
 use crate::model::Listen;
 use crate::stats::{AlbumStat, ArtistStat, StatsReport, TrackStat, YearStat};
 
-/// Kartın bütün göstereceği sayı ve isimler.
+/// All the numbers and names the card will show.
 ///
-/// SVG üretimi [`super::svg`] yalnızca bunu okur — veri toplama ve çizim
-/// ayrı katmanlar, GUI ileride aynı veriyle kendi çizimini yapabilir.
+/// SVG generation [`super::svg`] reads only this — collecting data and
+/// drawing are separate layers, and the GUI can later do its own drawing from
+/// the same data.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SleeveData {
-    /// Kartın dönemi: `Some(2026)` → yıl kartı, `None` → tüm zamanlar.
+    /// The card's period: `Some(2026)` → a year card, `None` → all time.
     pub year: Option<i16>,
     pub total_ms_played: u64,
     pub plays: usize,
@@ -24,33 +26,34 @@ pub struct SleeveData {
     pub top_artist: Option<ArtistStat>,
     pub top_track: Option<TrackStat>,
     pub top_album: Option<AlbumStat>,
-    /// Kapsam içindeki ilk dinleme anı. Boş kütüphanede `None`.
+    /// The moment of the first listen within scope. `None` for an empty library.
     pub first_listen: Option<jiff::Timestamp>,
-    /// Tüm arşivin (yıl filtresinden bağımsız) ilk ve son dinleme yılı.
-    /// "8 yıllık arşiv" anlatısının kaynağı — Sleeve'ın, sağlayıcıların
-    /// 12 aylık hafızasından (Spotify Wrapped®) ayrıldığı yer.
+    /// The first and last listening year of the whole archive (independent of the
+    /// year filter). The source of the "an 8-year archive" story — where Sleeve
+    /// parts ways with the providers' 12-month memory (Spotify Wrapped®).
     pub archive_start_year: Option<i16>,
     pub archive_end_year: Option<i16>,
-    /// Yıllara göre çalma sayıları (kapsam içinde). Tek yıl varsa zaman
-    /// çizelgesi anlamsızdır; çizim katmanı bölümü kendisi atlar.
+    /// Play counts by year (within scope). If there is only one year a timeline
+    /// is meaningless; the drawing layer skips that section itself.
     pub by_year: Vec<YearStat>,
-    /// Keşif çizelgesi: yıl kartında "bu yıl ilk kez dinlediğin" sanatçılar
-    /// (en çok dinlenene göre); tüm zamanlar kartında en çok dinlenen
-    /// sanatçıların ilk dinleme yılları (kronolojik).
+    /// The discovery chart: on a year card, the artists "you listened to for the
+    /// first time this year" (by most listened); on the all-time card, the first
+    /// listening years of the most listened artists (chronological).
     pub discoveries: Vec<Discovery>,
 }
 
-/// Bir sanatçının keşfi: ilk dinleme yılı + o kapsamda kaç çalması olduğu.
+/// An artist's discovery: the first listening year + how many plays it has in
+/// that scope.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Discovery {
     pub artist: String,
-    /// Sanatçın **tüm arşivdeki** ilk dinleme yılı.
+    /// The artist's first listening year **in the whole archive**.
     pub first_year: i16,
-    /// Sorgu kapsamındaki sayılan çalma sayısı.
+    /// The number of counted plays within the query's scope.
     pub plays_in_scope: usize,
 }
 
-/// Kapsam içi (yıl filtresi + çalma kuralı) dinlemeleri süzer.
+/// Filters the listens within scope (the year filter + the play rule).
 fn in_scope<'a>(listens: &'a [Listen], report: &StatsReport) -> impl Iterator<Item = &'a Listen> {
     let rule = report.query.play_rule();
     listens.iter().filter(move |listen| {
@@ -63,17 +66,19 @@ fn year_of(listen: &Listen) -> i16 {
     listen.played_at.to_zoned(jiff::tz::TimeZone::UTC).year()
 }
 
-/// Kart verisini üretir.
+/// Produces the card data.
 ///
-/// `report` kapsamın istatistikleri, `listens` ise **filtresiz** tüm dinlemeler:
-/// keşif ve arşiv kapsamı yalnızca tüm arşive bakarak doğru hesaplanır.
+/// `report` is the scope's statistics, while `listens` is **all** listens,
+/// unfiltered: discoveries and the archive span are only computed correctly
+/// by looking at the whole archive.
 #[must_use]
 pub fn card_data(report: &StatsReport, listens: &[Listen]) -> SleeveData {
-    // Tüm arşivin kapsamı — yıl filtresinden bağımsız.
+    // The span of the whole archive — independent of the year filter.
     let archive_start_year = listens.iter().map(year_of).min();
     let archive_end_year = listens.iter().map(year_of).max();
 
-    // Kapsam içi ilk dinleme (eşik gözetmeksizin: "o an" dediğimiz andır).
+    // The first listen within scope (regardless of the threshold: it is the
+    // moment we call "that moment").
     let first_listen = listens
         .iter()
         .filter(|listen| {
@@ -85,7 +90,8 @@ pub fn card_data(report: &StatsReport, listens: &[Listen]) -> SleeveData {
         .map(|listen| listen.played_at)
         .min();
 
-    // Kapsam içi sanatçı tablosu ve tüm arşivdeki ilk dinleme yılları.
+    // The artist table within scope and the first listening years in the whole
+    // archive.
     let mut scoped: std::collections::HashMap<String, (String, usize)> =
         std::collections::HashMap::new();
     for listen in in_scope(listens, report) {
@@ -115,7 +121,8 @@ pub fn card_data(report: &StatsReport, listens: &[Listen]) -> SleeveData {
         .collect();
 
     match report.query.year {
-        // Yıl kartı: bu yıl **keşfedilenler** — ilk dinleme yılı sorgu yılına eşit.
+        // A year card: those **discovered** this year — the first listening year
+        // equals the query's year.
         Some(year) => {
             discoveries.retain(|d| d.first_year == year);
             discoveries.sort_by(|a, b| {
@@ -124,7 +131,7 @@ pub fn card_data(report: &StatsReport, listens: &[Listen]) -> SleeveData {
                     .then_with(|| a.artist.cmp(&b.artist))
             });
         }
-        // Tüm zamanlar: en çok dinlenenler, kronolojik olarak.
+        // All time: the most listened, in chronological order.
         None => {
             discoveries.sort_by(|a, b| {
                 b.plays_in_scope
@@ -154,7 +161,7 @@ pub fn card_data(report: &StatsReport, listens: &[Listen]) -> SleeveData {
     }
 }
 
-/// Kartta gösterilecek en fazla keşif satırı.
+/// The most discovery rows to show on the card.
 pub const TOP_DISCOVERIES: usize = 5;
 
 #[cfg(test)]
@@ -165,8 +172,8 @@ mod tests {
 
     fn listen(artist: &str, title: &str, ts: &str, ms: u64) -> Listen {
         Listen {
-            track: TrackRef::new(artist, title).with_album(Some(format!("{title} albümü"))),
-            played_at: ts.parse().expect("test zaman damgası geçerli"),
+            track: TrackRef::new(artist, title).with_album(Some(format!("{title} album"))),
+            played_at: ts.parse().expect("the test timestamp is valid"),
             ms_played: ms,
             source: ListenSource::Import {
                 export: ExportKind::SpotifyExtended,
@@ -197,7 +204,7 @@ mod tests {
         let data = card_data(&report, &archive());
         assert_eq!(data.archive_start_year, Some(2019));
         assert_eq!(data.archive_end_year, Some(2026));
-        // Kapsam içi ilk dinleme 2024'ün içinden gelir.
+        // The first listen within scope comes from inside 2024.
         assert_eq!(
             data.first_listen
                 .as_ref()
@@ -216,7 +223,8 @@ mod tests {
             },
         );
         let data = card_data(&report, &archive());
-        // 2021'de dinlenen tek sanatçı Portishead ve ilk dinlemesi de 2021: keşif.
+        // The only artist listened to in 2021 is Portishead, and its first listen is
+        // in 2021 too: a discovery.
         let names: Vec<&str> = data.discoveries.iter().map(|d| d.artist.as_str()).collect();
         assert_eq!(names, vec!["Portishead"]);
         assert_eq!(data.discoveries[0].plays_in_scope, 1);
@@ -239,8 +247,8 @@ mod tests {
             },
         );
         let data = card_data(&report, &listens);
-        // Radiohead 2019'dan beri var; 2026 kartında keşif listesinde olmamalı.
-        // 2026'da ilk kez dinlenen Sault kalmalı.
+        // Radiohead has been around since 2019; it must not be in the discovery list
+        // on the 2026 card. Sault, first listened to in 2026, must remain.
         assert!(data.discoveries.iter().all(|d| d.artist != "Radiohead"));
         assert!(data.discoveries.iter().any(|d| d.artist == "Sault"));
     }

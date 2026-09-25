@@ -1,8 +1,8 @@
-//! Dinleme istatistikleri.
+//! Listening statistics.
 //!
-//! Gruplama kanonik kimlik üzerinden yapılır; kimliği çözülmemiş kayıtlar
-//! normalize anahtara düşer ve **sayılır** — kaç kaydın kimliksiz olduğu
-//! raporun içinde görünür, sessizce kaybolmaz.
+//! Grouping is done by canonical identity; records whose identity is not
+//! resolved fall back to the normalised key and **are counted** — how many
+//! records have no identity is visible in the report, not silently lost.
 
 use std::collections::HashMap;
 
@@ -12,18 +12,18 @@ use crate::identity::normalize::track_key;
 use crate::ids::CanonicalId;
 use crate::model::{Listen, PlayRule};
 
-/// "Sayılan çalma" eşiği. Tanım [`crate::model`]'de; burada yalnızca
-/// yeniden dışa veriliyor ki eski çağıranlar kırılmasın (D-008).
+/// The "counted play" threshold. The definition is in [`crate::model`]; it is
+/// only re-exported here so that older callers do not break (D-008).
 pub use crate::model::DEFAULT_MIN_MS_PLAYED;
 
-/// İstatistik sorgusu.
+/// A statistics query.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StatsQuery {
-    /// Yalnızca bu takvim yılı (UTC). `None` ise tüm zamanlar.
+    /// Only this calendar year (UTC). All time if `None`.
     pub year: Option<i16>,
-    /// Listelerde kaç satır döndürülecek.
+    /// How many rows to return in lists.
     pub top: usize,
-    /// Bu sürenin altındaki çalmalar atlama sayılır.
+    /// Plays below this duration count as skips.
     pub min_ms_played: u64,
 }
 
@@ -38,17 +38,17 @@ impl Default for StatsQuery {
 }
 
 impl StatsQuery {
-    /// Sorgunun eşiğinden "sayılan çalma" kuralını üretir.
+    /// Builds the "counted play" rule from the query's threshold.
     ///
-    /// `stats` ve `library search` bu kuralın **aynı** örneğini kullanır;
-    /// eşik iki yerde ayrı yorumlanmaz (D-008).
+    /// `stats` and `library search` use the **same** instance of this rule; the
+    /// threshold is not interpreted separately in two places (D-008).
     #[must_use]
     pub const fn play_rule(&self) -> PlayRule {
         PlayRule::new(self.min_ms_played)
     }
 }
 
-/// Bir parçanın toplamları.
+/// A track's totals.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TrackStat {
     pub artist: String,
@@ -58,7 +58,7 @@ pub struct TrackStat {
     pub ms_played: u64,
 }
 
-/// Bir sanatçının toplamları.
+/// An artist's totals.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArtistStat {
     pub artist: String,
@@ -67,7 +67,7 @@ pub struct ArtistStat {
     pub unique_tracks: usize,
 }
 
-/// Bir albümün toplamları.
+/// An album's totals.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AlbumStat {
     pub artist: String,
@@ -76,7 +76,7 @@ pub struct AlbumStat {
     pub ms_played: u64,
 }
 
-/// Yıl bazlı toplam.
+/// A per-year total.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct YearStat {
     pub year: i16,
@@ -84,19 +84,20 @@ pub struct YearStat {
     pub ms_played: u64,
 }
 
-/// İstatistik raporu.
+/// The statistics report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StatsReport {
     pub query: StatsQuery,
-    /// Sorgu kapsamına giren toplam kayıt (eşik uygulanmadan önce).
+    /// The total records within the query's scope (before the threshold is
+    /// applied).
     pub listens_in_scope: usize,
-    /// Eşiği geçen, yani "dinlendi" sayılan kayıtlar.
+    /// Records that pass the threshold, i.e. count as "listened".
     pub plays: usize,
-    /// Eşiğin altında kaldığı için atlanan kayıtlar.
+    /// Records skipped because they fell below the threshold.
     pub skipped_short: usize,
-    /// Kapsam dışı kalanlar (yıl filtresi).
+    /// Records out of scope (the year filter).
     pub out_of_scope: usize,
-    /// Kanonik kimliği olmayan kayıt sayısı — çözümlemenin borcu.
+    /// The number of records without a canonical identity — resolution's debt.
     pub without_canonical_id: usize,
     pub total_ms_played: u64,
     pub unique_tracks: usize,
@@ -108,16 +109,16 @@ pub struct StatsReport {
 }
 
 impl StatsReport {
-    /// Toplam dinleme süresi, saat cinsinden.
+    /// The total listening time, in hours.
     #[must_use]
     pub fn total_hours(&self) -> f64 {
-        #[expect(clippy::cast_precision_loss, reason = "gösterim amaçlı")]
+        #[expect(clippy::cast_precision_loss, reason = "for display")]
         {
             self.total_ms_played as f64 / 3_600_000.0
         }
     }
 
-    /// Sayaçları tanı kaydediciye aktarır.
+    /// Copies the counters into the diagnostics recorder.
     pub fn record_into(&self, recorder: &mut crate::diag::Recorder) {
         let n = |v: usize| i64::try_from(v).unwrap_or(i64::MAX);
         recorder.set("stats.listens_in_scope", n(self.listens_in_scope));
@@ -130,10 +131,10 @@ impl StatsReport {
     }
 }
 
-/// Bir parçayı gruplamak için kullanılan anahtar.
+/// The key used for grouping a track.
 ///
-/// Kanonik kimlik varsa o; yoksa normalize sanatçı+başlık. İkisinin
-/// karışmaması için ayrı ön ek taşırlar.
+/// The canonical identity if there is one; otherwise the normalised
+/// artist+title. They carry different prefixes so the two do not mix.
 fn group_key(listen: &Listen) -> String {
     listen.canonical_id.as_ref().map_or_else(
         || {
@@ -150,10 +151,10 @@ fn year_of(listen: &Listen) -> i16 {
     listen.played_at.to_zoned(jiff::tz::TimeZone::UTC).year()
 }
 
-/// Dinleme kayıtlarından istatistik üretir.
+/// Produces statistics from listen records.
 ///
-/// Saf fonksiyon: girdi dilimi, çıktı rapor. Veri nereden geldiğiyle
-/// ilgilenmez — bellek, SQLite ya da test sahtesi olabilir.
+/// A pure function: a slice in, a report out. It does not care where the
+/// data came from — memory, SQLite or a test fake.
 #[must_use]
 pub fn compute(listens: &[Listen], query: StatsQuery) -> StatsReport {
     let rule = query.play_rule();
@@ -296,8 +297,8 @@ mod tests {
 
     fn listen(artist: &str, title: &str, ts: &str, ms: u64) -> Listen {
         Listen {
-            track: TrackRef::new(artist, title).with_album(Some(format!("{title} albümü"))),
-            played_at: ts.parse().expect("test zaman damgası geçerli"),
+            track: TrackRef::new(artist, title).with_album(Some(format!("{title} album"))),
+            played_at: ts.parse().expect("the test timestamp is valid"),
             ms_played: ms,
             source: ListenSource::Import {
                 export: ExportKind::SpotifyExtended,
@@ -337,20 +338,26 @@ mod tests {
             .top_tracks
             .iter()
             .find(|t| t.title.starts_with("Creep"))
-            .expect("Creep raporda olmalı");
-        assert_eq!(creep.plays, 2, "Remastered ayrı parça sayılmamalı");
+            .expect("Creep must be in the report");
+        assert_eq!(
+            creep.plays, 2,
+            "Remastered must not count as a separate track"
+        );
         assert_eq!(report.unique_tracks, 3);
     }
 
     #[test]
     fn canonical_id_overrides_text_grouping() {
         let mut listens = sample();
-        let id = CanonicalId::from_local_key("elle-verilmis");
+        let id = CanonicalId::from_local_key("given-by-hand");
         listens[0].canonical_id = Some(id.clone());
         listens[2].canonical_id = Some(id);
         let report = compute(&listens, StatsQuery::default());
         let top = &report.top_tracks[0];
-        assert_eq!(top.plays, 2, "aynı kanonik kimlik tek satırda toplanmalı");
+        assert_eq!(
+            top.plays, 2,
+            "the same canonical identity must add up in a single row"
+        );
         assert_eq!(report.without_canonical_id, 2);
     }
 

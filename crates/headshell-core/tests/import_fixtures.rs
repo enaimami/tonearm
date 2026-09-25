@@ -1,6 +1,6 @@
-//! `fixtures/` altındaki kırpılmış gerçek export'lar üzerinden uçtan uca test.
+//! End-to-end test over the trimmed real exports under `fixtures/`.
 //!
-//! Ağa çıkılmaz, geçici dizin kullanılır.
+//! Nothing goes online; a temporary directory is used.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -18,7 +18,7 @@ fn fixture(name: &str) -> PathBuf {
     PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures")).join(name)
 }
 
-/// Test başına tekil geçici dizin. `std` dışına çıkmadan.
+/// A unique temporary directory per test. Without leaving `std`.
 fn temp_dir(label: &str) -> support::TempDir {
     support::TempDir::new(&format!("import-{label}"))
 }
@@ -39,27 +39,28 @@ async fn extended_export_imports_resolves_and_counts() {
     assert_eq!(report.import.export, ExportKind::SpotifyExtended);
     assert_eq!(
         report.import.files_matched, 2,
-        "iki geçmiş dosyası eşleşmeli"
+        "two history files must match"
     );
     assert_eq!(report.import.records_total, 63);
     assert_eq!(report.import.listens, 60);
     assert_eq!(
         report.import.skipped_total(),
         3,
-        "2 podcast + 1 bozuk zaman"
+        "2 podcasts + 1 broken timestamp"
     );
 
-    // Faz 0'da ağ yok: her şey yerel anahtara düşmeli, uydurma otorite olmamalı.
+    // No network in Phase 0: everything must fall back to the local key, with
+    // no made-up authority.
     assert_eq!(report.identity.total, 60);
     assert_eq!(report.identity.by_local_key, 60);
     assert_eq!(report.identity.authoritative_ratio(), 0.0);
 
     assert_eq!(report.write.inserted, 60);
     assert_eq!(report.write.duplicates, 0);
-    // "Creep" ve "Creep - Remastered" tek parçada birleşmeli.
+    // "Creep" and "Creep - Remastered" must merge into one track.
     assert_eq!(
         report.write.new_tracks, 6,
-        "7 satırdan 6 benzersiz parça çıkmalı"
+        "7 rows must give 6 unique tracks"
     );
 
     assert!(report.diag.succeeded());
@@ -91,7 +92,7 @@ async fn reimporting_the_same_export_is_idempotent() {
     let stats = sess.stats(StatsQuery::default()).unwrap();
     assert_eq!(
         stats.report.listens_in_scope, 60,
-        "ikinci içe aktarma sayıyı şişirmemeli"
+        "a second import must not inflate the count"
     );
 
     std::fs::remove_dir_all(&dir).ok();
@@ -118,7 +119,7 @@ async fn account_export_is_detected_and_stats_reflect_it() {
     assert_eq!(stats.report.unique_artists, 2);
     assert_eq!(
         stats.report.without_canonical_id, 0,
-        "içe aktarma kimlik atamalı"
+        "the import must assign identities"
     );
 
     let hits = sess.search("portis", 10, PlayRule::default()).unwrap();
@@ -139,9 +140,10 @@ async fn stats_group_creep_variants_together() {
     .await
     .unwrap();
 
-    // Eşiği sıfırlayıp bakıyoruz: fixture'da "Creep" kayıtlarının yarısı kasten
-    // kısa çalma, varsayılan eşikle elenirler. Birleşmeyi ölçmek istediğimiz
-    // için burada hepsini sayıyoruz.
+    // We look with the threshold at zero: half of the "Creep" records in the
+    // fixture are deliberately short plays and would be filtered out with the
+    // default threshold. Since we want to measure the merge, we count them all
+    // here.
     let all = sess
         .stats(StatsQuery {
             min_ms_played: 0,
@@ -153,19 +155,19 @@ async fn stats_group_creep_variants_together() {
         .top_tracks
         .iter()
         .find(|t| t.title.starts_with("Creep"))
-        .expect("Creep listede olmalı");
+        .expect("Creep must be in the list");
     assert_eq!(
         creep.plays, 18,
-        "\"Creep\" ve \"Creep - Remastered\" tek satırda toplanmalı: {creep:?}"
+        "\"Creep\" and \"Creep - Remastered\" must add up in a single row: {creep:?}"
     );
 
     let stats = sess.stats(StatsQuery::default()).unwrap();
     assert_eq!(stats.report.unique_tracks, 6);
     assert_eq!(
         stats.report.skipped_short, 9,
-        "kısa çalmalar sayılmalı, yutulmamalı"
+        "short plays must be counted, not swallowed"
     );
-    assert_eq!(stats.report.by_year.len(), 2, "2023 ve 2024");
+    assert_eq!(stats.report.by_year.len(), 2, "2023 and 2024");
 
     let only_2024 = sess
         .stats(StatsQuery {
@@ -185,7 +187,7 @@ async fn unsupported_archive_fails_at_the_detect_stage() {
     let mut sess = Session::open(Config::with_data_dir(dir.path())).unwrap();
     let bogus = dir.join("bogus");
     std::fs::create_dir_all(&bogus).unwrap();
-    std::fs::write(bogus.join("notes.txt"), b"bu bir export degil").unwrap();
+    std::fs::write(bogus.join("notes.txt"), b"this is not an export").unwrap();
 
     let err = sess
         .import_archive(&bogus, session::default_lookup())
@@ -198,11 +200,12 @@ async fn unsupported_archive_fails_at_the_detect_stage() {
         err.chain_text()
     );
 
-    // Hata da tanı raporuna yazılmış olmalı — `headshell diag` bunu göstermeli.
+    // The error must have been written to the diagnostics report too —
+    // `headshell diag` should show it.
     let diag = sess
         .last_diag()
         .unwrap()
-        .expect("son çalıştırma kaydedilmeli");
+        .expect("the last run must be recorded");
     assert!(!diag.succeeded());
     assert_eq!(
         diag.failed_at,
@@ -226,7 +229,7 @@ async fn resolve_reports_the_chain_step_it_used() {
     assert_eq!(report.resolution.method, ResolveMethod::LocalKey);
 
     let err = sess
-        .resolve_track("ayirici yok", session::default_lookup())
+        .resolve_track("no separator", session::default_lookup())
         .await
         .unwrap_err();
     assert_eq!(err.stage(), headshell_core::diag::Stage::IdentityResolve);

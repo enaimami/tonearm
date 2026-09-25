@@ -1,19 +1,22 @@
-//! MusicBrainz üstveri kaynağı — K6 zincirinin 2. ve 3. halkasını besler.
+//! The MusicBrainz metadata source — it feeds the 2nd and 3rd links of the K6
+//! chain.
 //!
-//! Bu dosyaya kadar `MetadataLookup`'ın tek gerçek uygulaması yoktu:
-//! [`OfflineLookup`](super::OfflineLookup) her zaman "bulamadım" diyordu ve
-//! zincir ISRC'si olmayan her kaydı `LocalKey`'e düşürüyordu. Yani ISRC →
-//! **MBID** → **bulanık** sırasının ortadaki iki halkası ölçülebilir bir iş
-//! yapmıyordu (D-045).
+//! Until this file, `MetadataLookup` had no real implementation:
+//! [`OfflineLookup`](super::OfflineLookup) always said "not found" and the
+//! chain dropped every record without an ISRC to `LocalKey`. So the two middle
+//! links of the ISRC → **MBID** → **fuzzy** order did no measurable work
+//! (D-045).
 //!
-//! ## Sınırlar burada, çünkü MusicBrainz'in kuralları var
+//! ## The limits live here, because MusicBrainz has rules
 //!
-//! - **`User-Agent` zorunlu.** Uygulamayı tanıtmayan istekler `403` alır.
-//!   Varsayılan bir değer üretiyoruz ama [`MusicBrainzLookup::with_user_agent`]
-//!   ile değiştirilebilir; dağıtan kişi kendi iletişim adresini koymalı.
-//! - **Saniyede bir istek.** Anonim istemcilerin ortalama hızı budur; aşınca
-//!   `503` gelir. Kısıtlayıcı [`crate::net::RateLimiter`] içinde ve **çağrılar
-//!   arasında uyur**; gerekçesi orada yazılı.
+//! - **`User-Agent` is mandatory.** Requests that do not identify the
+//!   application get a `403`. We produce a default value, but it can be
+//!   changed with [`MusicBrainzLookup::with_user_agent`]; whoever distributes
+//!   the app should put their own contact address there.
+//! - **One request per second.** That is the average rate for anonymous
+//!   clients; exceed it and a `503` comes back. The limiter is in
+//!   [`crate::net::RateLimiter`] and **sleeps between calls**; the reasoning
+//!   is written there.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -25,32 +28,33 @@ use crate::error::Result;
 use crate::ids::{Isrc, Mbid};
 use crate::net::{HttpClient, HttpHeader, HttpRequest, RateLimiter, encode_query, parse_json};
 
-/// Genel MusicBrainz sunucusu.
+/// The public MusicBrainz server.
 pub const DEFAULT_BASE_URL: &str = "https://musicbrainz.org/ws/2";
 
-/// İki istek arasındaki en kısa süre.
+/// The shortest time between two requests.
 ///
-/// MusicBrainz'in anonim sınırı saniyede bir istek. 1100 ms, saat farkı ve
-/// ağ dalgalanması için pay bırakıyor — sınırı yalayan bir istemci `503`
-/// yiyip yeniden denemeye başlar, bu da toplamda daha yavaştır.
+/// MusicBrainz's anonymous limit is one request per second. 1100 ms leaves
+/// room for clock skew and network jitter — a client that grazes the limit
+/// eats a `503` and starts retrying, which is slower overall.
 const MIN_INTERVAL: Duration = Duration::from_millis(1100);
 
-/// Arama başına istenecek aday sayısı.
+/// How many candidates to ask for per search.
 ///
-/// Skorlamayı [`super::fuzzy`] yapıyor; buradan dönen liste onun girdisi.
-/// Fazlası ağı ve ayrıştırmayı büyütür, azı doğru adayı listeden düşürür.
+/// [`super::fuzzy`] does the scoring; the list returned here is its input.
+/// More grows the network traffic and the parsing, fewer drops the right
+/// candidate off the list.
 const SEARCH_LIMIT: usize = 25;
 
-/// `503` (hız sınırı) sonrası kaç kez yeniden denenir.
+/// How many times to retry after a `503` (rate limit).
 ///
-/// Sayılı: sonsuz yeniden deneme, kotayı aşan bir istemciyi sessiz kılardı —
-/// eklenti yeniden başlatmalarının sayılı olmasıyla aynı gerekçe (§2.1).
+/// Counted: endless retries would make a client that exceeds its quota
+/// silent — the same reasoning as plugin restarts being counted (§2.1).
 const RATE_LIMIT_RETRIES: u32 = 2;
 
-/// MusicBrainz'e bağlanan üstveri kaynağı.
+/// A metadata source that connects to MusicBrainz.
 ///
-/// HTTP'ye doğrudan değil [`HttpClient`] üstünden gidiyor (D-020): testler
-/// sahte istemci verir, mobil kendi yığınını verir.
+/// It goes through [`HttpClient`], not straight to HTTP (D-020): tests supply
+/// a fake client, mobile supplies its own stack.
 pub struct MusicBrainzLookup {
     http: Arc<dyn HttpClient>,
     base_url: String,
@@ -70,7 +74,7 @@ impl std::fmt::Debug for MusicBrainzLookup {
 }
 
 impl MusicBrainzLookup {
-    /// Genel sunucuya bağlanan kaynak.
+    /// A source connecting to the public server.
     #[must_use]
     pub fn new(http: Arc<dyn HttpClient>) -> Self {
         Self {
@@ -82,10 +86,10 @@ impl MusicBrainzLookup {
         }
     }
 
-    /// Başka bir sunucu (kendi MusicBrainz kopyanız, ya da test sunucusu).
+    /// Another server (your own copy of MusicBrainz, or a test server).
     ///
-    /// Sondaki `/` atılır: `{base}/recording` kurarken çift eğik çizgi
-    /// oluşmasın.
+    /// A trailing `/` is dropped, so no double slash appears when building
+    /// `{base}/recording`.
     #[must_use]
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
         let url = base_url.into();
@@ -93,28 +97,28 @@ impl MusicBrainzLookup {
         self
     }
 
-    /// Kendi `User-Agent`'ınız.
+    /// Your own `User-Agent`.
     ///
-    /// MusicBrainz uygulamayı ve **ulaşılabilir bir adresi** görmek ister;
-    /// biçim: `uygulama/sürüm ( iletişim )`. Bunu ayarlamayan bir dağıtım
-    /// varsayılanla gider ve sınırlama riskini paylaşır.
+    /// MusicBrainz wants to see the application and **a reachable address**;
+    /// format: `application/version ( contact )`. A distribution that does not
+    /// set this goes with the default and shares the risk of being throttled.
     #[must_use]
     pub fn with_user_agent(mut self, user_agent: impl Into<String>) -> Self {
         self.user_agent = user_agent.into();
         self
     }
 
-    /// İstekler arasındaki en kısa süre.
+    /// The shortest time between requests.
     ///
-    /// Yalnızca kendi kopyasına bağlananlar ve testler için; genel sunucuda
-    /// varsayılanın altına inmek kotayı ihlal eder.
+    /// Only for those connecting to their own copy, and for tests; going below
+    /// the default on the public server breaks the quota.
     #[must_use]
     pub fn with_min_interval(mut self, interval: Duration) -> Self {
         self.limiter = RateLimiter::new(interval);
         self
     }
 
-    /// Kaç aday istensin.
+    /// How many candidates to ask for.
     #[must_use]
     pub fn with_search_limit(mut self, limit: usize) -> Self {
         self.search_limit = limit.clamp(1, 100);
@@ -128,10 +132,12 @@ impl MusicBrainzLookup {
         ]
     }
 
-    /// Hız sınırına uyarak GET yapar; `404` **hata değil** `None`.
+    /// Makes a GET, respecting the rate limit; `404` is **not an error** but
+    /// `None`.
     ///
-    /// "Bulamadım" ile "konuşamadım" ayrımı burada başlıyor (K9): ilki
-    /// zincirin bir sonraki halkasına geçmek demek, ikincisi durup raporlamak.
+    /// The distinction between "not found" and "could not talk" starts here
+    /// (K9): the first means moving on to the next link of the chain, the second
+    /// means stopping and reporting.
     async fn get_json<T: serde::de::DeserializeOwned>(
         &self,
         url: &str,
@@ -146,14 +152,10 @@ impl MusicBrainzLookup {
             if response.status == 404 {
                 return Ok(None);
             }
-            // 503 = kota aşıldı. Sunucu "yavaşla" diyor, "hayır" demiyor.
+            // 503 = quota exceeded. The server says "slow down", not "no".
             if response.status == 503 && attempt < RATE_LIMIT_RETRIES {
                 attempt += 1;
-                tracing::warn!(
-                    url,
-                    deneme = attempt,
-                    "MusicBrainz hız sınırı: bekleyip yeniden denenecek"
-                );
+                tracing::warn!(url, attempt, "MusicBrainz rate limit: waiting and retrying");
                 std::thread::sleep(MIN_INTERVAL);
                 continue;
             }
@@ -163,10 +165,10 @@ impl MusicBrainzLookup {
     }
 }
 
-/// Bu derlemenin varsayılan `User-Agent`'ı.
+/// This build's default `User-Agent`.
 ///
-/// Adres yer tutucu (`README`'deki gibi); gerçek bir dağıtımda
-/// [`MusicBrainzLookup::with_user_agent`] ile değiştirilmeli.
+/// The address is a placeholder (as in the `README`); a real distribution
+/// should change it with [`MusicBrainzLookup::with_user_agent`].
 fn default_user_agent() -> String {
     format!(
         "headshell/{} ( https://github.com/enaimami/headshell )",
@@ -177,8 +179,8 @@ fn default_user_agent() -> String {
 impl MetadataLookup for MusicBrainzLookup {
     fn recording_by_isrc<'a>(&'a self, isrc: &'a Isrc) -> LookupFuture<'a, Option<Candidate>> {
         Box::pin(async move {
-            // `inc=artist-credits`: kayıt adı tek başına aday yapmaya yetmez,
-            // bulanık skorlama sanatçıyı da ister.
+            // `inc=artist-credits`: the recording title alone is not enough to make a
+            // candidate; fuzzy scoring wants the artist too.
             let url = format!(
                 "{}/isrc/{}?fmt=json&inc=artist-credits+isrcs",
                 self.base_url,
@@ -193,14 +195,14 @@ impl MetadataLookup for MusicBrainzLookup {
 
             let mut candidates = collect_candidates(payload.recordings, "isrc");
             if candidates.len() > 1 {
-                // Bir ISRC birden çok kayda bağlanabilir (aynı parçanın ayrı
-                // yayınlardaki kayıtları). İlkini alıyoruz ama sayı kayda
-                // geçiyor: sessizce seçim yapmak, sonradan "neden bu MBID"
-                // sorusunu cevapsız bırakır.
+                // An ISRC can be tied to more than one recording (the same track's
+                // recordings on different releases). We take the first, but the count
+                // goes on record: choosing silently would leave "why this MBID?"
+                // unanswered later.
                 tracing::debug!(
                     isrc = isrc.as_str(),
-                    adet = candidates.len(),
-                    "ISRC birden çok kayda bağlı; ilki alındı"
+                    count = candidates.len(),
+                    "the ISRC is tied to more than one recording; took the first"
                 );
             }
             Ok((!candidates.is_empty()).then(|| candidates.swap_remove(0)))
@@ -215,8 +217,9 @@ impl MetadataLookup for MusicBrainzLookup {
         Box::pin(async move {
             let query = build_query(artist, title);
             if query.is_empty() {
-                // Boş sorgu MusicBrainz'de `400` demek. İstek göndermeden
-                // "aday yok" diyoruz; zincir bulanık halkaya boş listeyle iner.
+                // An empty query means `400` at MusicBrainz. We say "no candidates"
+                // without sending a request; the chain goes down to the fuzzy link
+                // with an empty list.
                 return Ok(Vec::new());
             }
             let url = format!(
@@ -236,11 +239,12 @@ impl MetadataLookup for MusicBrainzLookup {
     }
 }
 
-/// Ham kayıtları adaylara çevirir; çevrilemeyeni **sayar ve raporlar**.
+/// Turns raw recordings into candidates; what cannot be turned **is counted
+/// and reported**.
 ///
-/// `filter_map` ile sessizce düşürmek "sessiz `unwrap_or_default()` yasak"
-/// kuralının ta kendisi olurdu: MBID'si bozuk gelen bir kayıt, doğruluk
-/// oranını sebepsiz düşürür ve kimse fark etmez.
+/// Dropping them silently with `filter_map` would be exactly what the "no
+/// silent `unwrap_or_default()`" rule forbids: a recording arriving with a
+/// broken MBID lowers the accuracy rate for no reason and nobody notices.
 fn collect_candidates(recordings: Vec<MbRecording>, source: &str) -> Vec<Candidate> {
     let mut out = Vec::with_capacity(recordings.len());
     let mut skipped = 0usize;
@@ -259,18 +263,18 @@ fn collect_candidates(recordings: Vec<MbRecording>, source: &str) -> Vec<Candida
     }
     if skipped > 0 {
         tracing::warn!(
-            kaynak = source,
-            atlanan = skipped,
-            "MusicBrainz yanıtında geçersiz MBID taşıyan kayıtlar atlandı"
+            source,
+            skipped,
+            "skipped recordings with an invalid MBID in the MusicBrainz response"
         );
     }
     out
 }
 
-/// Lucene sorgusu kurar: `artist:"..." AND recording:"..."`.
+/// Builds a Lucene query: `artist:"..." AND recording:"..."`.
 ///
-/// Alanlardan biri boşsa o alan düşer; ikisi de boşsa sorgu boş döner ve
-/// çağıran istek göndermez.
+/// If one of the fields is empty that field is dropped; if both are empty the
+/// query comes back empty and the caller sends no request.
 fn build_query(artist: &str, title: &str) -> String {
     let mut parts = Vec::new();
     let artist = escape_lucene(artist);
@@ -284,11 +288,11 @@ fn build_query(artist: &str, title: &str) -> String {
     parts.join(" AND ")
 }
 
-/// Lucene'in özel karakterlerini kaçırır.
+/// Escapes Lucene's special characters.
 ///
-/// Kaçırılmazsa `AC/DC` ya da `Where Is My Mind?` gibi adlar sorguyu bozar ve
-/// MusicBrainz `400` döndürür — yani en çok ihtiyaç duyulan yerde, tuhaf
-/// adlarda, çözümleme çöker.
+/// Without escaping, names like `AC/DC` or `Where Is My Mind?` break the
+/// query and MusicBrainz returns `400` — so resolution collapses exactly
+/// where it is most needed, on odd names.
 fn escape_lucene(value: &str) -> String {
     const SPECIAL: &[char] = &[
         '+', '-', '&', '|', '!', '(', ')', '{', '}', '[', ']', '^', '"', '~', '*', '?', ':', '\\',
@@ -304,7 +308,7 @@ fn escape_lucene(value: &str) -> String {
     out
 }
 
-// --- Tel biçimi (MusicBrainz ws/2, `fmt=json`) ---------------------------
+// --- Wire format (MusicBrainz ws/2, `fmt=json`) ---------------------------
 
 #[derive(Debug, Deserialize)]
 struct IsrcResponse {
@@ -323,18 +327,20 @@ struct MbRecording {
     id: String,
     #[serde(default)]
     title: String,
-    /// Milisaniye. MusicBrainz süreyi bilmiyorsa `null` gelir — bu bir bilgi,
-    /// sıfır değil: [`super::fuzzy`] süreyi bilmediğinde farklı davranır.
+    /// Milliseconds. If MusicBrainz does not know the duration it comes as
+    /// `null` — that is information, not zero: [`super::fuzzy`] behaves
+    /// differently when it does not know the duration.
     #[serde(default)]
     length: Option<u64>,
     #[serde(rename = "artist-credit", default)]
     artist_credit: Vec<MbArtistCredit>,
-    /// Kaydı adaşlarından ayıran not: `"live, 1994-05-27: Astoria, London, UK"`.
+    /// The note that sets a recording apart from its namesakes: `"live,
+    /// 1994-05-27: Astoria, London, UK"`.
     ///
-    /// Canlı kayıtların **tek** işareti bu alan — başlık düpedüz `Creep`
-    /// kalıyor. Boş dize de geliyor (`""`), o yüzden `filter` ile eleniyor:
-    /// "not yok" ile "notu boş" aynı şey, ama `Some("")` skorlamaya boş bir
-    /// bağlam sokardı.
+    /// This field is the **only** marker of live recordings — the title stays
+    /// plainly `Creep`. An empty string arrives too (`""`), so it is weeded out
+    /// with `filter`: "no note" and "an empty note" are the same thing, but
+    /// `Some("")` would push an empty context into scoring.
     #[serde(default)]
     disambiguation: Option<String>,
     #[serde(default)]
@@ -342,12 +348,12 @@ struct MbRecording {
 }
 
 impl MbRecording {
-    /// `artist-credit` listesini tek dizeye çevirir.
+    /// Turns the `artist-credit` list into a single string.
     ///
-    /// MusicBrainz çoklu sanatçıyı parça parça verir ve aradaki bağlacı
-    /// (`joinphrase`) ayrı taşır: `[{name:"Jay-Z", joinphrase:" & "},
-    /// {name:"Kanye West"}]` → `Jay-Z & Kanye West`. Yalnızca ilkini almak
-    /// düetlerin yarısını kaybettirirdi.
+    /// MusicBrainz gives multiple artists piece by piece and carries the joining
+    /// phrase (`joinphrase`) separately: `[{name:"Jay-Z", joinphrase:" & "},
+    /// {name:"Kanye West"}]` → `Jay-Z & Kanye West`. Taking only the first would
+    /// lose half of every duet.
     fn artist_name(&self) -> String {
         let mut out = String::new();
         for credit in &self.artist_credit {
@@ -366,11 +372,11 @@ struct MbArtistCredit {
     joinphrase: String,
 }
 
-/// Bu derlemenin varsayılan üstveri kaynağı.
+/// This build's default metadata source.
 ///
 /// # Errors
-/// `http-client` feature'ı kapalıysa: çağıran kendi istemcisini verip
-/// [`MusicBrainzLookup::new`] çağırmalı.
+/// If the `http-client` feature is off: the caller must supply its own
+/// client and call [`MusicBrainzLookup::new`].
 #[cfg(feature = "http-client")]
 pub fn default_musicbrainz_lookup() -> Result<Arc<dyn MetadataLookup>> {
     Ok(Arc::new(MusicBrainzLookup::new(
@@ -378,19 +384,19 @@ pub fn default_musicbrainz_lookup() -> Result<Arc<dyn MetadataLookup>> {
     )))
 }
 
-/// Bu derlemenin varsayılan üstveri kaynağı.
+/// This build's default metadata source.
 ///
 /// # Errors
-/// Bu derlemede `http-client` kapalı olduğu için **her zaman** hata döner.
-/// Sessizce çevrimdışı kaynağa düşmüyoruz: kullanıcı zincirin neden
-/// `LocalKey`'de bittiğini bilmeli (K9).
+/// In this build `http-client` is off, so it **always** returns an error. We
+/// do not silently fall back to the offline source: the user should know why
+/// the chain ended at `LocalKey` (K9).
 #[cfg(not(feature = "http-client"))]
 pub fn default_musicbrainz_lookup() -> Result<Arc<dyn MetadataLookup>> {
     Err(crate::error::Error::new(
         crate::diag::Stage::IdentityResolve,
         crate::error::ErrorKind::Unsupported {
             provider: "musicbrainz".to_owned(),
-            what: "üstveri araması (`http-client` feature'ı kapalı derleme)".to_owned(),
+            what: "metadata lookup (a build with the `http-client` feature off)".to_owned(),
             capabilities: "NONE".to_owned(),
         },
     ))
@@ -401,7 +407,7 @@ mod tests {
     use super::*;
     use crate::net::fake::FakeHttp;
 
-    /// Testlerde hız kısıtı 0: sınanan şey kısıtın kendisi değil.
+    /// In tests the rate limit is 0: the limiter itself is not what is tested.
     fn lookup(http: FakeHttp) -> MusicBrainzLookup {
         MusicBrainzLookup::new(Arc::new(http))
             .with_base_url("http://mb.test/ws/2")
@@ -453,7 +459,7 @@ mod tests {
         assert_eq!(found.mbid.as_str(), "b1a9c0e9-d987-4042-ae91-78d6a3267d69");
     }
 
-    /// K9: "bulamadım" hata değil — zincir bir sonraki halkaya geçmeli.
+    /// K9: "not found" is not an error — the chain must move on to the next link.
     #[tokio::test]
     async fn an_unknown_isrc_is_absence_not_failure() {
         let http = FakeHttp::new().route_status("/isrc/", 404, r#"{"error":"Not Found"}"#);
@@ -462,17 +468,17 @@ mod tests {
         assert_eq!(mb.recording_by_isrc(&isrc).await.unwrap(), None);
     }
 
-    /// ...ama "konuşamadım" hatadır ve aşamasını söyler.
+    /// ...but "could not talk" is an error, and it says its stage.
     #[tokio::test]
     async fn a_server_error_is_reported_not_swallowed() {
-        let http = FakeHttp::new().route_status("/recording?query=", 500, "bozuk");
+        let http = FakeHttp::new().route_status("/recording?query=", 500, "broken");
         let mb = lookup(http);
         let err = mb
             .search_recordings("Radiohead", "Creep")
             .await
             .unwrap_err();
         let text = err.chain_text();
-        assert!(text.starts_with("ADIM: NETWORK_REQUEST"), "{text}");
+        assert!(text.starts_with("STEP: NETWORK_REQUEST"), "{text}");
         assert!(text.contains("500"), "{text}");
     }
 
@@ -489,16 +495,17 @@ mod tests {
             .headers
             .iter()
             .find(|h| h.name == "User-Agent")
-            .expect("User-Agent gönderilmeli: MusicBrainz aksi halde 403 döner");
+            .expect("a User-Agent must be sent: MusicBrainz returns 403 otherwise");
         assert!(agent.value.starts_with("headshell/"), "{}", agent.value);
         assert!(
             agent.value.contains('('),
-            "iletişim adresi: {}",
+            "contact address: {}",
             agent.value
         );
     }
 
-    /// Tuhaf adlar sorguyu bozmamalı — kaçırılmazsa MusicBrainz `400` döner.
+    /// Odd names must not break the query — unescaped, MusicBrainz returns
+    /// `400`.
     #[test]
     fn lucene_special_characters_are_escaped() {
         let query = build_query("AC/DC", "Where Is My Mind?");
@@ -529,12 +536,12 @@ mod tests {
         assert_eq!(recording.artist_name(), "JAY-Z & Kanye West");
     }
 
-    /// Bozuk MBID sessizce düşmez: sayılır ve raporlanır.
+    /// A broken MBID is not dropped silently: it is counted and reported.
     #[test]
     fn invalid_mbids_are_counted_not_silently_dropped() {
         let recordings: Vec<MbRecording> = serde_json::from_str(
             r#"[
-                { "id": "not-a-uuid", "title": "Bozuk" },
+                { "id": "not-a-uuid", "title": "Broken" },
                 { "id": "b1a9c0e9-d987-4042-ae91-78d6a3267d69", "title": "Creep" }
             ]"#,
         )
@@ -544,7 +551,8 @@ mod tests {
         assert_eq!(candidates[0].title, "Creep");
     }
 
-    /// Süre bilinmiyorsa `None` kalmalı — sıfır olmamalı (skorlama ayrımı).
+    /// If the duration is unknown it must stay `None` — not zero (the scoring
+    /// distinction).
     #[test]
     fn a_missing_length_stays_unknown_rather_than_zero() {
         let recordings: Vec<MbRecording> = serde_json::from_str(
@@ -555,13 +563,14 @@ mod tests {
         assert_eq!(candidates[0].duration_ms, None);
     }
 
-    /// Hız sınırı `503` "hayır" değil "yavaşla" demek: bir kez daha denenir.
+    /// A rate-limit `503` means "slow down", not "no": it is tried once more.
     #[tokio::test]
     async fn a_rate_limited_response_is_retried() {
-        // Sahte istemci ilk eşleşen yolu döndürüyor; iki farklı yol tanımlayıp
-        // sırayla dönmesini sağlayamıyoruz, o yüzden burada sınanan şey
-        // yeniden denemenin *sayılı* olduğu: 503 kalıcıysa hata dönmeli.
-        let http = Arc::new(FakeHttp::new().route_status("/recording?query=", 503, "yavaşla"));
+        // The fake client returns the first matching route; we cannot define
+        // two different routes and have them returned in turn, so what is tested
+        // here is that retrying is *counted*: if the 503 persists, an error must
+        // come back.
+        let http = Arc::new(FakeHttp::new().route_status("/recording?query=", 503, "slow down"));
         let mb = MusicBrainzLookup::new(http.clone())
             .with_base_url("http://mb.test/ws/2")
             .with_min_interval(Duration::ZERO);
@@ -574,7 +583,7 @@ mod tests {
         assert_eq!(
             http.requests().len(),
             (RATE_LIMIT_RETRIES + 1) as usize,
-            "ilk deneme + {RATE_LIMIT_RETRIES} yeniden deneme"
+            "first attempt + {RATE_LIMIT_RETRIES} retries"
         );
     }
 }

@@ -1,25 +1,26 @@
-//! `127.0.0.1` üzerinde sıralı akış sunan küçük bir HTTP/1.1 sunucusu (D-047 S2).
+//! A small HTTP/1.1 server serving sequential streams on `127.0.0.1` (D-047
+//! S2).
 //!
-//! ## Neden var
+//! ## Why it exists
 //!
-//! `resolve_source` hazır bir `AudioSource` döndürmek zorunda; torrent ise
-//! dakikalar süren bir edinme işi. `librqbit`'in `FileStream`'i okuma
-//! konumuna göre parça önceliği ayarlıyor — yani dosyanın başı elimize
-//! geçtiği anda çalmaya başlanabilir. O akışı oynatıcıya vermenin api 1'de
-//! **protokol değiştirmeyen** tek yolu bir adres vermek.
+//! `resolve_source` has to return a ready `AudioSource`, while a torrent is an
+//! acquisition job that takes minutes. `librqbit`'s `FileStream` sets piece
+//! priority by the read position — so playback can start the moment the start
+//! of the file is in hand. In api 1, the only way to hand that stream to the
+//! player **without changing the protocol** is to give an address.
 //!
-//! ## K3 ihlali değil
+//! ## Not a K3 violation
 //!
-//! Röle edilen bir şey yok: veriyi kullanıcının kendi makinesi çekiyor,
-//! sunucu aynı makinede ve yalnızca yerel arayüze bağlı. Sunucudan ses
-//! akıtan bir *tasarım* K3'ün yasakladığı şey; bu, sürecin kendi içindeki
-//! bir borunun HTTP kılığı.
+//! Nothing is relayed: the user's own machine fetches the data, and the server
+//! is on the same machine, bound only to the local interface. A *design* that
+//! streams audio from a server is what K3 forbids; this is a pipe inside the
+//! process wearing HTTP clothes.
 //!
-//! ## Jeton neden var
+//! ## Why there is a token
 //!
-//! Aynı makinedeki başka bir süreç `127.0.0.1:<port>/<infohash>/0` adresini
-//! deneyerek indirilenleri okuyabilirdi. Yol, süreç ömrü kadar yaşayan
-//! rastgele bir jetonla başlıyor; jeton diske yazılmıyor.
+//! Another process on the same machine could read what was downloaded by
+//! trying `127.0.0.1:<port>/<infohash>/0`. The path starts with a random token
+//! that lives as long as the process; the token is not written to disk.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -30,10 +31,10 @@ use tokio::net::{TcpListener, TcpStream};
 use crate::engine::Engine;
 use crate::rpc::{PluginError, Result, chain_text};
 
-/// İstek başlıklarının üst sınırı. Bunu aşan istek okunmadan reddedilir.
+/// The upper limit for request headers. A request over it is refused unread.
 const MAX_HEADER_BYTES: usize = 8 * 1024;
-/// Kopyalama tamponu. Parça boyutundan küçük olması sorun değil; `FileStream`
-/// eksik parçayı beklerken bloke oluyor, biz de onu bekliyoruz.
+/// The copy buffer. Being smaller than a piece is no problem; `FileStream`
+/// blocks while waiting for a missing piece, and we wait for it.
 const COPY_BUFFER: usize = 64 * 1024;
 
 pub struct StreamServer {
@@ -42,15 +43,15 @@ pub struct StreamServer {
 }
 
 impl StreamServer {
-    /// Sunucuyu başlatır ve dinlemeye başladıktan **sonra** döner — adres
-    /// elimize geçmeden `resolve_source` cevap veremez.
+    /// Starts the server and returns **after** it starts listening —
+    /// `resolve_source` cannot answer before it has the address.
     pub async fn spawn(engine: Arc<Engine>) -> Result<Arc<Self>> {
         let listener = TcpListener::bind(("127.0.0.1", 0)).await.map_err(|error| {
-            PluginError::new(format!("yerel akış sunucusu bağlanamadı: {error}"))
+            PluginError::new(format!("could not bind the local stream server: {error}"))
         })?;
         let addr = listener
             .local_addr()
-            .map_err(|error| PluginError::new(format!("yerel akış adresi okunamadı: {error}")))?;
+            .map_err(|error| PluginError::new(format!("could not read the local stream address: {error}")))?;
 
         let token = format!(
             "{:016x}{:016x}",
@@ -68,15 +69,15 @@ impl StreamServer {
                         let server = Arc::clone(&accept_server);
                         tokio::spawn(async move {
                             if let Err(error) = server.serve(socket, engine).await {
-                                // Oynatıcının bağlantıyı kapatması olağan; yine de
-                                // stderr'e yazıyoruz, çünkü "çalmıyor" tanısının
-                                // yarısı burada.
-                                eprintln!("akış isteği düştü: {error}");
+                                // The player closing the connection is normal; still, we
+                                // write it to stderr, because half of the "it doesn't play"
+                                // diagnosis is here.
+                                eprintln!("a stream request dropped: {error}");
                             }
                         });
                     }
                     Err(error) => {
-                        eprintln!("akış sunucusu bağlantı kabul edemedi: {error}");
+                        eprintln!("the stream server could not accept a connection: {error}");
                         return;
                     }
                 }
@@ -86,7 +87,7 @@ impl StreamServer {
         Ok(server)
     }
 
-    /// Bir dosyanın çalınabilir adresi.
+    /// A file's playable address.
     pub fn url_for(&self, infohash: &str, file_index: usize) -> String {
         format!(
             "http://{}/{}/{infohash}/{file_index}",
@@ -102,15 +103,15 @@ impl StreamServer {
         };
 
         let Some(route) = self.route(&request.path) else {
-            // Jeton yanlışsa "yok" diyoruz, "yasak" değil: var olduğunu
-            // doğrulamak bile bir bilgi.
-            return respond_status(&mut socket, 404, "yok").await;
+            // If the token is wrong we say "not found", not "forbidden":
+            // even confirming that it exists is information.
+            return respond_status(&mut socket, 404, "not found").await;
         };
 
         let (source_url, from_catalog) = engine.source_for(&route.infohash).await;
         if !from_catalog {
             eprintln!(
-                "{}: katalogda yok, çıplak magnet ile deneniyor (yalnızca DHT)",
+                "{}: not in the catalog, trying with a bare magnet (DHT only)",
                 route.infohash
             );
         }
@@ -118,13 +119,13 @@ impl StreamServer {
             Ok(handle) => handle,
             Err(error) => {
                 eprintln!("{}: {error}", route.infohash);
-                return respond_status(&mut socket, 503, "torrent hazır değil").await;
+                return respond_status(&mut socket, 503, "the torrent is not ready").await;
             }
         };
 
         let files = Engine::audio_files(&handle)?;
         let Some(file) = files.iter().find(|file| file.index == route.file_index) else {
-            return respond_status(&mut socket, 404, "dosya yok").await;
+            return respond_status(&mut socket, 404, "no such file").await;
         };
         let total = file.len;
         let content_type = content_type_for(&file.file_name);
@@ -132,8 +133,8 @@ impl StreamServer {
         let range = match request.range.as_deref().map(|raw| parse_range(raw, total)) {
             Some(Ok(range)) => Some(range),
             Some(Err(())) => {
-                // 416: istenen aralık dosyanın dışında. Sessizce baştan
-                // göndermek oynatıcıyı yanlış konuma götürür.
+                // 416: the requested range is outside the file. Silently sending
+                // from the start takes the player to the wrong position.
                 let head = format!(
                     "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */{total}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                 );
@@ -166,12 +167,12 @@ impl StreamServer {
             .clone()
             .stream(route.file_index)
             .await
-            .map_err(|error| PluginError::new(format!("akış açılamadı: {}", chain_text(&error))))?;
+            .map_err(|error| PluginError::new(format!("could not open the stream: {}", chain_text(&error))))?;
         if start > 0 {
             stream
                 .seek(std::io::SeekFrom::Start(start))
                 .await
-                .map_err(|error| PluginError::new(format!("akışta konumlanılamadı: {error}")))?;
+                .map_err(|error| PluginError::new(format!("could not seek in the stream: {error}")))?;
         }
 
         let mut remaining = length;
@@ -181,12 +182,12 @@ impl StreamServer {
             let read = stream
                 .read(&mut buffer[..want])
                 .await
-                .map_err(|error| PluginError::new(format!("akış okunamadı: {error}")))?;
+                .map_err(|error| PluginError::new(format!("could not read the stream: {error}")))?;
             if read == 0 {
-                // Dosya beklenenden kısa bitti: bunu yutmak, oynatıcıya
-                // "parça bitti" dedirtir ve sebebi görünmez olur.
+                // The file ended shorter than expected: swallowing this would
+                // make the player say "the track ended" and hide the reason.
                 return Err(PluginError::new(format!(
-                    "akış {remaining} bayt eksik bitti ({})",
+                    "the stream ended {remaining} bytes short ({})",
                     route.infohash
                 )));
             }
@@ -197,14 +198,15 @@ impl StreamServer {
             .get_mut()
             .flush()
             .await
-            .map_err(|error| PluginError::new(format!("akış boşaltılamadı: {error}")))
+            .map_err(|error| PluginError::new(format!("could not flush the stream: {error}")))
     }
 
     fn route(&self, path: &str) -> Option<Route> {
         let rest = path.strip_prefix('/')?;
         let (token, rest) = rest.split_once('/')?;
-        // Sabit zamanlı karşılaştırma gerekmiyor: jeton her süreçte yeni ve
-        // saldırgan zaten yerel; yine de eşitlik dışında bir şey kabul etmiyoruz.
+        // No constant-time comparison needed: the token is new in every
+        // process and the attacker is local anyway; still, we accept
+        // nothing but equality.
         if token != self.token {
             return None;
         }
@@ -237,7 +239,7 @@ async fn read_request(socket: &mut BufReader<TcpStream>) -> Result<Option<HttpRe
     let read = socket
         .read_line(&mut line)
         .await
-        .map_err(|error| PluginError::new(format!("istek satırı okunamadı: {error}")))?;
+        .map_err(|error| PluginError::new(format!("could not read the request line: {error}")))?;
     if read == 0 {
         return Ok(None);
     }
@@ -260,13 +262,13 @@ async fn read_request(socket: &mut BufReader<TcpStream>) -> Result<Option<HttpRe
         let read = socket
             .read_line(&mut header)
             .await
-            .map_err(|error| PluginError::new(format!("başlık okunamadı: {error}")))?;
+            .map_err(|error| PluginError::new(format!("could not read a header: {error}")))?;
         if read == 0 {
             break;
         }
         consumed += read;
         if consumed > MAX_HEADER_BYTES {
-            return Err(PluginError::new("istek başlıkları çok uzun"));
+            return Err(PluginError::new("the request headers are too long"));
         }
         let trimmed = header.trim_end();
         if trimmed.is_empty() {
@@ -301,13 +303,13 @@ async fn write_all(socket: &mut BufReader<TcpStream>, bytes: &[u8]) -> Result<()
         .get_mut()
         .write_all(bytes)
         .await
-        .map_err(|error| PluginError::new(format!("yanıt yazılamadı: {error}")))
+        .map_err(|error| PluginError::new(format!("could not write the response: {error}")))
 }
 
-/// `bytes=start-end` ayrıştırır. `Err(())` = aralık dosyanın dışında (416).
+/// Parses `bytes=start-end`. `Err(())` = the range is outside the file (416).
 ///
-/// Çoklu aralık (`bytes=0-1,5-6`) desteklenmiyor: oynatıcılar kullanmıyor ve
-/// yarım desteklemek, desteklememekten kötü.
+/// Multiple ranges (`bytes=0-1,5-6`) are not supported: players do not use
+/// them, and supporting them halfway is worse than not supporting them.
 fn parse_range(raw: &str, total: u64) -> std::result::Result<(u64, u64), ()> {
     let spec = raw.trim().strip_prefix("bytes=").ok_or(())?;
     if spec.contains(',') {
@@ -317,7 +319,7 @@ fn parse_range(raw: &str, total: u64) -> std::result::Result<(u64, u64), ()> {
     let (start, end) = (start.trim(), end.trim());
 
     if start.is_empty() {
-        // `bytes=-500`: sondan 500 bayt.
+        // `bytes=-500`: the last 500 bytes.
         let suffix: u64 = end.parse().map_err(|_| ())?;
         if suffix == 0 || total == 0 {
             return Err(());
@@ -355,7 +357,7 @@ fn content_type_for(file_name: &str) -> &'static str {
         "aiff" | "aif" => "audio/aiff",
         "wv" => "audio/x-wavpack",
         "ape" => "audio/x-ape",
-        // Bilinmeyen uzantı: yalan söylemek yerine "bayt yığını" diyoruz.
+        // An unknown extension: instead of lying we say "a heap of bytes".
         _ => "application/octet-stream",
     }
 }
@@ -393,7 +395,7 @@ mod tests {
 
     #[test]
     fn a_malformed_range_is_refused() {
-        assert_eq!(parse_range("baytlar=0-1", 1000), Err(()));
+        assert_eq!(parse_range("octets=0-1", 1000), Err(()));
         assert_eq!(parse_range("bytes=abc-def", 1000), Err(()));
     }
 
@@ -401,8 +403,8 @@ mod tests {
     fn known_audio_extensions_get_a_real_content_type_and_others_do_not_lie() {
         assert_eq!(content_type_for("a.FLAC"), "audio/flac");
         assert_eq!(content_type_for("a.mp3"), "audio/mpeg");
-        assert_eq!(content_type_for("a.kimbilir"), "application/octet-stream");
-        assert_eq!(content_type_for("uzantısız"), "application/octet-stream");
+        assert_eq!(content_type_for("a.whoknows"), "application/octet-stream");
+        assert_eq!(content_type_for("no-extension"), "application/octet-stream");
     }
 
     #[test]
@@ -421,11 +423,11 @@ mod tests {
     fn a_wrong_token_does_not_route() {
         let server = StreamServer {
             addr: "127.0.0.1:1".parse().unwrap(),
-            token: "dogru".to_owned(),
+            token: "right".to_owned(),
         };
         let hash = "c".repeat(40);
-        assert!(server.route(&format!("/yanlis/{hash}/0")).is_none());
-        assert!(server.route(&format!("/dogru/{hash}/0")).is_some());
+        assert!(server.route(&format!("/wrong/{hash}/0")).is_none());
+        assert!(server.route(&format!("/right/{hash}/0")).is_some());
     }
 
     #[test]
@@ -434,7 +436,7 @@ mod tests {
             addr: "127.0.0.1:1".parse().unwrap(),
             token: "t".to_owned(),
         };
-        assert!(server.route("/t/kisa/0").is_none());
+        assert!(server.route("/t/short/0").is_none());
         assert!(server.route("/t/../../etc/passwd/0").is_none());
     }
 

@@ -1,13 +1,13 @@
-//! Eklenti kataloğu: ayrı bir depodan okunan `index.json` (D-071).
+//! Plugin catalog: an `index.json` read from a separate repository (D-071).
 //!
-//! Eklentiler ana depoda durmuyor. [`headshell/plugins`] deposunda dizin
-//! olarak yaşıyorlar ve o deponun kökündeki `index.json` onlardan üretiliyor
-//! ([`build_index`]). Uygulama listeyi bu dosyadan okur, eklentiyi oradan
-//! kurar ve günceller.
+//! Plugins do not live in the main repository. They live as directories in
+//! the [`headshell/plugins`] repository, and the `index.json` at that
+//! repository's root is generated from them ([`build_index`]). The app reads
+//! the list from this file and installs and updates plugins from there.
 //!
 //! [`headshell/plugins`]: https://github.com/headshell/plugins
 //!
-//! ## İndeks (şema 1)
+//! ## Index (schema 1)
 //!
 //! ```json
 //! {
@@ -25,43 +25,46 @@
 //! }
 //! ```
 //!
-//! Girdi eklentinin manifestini **olduğu gibi** taşıyor: katalogda
-//! gösterilen izinler ile kurulan eklentinin izinleri aynı kaynaktan geliyor,
-//! ve inen `plugin.json` bununla karşılaştırılıyor. Dosya adresi serbest:
-//! bugün hepsi `headshell/plugins`'in sürüm etiketlerinde, ama başka bir
-//! depodaki bir eklenti de aynı biçimle listelenebilir (Obsidian'ın modeli).
-//! `url_template` yalnızca üreticinin notu; istemci okumaz.
+//! An entry carries the plugin's manifest **as is**: the permissions shown in
+//! the catalog and the permissions of the installed plugin come from the same
+//! source, and the downloaded `plugin.json` is compared with it. File
+//! addresses are free: today they all point at `headshell/plugins` release
+//! tags, but a plugin in another repository can be listed the same way
+//! (Obsidian's model). `url_template` is only the generator's note; the
+//! client does not read it.
 //!
-//! ## Güven
+//! ## Trust
 //!
-//! İndeks HTTPS'ten gelir ve her dosyanın sha256'sını taşır:
+//! The index comes over HTTPS and carries every file's sha256:
 //!
-//! 1. Her dosya karmasıyla doğrulanır; biri tutmazsa diske hiçbir şey
-//!    yazılmaz.
-//! 2. İnen `plugin.json` indeksin gösterdiği manifestle **aynı** olmalı.
-//! 3. Kurulan eklenti **onay bekler** (D-040): katalogdan gelmek onay değil.
+//! 1. Every file is verified against its hash; if one does not match,
+//!    nothing is written to disk.
+//! 2. The downloaded `plugin.json` must be **identical** to the manifest the
+//!    index showed.
+//! 3. An installed plugin **awaits consent** (D-040): coming from the catalog
+//!    is not consent.
 //!
-//! Adresleri sürüm etiketine sabitlemek üreticinin işi ve şablonda
-//! `{version}` bu yüzden zorunlu: GitHub'ın ham içerik önbelleği beş dakika
-//! tutuyor ve `main`'e sabitli bir adres, yeni bir sürüm yayımlanırken yeni
-//! indeksi eski dosyayla eşleştirirdi — "karma tutmuyor" diyen, korkutucu ve
-//! geçici bir hata.
+//! Pinning the addresses to release tags is the generator's job, which is why
+//! `{version}` is mandatory in the template: GitHub's raw content cache keeps
+//! things for five minutes, and an address pinned to `main` could pair the
+//! new index with the old file while a release goes out — a frightening,
+//! transient "hash mismatch" error.
 //!
-//! ## Ağ
+//! ## Network
 //!
-//! Katalog yalnızca **açık bir komutla** okunur: `plugin catalog`,
-//! `plugin install` (eklenti diskte yoksa) ve `plugin update`. Açılışta ya da
-//! arka planda istek yok — "bir export'u içe aktarmak kimseyi sessizce ağa
-//! bağlamaz" ilkesinin aynısı.
+//! The catalog is read only by **an explicit command**: `plugin catalog`,
+//! `plugin install` (if the plugin is not on disk) and `plugin update`. No
+//! request at startup or in the background — the same principle as
+//! "importing an export never silently connects anyone to the network".
 //!
-//! ## Kimin dosyasına dokunulur
+//! ## Whose files get touched
 //!
-//! Katalogdan kurulan her eklentinin dizininde bir köken kaydı durur
-//! ([`ORIGIN_FILE`]): hangi katalog, hangi sürüm, hangi dosyalar ve
-//! karmaları. Güncelleme **yalnızca** bu kaydı olan ve dosyaları kayıtla aynı
-//! olan eklentiye dokunur. Elle konmuş (kayıt yok) ya da elle değiştirilmiş
-//! (karma tutmuyor) bir eklentinin üstüne yazılmaz: bir geliştiricinin
-//! çalışma kopyası bir güncellemeyle silinmemeli.
+//! Every plugin installed from the catalog has an origin record in its
+//! directory ([`ORIGIN_FILE`]): which catalog, which version, which files and
+//! their hashes. An update touches **only** a plugin that has this record and
+//! whose files match it. A plugin put there by hand (no record) or changed by
+//! hand (hash mismatch) is never overwritten: a developer's working copy must
+//! not be deleted by an update.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -80,45 +83,48 @@ use super::manifest::{
 };
 use super::protocol::PLUGIN_API;
 
-/// Varsayılan katalog: `headshell/plugins` deposunun `main` dalındaki indeks.
+/// The default catalog: the index on the `main` branch of the
+/// `headshell/plugins` repository.
 ///
-/// İndeks dalda, dosyalar sürüm etiketlerinde: indeks her zaman güncel
-/// listeyi verir, gösterdiği dosyalar ise değişmez.
+/// The index lives on the branch, the files on release tags: the index
+/// always gives the current list, while the files it points at never change.
 pub const DEFAULT_INDEX_URL: &str =
     "https://raw.githubusercontent.com/headshell/plugins/refs/heads/main/index.json";
 
-/// Katalog adresini değiştirmek için ortam değişkeni: bir çatal, bir ayna,
-/// ya da sınama için yerel bir sunucu.
+/// Environment variable to change the catalog address: a fork, a mirror, or a
+/// local server for testing.
 pub const INDEX_ENV: &str = "HEADSHELL_PLUGIN_INDEX";
 
-/// Katalog deposunun kökündeki indeks dosyasının adı.
+/// Name of the index file at the catalog repository's root.
 pub const INDEX_FILE: &str = "index.json";
 
-/// Bu çekirdeğin okuduğu indeks biçimi.
+/// The index format this core reads.
 ///
-/// Kural `api`'ninkiyle aynı: **eklemek artırmaz**, kaldırmak ya da anlamını
-/// değiştirmek artırır. Bilinmeyen bir şema okunmaz ve bunun sebebi söylenir.
+/// The rule is the same as `api`'s: **adding does not bump it**, removing or
+/// changing a meaning does. An unknown schema is not read, and the reason is
+/// given.
 pub const INDEX_SCHEMA: u32 = 1;
 
-/// Katalogdan kurulan eklentinin dizinindeki köken kaydı.
+/// The origin record in the directory of a plugin installed from the
+/// catalog.
 pub const ORIGIN_FILE: &str = "origin.json";
 
-/// İndeksin kabul edilen en büyük boyutu. Emniyet kemeri: yanlış bir adres
-/// belleği doldurmasın.
+/// The largest index size accepted. A safety belt: a wrong address must not
+/// fill memory.
 pub const MAX_INDEX_BYTES: usize = 8 * 1024 * 1024;
 
-/// Bir eklenti dosyasının kabul edilen en büyük boyutu. Bugünün en büyük
-/// eklentisi ~12 KB.
+/// The largest plugin file size accepted. Today's largest plugin is ~12 KB.
 pub const MAX_FILE_BYTES: usize = 4 * 1024 * 1024;
 
-/// Eklenti dizininde motorun kullandığı adlar: katalogdaki bir dosya bunlara
-/// yazılamaz. `state/` motorun eklenti adına tuttuğu depo
-/// ([`Config::plugin_state_dir`]), `origin.json` köken kaydı.
+/// Names the engine uses inside a plugin directory: a catalog file cannot
+/// write to them. `state/` is the store the engine keeps on the plugin's
+/// behalf ([`Config::plugin_state_dir`]), `origin.json` the origin record.
 const RESERVED: &[&str] = &[ORIGIN_FILE, "state"];
 
-/// Katalog adresini ortamdan çözer: `HEADSHELL_PLUGIN_INDEX` ya da
-/// varsayılan. Dışarıdan [`Config::plugin_index_url`] ile çağrılır; ortam bir
-/// closure olarak geçtiği için dışa açılmaz (K7).
+/// Resolves the catalog address from the environment:
+/// `HEADSHELL_PLUGIN_INDEX` or the default. Called from outside through
+/// [`Config::plugin_index_url`]; it is not exported because the environment is
+/// passed as a closure (K7).
 #[must_use]
 pub(crate) fn resolve_index_url(env: &dyn Fn(&str) -> Option<String>) -> String {
     env(INDEX_ENV)
@@ -127,71 +133,77 @@ pub(crate) fn resolve_index_url(env: &dyn Fn(&str) -> Option<String>) -> String 
         .unwrap_or_else(|| DEFAULT_INDEX_URL.to_owned())
 }
 
-/// Katalogdaki bir eklenti dosyası.
+/// A plugin file in the catalog.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CatalogFile {
-    /// Eklenti dizinine göre yol, `/` ayırıcılı (`main.js`).
+    /// Path relative to the plugin directory, `/`-separated (`main.js`).
     pub path: String,
-    /// İndirileceği adres.
+    /// Where to download it from.
     pub url: String,
-    /// Beklenen sha256, küçük harf onaltılık. Tutmazsa dosya yazılmaz.
+    /// Expected sha256, lower-case hex. If it does not match, the file is not
+    /// written.
     pub sha256: String,
 }
 
-/// Katalogdaki bir eklentinin bu makinedeki durumu. **Ağa çıkmadan**
-/// ölçülür; "güncelleme var" katalogdaki sürümle karşılaştırmadır.
+/// A catalog plugin's state on this machine. Measured **without going
+/// online**; "update available" is a comparison with the catalog's version.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum InstallState {
-    /// Bu makinede yok.
+    /// Not on this machine.
     NotInstalled,
-    /// Katalogdan kuruldu, sürüm katalogdakiyle aynı, dosyalar kurulduğu gibi.
+    /// Installed from the catalog, same version as the catalog, files as
+    /// installed.
     Current { version: String },
-    /// Katalogdan kuruldu; katalogda başka bir sürüm var.
+    /// Installed from the catalog; the catalog has another version.
     UpdateAvailable {
         installed: String,
         available: String,
     },
-    /// Dizin var ama köken kaydı yok: elle konmuş. Güncelleme dokunmaz.
+    /// The directory exists but has no origin record: put there by hand. Updates
+    /// leave it alone.
     Manual,
-    /// Katalogdan kuruldu ama dosyaları kurulduğu gibi değil. Güncelleme
-    /// dokunmaz — elle yapılan değişiklik silinmesin.
+    /// Installed from the catalog, but its files are not as installed. Updates
+    /// leave it alone — a manual change must not be deleted.
     Modified { version: String, files: Vec<String> },
-    /// Köken kaydı okunamadı. Güncelleme dokunmaz.
+    /// The origin record could not be read. Updates leave it alone.
     Unreadable { detail: String },
 }
 
 impl InstallState {
-    /// Diskte bu adla bir eklenti var mı.
+    /// Is there a plugin with this name on disk.
     #[must_use]
     pub const fn is_installed(&self) -> bool {
         !matches!(self, Self::NotInstalled)
     }
 
-    /// Kullanıcıya gösterilecek tek satır.
+    /// One line to show the user.
     #[must_use]
     pub fn describe(&self) -> String {
         match self {
-            Self::NotInstalled => "kurulu değil".to_owned(),
-            Self::Current { version } => format!("kurulu {version} · güncel"),
+            Self::NotInstalled => "not installed".to_owned(),
+            Self::Current { version } => format!("installed {version} · up to date"),
             Self::UpdateAvailable {
                 installed,
                 available,
-            } => format!("güncelleme var: {installed} → {available}"),
-            Self::Manual => "elle kurulmuş — katalog ona dokunmaz (köken kaydı yok)".to_owned(),
+            } => format!("update available: {installed} → {available}"),
+            Self::Manual => {
+                "installed by hand — the catalog does not touch it (no origin record)".to_owned()
+            }
             Self::Modified { version, files } => format!(
-                "kurulu {version} · yerelde değiştirilmiş ({}) — güncelleme üstüne yazmaz",
+                "installed {version} · changed locally ({}) — an update does not overwrite it",
                 files.join(", ")
             ),
-            Self::Unreadable { detail } => format!("köken kaydı okunamadı: {detail}"),
+            Self::Unreadable { detail } => format!("origin record could not be read: {detail}"),
         }
     }
 }
 
-/// Katalogdaki bir eklenti — kullanıcıya gösterilen hâli.
+/// A plugin in the catalog — as shown to the user.
 ///
-/// Kurulamayan girdiler de burada: sessizce düşen bir girdi, kullanıcının
-/// katalogda aradığı ama bulamadığı eklentidir (K9). Sebebi `problem`'de.
+/// Entries that cannot be installed are here too: an entry that silently
+/// drops out is a plugin the user looked for in the catalog and did not find
+/// (K9). The reason is in `problem`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CatalogPlugin {
     pub name: String,
@@ -201,36 +213,38 @@ pub struct CatalogPlugin {
     pub description: Option<String>,
     #[serde(default)]
     pub capabilities: Vec<String>,
-    /// Eklentinin beyan ettiği ağ izinleri — kurulunca onaya sunulacak olan.
+    /// The network permissions the plugin declares — the ones that will be up
+    /// for approval once installed.
     #[serde(default)]
     pub permissions: Permissions,
-    /// Motorun kuracağı araçlar (D-055). Ağ izninden ayrı gösterilir.
+    /// The tools the engine will install (D-055). Shown apart from the network
+    /// permissions.
     #[serde(default)]
     pub requires: Vec<Requirement>,
     #[serde(default)]
     pub files: Vec<CatalogFile>,
-    /// Kurulamıyorsa sebebi, tek satır.
+    /// Why it cannot be installed, if it cannot; one line.
     pub problem: Option<String>,
     pub installed: InstallState,
 }
 
-/// Bir katalog okumasının özeti (K9: kaç geldi, kaçı ne durumda).
+/// Summary of one catalog read (K9: how many came, in what state).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CatalogSummary {
-    /// İndeksteki girdi sayısı.
+    /// Number of entries in the index.
     pub listed: usize,
-    /// Bu sürümün kurabileceği girdiler.
+    /// Entries this version can install.
     pub installable: usize,
-    /// Bu makinede kurulu olanlar (elle konmuşlar dahil).
+    /// Those installed on this machine (including ones put there by hand).
     pub installed: usize,
-    /// Güncellemesi olanlar.
+    /// Those with an update.
     pub updates: usize,
-    /// Kurulamayan girdiler (bozuk, uyumsuz sürüm).
+    /// Entries that cannot be installed (broken, incompatible version).
     pub problems: usize,
 }
 
 impl CatalogSummary {
-    /// Sayaçları tanı kaydediciye aktarır.
+    /// Copies the counters into the diagnostics recorder.
     pub fn record_into(&self, recorder: &mut crate::diag::Recorder) {
         let n = |value: usize| i64::try_from(value).unwrap_or(i64::MAX);
         recorder.set("catalog.listed", n(self.listed));
@@ -241,28 +255,29 @@ impl CatalogSummary {
     }
 }
 
-/// Kataloğun bu makineye karşı okunmuş hâli.
+/// The catalog as read against this machine.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CatalogSurvey {
     pub plugins: Vec<CatalogPlugin>,
-    /// **Bu katalogdan** kurulmuş ama artık listede olmayan eklentiler. Bir
-    /// eklenti katalogdan çekildiyse kullanıcı bunu bilmeli.
+    /// Plugins installed **from this catalog** that are no longer listed. If a
+    /// plugin was pulled from the catalog, the user should know.
     pub delisted: Vec<String>,
     pub summary: CatalogSummary,
 }
 
-/// Katalogdan kurulan bir eklentinin köken kaydı ([`ORIGIN_FILE`]).
+/// The origin record of a plugin installed from the catalog
+/// ([`ORIGIN_FILE`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InstallRecord {
-    /// Okunduğu katalog.
+    /// The catalog it was read from.
     pub index: String,
     pub version: String,
     pub installed_at: jiff::Timestamp,
-    /// Yol → sha256. Güncelleme bunlara bakıp yerel değişikliği yakalar.
+    /// Path → sha256. Updates compare against these to catch local changes.
     pub files: BTreeMap<String, String>,
 }
 
-/// Bu komutta katalogdan ne indirildiği.
+/// What this command downloaded from the catalog.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CatalogFetch {
     pub index: String,
@@ -270,29 +285,29 @@ pub struct CatalogFetch {
     pub files: Vec<CatalogFile>,
 }
 
-/// Bir aracın (motorun kurduğu eser) güncellemede değişmesi.
+/// A tool (an artifact the engine installs) changing in an update.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolChange {
     pub name: String,
-    /// Önceki sürüm; `None`: yeni eklendi.
+    /// The previous version; `None`: newly added.
     pub from: Option<String>,
-    /// Yeni sürüm; `None`: artık istenmiyor.
+    /// The new version; `None`: no longer requested.
     pub to: Option<String>,
-    /// Bu platformun ikilisinin adresi ya da karması değişti mi — sürüm aynı
-    /// kalsa bile.
+    /// Whether this platform's binary changed its address or hash — even with
+    /// the same version.
     pub binary_changed: bool,
 }
 
 impl ToolChange {
-    /// Kullanıcıya gösterilecek tek satır.
+    /// One line to show the user.
     #[must_use]
     pub fn describe(&self) -> String {
         match (&self.from, &self.to) {
-            (None, Some(to)) => format!("{} {to} eklendi", self.name),
-            (Some(from), None) => format!("{} {from} artık istenmiyor", self.name),
+            (None, Some(to)) => format!("{} {to} added", self.name),
+            (Some(from), None) => format!("{} {from} no longer requested", self.name),
             (Some(from), Some(to)) if from != to => format!("{} {from} → {to}", self.name),
             (Some(version), Some(_)) => format!(
-                "{} {version}: sürüm aynı, bu platformun ikilisi değişti",
+                "{} {version}: same version, this platform's binary changed",
                 self.name
             ),
             (None, None) => self.name.clone(),
@@ -300,44 +315,44 @@ impl ToolChange {
     }
 }
 
-/// Bir güncelleme denemesinin sonucu.
+/// The result of one update attempt.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum UpdateOutcome {
-    /// Yeni sürüm yerine kondu.
+    /// The new version was put in place.
     Updated {
         from: String,
         to: String,
-        /// Yeni sürümün **fazladan** istediği ağ izinleri. Boş değilse
-        /// eklenti yeniden onay bekler (D-040).
+        /// Network permissions the new version asks for **in addition**. If not
+        /// empty, the plugin awaits consent again (D-040).
         permissions_added: Permissions,
-        /// Motorun kurduğu araçlardaki değişiklikler. Onay istemez (D-071,
-        /// kullanıcının kararı) ama **söylenir**: hapsedilmeyen bir ikili
-        /// sessizce değişmemeli.
+        /// Changes to the tools the engine installs. They need no consent (D-071,
+        /// the user's decision) but are **stated**: an unconfined binary must not
+        /// change silently.
         tools_changed: Vec<ToolChange>,
     },
-    /// Kurulu sürüm katalogdakiyle aynı.
+    /// The installed version is the same as the catalog's.
     Current { version: String },
-    /// Dokunulmadı; sebebi yazıyor.
+    /// Left alone; the reason is written.
     Skipped { reason: String },
-    /// Denendi ve olmadı (ağ, karma, disk). Eklenti eski hâlinde.
+    /// Tried and failed (network, hash, disk). The plugin is as it was.
     Failed { error: String },
 }
 
 impl UpdateOutcome {
-    /// Kullanıcıya gösterilecek tek satır.
+    /// One line to show the user.
     #[must_use]
     pub fn describe(&self) -> String {
         match self {
-            Self::Updated { from, to, .. } => format!("güncellendi: {from} → {to}"),
-            Self::Current { version } => format!("güncel ({version})"),
-            Self::Skipped { reason } => format!("atlandı — {reason}"),
-            Self::Failed { error } => format!("GÜNCELLENEMEDİ — {error}"),
+            Self::Updated { from, to, .. } => format!("updated: {from} → {to}"),
+            Self::Current { version } => format!("up to date ({version})"),
+            Self::Skipped { reason } => format!("skipped — {reason}"),
+            Self::Failed { error } => format!("NOT UPDATED — {error}"),
         }
     }
 }
 
-/// Bir güncelleme turunun özeti (K9).
+/// Summary of one update round (K9).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UpdateSummary {
     pub checked: usize,
@@ -348,7 +363,7 @@ pub struct UpdateSummary {
 }
 
 impl UpdateSummary {
-    /// Sonuçlardan sayar.
+    /// Counts from the results.
     #[must_use]
     pub fn of<'a>(outcomes: impl IntoIterator<Item = &'a UpdateOutcome>) -> Self {
         let mut summary = Self::default();
@@ -364,7 +379,7 @@ impl UpdateSummary {
         summary
     }
 
-    /// Sayaçları tanı kaydediciye aktarır.
+    /// Copies the counters into the diagnostics recorder.
     pub fn record_into(&self, recorder: &mut crate::diag::Recorder) {
         let n = |value: usize| i64::try_from(value).unwrap_or(i64::MAX);
         recorder.set("update.checked", n(self.checked));
@@ -375,17 +390,17 @@ impl UpdateSummary {
     }
 }
 
-/// Kaldırılan bir eklenti.
+/// A removed plugin.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Removed {
     pub path: PathBuf,
-    /// Dizin bir sembolik bağlantıydıysa hedefi. Yalnızca **bağlantı**
-    /// kaldırıldı; hedefteki dosyalara dokunulmadı — bir geliştiricinin
-    /// çalışma kopyası olabilir.
+    /// The target, if the directory was a symbolic link. Only the **link** was
+    /// removed; the files at the target were not touched — it may be a
+    /// developer's working copy.
     pub link_target: Option<PathBuf>,
 }
 
-/// İndekse giren bir eklenti.
+/// A plugin that went into the index.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IndexedPlugin {
     pub name: String,
@@ -393,15 +408,15 @@ pub struct IndexedPlugin {
     pub files: Vec<CatalogFile>,
 }
 
-/// Üretilmiş bir indeks.
+/// A generated index.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuiltIndex {
-    /// Dosyaya yazılacak metin (sonunda satır sonu).
+    /// The text to write to the file (with a trailing newline).
     pub json: String,
     pub plugins: Vec<IndexedPlugin>,
 }
 
-/// İndeksteki bir girdi — doğrulanmış ya da neden doğrulanamadığı.
+/// An entry in the index — validated, or why it could not be.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CatalogEntry {
     name: String,
@@ -410,19 +425,19 @@ struct CatalogEntry {
     api: Option<u32>,
     description: Option<String>,
     files: Vec<CatalogFile>,
-    /// Yalnızca girdi kurulabilirse var.
+    /// Present only if the entry can be installed.
     manifest: Option<PluginManifest>,
     problem: Option<String>,
 }
 
-/// Okunmuş bir katalog.
+/// A catalog that has been read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Catalog {
     index: String,
     entries: Vec<CatalogEntry>,
 }
 
-/// İndeks dosyasının şemayı soran en küçük hâli.
+/// The smallest form of the index file that asks for its schema.
 #[derive(Deserialize)]
 struct SchemaProbe {
     schema: Option<u32>,
@@ -448,13 +463,13 @@ struct EntryOut {
 }
 
 impl Catalog {
-    /// Okunduğu adres.
+    /// The address it was read from.
     #[must_use]
     pub fn index(&self) -> &str {
         &self.index
     }
 
-    /// Girdi adları, indeksteki sırayla.
+    /// Entry names, in index order.
     #[must_use]
     pub fn names(&self) -> Vec<&str> {
         self.entries
@@ -463,20 +478,20 @@ impl Catalog {
             .collect()
     }
 
-    /// İndeks metnini okur.
+    /// Reads the index text.
     ///
-    /// Bozuk bir **girdi** okumayı durdurmaz: sebebi o girdinin
-    /// `problem`'ine yazılır ve gerisi okunur. Bozuk bir **indeks** (JSON
-    /// değil, şeması bilinmiyor) hatadır.
+    /// A broken **entry** does not stop the read: its reason is written to that
+    /// entry's `problem` and the rest is read. A broken **index** (not JSON, an
+    /// unknown schema) is an error.
     ///
     /// # Errors
-    /// Metin JSON değilse, şema yoksa ya da bu çekirdeğin okuduğundan
-    /// farklıysa.
+    /// If the text is not JSON, has no schema, or has a schema other than the
+    /// one this core reads.
     pub fn parse(index: &str, body: &[u8]) -> Result<Self> {
         let probe: SchemaProbe = serde_json::from_slice(body).map_err(|err| {
             catalog_err(
                 index,
-                format!("indeks JSON olarak okunamadı: {err} — adres bir indeks mi gösteriyor?"),
+                format!("the index could not be read as JSON: {err} — does the address point at an index?"),
             )
         })?;
         match probe.schema {
@@ -485,15 +500,15 @@ impl Catalog {
                 return Err(catalog_err(
                     index,
                     format!(
-                        "indeks biçimi bu sürümün okuduğundan farklı (şema {schema}, bu sürüm \
-                         {INDEX_SCHEMA} okur) — headshell'i güncelleyin"
+                        "the index format differs from what this version reads (schema {schema}, this version \
+                         reads {INDEX_SCHEMA}) — update headshell"
                     ),
                 ));
             }
             None => {
                 return Err(catalog_err(
                     index,
-                    "indekste `schema` alanı yok — bu bir headshell eklenti indeksi değil"
+                    "the index has no `schema` field — this is not a headshell plugin index"
                         .to_owned(),
                 ));
             }
@@ -501,7 +516,7 @@ impl Catalog {
         let raw: RawIndex = serde_json::from_slice(body).map_err(|err| {
             catalog_err(
                 index,
-                format!("indeksin `plugins` listesi okunamadı: {err}"),
+                format!("the index's `plugins` list could not be read: {err}"),
             )
         })?;
 
@@ -512,7 +527,7 @@ impl Catalog {
             .map(|value| parse_entry(index, value, loopback))
             .collect();
 
-        // Aynı ad iki kez: hangisinin kurulacağı tahmin edilmez (K9).
+        // The same name twice: which one to install is not guessed (K9).
         let mut counts: BTreeMap<String, usize> = BTreeMap::new();
         for entry in &entries {
             *counts.entry(entry.name.clone()).or_default() += 1;
@@ -521,7 +536,7 @@ impl Catalog {
             if counts.get(&entry.name).is_some_and(|count| *count > 1) {
                 entry.manifest = None;
                 entry.problem = Some(
-                    "katalogda bu ad birden çok kez var — hangisinin kurulacağı tahmin edilmez"
+                    "this name appears more than once in the catalog — which one to install is not guessed"
                         .to_owned(),
                 );
             }
@@ -536,7 +551,8 @@ impl Catalog {
         self.entries.iter().find(|entry| entry.name == name)
     }
 
-    /// Adı verilen girdi; yoksa hangi adların olduğu ve belki kastedilen.
+    /// The named entry; if missing, which names exist and perhaps the one that was
+    /// meant.
     fn find(&self, name: &str) -> Result<&CatalogEntry> {
         if let Some(entry) = self.lookup(name) {
             return Ok(entry);
@@ -545,30 +561,30 @@ impl Catalog {
             .entries
             .iter()
             .find(|entry| entry.name.eq_ignore_ascii_case(name))
-            .map(|entry| format!(" — bunu mu demek istediniz: `{}`?", entry.name))
+            .map(|entry| format!(" — did you mean `{}`?", entry.name))
             .unwrap_or_default();
         let available = if self.entries.is_empty() {
-            "katalog boş".to_owned()
+            "the catalog is empty".to_owned()
         } else {
-            format!("katalogdakiler: {}", self.names().join(", "))
+            format!("in the catalog: {}", self.names().join(", "))
         };
         Err(Error::new(
             Stage::PluginCatalog,
             ErrorKind::NotFound {
                 what: format!(
-                    "katalogda `{name}` adlı eklenti ({}){hint}; {available}",
+                    "plugin named `{name}` in the catalog ({}){hint}; {available}",
                     self.index
                 ),
             },
         ))
     }
 
-    /// Kataloğu bu makineye karşı okur: her girdinin kurulu olup olmadığı,
-    /// güncelleme olup olmadığı, ve katalogdan çekilmiş kurulu eklentiler.
-    /// **Ağa çıkmaz.**
+    /// Reads the catalog against this machine: whether each entry is installed,
+    /// whether it has an update, and installed plugins pulled from the catalog.
+    /// **Does not go online.**
     ///
     /// # Errors
-    /// Eklenti dizini var ama okunamıyorsa.
+    /// If the plugin directory exists but cannot be read.
     pub fn survey(&self, config: &Config) -> Result<CatalogSurvey> {
         let plugins: Vec<CatalogPlugin> = self
             .entries
@@ -603,7 +619,7 @@ impl Catalog {
         })
     }
 
-    /// Bu katalogdan kurulmuş ama artık listede olmayanlar.
+    /// Plugins installed from this catalog that are no longer listed.
     fn delisted(&self, config: &Config) -> Result<Vec<String>> {
         let mut delisted = Vec::new();
         for (name, dir) in installed_dirs(config)? {
@@ -616,21 +632,22 @@ impl Catalog {
                 Err(err) => tracing::warn!(
                     plugin = %name,
                     error = %err.chain_text().replace('\n', " "),
-                    "köken kaydı okunamadı; katalogdan çekilip çekilmediği söylenemiyor"
+                    "origin record could not be read; cannot tell whether it was pulled from the catalog"
                 ),
             }
         }
         Ok(delisted)
     }
 
-    /// Güncellemede bakılacak eklentiler: katalogdaki adlardan bu makinede
-    /// kurulu olanlar ve bu katalogdan kurulup listeden çekilenler.
+    /// The plugins an update looks at: those installed on this machine whose
+    /// names are in the catalog, and those installed from this catalog and since
+    /// pulled from the list.
     ///
-    /// Elle kurulmuş ve katalogda adı olmayan bir eklenti (bir geliştiricinin
-    /// çalışma kopyası) listeye girmez — katalogla ilgisi yok.
+    /// A plugin installed by hand whose name is not in the catalog (a developer's
+    /// working copy) is not listed — it has nothing to do with the catalog.
     ///
     /// # Errors
-    /// Eklenti dizini var ama okunamıyorsa.
+    /// If the plugin directory exists but cannot be read.
     pub fn update_candidates(&self, config: &Config) -> Result<Vec<String>> {
         let mut names: BTreeSet<String> = installed_dirs(config)?
             .into_iter()
@@ -660,23 +677,23 @@ impl CatalogEntry {
         }
     }
 
-    /// Kurulabilir manifest; değilse sebebiyle hata.
+    /// The installable manifest; otherwise an error with the reason.
     fn installable(&self, index: &str) -> Result<&PluginManifest> {
         match (&self.manifest, &self.problem) {
             (Some(manifest), None) => Ok(manifest),
             (_, Some(problem)) => Err(catalog_err(
                 index,
-                format!("{} kurulamıyor: {problem}", self.name),
+                format!("{} cannot be installed: {problem}", self.name),
             )),
             (None, None) => Err(catalog_err(
                 index,
-                format!("{} kurulamıyor: girdi doğrulanmadı", self.name),
+                format!("{} cannot be installed: entry was not validated", self.name),
             )),
         }
     }
 }
 
-/// İndeksteki bir girdiyi okur. Hiç düşmez: sorun `problem`'e yazılır.
+/// Reads one entry of the index. Never fails: problems go into `problem`.
 fn parse_entry(index: &str, value: serde_json::Value, loopback: bool) -> CatalogEntry {
     let manifest_value = value.get("manifest").cloned();
     let field = |key: &str| {
@@ -694,10 +711,10 @@ fn parse_entry(index: &str, value: serde_json::Value, loopback: bool) -> Catalog
     let files: std::result::Result<Vec<CatalogFile>, String> = value
         .get("files")
         .cloned()
-        .ok_or_else(|| "`files` yok".to_owned())
+        .ok_or_else(|| "no `files`".to_owned())
         .and_then(|files| {
             serde_json::from_value::<Vec<CatalogFile>>(files)
-                .map_err(|err| format!("`files` okunamadı: {err}"))
+                .map_err(|err| format!("`files` could not be read: {err}"))
         })
         .map(|files| {
             files
@@ -721,22 +738,21 @@ fn parse_entry(index: &str, value: serde_json::Value, loopback: bool) -> Catalog
     };
 
     let checked = (|| -> std::result::Result<PluginManifest, String> {
-        let manifest_value = manifest_value.ok_or_else(|| "`manifest` yok".to_owned())?;
+        let manifest_value = manifest_value.ok_or_else(|| "no `manifest`".to_owned())?;
         validate_catalog_name(&entry.name)?;
         if let Some(api) = entry.api
             && api != PLUGIN_API
         {
             return Err(format!(
-                "bu headshell sürümüyle uyumsuz: eklenti api {api}, çekirdek api {PLUGIN_API}"
+                "incompatible with this headshell version: plugin api {api}, core api {PLUGIN_API}"
             ));
         }
         let origin = PathBuf::from(format!("{index}#{}", entry.name));
         let manifest = PluginManifest::parse(&manifest_value.to_string(), &entry.name, &origin)
             .map_err(|err| cause_text(&err))?;
-        let version = manifest
-            .version
-            .as_deref()
-            .ok_or_else(|| "`version` yok — katalogdaki her eklenti sürümlü olmalı".to_owned())?;
+        let version = manifest.version.as_deref().ok_or_else(|| {
+            "no `version` — every plugin in the catalog must be versioned".to_owned()
+        })?;
         validate_version(version)?;
         validate_files(&files?, &manifest, loopback)?;
         Ok(manifest)
@@ -748,8 +764,8 @@ fn parse_entry(index: &str, value: serde_json::Value, loopback: bool) -> Catalog
     entry
 }
 
-/// Girdinin dosya listesi: tam olarak `plugin.json` ve betik, her biri
-/// geçerli bir yol, karma ve adresle.
+/// The entry's file list: exactly `plugin.json` and the script, each with a
+/// valid path, hash and address.
 fn validate_files(
     files: &[CatalogFile],
     manifest: &PluginManifest,
@@ -759,11 +775,11 @@ fn validate_files(
     for file in files {
         validate_file_path(&file.path)?;
         if !seen.insert(file.path.as_str()) {
-            return Err(format!("`{}` dosya listesinde iki kez var", file.path));
+            return Err(format!("`{}` appears twice in the file list", file.path));
         }
         if file.sha256.len() != 64 || !file.sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(format!(
-                "`{}`: `sha256` 64 haneli onaltılık olmalı (bulunan: {} hane)",
+                "`{}`: `sha256` must be 64 hex digits (found: {} digits)",
                 file.path,
                 file.sha256.len()
             ));
@@ -774,7 +790,7 @@ fn validate_files(
     let expected: BTreeSet<&str> = [MANIFEST_FILE, main.as_str()].into_iter().collect();
     if seen != expected {
         return Err(format!(
-            "dosya listesi tam olarak `{}` olmalı; bulunan: `{}`",
+            "the file list must be exactly `{}`; found: `{}`",
             expected.into_iter().collect::<Vec<_>>().join("`, `"),
             seen.into_iter().collect::<Vec<_>>().join("`, `")
         ));
@@ -782,13 +798,13 @@ fn validate_files(
     Ok(())
 }
 
-/// Katalogdaki bir dosya yolu eklenti dizininin içinde, düz ve adrese
-/// yüzde kodlamasız girebilen bir yol mu.
+/// Whether a catalog file path stays inside the plugin directory, is plain,
+/// and can go into an address without percent-encoding.
 fn validate_file_path(path: &str) -> std::result::Result<(), String> {
     let invalid = || {
         Err(format!(
-            "`{path}` geçerli bir eklenti dosyası yolu değil: göreli, `/` ayırıcılı, her parçası \
-             ASCII harf/rakam/`.`/`-`/`_` ve noktayla başlamayan bir yol olmalı"
+            "`{path}` is not a valid plugin file path: it must be relative, `/`-separated, each part \
+             ASCII letters/digits/`.`/`-`/`_` and not starting with a dot"
         ))
     };
     if path.is_empty() || path.starts_with('/') || path.contains('\\') {
@@ -807,13 +823,13 @@ fn validate_file_path(path: &str) -> std::result::Result<(), String> {
     let top = path.split('/').next().unwrap_or(path);
     if RESERVED.contains(&top) {
         return Err(format!(
-            "`{path}`: `{top}` motorun eklenti dizininde kullandığı bir ad"
+            "`{path}`: `{top}` is a name the engine uses in the plugin directory"
         ));
     }
     Ok(())
 }
 
-/// Katalogdaki bir sürüm adresin içine girer; yüzde kodlaması gerekmemeli.
+/// A catalog version goes into the address; it must not need percent-encoding.
 fn validate_version(version: &str) -> std::result::Result<(), String> {
     let valid = !version.is_empty()
         && version.len() <= 64
@@ -824,18 +840,18 @@ fn validate_version(version: &str) -> std::result::Result<(), String> {
         Ok(())
     } else {
         Err(format!(
-            "sürüm `{version}` katalogda kullanılamaz: 1–64 karakter, ASCII harf/rakam/`.`/`-`/`_`/`+`"
+            "version `{version}` cannot be used in the catalog: 1–64 characters, ASCII letters/digits/`.`/`-`/`_`/`+`"
         ))
     }
 }
 
-/// Bir adres katalog için kabul edilir mi: `https://`, ya da düz `http://`
-/// yalnızca bu makinenin kendisine (`127.0.0.1`, `localhost`) ve yalnızca
-/// indeks de oradaysa.
+/// Whether an address is acceptable for the catalog: `https://`, or plain
+/// `http://` only to this machine itself (`127.0.0.1`, `localhost`) and only if
+/// the index is there too.
 ///
-/// İndeks güvenin köküdür — dosyaların karmasını o taşır. Düz HTTP'den gelen
-/// bir indeksi yoldaki herkes değiştirebilir; yerel döngü adresinde bu yol
-/// yok, sınamalar ve yerel aynalar orada koşar.
+/// The index is the root of trust — it carries the files' hashes. An index
+/// over plain HTTP can be changed by anyone on the path; the loopback address
+/// has no such path, and that is where tests and local mirrors run.
 fn check_url(url: &str, loopback_allowed: bool) -> std::result::Result<(), String> {
     let host = url_host(url)?;
     let https = url
@@ -845,8 +861,8 @@ fn check_url(url: &str, loopback_allowed: bool) -> std::result::Result<(), Strin
         Ok(())
     } else {
         Err(format!(
-            "yalnızca https:// adresleri kabul edilir (düz http yalnızca bu makinenin kendisi \
-             için: 127.0.0.1, localhost) — bulunan: {url}"
+            "only https:// addresses are accepted (plain http only for this machine itself: \
+             127.0.0.1, localhost) — found: {url}"
         ))
     }
 }
@@ -855,8 +871,8 @@ fn is_loopback(host: &str) -> bool {
     host == "127.0.0.1" || host == "localhost"
 }
 
-/// Hatanın aşama satırı olmadan nedeni: bir girdinin `problem`'ine yazılır,
-/// `ADIM: …` orada gürültü.
+/// The error's cause without its stage line: written into an entry's
+/// `problem`, where `STEP: …` is noise.
 fn cause_text(err: &Error) -> String {
     let mut parts = Vec::new();
     let mut current: Option<&dyn std::error::Error> = Some(err.kind());
@@ -877,11 +893,12 @@ fn catalog_err(index: &str, detail: String) -> Error {
     )
 }
 
-/// Kataloğu okur.
+/// Reads the catalog.
 ///
 /// # Errors
-/// Adres kabul edilmezse, ağa ulaşılamazsa (`NETWORK_REQUEST`), indeks
-/// yoksa ya da okunamıyorsa (`PLUGIN_CATALOG`).
+/// If the address is not accepted, the network cannot be reached
+/// (`NETWORK_REQUEST`), or the index is missing or unreadable
+/// (`PLUGIN_CATALOG`).
 pub async fn fetch(http: &dyn HttpClient, index: &str) -> Result<Catalog> {
     check_url(index, true).map_err(|detail| catalog_err(index, detail))?;
     let request = HttpRequest::get(index);
@@ -890,8 +907,8 @@ pub async fn fetch(http: &dyn HttpClient, index: &str) -> Result<Catalog> {
         return Err(catalog_err(
             index,
             format!(
-                "indeks bulunamadı (HTTP {}) — adres doğru mu? `{INDEX_ENV}` verilmişse onu \
-                 denetleyin",
+                "index not found (HTTP {}) — is the address right? If `{INDEX_ENV}` is set, \
+                 check it",
                 response.status
             ),
         ));
@@ -901,7 +918,7 @@ pub async fn fetch(http: &dyn HttpClient, index: &str) -> Result<Catalog> {
         return Err(catalog_err(
             index,
             format!(
-                "indeks {} bayt, sınır {MAX_INDEX_BYTES} — adres bir indeks göstermiyor olabilir",
+                "the index is {} bytes, the limit is {MAX_INDEX_BYTES} — the address may not point at an index",
                 response.body.len()
             ),
         ));
@@ -909,16 +926,19 @@ pub async fn fetch(http: &dyn HttpClient, index: &str) -> Result<Catalog> {
     Catalog::parse(index, &response.body)
 }
 
-/// Bir eklentiyi katalogdan kurar: indirir, karmalarını ve manifestini
-/// doğrular, köken kaydıyla birlikte **tek adımda** yerine koyar.
+/// Installs a plugin from the catalog: downloads it, verifies its hashes and
+/// its manifest, and puts it in place **in one step** together with the
+/// origin record.
 ///
-/// Dosyalar önce veri dizininde geçici bir dizine yazılır ve dizin olarak
-/// taşınır: yarıda kalan bir kurulum eklenti dizininde yarım bir eklenti
-/// bırakmaz. Eklenti kurulduktan sonra **onay bekler** (D-040).
+/// The files are first written to a temporary directory in the data
+/// directory and moved as a directory: an interrupted install never leaves a
+/// half plugin in the plugin directory. Once installed, the plugin **awaits
+/// consent** (D-040).
 ///
 /// # Errors
-/// Eklenti katalogda yoksa ya da kurulamıyorsa, bu adla zaten bir dizin
-/// varsa, indirme ya da karma tutmazsa, dosyalar yazılamazsa.
+/// If the plugin is not in the catalog or cannot be installed, a directory
+/// with this name already exists, a download or hash fails, or the files
+/// cannot be written.
 pub async fn install(
     config: &Config,
     http: &dyn HttpClient,
@@ -932,7 +952,7 @@ pub async fn install(
         return Err(catalog_err(
             &catalog.index,
             format!(
-                "{} zaten kurulu ({}) — güncellemek için `headshell plugin update {}`",
+                "{} is already installed ({}) — to update it, `headshell plugin update {}`",
                 entry.name,
                 dir.display(),
                 entry.name
@@ -962,7 +982,7 @@ pub async fn install(
     )?;
     staging.move_to(&dir, &catalog.index)?;
 
-    tracing::info!(eklenti = %entry.name, surum = %version, katalog = %catalog.index, "eklenti katalogdan kuruldu");
+    tracing::info!(plugin = %entry.name, version = %version, catalog = %catalog.index, "plugin installed from the catalog");
     Ok(CatalogFetch {
         index: catalog.index.clone(),
         version,
@@ -970,20 +990,21 @@ pub async fn install(
     })
 }
 
-/// Katalogdan kurulmuş bir eklentiyi katalogdaki sürüme getirir.
+/// Brings a plugin installed from the catalog to the catalog's version.
 ///
-/// Yalnızca köken kaydı olan ve dosyaları kayıtla aynı olan eklentiye
-/// dokunur; ötekiler için sebebi yazan [`UpdateOutcome::Skipped`] döner.
-/// Dosyalar tek tek, her biri atomik olarak değiştirilir ve köken kaydı en
-/// son yazılır; `state/` (eklentinin kalıcı deposu) korunur.
+/// Touches only a plugin that has an origin record and whose files match it;
+/// for the others it returns [`UpdateOutcome::Skipped`] with the reason.
+/// Files are replaced one by one, each atomically, and the origin record is
+/// written last; `state/` (the plugin's persistent store) is kept.
 ///
-/// `platform` araç değişikliklerinin hangi platformun ikilisine göre
-/// söyleneceği ([`super::artifact::current_platform`]).
+/// `platform` is the platform whose binary tool changes are reported for
+/// ([`super::artifact::current_platform`]).
 ///
 /// # Errors
-/// Eklenti kurulu değilse, indirme ya da karma tutmazsa, dosyalar
-/// yazılamazsa. Yarıda kalan bir güncelleme bir sonrakinde tamamlanır:
-/// katalogdaki yeni karmayı taşıyan dosya "yerel değişiklik" sayılmaz.
+/// If the plugin is not installed, a download or hash fails, or the files
+/// cannot be written. An interrupted update is completed by the next one: a
+/// file that carries the catalog's new hash does not count as a "local
+/// change".
 pub async fn update(
     config: &Config,
     http: &dyn HttpClient,
@@ -995,7 +1016,7 @@ pub async fn update(
     let Some(entry) = catalog.lookup(name) else {
         return Ok(UpdateOutcome::Skipped {
             reason: format!(
-                "katalogda yok ({}) — katalogdan çekilmiş olabilir",
+                "not in the catalog ({}) — it may have been pulled from the catalog",
                 catalog.index
             ),
         });
@@ -1009,48 +1030,49 @@ pub async fn update(
         InstallState::Manual => {
             return Ok(UpdateOutcome::Skipped {
                 reason: format!(
-                    "elle kurulmuş (köken kaydı yok) — güncelleme elle konan dosyaların üstüne \
-                     yazmaz; katalogdakini kurmak için önce `headshell plugin remove {name}`"
+                    "installed by hand (no origin record) — an update does not overwrite files put there by \
+                     hand; to install the catalog's version, first `headshell plugin remove {name}`"
                 ),
             });
         }
         InstallState::Modified { files, .. } => {
             return Ok(UpdateOutcome::Skipped {
                 reason: format!(
-                    "yerelde değiştirilmiş ({}) — üstüne yazılmaz; katalogdakine dönmek için \
-                     `headshell plugin remove {name}` ve `install`",
+                    "changed locally ({}) — not overwritten; to go back to the catalog's version, \
+                     `headshell plugin remove {name}` and `install`",
                     files.join(", ")
                 ),
             });
         }
         InstallState::Unreadable { detail } => {
             return Ok(UpdateOutcome::Skipped {
-                reason: format!("köken kaydı okunamadı: {detail}"),
+                reason: format!("origin record could not be read: {detail}"),
             });
         }
         InstallState::NotInstalled => {
             return Ok(UpdateOutcome::Skipped {
-                reason: "kurulu değil".to_owned(),
+                reason: "not installed".to_owned(),
             });
         }
     };
     if let Some(problem) = &entry.problem {
         return Ok(UpdateOutcome::Skipped {
-            reason: format!("katalogdaki sürüm ({available}) kurulamıyor: {problem}"),
+            reason: format!("the catalog's version ({available}) cannot be installed: {problem}"),
         });
     }
     let manifest = entry.installable(&catalog.index)?;
     let previous = read_record(&dir)?;
-    // Eski manifest okunamıyorsa güncelleme yine yapılır (bozuk bir sürümü
-    // düzeltmenin yolu bu); karşılaştırma boş bir öncülle yapılır.
+    // If the old manifest cannot be read the update still goes ahead (that is
+    // how a broken version gets fixed); the comparison is made against an empty
+    // predecessor.
     let old_manifest = PluginManifest::load(&dir).ok();
 
     let files = download(http, &catalog.index, entry).await?;
     verify_manifest(&catalog.index, entry, manifest, &files)?;
 
-    // Betik önce, manifest sonra, köken kaydı en son: yarıda kalırsa eski
-    // manifestin izinleriyle koşan yeni betik ancak eski izinlerin içinde
-    // kalabilir, ve eski kayıt bir sonraki güncellemeyi tetikler.
+    // Script first, manifest next, origin record last: if interrupted, the new
+    // script running with the old manifest's permissions can only stay within
+    // the old permissions, and the old record triggers the next update.
     let mut ordered: Vec<&(CatalogFile, Vec<u8>)> = files.iter().collect();
     ordered.sort_by_key(|(file, _)| file.path == MANIFEST_FILE);
     for (file, bytes) in ordered {
@@ -1082,7 +1104,7 @@ pub async fn update(
     let (old_permissions, old_requires) = old_manifest
         .map(|old| (old.permissions, old.requires))
         .unwrap_or_default();
-    tracing::info!(eklenti = %name, onceki = %installed, yeni = %available, "eklenti güncellendi");
+    tracing::info!(plugin = %name, previous = %installed, new = %available, "plugin updated");
     Ok(UpdateOutcome::Updated {
         from: installed,
         to: available,
@@ -1091,13 +1113,16 @@ pub async fn update(
     })
 }
 
-/// Bir eklentiyi diskten kaldırır: dizini, içindeki `state/` ile birlikte.
+/// Removes a plugin from disk: its directory, together with the `state/`
+/// inside.
 ///
-/// Dizin bir sembolik bağlantıysa **yalnızca bağlantı** kaldırılır, hedefine
-/// dokunulmaz. Onay kaydı ve sırlar burada değil, çağıranda ([`crate::session`]).
+/// If the directory is a symbolic link, **only the link** is removed and its
+/// target is not touched. The consent record and secrets are handled by the
+/// caller ([`crate::session`]), not here.
 ///
 /// # Errors
-/// Ad tek bir dizin adı değilse, eklenti kurulu değilse ya da silinemezse.
+/// If the name is not a single directory name, the plugin is not installed,
+/// or it cannot be deleted.
 pub fn remove(config: &Config, name: &str) -> Result<Removed> {
     let dir = installed_dir(config, name)?;
     let meta =
@@ -1114,7 +1139,7 @@ pub fn remove(config: &Config, name: &str) -> Result<Removed> {
         return Err(Error::new(
             Stage::PluginCatalog,
             ErrorKind::InvalidInput {
-                detail: format!("{} bir eklenti dizini değil", dir.display()),
+                detail: format!("{} is not a plugin directory", dir.display()),
             },
         ));
     }
@@ -1125,14 +1150,15 @@ pub fn remove(config: &Config, name: &str) -> Result<Removed> {
     })
 }
 
-/// Kurulu bir eklentinin dizini.
+/// An installed plugin's directory.
 ///
-/// Ad yola eklenmeden önce doğrulanır ([`validate_local_name`]): `../`
-/// taşıyan bir ad veri dizininin dışına uzanırdı. Kurulu değilse hata
-/// **ne yapılacağını** söyler.
+/// The name is validated before it is joined to a path
+/// ([`validate_local_name`]): a name carrying `../` would reach outside the
+/// data directory. If it is not installed, the error says **what to do**.
 ///
 /// # Errors
-/// Ad tek bir dizin adı değilse ya da bu adla bir eklenti yoksa.
+/// If the name is not a single directory name or there is no plugin with
+/// this name.
 pub fn installed_dir(config: &Config, name: &str) -> Result<PathBuf> {
     validate_local_name(name)
         .map_err(|detail| Error::new(Stage::PluginCatalog, ErrorKind::InvalidInput { detail }))?;
@@ -1143,7 +1169,7 @@ pub fn installed_dir(config: &Config, name: &str) -> Result<PathBuf> {
             Stage::PluginCatalog,
             ErrorKind::NotFound {
                 what: format!(
-                    "kurulu eklenti: {name} ({}) — kurmak için `headshell plugin install {name}`",
+                    "installed plugin: {name} ({}) — to install it, `headshell plugin install {name}`",
                     dir.display()
                 ),
             },
@@ -1152,9 +1178,8 @@ pub fn installed_dir(config: &Config, name: &str) -> Result<PathBuf> {
     }
 }
 
-/// Bir sembolik bağlantıyı kaldırır. Unix'te bağlantı bir dosyadır;
-/// Windows'ta bir dizin bağlantısı `remove_dir` ister. İkisi de hedefe
-/// dokunmaz.
+/// Removes a symbolic link. On Unix a link is a file; on Windows a directory
+/// link needs `remove_dir`. Neither touches the target.
 fn remove_link(path: &Path) -> Result<()> {
     match std::fs::remove_file(path) {
         Ok(()) => Ok(()),
@@ -1164,11 +1189,11 @@ fn remove_link(path: &Path) -> Result<()> {
     }
 }
 
-/// Bir eklentinin köken kaydını okur. Kayıt **yoksa** `None`: eklenti elle
-/// konmuş demektir, hata değil.
+/// Reads a plugin's origin record. **No** record is `None`: the plugin was
+/// put there by hand, which is not an error.
 ///
 /// # Errors
-/// Kayıt var ama okunamıyorsa ya da bozuksa.
+/// If the record exists but cannot be read or is corrupt.
 pub fn read_record(dir: &Path) -> Result<Option<InstallRecord>> {
     let path = dir.join(ORIGIN_FILE);
     let raw = match std::fs::read_to_string(&path) {
@@ -1187,7 +1212,7 @@ pub fn read_record(dir: &Path) -> Result<Option<InstallRecord>> {
     })
 }
 
-/// Bir katalog girdisinin bu makinedeki durumu. Ağa çıkmaz.
+/// A catalog entry's state on this machine. Does not go online.
 fn state_of(config: &Config, entry: &CatalogEntry) -> InstallState {
     let dir = config.plugins_dir().join(&entry.name);
     match std::fs::symlink_metadata(&dir) {
@@ -1228,9 +1253,9 @@ fn state_of(config: &Config, entry: &CatalogEntry) -> InstallState {
     }
 }
 
-/// Kurulduğu gibi olmayan dosyalar. Katalogdaki **yeni** karmayı taşıyan
-/// dosya değişmiş sayılmaz: yarıda kalmış bir güncellemenin izidir ve bir
-/// sonraki güncelleme onu tamamlar.
+/// Files that are not as installed. A file carrying the catalog's **new**
+/// hash does not count as changed: it is the trace of an interrupted update,
+/// and the next update completes it.
 fn modified_files(
     dir: &Path,
     record: &InstallRecord,
@@ -1246,14 +1271,15 @@ fn modified_files(
                         .iter()
                         .any(|file| &file.path == *path && file.sha256 == found)
             }
-            // Silinmiş ya da okunamayan dosya da kurulduğu gibi değil.
+            // A deleted or unreadable file is not as installed either.
             Err(_) => true,
         })
         .map(|(path, _)| path.clone())
         .collect()
 }
 
-/// Eklenti dizinindeki alt dizinler: `(ad, yol)`. Dizin yoksa boş.
+/// Subdirectories of the plugin directory: `(name, path)`. Empty if the
+/// directory does not exist.
 fn installed_dirs(config: &Config) -> Result<Vec<(String, PathBuf)>> {
     let plugins_dir = config.plugins_dir();
     let entries = match std::fs::read_dir(&plugins_dir) {
@@ -1273,8 +1299,8 @@ fn installed_dirs(config: &Config) -> Result<Vec<(String, PathBuf)>> {
     Ok(dirs)
 }
 
-/// Girdinin dosyalarını indirir ve **hepsinin** karmasını doğrular. Biri
-/// tutmazsa hiçbir şey dönmez — diske de hiçbir şey yazılmaz.
+/// Downloads the entry's files and verifies the hash of **every one**. If one
+/// does not match, nothing is returned — and nothing is written to disk.
 async fn download(
     http: &dyn HttpClient,
     index: &str,
@@ -1288,8 +1314,8 @@ async fn download(
             return Err(catalog_err(
                 index,
                 format!(
-                    "{} {}: dosya bulunamadı (HTTP {}, {}) — indeks var olmayan bir sürümü \
-                     gösteriyor; düzeltmesi katalog bakımcısının işi",
+                    "{} {}: file not found (HTTP {}, {}) — the index points at a version that does not \
+                     exist; fixing it is the catalog maintainer's job",
                     entry.name, file.path, response.status, file.url
                 ),
             ));
@@ -1299,7 +1325,7 @@ async fn download(
             return Err(catalog_err(
                 index,
                 format!(
-                    "{} {}: {} bayt, sınır {MAX_FILE_BYTES}",
+                    "{} {}: {} bytes, the limit is {MAX_FILE_BYTES}",
                     entry.name,
                     file.path,
                     response.body.len()
@@ -1311,7 +1337,7 @@ async fn download(
             return Err(catalog_err(
                 index,
                 format!(
-                    "{} {}: karma tutmuyor (beklenen {}…, inen {}…) — hiçbir şey yazılmadı",
+                    "{} {}: hash mismatch (expected {}…, downloaded {}…) — nothing was written",
                     entry.name,
                     file.path,
                     short_hash(&file.sha256),
@@ -1324,8 +1350,9 @@ async fn download(
     Ok(out)
 }
 
-/// İnen `plugin.json` indeksin gösterdiği manifestle aynı mı: katalogda
-/// gösterilen izinler kurulanın izinleri olmalı.
+/// Whether the downloaded `plugin.json` is the manifest the index showed: the
+/// permissions shown in the catalog must be the installed plugin's
+/// permissions.
 fn verify_manifest(
     index: &str,
     entry: &CatalogEntry,
@@ -1335,13 +1362,13 @@ fn verify_manifest(
     let Some((file, bytes)) = files.iter().find(|(file, _)| file.path == MANIFEST_FILE) else {
         return Err(catalog_err(
             index,
-            format!("{}: `{MANIFEST_FILE}` indirilmedi", entry.name),
+            format!("{}: `{MANIFEST_FILE}` was not downloaded", entry.name),
         ));
     };
     let raw = std::str::from_utf8(bytes).map_err(|err| {
         catalog_err(
             index,
-            format!("{} {MANIFEST_FILE} UTF-8 değil: {err}", entry.name),
+            format!("{} {MANIFEST_FILE} is not UTF-8: {err}", entry.name),
         )
     })?;
     let downloaded = PluginManifest::parse(raw, &entry.name, Path::new(&file.url))
@@ -1350,8 +1377,8 @@ fn verify_manifest(
         return Err(catalog_err(
             index,
             format!(
-                "{}: inen {MANIFEST_FILE} indeksin gösterdiğinden farklı — katalogda gösterilen \
-                 izinler kurulanın izinleri olmalı; kurulmadı",
+                "{}: the downloaded {MANIFEST_FILE} differs from what the index showed — the permissions \
+                 shown in the catalog must be the installed plugin's; not installed",
                 entry.name
             ),
         ));
@@ -1359,7 +1386,7 @@ fn verify_manifest(
     Ok(())
 }
 
-/// Motorun kurduğu araçlardaki değişiklikler, bu platformun ikilisine göre.
+/// Changes to the tools the engine installs, per this platform's binary.
 fn tool_changes(old: &[Requirement], new: &[Requirement], platform: &str) -> Vec<ToolChange> {
     let names: BTreeSet<&str> = old
         .iter()
@@ -1396,7 +1423,8 @@ fn record_files(files: &[(CatalogFile, Vec<u8>)]) -> BTreeMap<String, String> {
         .collect()
 }
 
-/// `/` ayırıcılı göreli yolu dizine ekler — her platformun kendi ayırıcısıyla.
+/// Joins a `/`-separated relative path to a directory — with each platform's
+/// own separator.
 fn relative(dir: &Path, path: &str) -> PathBuf {
     path.split('/')
         .fold(dir.to_path_buf(), |acc, segment| acc.join(segment))
@@ -1409,8 +1437,8 @@ fn write_file(path: &Path, bytes: &[u8]) -> Result<()> {
     std::fs::write(path, bytes).map_err(|err| io_err(Stage::PluginCatalog, path, err))
 }
 
-/// Bir dosyayı atomik olarak değiştirir: yanına koşuma özgü geçici bir
-/// adla yazar (D-060), sonra üstüne taşır.
+/// Replaces a file atomically: writes it next to the target under a
+/// run-specific temporary name (D-060), then moves it over.
 fn replace_file(dir: &Path, path: &str, bytes: &[u8]) -> Result<()> {
     let target = relative(dir, path);
     if let Some(parent) = target.parent() {
@@ -1421,7 +1449,7 @@ fn replace_file(dir: &Path, path: &str, bytes: &[u8]) -> Result<()> {
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
     let temp = target.with_file_name(format!(
-        "{file_name}.{}-{}.indiriliyor",
+        "{file_name}.{}-{}.downloading",
         std::process::id(),
         jiff::Timestamp::now().as_nanosecond()
     ));
@@ -1448,9 +1476,10 @@ fn write_record(dir: &Path, record: &InstallRecord) -> Result<()> {
     replace_file(dir, ORIGIN_FILE, text.as_bytes())
 }
 
-/// Kurulumun hazırlandığı geçici dizin: veri dizininde, eklenti dizininin
-/// **dışında** — hazırlanırken keşif onu yarım bir eklenti sanmasın.
-/// Taşınmadan düşerse (hata, panik) kendini siler.
+/// The temporary directory an install is prepared in: in the data directory,
+/// **outside** the plugin directory — so discovery does not mistake it for a
+/// half-installed plugin while it is being prepared. If dropped before being
+/// moved (error, panic), it deletes itself.
 struct Staging {
     path: PathBuf,
     moved: bool,
@@ -1459,7 +1488,7 @@ struct Staging {
 impl Staging {
     fn create(data_dir: &Path, name: &str) -> Result<Self> {
         let path = data_dir.join(format!(
-            ".plugin-{name}-{}-{}.kuruluyor",
+            ".plugin-{name}-{}-{}.installing",
             std::process::id(),
             jiff::Timestamp::now().as_nanosecond()
         ));
@@ -1471,14 +1500,14 @@ impl Staging {
         &self.path
     }
 
-    /// Hazır dizini yerine taşır. Hedef bu arada belirdiyse (aynı anda iki
-    /// kurulum) üstüne yazılmaz ve bu söylenir.
+    /// Moves the ready directory into place. If the target appeared in the
+    /// meantime (two installs at once), it is not overwritten, and this is said.
     fn move_to(mut self, target: &Path, index: &str) -> Result<()> {
         if std::fs::symlink_metadata(target).is_ok() {
             return Err(catalog_err(
                 index,
                 format!(
-                    "{} kurulurken başka bir kurulum araya girdi; üstüne yazılmadı",
+                    "another install got in while {} was being installed; not overwritten",
                     target.display()
                 ),
             ));
@@ -1498,29 +1527,30 @@ impl Drop for Staging {
         if let Err(err) = std::fs::remove_dir_all(&self.path)
             && err.kind() != std::io::ErrorKind::NotFound
         {
-            tracing::warn!(yol = %self.path.display(), error = %err, "geçici kurulum dizini silinemedi");
+            tracing::warn!(path = %self.path.display(), error = %err, "could not delete the temporary install directory");
         }
     }
 }
 
-/// Katalog deposundaki eklentilerden indeksi üretir (D-071).
+/// Generates the index from the plugins in the catalog repository (D-071).
 ///
-/// Her alt dizin bir eklenti: `<ad>/plugin.json` + betik. Noktayla başlayan
-/// dizinler (`.git`, `.github`) ve `plugin.json`'u olmayanlar atlanır.
-/// Manifest **çekirdeğin kendi** doğrulamasından geçer — kurulumda
-/// uygulanacak kuralın aynısı; indekse yalnızca bu sürümün kurabileceği
-/// eklenti girer.
+/// Every subdirectory is a plugin: `<name>/plugin.json` + script. Directories
+/// starting with a dot (`.git`, `.github`) and those without a `plugin.json`
+/// are skipped. The manifest goes through **the core's own** validation — the
+/// same rule installation applies; only plugins this version can install go
+/// into the index.
 ///
-/// `url_template` her dosyanın adresini üretir: `{name}`, `{version}` ve
-/// `{path}` zorunlu. `{version}` zorunlu çünkü adres sürüme sabitlenmeli
-/// (modül belgesi, "Güven").
+/// `url_template` produces every file's address: `{name}`, `{version}` and
+/// `{path}` are mandatory. `{version}` is mandatory because the address must
+/// be pinned to the version (module docs, "Trust").
 ///
-/// Çıktı belirlenimci: aynı dizin her zaman aynı metni üretir, ki
-/// `--check` bir fark gördüğünde gerçekten bir şey değişmiş olsun.
+/// The output is deterministic: the same directory always produces the same
+/// text, so that when `--check` sees a difference something really changed.
 ///
 /// # Errors
-/// Şablon geçersizse, dizin okunamazsa, hiç eklenti yoksa ya da **herhangi
-/// bir** eklenti geçersizse — hepsi birden, tek tek sebebiyle.
+/// If the template is invalid, the directory cannot be read, there are no
+/// plugins, or **any** plugin is invalid — all of them at once, each with its
+/// reason.
 pub fn build_index(dir: &Path, url_template: &str) -> Result<BuiltIndex> {
     let origin = dir.display().to_string();
     validate_template(url_template).map_err(|detail| catalog_err(&origin, detail))?;
@@ -1541,8 +1571,8 @@ pub fn build_index(dir: &Path, url_template: &str) -> Result<BuiltIndex> {
         return Err(catalog_err(
             &origin,
             format!(
-                "dizinde eklenti yok — her eklenti `<ad>/{MANIFEST_FILE}` olarak durmalı; boş bir \
-                 indeks yayımlanırsa kataloğu siler"
+                "no plugins in the directory — each plugin must live at `<name>/{MANIFEST_FILE}`; publishing \
+                 an empty index would wipe the catalog"
             ),
         ));
     }
@@ -1563,7 +1593,7 @@ pub fn build_index(dir: &Path, url_template: &str) -> Result<BuiltIndex> {
         return Err(catalog_err(
             &origin,
             format!(
-                "{} eklenti indekse giremedi:\n  {}",
+                "{} plugins could not go into the index:\n  {}",
                 problems.len(),
                 problems.join("\n  ")
             ),
@@ -1575,7 +1605,7 @@ pub fn build_index(dir: &Path, url_template: &str) -> Result<BuiltIndex> {
         url_template,
         plugins: out,
     })
-    .map_err(|err| catalog_err(&origin, format!("indeks yazılamadı: {err}")))?;
+    .map_err(|err| catalog_err(&origin, format!("could not write the index: {err}")))?;
     json.push('\n');
     Ok(BuiltIndex { json, plugins })
 }
@@ -1590,7 +1620,7 @@ fn index_one(
     let version = manifest
         .version
         .clone()
-        .ok_or_else(|| "`version` yok — katalogdaki her eklenti sürümlü olmalı".to_owned())?;
+        .ok_or_else(|| "no `version` — every plugin in the catalog must be versioned".to_owned())?;
     validate_version(&version)?;
 
     let manifest_path = dir.join(MANIFEST_FILE);
@@ -1630,32 +1660,34 @@ fn validate_template(template: &str) -> std::result::Result<(), String> {
     for placeholder in ["{name}", "{version}", "{path}"] {
         if !template.contains(placeholder) {
             return Err(format!(
-                "adres şablonunda `{placeholder}` yok — her sürümün her dosyası kendi adresine \
-                 gitmeli (şablon: {template})"
+                "the address template has no `{placeholder}` — every file of every version must go to its \
+                 own address (template: {template})"
             ));
         }
     }
     let sample = template
-        .replace("{name}", "ornek")
+        .replace("{name}", "example")
         .replace("{version}", "1.0.0")
         .replace("{path}", "main.js");
-    check_url(&sample, true).map_err(|detail| format!("adres şablonu: {detail}"))
+    check_url(&sample, true).map_err(|detail| format!("address template: {detail}"))
 }
 
-/// İndeksi katalog deposunun köküne atomik olarak yazar ([`INDEX_FILE`]).
+/// Writes the index atomically to the catalog repository's root
+/// ([`INDEX_FILE`]).
 ///
 /// # Errors
-/// Dosya yazılamazsa.
+/// If the file cannot be written.
 pub fn write_index(dir: &Path, json: &str) -> Result<PathBuf> {
     replace_file(dir, INDEX_FILE, json.as_bytes())?;
     Ok(dir.join(INDEX_FILE))
 }
 
-/// Var olan bir indeksin adres şablonu — `plugin index` şablon verilmezse
-/// onu kullanır, ki her üretim aynı adresleri yazsın. Dosya yoksa `None`.
+/// The address template of an existing index — `plugin index` uses it when no
+/// template is given, so that every build writes the same addresses. `None`
+/// if the file does not exist.
 ///
 /// # Errors
-/// Dosya var ama okunamıyorsa ya da JSON değilse.
+/// If the file exists but cannot be read or is not JSON.
 pub fn read_url_template(index_path: &Path) -> Result<Option<String>> {
     let raw = match std::fs::read_to_string(index_path) {
         Ok(raw) => raw,
@@ -1677,8 +1709,8 @@ pub fn read_url_template(index_path: &Path) -> Result<Option<String>> {
         .map(str::to_owned))
 }
 
-/// İki indeks metni arasında hangi eklentilerin farklı olduğu — `--check`
-/// "güncel değil" derken **neyin** güncel olmadığını söylesin (K9).
+/// Which plugins differ between two index texts — so that when `--check` says
+/// "out of date" it says **what** is out of date (K9).
 #[must_use]
 pub fn index_differences(existing: &str, built: &str) -> Vec<String> {
     fn by_name(text: &str) -> Option<BTreeMap<String, serde_json::Value>> {
@@ -1700,26 +1732,28 @@ pub fn index_differences(existing: &str, built: &str) -> Vec<String> {
         )
     }
     let (Some(old), Some(new)) = (by_name(existing), by_name(built)) else {
-        return vec!["var olan index.json okunamadı".to_owned()];
+        return vec!["the existing index.json could not be read".to_owned()];
     };
     let mut differences = Vec::new();
     for (name, entry) in &new {
         match old.get(name) {
-            None => differences.push(format!("{name}: indekste yok")),
+            None => differences.push(format!("{name}: not in the index")),
             Some(previous) if previous != entry => {
-                differences.push(format!("{name}: girdisi değişti"));
+                differences.push(format!("{name}: its entry changed"));
             }
             Some(_) => {}
         }
     }
     for name in old.keys() {
         if !new.contains_key(name) {
-            differences.push(format!("{name}: indekste var ama dizini yok"));
+            differences.push(format!("{name}: in the index but has no directory"));
         }
     }
     if differences.is_empty() {
-        differences
-            .push("eklentiler aynı; indeksin geri kalanı (şema, şablon, biçim) farklı".to_owned());
+        differences.push(
+            "the plugins are the same; the rest of the index (schema, template, format) differs"
+                .to_owned(),
+        );
     }
     differences
 }

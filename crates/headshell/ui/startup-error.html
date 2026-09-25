@@ -1,24 +1,24 @@
 <!doctype html>
-<html lang="tr">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>headshell açılamadı</title>
+    <title>headshell could not start</title>
     <link rel="stylesheet" href="style.css" />
     <script type="module" src="startup-error.js"></script>
   </head>
-  <!-- Açılış hatası penceresi (D-070). Çekirdek yok, IPC yok: metin adresin
-       `#` kısmından geliyor ve bu sayfa onu yalnızca gösteriyor. -->
+  <!-- The startup error window (D-070). No core, no IPC: the text comes from
+       the `#` part of the address, and this page only shows it. -->
   <body class="startup-error">
     <main class="content">
-      <h2>headshell açılamadı</h2>
+      <h2>headshell could not start</h2>
       <p class="hint">
-        Uygulama başlarken aşağıdaki aşamada durdu. Metni seçip kopyalayabilirsiniz;
-        bir hata bildirirken olduğu gibi yapıştırın.
+        The app stopped at the stage below while starting. You can select and copy the
+        text; paste it as it is when reporting a bug.
       </p>
       <pre id="startupError"></pre>
       <p class="hint">
-        Veri dizinini başka bir yere almak için <code>HEADSHELL_DATA_DIR</code>
-        ortam değişkenini tanımlayabilirsiniz.
+        To move the data directory somewhere else, you can set the <code>HEADSHELL_DATA_DIR</code>
+        environment variable.
       </p>
     </main>
   </body>

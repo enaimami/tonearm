@@ -1,11 +1,12 @@
-//! Kütüphane şeması ve göçleri.
+//! The library schema and its migrations.
 //!
-//! Göçler sıralı ve geri dönüşsüzdür; her biri `schema_version`'ı bir artırır.
-//! Yeni bir göç eklerken diziye ekle, var olanı **değiştirme**.
+//! Migrations are ordered and irreversible; each one bumps `schema_version` by
+//! one. When adding a new migration, append it to the array — **do not
+//! change** an existing one.
 
-/// Sırayla uygulanan göçler. Dizideki indeks + 1 = şema sürümü.
+/// The migrations, applied in order. Index in the array + 1 = schema version.
 pub(crate) const MIGRATIONS: &[&str] = &[
-    // v1 — parçalar, dinlemeler ve tam metin arama.
+    // v1 — tracks, listens and full-text search.
     r"
     CREATE TABLE tracks (
         id                INTEGER PRIMARY KEY,
@@ -56,16 +57,17 @@ pub(crate) const MIGRATIONS: &[&str] = &[
         VALUES (new.id, new.artist, new.title, new.album);
     END;
     ",
-    // v2 — sağlayıcı kataloğu (Faz 1.2).
+    // v2 — the provider catalog (Phase 1.2).
     //
-    // Yerel dosya indeksi süreç ömrü boyunca bellekte duruyordu; her `play`
-    // çağrısı diski baştan tarıyordu. Bu tablo indeksi kalıcı kılar.
+    // The local file index used to live in memory for the life of the process;
+    // every `play` call rescanned the disk from scratch. This table makes the
+    // index persistent.
     //
-    // `listens`/`tracks`'tan **ayrı** tutuluyor, çünkü farklı şeyler:
-    // `tracks` "dinlediğin parçalar" (ham olaylardan türer, asla silinmez),
-    // `provider_tracks` ise "şu an çalabildiklerin" — dosya silinince satır
-    // da gider. İkisini birleştirmek, diskten sildiğin bir dosyanın geçmişini
-    // de silmek olurdu.
+    // It is kept **separate** from `listens`/`tracks`, because they are different
+    // things: `tracks` is "the tracks you listened to" (derived from raw events,
+    // never deleted), while `provider_tracks` is "what you can play right now" —
+    // when a file is deleted, its row goes too. Merging the two would mean
+    // deleting the history of a file you deleted from disk as well.
     r"
     CREATE TABLE provider_tracks (
         id           INTEGER PRIMARY KEY,
@@ -77,9 +79,9 @@ pub(crate) const MIGRATIONS: &[&str] = &[
         album        TEXT,
         duration_ms  INTEGER,
         isrc         TEXT,
-        -- Etiketlerden mi okundu (1), dosya adından mı türetildi (0).
+        -- Read from the tags (1), or derived from the file name (0).
         from_tags    INTEGER NOT NULL DEFAULT 0,
-        -- Dosyanın son değişme zamanı (ms). Değişmediyse yeniden okumayız.
+        -- The file's last modification time (ms). If unchanged, we do not read it again.
         mtime_ms     INTEGER,
         scanned_at   INTEGER NOT NULL,
         UNIQUE(provider, provider_ref)

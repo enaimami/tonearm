@@ -1,12 +1,14 @@
-//! Spotify export ayrıştırıcıları.
+//! Spotify export parsers.
 //!
-//! İki biçim var:
-//! - **Extended streaming history** — `Streaming_History_Audio_*.json`, tüm
-//!   geçmiş, parça URI'si dahil. İstenen budur.
-//! - **Hesap verisi** — `StreamingHistory*.json`, yalnızca son 12 ay, URI yok.
+//! There are two formats:
+//! - **Extended streaming history** — `Streaming_History_Audio_*.json`, the
+//!   whole history, track URIs included. This is the one to ask for.
+//! - **Account data** — `StreamingHistory*.json`, only the last 12 months, no
+//!   URIs.
 //!
-//! Not: Spotify export'ları ISRC vermez. Kimlik zinciri bu yüzden burada
-//! `spotify:track:...` ile başlar ve MBID'ye [`crate::identity`] içinde çevrilir.
+//! Note: Spotify exports do not include ISRCs. So the identity chain starts
+//! here with `spotify:track:...` and is turned into an MBID in
+//! [`crate::identity`].
 
 use serde::Deserialize;
 
@@ -16,17 +18,17 @@ use crate::ids::{ProviderId, ProviderTrackId};
 use crate::import::{ExportParser, ParseSink, SkipReason};
 use crate::model::{ExportKind, Listen, ListenSource, TrackRef};
 
-/// Spotify'ın sağlayıcı adı. Çekirdek Spotify'a *bağımlı* değil; bu yalnızca
-/// export'tan gelen kimliğin hangi ada ait olduğunu söyleyen bir etiket.
+/// Spotify's provider name. The core does not *depend* on Spotify; this is
+/// only a label saying which name the id coming from the export belongs to.
 fn spotify_provider() -> ProviderId {
     ProviderId::new("spotify")
 }
 
-/// `Streaming_History_Audio_2023_5.json` gibi girdileri ayrıştırır.
+/// Parses entries like `Streaming_History_Audio_2023_5.json`.
 pub(crate) struct ExtendedParser;
 
-/// Extended history kaydı. Bilinmeyen alanlar yok sayılır; Spotify şemayı
-/// zaman zaman genişletiyor ve bu yüzden hiçbir alan zorunlu tutulmuyor.
+/// An extended history record. Unknown fields are ignored; Spotify extends
+/// the schema from time to time, which is why no field is required.
 #[derive(Debug, Deserialize)]
 struct ExtendedRecord {
     ts: Option<String>,
@@ -35,10 +37,10 @@ struct ExtendedRecord {
     master_metadata_album_artist_name: Option<String>,
     master_metadata_album_album_name: Option<String>,
     spotify_track_uri: Option<String>,
-    /// Podcast bölümü ise doludur — bu kayıt müzik değildir.
+    /// Set if it is a podcast episode — this record is not music.
     #[serde(default)]
     episode_name: Option<String>,
-    /// Sesli kitap bölümü (2024 sonrası export'lar).
+    /// An audiobook chapter (exports from 2024 onwards).
     #[serde(default)]
     audiobook_title: Option<String>,
 }
@@ -107,12 +109,12 @@ impl ExportParser for ExtendedParser {
     }
 }
 
-/// `StreamingHistory_music_0.json` / `StreamingHistory0.json` ayrıştırıcısı.
+/// The parser for `StreamingHistory_music_0.json` / `StreamingHistory0.json`.
 pub(crate) struct AccountParser;
 
 #[derive(Debug, Deserialize)]
 struct AccountRecord {
-    /// `"2023-05-01 12:34"` — saat dilimi yok, yerel saat.
+    /// `"2023-05-01 12:34"` — no time zone, local time.
     #[serde(rename = "endTime")]
     end_time: Option<String>,
     #[serde(rename = "artistName")]
@@ -186,7 +188,7 @@ fn parse_json<T: serde::de::DeserializeOwned>(entry: &str, body: &[u8]) -> Resul
     })
 }
 
-/// Zip girdisindeki yolun son parçası.
+/// The last part of the path in a zip entry.
 fn file_name(entry: &str) -> &str {
     entry.rsplit('/').next().unwrap_or(entry)
 }
@@ -195,16 +197,16 @@ fn non_empty(value: Option<String>) -> Option<String> {
     value.filter(|s| !s.trim().is_empty())
 }
 
-/// `2023-05-01T12:34:56Z` → UTC zaman damgası.
+/// `2023-05-01T12:34:56Z` → a UTC timestamp.
 fn parse_rfc3339(raw: &str) -> Option<jiff::Timestamp> {
     raw.trim().parse::<jiff::Timestamp>().ok()
 }
 
-/// `2023-05-01 12:34` → UTC kabul edilir.
+/// `2023-05-01 12:34` → taken as UTC.
 ///
-/// Spotify hesap verisinde saat dilimi yok. UTC varsaymak yıl sınırındaki
-/// birkaç kaydı kaydırabilir; bu bilinçli bir takas ve
-/// [`ExportKind::SpotifyAccount`] etiketiyle kayıtta durur.
+/// Spotify account data has no time zone. Assuming UTC may shift a few
+/// records at the year boundary; this is a deliberate trade-off and it stays
+/// on record with the [`ExportKind::SpotifyAccount`] label.
 fn parse_naive_minutes(raw: &str) -> Option<jiff::Timestamp> {
     let civil = jiff::civil::DateTime::strptime("%Y-%m-%d %H:%M", raw.trim()).ok()?;
     civil
@@ -213,7 +215,7 @@ fn parse_naive_minutes(raw: &str) -> Option<jiff::Timestamp> {
         .map(|z| z.timestamp())
 }
 
-/// `spotify:track:70LcF31zb1H0PyJoS1Sx1r` → sağlayıcı parça kimliği.
+/// `spotify:track:70LcF31zb1H0PyJoS1Sx1r` → a provider track id.
 fn track_id_from_uri(uri: &str) -> Option<ProviderTrackId> {
     let id = uri.strip_prefix("spotify:track:")?;
     (!id.is_empty()).then(|| ProviderTrackId::new(spotify_provider(), id))
@@ -240,10 +242,10 @@ mod tests {
         "master_metadata_album_artist_name": null,
         "master_metadata_album_album_name": null,
         "spotify_track_uri": null,
-        "episode_name": "Bir Podcast"
+        "episode_name": "A Podcast"
       },
       {
-        "ts": "bozuk-tarih",
+        "ts": "broken-date",
         "ms_played": 1000,
         "master_metadata_track_name": "X",
         "master_metadata_album_artist_name": "Y",
@@ -254,7 +256,7 @@ mod tests {
 
     const ACCOUNT: &str = r#"[
       {"endTime": "2023-05-01 12:34", "artistName": "Portishead", "trackName": "Roads", "msPlayed": 300000},
-      {"endTime": "2023-05-01 12:40", "artistName": "", "trackName": "Adsız", "msPlayed": 1000}
+      {"endTime": "2023-05-01 12:40", "artistName": "", "trackName": "Untitled", "msPlayed": 1000}
     ]"#;
 
     #[test]
@@ -292,7 +294,7 @@ mod tests {
     #[test]
     fn account_format_is_detected_and_parsed() {
         let mut archive =
-            MemoryArchive::new("hesap.zip").with_entry("MyData/StreamingHistory0.json", ACCOUNT);
+            MemoryArchive::new("account.zip").with_entry("MyData/StreamingHistory0.json", ACCOUNT);
         let outcome = import(&mut archive).unwrap();
 
         assert_eq!(outcome.summary.export, ExportKind::SpotifyAccount);
@@ -307,8 +309,8 @@ mod tests {
 
     #[test]
     fn malformed_json_names_the_entry_and_stage() {
-        let mut archive = MemoryArchive::new("kirik.zip")
-            .with_entry("Streaming_History_Audio_2023.json", "{ bu json değil");
+        let mut archive = MemoryArchive::new("broken.zip")
+            .with_entry("Streaming_History_Audio_2023.json", "{ this is not json");
         let err = import(&mut archive).unwrap_err();
         assert_eq!(err.stage(), Stage::ImportParse);
         assert!(

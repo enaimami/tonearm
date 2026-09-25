@@ -1,36 +1,36 @@
-/* headshell — masaüstü arayüzü.
+/* headshell — the desktop interface.
  *
- * Bu dosyanın tepesindeki `:root` bloğu §3.3'ün tema sözleşmesidir (D-037).
- * `--headshell-` önekli değişkenler ve aşağıdaki sınıf adları (`.topbar`,
- * `.queue`, `.toast` vb.) stabil: bir tema bunları hedefler, habersiz
- * yeniden adlandırılmazlar. Yeni bir sınıf eklemek serbest; var olanı
- * kaldırmak/anlamını değiştirmek `api` sürümünü artırır. Tam liste
- * `tests/ui_contract.rs` içindeki `CONTRACT_CLASSES`.
+ * The `:root` block at the top of this file is §3.3's theme contract (D-037).
+ * The `--headshell-` prefixed variables and the class names below (`.topbar`,
+ * `.queue`, `.toast` etc.) are stable: a theme targets them, and they are not
+ * renamed without notice. Adding a new class is free; removing an existing
+ * one or changing its meaning bumps the `api` version. The full list is
+ * `CONTRACT_CLASSES` in `tests/ui_contract.rs`.
  *
- * D-072 iskeleti değiştirdi (tam boy kenar çubuğu, oynatıcı içerik
- * sütununun altında) ama tek bir token'ı ya da sözleşme sınıfını
- * kaldırmadı: eski temalar aynen yükleniyor, `api` 1'de.
+ * D-072 changed the skeleton (a full-height sidebar, the player under the
+ * content column) but did not remove a single token or contract class: old
+ * themes load as they are, at `api` 1.
  *
- * Token seti bilerek dar: bölgeye özel geçersiz kılma yok (Spicetify'ın
- * kırılganlığı oradan geliyordu). Her token'ın aşağıda en az bir kullanımı
- * var — kullanılmayan token yok. Tonlar (vurgunun soluk hâli gibi) yeni
- * token değil, var olanların `color-mix` ile karışımı; tema yazarı yalnızca
- * on dört değeri bilir.
+ * The token set is deliberately narrow: no region-specific overrides
+ * (Spicetify's fragility came from there). Every token is used at least once
+ * below — there is no unused token. Shades (like a faded accent) are not new
+ * tokens but `color-mix` blends of the existing ones; a theme author only
+ * needs to know fourteen values.
  *
- * D-028'den gelen kural: yalnızca `transform` ve `opacity` canlandırılır.
- * `height`, `box-shadow`, `filter`, `background-position` düzeltilmiş
- * ortamda bile 58.8 → 47.6 fps götürüyor. İlerleme çubuğu bu yüzden
- * `scaleX` ile çiziliyor, genişlikle değil. Aynı ölçüm yarı saydam, bulanık
- * "malzeme" yüzeyleri de dışarıda bırakıyor: kayan içeriğin üstündeki bir
- * `backdrop-filter` her karede yeniden bulanıklaştırmak demek ve WebKitGTK'da
- * ölçülmedi. Yüzeyler düz; derinliği gölge ve ton veriyor.
+ * The rule from D-028: only `transform` and `opacity` are animated.
+ * `height`, `box-shadow`, `filter`, `background-position` cost
+ * 58.8 → 47.6 fps even in the fixed-up environment. That is why the progress
+ * bar is drawn with `scaleX`, not with its width. The same measurement also
+ * leaves out translucent, blurred "material" surfaces: a `backdrop-filter`
+ * over scrolling content means blurring again on every frame, and it was not
+ * measured on WebKitGTK. Surfaces are flat; shadow and shade give the depth.
  */
 
 :root {
-  /* Motorun **kendi** çizdiği parçalar için: onay kutusu, imleç, kaydırma
-   * çubuğu. Token'lar yalnızca bizim çizdiğimiz renkleri değiştiriyor;
-   * bu ikisi olmadan açık bir tema koyu onay kutularıyla kalıyor. Sette
-   * `daylight` referans teması yazılırken doğdu (§3.4). */
+  /* For the parts the engine draws **itself**: checkboxes, the caret, scroll
+   * bars. The tokens only change the colours we draw; without these two a
+   * light theme is left with dark checkboxes. It was born while the
+   * `daylight` reference theme was being written (§3.4). */
   --headshell-color-scheme: dark;
 
   --headshell-bg: #12100e;
@@ -52,14 +52,16 @@
   box-sizing: border-box;
 }
 
-/* `hidden` özniteliği bir sınıf kuralına yenilmesin.
+/* The `hidden` attribute must not lose to a class rule.
  *
- * UA stylesheet `[hidden] { display: none }` diyor ama özgüllüğü en düşük:
- * `.sheet { display: flex }` onu eziyor ve öğe `hidden` olduğu hâlde ekranda
- * kalıyordu. Kısayol penceresi tam bunu yaşadı — her açılışta açık geliyordu.
- * İşaretleme de JavaScript de doğruydu, yalnızca özgüllük yanlıştı.
+ * The UA stylesheet says `[hidden] { display: none }`, but its specificity is
+ * the lowest: `.sheet { display: flex }` overrode it and the element stayed on
+ * screen even though it was `hidden`. The shortcut sheet went through exactly
+ * this — it came up open on every start. The markup and the JavaScript were
+ * both right; only the specificity was wrong.
  *
- * `!important` bilinçli: gizlenmiş bir öğeyi bir tema geri getirememeli. */
+ * `!important` is deliberate: a theme must not be able to bring back a hidden
+ * element. */
 [hidden] {
   display: none !important;
 }
@@ -74,9 +76,10 @@ html {
   color-scheme: var(--headshell-color-scheme);
 }
 
-/* İç değişkenler `body`'de, `:root`'ta değil: bir temanın `:root` bloğu
- * bunları ezemesin — sözleşme yalnızca `--headshell-*`. Yedek değerler
- * `color-mix` bilmeyen motorlar için (eski macOS WebKit'i). */
+/* The internal variables are on `body`, not on `:root`: so a theme's `:root`
+ * block cannot override them — the contract is only `--headshell-*`. The
+ * fallback values are for engines that do not know `color-mix` (older macOS
+ * WebKit). */
 body {
   --tint-accent: var(--headshell-surface-raised);
   --tint-accent-strong: var(--headshell-border);
@@ -109,10 +112,10 @@ body {
   background: var(--tint-accent-strong);
 }
 
-/* ————————————————— iskelet (D-072)
+/* ————————————————— skeleton (D-072)
  *
- * Kenar çubuğu tam boy; oynatıcı yalnızca içerik sütununun altında.
- * Pencerenin en küçük boyu 900×600 (`tauri.conf.json`). */
+ * The sidebar is full height; the player is only under the content column.
+ * The window's minimum size is 900×600 (`tauri.conf.json`). */
 
 body.app {
   display: grid;
@@ -124,7 +127,7 @@ body.app {
   overflow: hidden;
 }
 
-/* ————————————————— kenar çubuğu */
+/* ————————————————— sidebar */
 
 .sidebar {
   grid-area: sidebar;
@@ -188,8 +191,9 @@ body.app {
   flex: 1;
 }
 
-/* Seçim göstergesi: sekmeler arasında yayla kayar (`motion.js`). Arka plan
- * `.nav`'da değil burada; `aria-current` yalnızca yazının rengini veriyor. */
+/* The selection indicator: slides between tabs on a spring (`motion.js`). The
+ * background is here, not on `.nav`; `aria-current` only sets the text
+ * colour. */
 .nav-pill {
   position: absolute;
   top: 0;
@@ -268,7 +272,7 @@ body.app {
   font-size: 11px;
 }
 
-/* ————————————————— içerik sütunu ve üst çubuk */
+/* ————————————————— content column and top bar */
 
 .main {
   grid-area: main;
@@ -289,8 +293,8 @@ body.app {
   background: var(--headshell-bg);
 }
 
-/* Kaydırma kenarı: sabit bir çizgi yerine içerik üst çubuğun altına
- * girince beliren yumuşak bir gölge. Yalnızca `opacity` değişiyor. */
+/* The scroll edge: instead of a fixed line, a soft shadow that appears when
+ * content slides under the top bar. Only `opacity` changes. */
 .topbar::after {
   content: "";
   position: absolute;
@@ -337,7 +341,8 @@ body.app {
   text-overflow: ellipsis;
 }
 
-/* Dönen halka: süre temadan (0ms = dönmez, Yüksek Karşıtlık). */
+/* The spinning ring: the duration comes from the theme (0ms = it does not
+ * spin, High Contrast). */
 .busy::before {
   content: "";
   flex: none;
@@ -441,7 +446,7 @@ h3 {
   font-variant-numeric: tabular-nums;
 }
 
-/* ————————————————— denetimler */
+/* ————————————————— controls */
 
 input,
 select,
@@ -476,8 +481,8 @@ input::placeholder {
   opacity: 1;
 }
 
-/* WebKitGTK `<select>`'i yerel olarak çiziyor ve arka planı yok sayıyor;
- * `appearance: none` demeden koyu temada beyaz bir kutu kalıyor. */
+/* WebKitGTK draws `<select>` natively and ignores its background; without
+ * `appearance: none` a white box is left in a dark theme. */
 select {
   appearance: none;
   padding-right: 26px;
@@ -490,8 +495,9 @@ select {
   background-repeat: no-repeat;
 }
 
-/* Masaüstü uygulaması: düğmelerde el imleci yok (yerel denetimler gibi).
- * Basışın karşılığı **basıldığı an**: bırakmayı beklemeden küçülür. */
+/* A desktop app: no hand cursor on buttons (like native controls). A press
+ * responds **the moment it happens**: it shrinks without waiting for the
+ * release. */
 button {
   display: inline-flex;
   align-items: center;
@@ -591,7 +597,7 @@ button .icon {
   overflow: hidden;
 }
 
-/* Klavye odağı görünür; fareyle tıklanınca halka çıkmaz. */
+/* Keyboard focus is visible; no ring shows up when clicking with the mouse. */
 :focus-visible {
   outline: 2px solid var(--headshell-accent);
   outline-offset: 2px;
@@ -610,7 +616,7 @@ select:focus-visible {
   box-shadow: 0 0 0 3px var(--ring);
 }
 
-/* Simgeli yazı kutusu. */
+/* A text box with an icon. */
 .field {
   display: flex;
   align-items: center;
@@ -657,7 +663,8 @@ select:focus-visible {
   padding: 0;
 }
 
-/* Parçalı denetim: eşit sütunlar, altta yayla kayan bir başparmak. */
+/* A segmented control: equal columns, a thumb sliding underneath on a
+ * spring. */
 .segmented {
   position: relative;
   display: inline-grid;
@@ -704,7 +711,7 @@ select:focus-visible {
   margin: 0 0 20px;
 }
 
-/* ————————————————— düzen yardımcıları */
+/* ————————————————— layout helpers */
 
 .row {
   display: flex;
@@ -762,7 +769,7 @@ select:focus-visible {
   white-space: nowrap;
 }
 
-/* ————————————————— metin */
+/* ————————————————— text */
 
 .hint,
 .empty {
@@ -796,7 +803,7 @@ select:focus-visible {
   border-left: 3px solid var(--headshell-info);
 }
 
-/* Zorlanmayan izin modeli (D-040) gizlenmez. */
+/* The unenforced permission model (D-040) is not hidden. */
 .warn-note {
   border-left: 3px solid var(--headshell-accent);
 }
@@ -822,7 +829,7 @@ kbd {
   text-align: center;
 }
 
-/* ————————————————— kartlar ve bloklar */
+/* ————————————————— cards and blocks */
 
 .card {
   margin: 0 0 24px;
@@ -900,7 +907,7 @@ kbd {
   overflow-wrap: anywhere;
 }
 
-/* Etiket (D-038'in "genişletilmiş" işareti) ve durum çipi. */
+/* A tag (D-038's "extended" mark) and the status chip. */
 .tag {
   display: inline-flex;
   align-items: center;
@@ -960,7 +967,7 @@ kbd {
   background: currentColor;
 }
 
-/* ————————————————— tablolar */
+/* ————————————————— tables */
 
 .table {
   width: 100%;
@@ -1011,7 +1018,7 @@ kbd {
   height: 28px;
 }
 
-/* ————————————————— çalan */
+/* ————————————————— now playing */
 
 .now-card {
   display: flex;
@@ -1047,7 +1054,8 @@ kbd {
   stroke-width: 1.1;
 }
 
-/* Çalarken dört çubuk; hız temadan, duraklayınca donar. */
+/* Four bars while playing; the speed comes from the theme, and they freeze
+ * when paused. */
 .eq {
   position: absolute;
   right: 12px;
@@ -1223,7 +1231,7 @@ kbd {
   font-variant-numeric: tabular-nums;
 }
 
-/* ————————————————— başlarken */
+/* ————————————————— getting started */
 
 .onboarding {
   max-width: 780px;
@@ -1287,7 +1295,7 @@ kbd {
   gap: 6px;
 }
 
-/* ————————————————— istatistik */
+/* ————————————————— statistics */
 
 .summary {
   display: flex;
@@ -1361,8 +1369,9 @@ kbd {
   background: var(--headshell-surface);
 }
 
-/* Boyu yayla geliyor (`motion.js`): stil dosyası `transform` yazmaz, yoksa
- * tam boya oturan çubuk o `transform`'a geri düşerdi. */
+/* Its height comes from a spring (`motion.js`): the stylesheet writes no
+ * `transform`, otherwise a bar settling at full height would fall back to
+ * that `transform`. */
 .year-fill {
   position: absolute;
   inset: 0;
@@ -1443,7 +1452,7 @@ kbd {
   font-variant-numeric: tabular-nums;
 }
 
-/* ————————————————— sleeve (Faz 0.5) */
+/* ————————————————— sleeve (Phase 0.5) */
 
 .card-stage {
   display: grid;
@@ -1466,7 +1475,7 @@ kbd {
     0 2px 8px rgb(0 0 0 / 24%);
 }
 
-/* ————————————————— içe aktarma */
+/* ————————————————— import */
 
 .dropzone {
   display: grid;
@@ -1585,7 +1594,7 @@ kbd {
   background: var(--headshell-text-dim);
 }
 
-/* ————————————————— sağlayıcılar */
+/* ————————————————— providers */
 
 .caps {
   display: flex;
@@ -1612,7 +1621,7 @@ kbd {
   color: var(--headshell-text-dim);
 }
 
-/* ————————————————— eklentiler (Faz 2 yüzeyi, D-069, D-071) */
+/* ————————————————— plugins (the Phase 2 surface, D-069, D-071) */
 
 .plugins {
   display: grid;
@@ -1673,7 +1682,8 @@ kbd {
   font-weight: 600;
 }
 
-/* Manifest sorunu bastırılmıyor: düğmelerin neden işe yaramadığı görünsün. */
+/* A manifest problem is not suppressed: why the buttons do not work should
+ * be visible. */
 .plugin-problem {
   margin: 6px 0;
   color: var(--headshell-error);
@@ -1694,7 +1704,7 @@ kbd {
   flex: 1;
 }
 
-/* ————————————————— tema listesi (§3.3) */
+/* ————————————————— theme list (§3.3) */
 
 .themes {
   display: grid;
@@ -1742,8 +1752,8 @@ kbd {
   margin-left: auto;
 }
 
-/* Temanın kendi token'larıyla çizilmiş küçük bir pencere (D-072). Renkler
- * `style` üzerinden geliyor; bu kurallar yalnızca yerleşim. */
+/* A small window drawn with the theme's own tokens (D-072). The colours come
+ * through `style`; these rules are only the layout. */
 .swatch {
   position: relative;
   height: 76px;
@@ -1806,7 +1816,7 @@ kbd {
   font-family: var(--mono);
 }
 
-/* ————————————————— oynatıcı çubuğu */
+/* ————————————————— player bar */
 
 .player {
   grid-area: player;
@@ -1891,7 +1901,7 @@ kbd {
   color: var(--headshell-text-dim);
 }
 
-/* Durum noktası; renk durumun kendisi. */
+/* The state dot; its colour is the state itself. */
 .state {
   flex: none;
   align-self: center;
@@ -1934,7 +1944,7 @@ kbd {
   background: var(--headshell-border);
 }
 
-/* `scaleX` — genişlik değil (D-028). */
+/* `scaleX` — not the width (D-028). */
 .fill {
   height: 100%;
   background: var(--headshell-accent);
@@ -1955,7 +1965,7 @@ kbd {
   font-variant-numeric: tabular-nums;
 }
 
-/* ————————————————— uyarılar */
+/* ————————————————— notices */
 
 .toasts {
   position: fixed;
@@ -1970,7 +1980,8 @@ kbd {
   pointer-events: none;
 }
 
-/* Sağa sürüklenerek kapanır (`motion.js`); dikey jest sayfaya kalır. */
+/* Closes when dragged to the right (`motion.js`); a vertical gesture is left
+ * to the page. */
 .toast {
   position: relative;
   padding: 12px 38px 12px 14px;
@@ -2028,7 +2039,8 @@ kbd {
   font-size: 12px;
 }
 
-/* Kapatma düğmesi: uyarının kendiliğinden gitmesini beklemek zorunda değil. */
+/* The close button: there is no need to wait for the notice to go on its
+ * own. */
 .toast .close {
   position: absolute;
   top: 8px;
@@ -2059,7 +2071,7 @@ kbd {
   color: var(--headshell-success);
 }
 
-/* ————————————————— kısayol penceresi */
+/* ————————————————— shortcut sheet */
 
 .sheet {
   position: fixed;
@@ -2107,10 +2119,10 @@ kbd {
   border-bottom: 0;
 }
 
-/* ————————————————— açılış hatası penceresi (D-070)
+/* ————————————————— startup error window (D-070)
  *
- * Aynı dosyayı kullanıyor ama `body.app` değil: iskelet yok, yalnızca metin.
- * Uzun hata satırları yatay kaydırma yerine sarılır. */
+ * It uses the same file, but not `body.app`: no skeleton, only text. Long
+ * error lines wrap instead of scrolling sideways. */
 
 .startup-error {
   overflow: auto;
@@ -2140,10 +2152,10 @@ kbd {
   word-break: break-word;
 }
 
-/* ————————————————— erişilebilirlik tercihleri */
+/* ————————————————— accessibility preferences */
 
-/* Hareketi azalt: konum ve ölçek hareketi yok, döngüler durur; opaklık
- * geçişleri kalır (yaylar için aynı kural `motion.js`'te). */
+/* Reduce motion: no position or scale motion, loops stop; opacity
+ * transitions stay (the same rule for springs is in `motion.js`). */
 @media (prefers-reduced-motion: reduce) {
   .busy::before,
   .eq i,
@@ -2161,7 +2173,7 @@ kbd {
   }
 }
 
-/* Daha fazla karşıtlık: ince ayraçlar ikincil metin kadar belirgin. */
+/* More contrast: thin dividers are as prominent as secondary text. */
 @media (prefers-contrast: more) {
   .card,
   .plugin,
@@ -2181,7 +2193,7 @@ kbd {
   }
 }
 
-/* Dar pencere: kenar çubuğu yalnızca simgeler. */
+/* A narrow window: the sidebar shows icons only. */
 @media (max-width: 1000px) {
   body {
     --sidebar-width: 64px;

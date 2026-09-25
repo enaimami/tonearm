@@ -1,17 +1,18 @@
-//! Kartın SVG çizimi.
+//! The card's SVG drawing.
 //!
-//! D-012: tasarım sabit, renkler ve ölçüler isimli sabitler. Ölçüler
-//! [`CardSize`] ile parametredir; iki hazır ölçü (kare, dikey) modül
-//! kökünde. Tema sistemi (Faz 3) geldiğinde `palette`/`metrics` token
-//! setine taşınır — dış sözleşme açılmaz.
+//! D-012: the design is fixed, colours and sizes are named constants. Sizes
+//! are a parameter through [`CardSize`]; the two ready-made sizes (square,
+//! vertical) are at the module root. When the theme system (Phase 3) arrives,
+//! `palette`/`metrics` move into a token set — the external contract is not
+//! opened up.
 //!
-//! Metin genişliği tahminidir (kaba karakter ölçüsü); taşan isimler
-//! kırılır. Piksel noktası doğruluğu değil, paylaşılabilir kalite hedefi.
+//! Text width is an estimate (a rough character measure); names that overflow
+//! are cut. The goal is shareable quality, not pixel-perfect accuracy.
 
 use super::CardSize;
 use super::data::SleeveData;
 
-/// Renkler. Koyu zemin, tek vurgu rengi.
+/// Colours. A dark background, a single accent colour.
 mod palette {
     pub const BG: &str = "#0f1218";
     pub const TEXT: &str = "#f4f6fa";
@@ -20,9 +21,9 @@ mod palette {
     pub const BAR_TRACK: &str = "#262c36";
 }
 
-/// Ölçüler — 1080 tasarım genişliği referansıyla. Kare ve dikey kart
-/// aynı genişlikte olduğu için font boyutları sabittir; yalnızca dikey
-/// paylar ve bölüm limitleri ölçüye göre değişir.
+/// Sizes — relative to a 1080 design width. Since the square and the vertical
+/// card have the same width the font sizes are fixed; only the vertical
+/// margins and the section limits change with the size.
 mod metrics {
     pub const MARGIN: f64 = 72.0;
     pub const TITLE: f64 = 34.0;
@@ -34,28 +35,41 @@ mod metrics {
     pub const DISCOVERY: f64 = 38.0;
     pub const BAR_LABEL: f64 = 22.0;
     pub const FOOTER: f64 = 28.0;
-    /// Metin genişliği tahmini için ortalama karakter katsayısı.
+    /// The average character factor for estimating text width.
     pub const CHAR_W: f64 = 0.60;
 }
 
-/// Bölümler arasındaki en küçük nefes payı. Sığdırma döngüsü bunu garanti eder.
+/// The smallest breathing room between sections. The fitting loop guarantees
+/// it.
 const MIN_GAP: f64 = 22.0;
 
-/// Türkçe ay adları — bağımlılık yok, kart dili projenin dili.
-const MONTHS_TR: [&str; 12] = [
-    "Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim",
-    "Kasım", "Aralık",
+/// English month names — no dependency; the card's language is the project's
+/// language.
+const MONTHS: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
 ];
 
-/// Kartı SVG olarak çizer.
+/// Draws the card as SVG.
 #[must_use]
 pub fn render(data: &SleeveData, size: CardSize) -> String {
     let w = f64::from(size.width);
     let h = f64::from(size.height);
     let content_w = w - 2.0 * metrics::MARGIN;
 
-    // Dikey kartta daha çok yer var. Kare kart `h == w` olduğu için karşılaştırma
-    // **kesin** olmalı — `>=` kare kartı da uzun sayıp içeriği taşırıyordu.
+    // The vertical card has more room. Since a square card has `h == w`, the
+    // comparison must be **strict** — `>=` counted the square card as tall too
+    // and made its content overflow.
     let tall = h > w;
     let max_disc = if tall { 5 } else { 3 };
     let bar_area_wanted = if tall { 260.0 } else { 120.0 };
@@ -64,8 +78,8 @@ pub fn render(data: &SleeveData, size: CardSize) -> String {
         data.top_artist.is_some() || data.top_track.is_some() || data.top_album.is_some();
     let show_bars = data.by_year.len() >= 2;
 
-    // Yükseklikler baseline'a göre ölçülür; bir bloğun son satırının altında
-    // kalan descender payı sayılmazsa üst bloklar bitişik görünür.
+    // Heights are measured from the baseline; if the descender room below a
+    // block's last line is not counted, the blocks above look glued together.
     let desc = |font: f64| font * 0.3;
     let h_header = metrics::TITLE + 18.0;
     let h_hero = if data.plays == 0 {
@@ -76,11 +90,11 @@ pub fn render(data: &SleeveData, size: CardSize) -> String {
     let h_tops = show_tops
         .then_some(metrics::SECTION + 10.0 + 3.0 * (metrics::VALUE + 18.0) + desc(metrics::VALUE));
     let h_footer = metrics::FOOTER + 12.0;
-    // Alt bilgi kartın dibine sabitlenir; akış onun üstünde biter.
+    // The footer is pinned to the bottom of the card; the flow ends above it.
     let available = h - 2.0 * metrics::MARGIN - h_footer;
 
-    // Keşif satırı sayısını ve bar yüksekliğini **sığana kadar** kıs.
-    // Taşma sessizce görsel bozulma üretiyordu; burada ölçüp kısıyoruz.
+    // **Shrink** the number of discovery rows and the bar height until it fits.
+    // Overflow silently produced visual breakage; here we measure and shrink.
     let fixed = h_header + h_hero + h_tops.unwrap_or(0.0);
     let (disc_len, bar_area) = {
         let mut disc = data.discoveries.len().min(max_disc);
@@ -101,7 +115,8 @@ pub fn render(data: &SleeveData, size: CardSize) -> String {
             };
             let sections_n =
                 2 + usize::from(h_tops.is_some()) + usize::from(disc > 0) + usize::from(show_bars);
-            // En az bu kadar nefes payı olmalı; yoksa bölümler bitişir.
+            // There must be at least this much breathing room; otherwise the sections
+            // touch.
             let min_gaps = MIN_GAP * (sections_n.saturating_sub(1)) as f64;
             if fixed + d + b + min_gaps <= available {
                 break (disc, bars);
@@ -130,20 +145,22 @@ pub fn render(data: &SleeveData, size: CardSize) -> String {
     let content: f64 = sections.iter().filter_map(|s| *s).sum();
     let gap_count = sections.iter().filter(|s| s.is_some()).count();
     let gaps = gap_count.saturating_sub(1).max(1);
-    // Dikey kartta bölüm sayısı aynı ama alan çok daha fazla; üst sınır
-    // kare kart için kalırsa story kartının alt üçte biri boş kalıyordu.
+    // The vertical card has the same number of sections but far more room; if
+    // the upper bound stayed at the square card's, the bottom third of the story
+    // card was left empty.
     let max_gap = if tall { 190.0 } else { 90.0 };
     let gap = ((available - content) / gaps as f64).clamp(MIN_GAP, max_gap);
 
     let mut svg = Svg::new(w, h);
-    // İçerik üst kenardan başlar; artan boşluk bölümlere dağıtıldığı için
-    // ayrıca ortalamıyoruz (ortalamak alt bilgiyle çakışma riski doğuruyordu).
+    // The content starts at the top edge; since the extra space is spread over
+    // the sections we do not centre separately (centring risked colliding with
+    // the footer).
     let mut y = metrics::MARGIN;
     let step = |y: &mut f64, height: f64| {
         *y += height + gap;
     };
 
-    // — Üst bilgi: marka solda, dönem sağda.
+    // — Header: the brand on the left, the period on the right.
     svg.text(
         metrics::MARGIN,
         y + metrics::TITLE,
@@ -163,7 +180,7 @@ pub fn render(data: &SleeveData, size: CardSize) -> String {
     );
     step(&mut y, h_header);
 
-    // — Ana sayı.
+    // — The hero number.
     if data.plays == 0 {
         svg.text(
             metrics::MARGIN,
@@ -171,7 +188,7 @@ pub fn render(data: &SleeveData, size: CardSize) -> String {
             metrics::HERO,
             false,
             palette::DIM,
-            "henüz dinleme yok",
+            "no listens yet",
         );
         step(&mut y, h_hero);
     } else {
@@ -200,7 +217,7 @@ pub fn render(data: &SleeveData, size: CardSize) -> String {
             false,
             palette::DIM,
             &format!(
-                "{} çalma · {} parça · {} sanatçı",
+                "{} plays · {} tracks · {} artists",
                 fmt_thousands(data.plays),
                 fmt_thousands(data.unique_tracks),
                 fmt_thousands(data.unique_artists)
@@ -209,25 +226,25 @@ pub fn render(data: &SleeveData, size: CardSize) -> String {
         step(&mut y, h_hero);
     }
 
-    // — En çok dinlenenler.
+    // — The most listened.
     if let Some(height) = h_tops {
-        svg.section_header(y, "EN ÇOK DİNLEDİKLERİN");
+        svg.section_header(y, "MOST PLAYED");
         let mut row_y = y + metrics::SECTION + 10.0;
         let rows: [(&str, Option<String>, Option<usize>); 3] = [
             (
-                "sanatçı",
+                "artist",
                 data.top_artist.as_ref().map(|a| a.artist.clone()),
                 data.top_artist.as_ref().map(|a| a.plays),
             ),
             (
-                "parça",
+                "track",
                 data.top_track
                     .as_ref()
                     .map(|t| format!("{} — {}", t.title, t.artist)),
                 data.top_track.as_ref().map(|t| t.plays),
             ),
             (
-                "albüm",
+                "album",
                 data.top_album
                     .as_ref()
                     .map(|a| format!("{} — {}", a.album, a.artist)),
@@ -239,7 +256,7 @@ pub fn render(data: &SleeveData, size: CardSize) -> String {
                 continue;
             };
             let dy = row_y + metrics::VALUE;
-            // Tür etiketi ismin önünde küçük ve soluk.
+            // The kind label is small and faint in front of the name.
             svg.text(
                 metrics::MARGIN,
                 dy,
@@ -267,7 +284,7 @@ pub fn render(data: &SleeveData, size: CardSize) -> String {
                     metrics::COUNT,
                     false,
                     palette::DIM,
-                    &format!("{} çalma", fmt_thousands(plays)),
+                    &format!("{} plays", fmt_thousands(plays)),
                 );
             }
             row_y += metrics::VALUE + 18.0;
@@ -275,11 +292,11 @@ pub fn render(data: &SleeveData, size: CardSize) -> String {
         step(&mut y, height);
     }
 
-    // — Keşifler.
+    // — Discoveries.
     if let Some(height) = h_disc {
         let header = match data.year {
-            Some(_) => "BU YIL KEŞFETTİKLERİN",
-            None => "İLK DİNLEDİĞİNDE",
+            Some(_) => "DISCOVERED THIS YEAR",
+            None => "FIRST LISTENED",
         };
         svg.section_header(y, header);
         let mut row_y = y + metrics::SECTION + 10.0;
@@ -311,16 +328,16 @@ pub fn render(data: &SleeveData, size: CardSize) -> String {
                 metrics::COUNT,
                 false,
                 palette::DIM,
-                &format!("{} çalma", fmt_thousands(discovery.plays_in_scope)),
+                &format!("{} plays", fmt_thousands(discovery.plays_in_scope)),
             );
             row_y += metrics::DISCOVERY + 12.0;
         }
         step(&mut y, height);
     }
 
-    // — Yıllara göre zaman çizelgesi.
+    // — The timeline by year.
     if let Some(height) = h_bars {
-        svg.section_header(y, "YILLARA GÖRE");
+        svg.section_header(y, "BY YEAR");
         let top = y + metrics::SECTION + 10.0;
         let max_plays = data.by_year.iter().map(|s| s.plays).max().unwrap_or(1);
         let n = data.by_year.len();
@@ -331,7 +348,7 @@ pub fn render(data: &SleeveData, size: CardSize) -> String {
             let filled = (bar_area * stat.plays as f64 / max_plays.max(1) as f64).max(6.0);
             svg.rect(x, top + bar_area - filled, bar_w, filled, palette::ACCENT);
             svg.rect(x, top + bar_area, bar_w, 2.0, palette::BAR_TRACK);
-            // Çok yıl varsa etiket seyrekleştir: en fazla ~12 etiket.
+            // With many years, thin out the labels: at most ~12 labels.
             let label_every = n.div_ceil(12);
             if index % label_every == 0 || index == n - 1 {
                 svg.text_middle(
@@ -347,8 +364,8 @@ pub fn render(data: &SleeveData, size: CardSize) -> String {
         step(&mut y, height);
     }
 
-    // — Alt bilgi: arşivin yaşı. Sağlayıcının 12 aylık hafızasının
-    //   yapamadığını burada görünür kılıyoruz (D-004).
+    // — Footer: the archive's age. Here we make visible what the provider's
+    //   12-month memory cannot do (D-004).
     let footer = footer_text(data);
     svg.text(
         metrics::MARGIN,
@@ -362,34 +379,34 @@ pub fn render(data: &SleeveData, size: CardSize) -> String {
     svg.finish()
 }
 
-/// Dönem etiketi.
+/// The period label.
 fn period_label(year: Option<i16>) -> String {
-    year.map_or_else(|| "tüm zamanlar".to_owned(), |y| y.to_string())
+    year.map_or_else(|| "all time".to_owned(), |y| y.to_string())
 }
 
-/// Ana sayı: saat; 1 saatin altındakiler dakikaya iner.
+/// The hero number: hours; below 1 hour it drops to minutes.
 fn hero_value(total_ms: u64) -> (String, &'static str) {
     let hours = total_ms / 3_600_000;
     if hours > 0 {
         (
             fmt_thousands(usize::try_from(hours).unwrap_or(0)),
-            "saat dinleme",
+            "hours listened",
         )
     } else {
         (
             fmt_thousands(usize::try_from(total_ms / 60_000).unwrap_or(0)),
-            "dakika dinleme",
+            "minutes listened",
         )
     }
 }
 
-/// Alt bilgi metni: "12 Mart 2019'dan beri (8 yıl) · headshell".
+/// The footer text: "since 12 March 2019 (8 years) · headshell".
 fn footer_text(data: &SleeveData) -> String {
     let span = match (data.archive_start_year, data.archive_end_year) {
         (Some(start), Some(end)) => {
             let years = end.saturating_sub(start).saturating_add(1);
             let years_label = if years > 1 {
-                format!(" ({years} yıl)")
+                format!(" ({years} years)")
             } else {
                 String::new()
             };
@@ -400,12 +417,12 @@ fn footer_text(data: &SleeveData) -> String {
                     format!(
                         "{} {} {}",
                         zoned.day(),
-                        MONTHS_TR[(zoned.month() as usize).saturating_sub(1).min(11)],
+                        MONTHS[(zoned.month() as usize).saturating_sub(1).min(11)],
                         zoned.year()
                     )
                 },
             );
-            format!("{date}'dan beri{years_label}")
+            format!("since {date}{years_label}")
         }
         _ => "headshell".to_owned(),
     };
@@ -416,25 +433,26 @@ fn footer_text(data: &SleeveData) -> String {
     }
 }
 
-/// Binlik ayraçlı sayı (Türkçe: nokta).
+/// A number with thousands separators (English: a comma).
 fn fmt_thousands(value: usize) -> String {
     let digits = value.to_string();
     let mut out = String::with_capacity(digits.len() + digits.len() / 3);
     for (index, ch) in digits.chars().enumerate() {
         if index > 0 && (digits.len() - index).is_multiple_of(3) {
-            out.push('.');
+            out.push(',');
         }
         out.push(ch);
     }
     out
 }
 
-/// Verilen piksel genişliğine sığan yaklaşık karakter sayısı.
+/// The approximate number of characters that fit in the given pixel width.
 fn max_chars(width_px: f64, font_size: f64) -> usize {
     (width_px / (metrics::CHAR_W * font_size)).max(4.0) as usize
 }
 
-/// Unicode karakter sınırıyla kırpar; kesme yerine üç nokta ekler.
+/// Cuts on a Unicode character boundary; adds an ellipsis in place of the
+/// cut.
 fn truncate(input: &str, max_chars: usize) -> String {
     if input.chars().count() <= max_chars {
         return input.to_owned();
@@ -443,7 +461,7 @@ fn truncate(input: &str, max_chars: usize) -> String {
     format!("{kept}…")
 }
 
-/// XML metin kaçışı: `& < > " '`.
+/// XML text escaping: `& < > " '`.
 fn xml_escape(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     for ch in input.chars() {
@@ -459,7 +477,7 @@ fn xml_escape(input: &str) -> String {
     out
 }
 
-/// Basit SVG biriktirici.
+/// A simple SVG accumulator.
 struct Svg {
     out: String,
     w: f64,
@@ -540,8 +558,8 @@ impl Svg {
     fn finish(self) -> String {
         let Self { mut out, w, h } = self;
         out.push_str("</svg>\n");
-        //-boyut öznitelikleri zaten kökte; bu işaretleyici yalnızca okunurluk için değil,
-        //hata ayıklamada hızlı doğrulama içindir.
+        // The size attributes are already on the root; this marker is not only for
+        // readability but for quick verification while debugging.
         let _ = (w, h);
         out
     }
@@ -557,8 +575,8 @@ mod tests {
 
     fn listen(artist: &str, title: &str, ts: &str, ms: u64) -> Listen {
         Listen {
-            track: TrackRef::new(artist, title).with_album(Some(format!("{title} albümü"))),
-            played_at: ts.parse().expect("test zaman damgası geçerli"),
+            track: TrackRef::new(artist, title).with_album(Some(format!("{title} album"))),
+            played_at: ts.parse().expect("the test timestamp is valid"),
             ms_played: ms,
             source: ListenSource::Import {
                 export: ExportKind::SpotifyExtended,
@@ -572,7 +590,7 @@ mod tests {
             listen("Radiohead", "Creep", "2019-06-01T10:00:00Z", 200_000),
             listen("Radiohead", "Karma Police", "2019-08-01T10:00:00Z", 260_000),
         ];
-        // Birkaç yıl, zaman çizelgesi dolusun.
+        // A few years, so the timeline fills up.
         for year in 2020..=2026 {
             listens.push(listen(
                 "Portishead",
@@ -593,13 +611,13 @@ mod tests {
     #[test]
     fn card_contains_the_story_numbers() {
         let svg = render(&full_data(), CardSize::square());
-        assert!(svg.contains("dinleme"), "{svg}");
-        assert!(svg.contains("EN ÇOK DİNLEDİKLERİN"), "{svg}");
+        assert!(svg.contains("listened"), "{svg}");
+        assert!(svg.contains("MOST PLAYED"), "{svg}");
         assert!(svg.contains("Radiohead"), "{svg}");
-        assert!(svg.contains("YILLARA GÖRE"), "{svg}");
-        assert!(svg.contains("tüm zamanlar"), "{svg}");
-        // Kesme işareti XML'de &apos; olarak kaçılır.
-        assert!(svg.contains("2019&apos;dan beri"), "{svg}");
+        assert!(svg.contains("BY YEAR"), "{svg}");
+        assert!(svg.contains("all time"), "{svg}");
+        // The footer tells how old the archive is.
+        assert!(svg.contains("since ") && svg.contains(" 2019 ("), "{svg}");
     }
 
     #[test]
@@ -614,15 +632,16 @@ mod tests {
         let data = card_data(&report, &archive());
         let svg = render(&data, CardSize::square());
         assert!(svg.contains("2026"), "{svg}");
-        assert!(svg.contains("BU YIL KEŞFETTİKLERİN"), "{svg}");
-        // Tek yıllık kapsam → bar bölümü yok.
-        assert!(!svg.contains("YILLARA GÖRE"), "{svg}");
+        assert!(svg.contains("DISCOVERED THIS YEAR"), "{svg}");
+        // A single-year scope → no bar section.
+        assert!(!svg.contains("BY YEAR"), "{svg}");
     }
 
     #[test]
     fn special_characters_are_escaped() {
-        // Sanatçıyı **en çok dinlenen** yap: adın kartta basıldığı garanti
-        // olsun. (Keşif listesi sığmaya göre kısalabilir; test ona bel bağlamaz.)
+        // Make the artist **the most listened**: so its name is guaranteed to be
+        // printed on the card. (The discovery list can shrink to fit; the test does
+        // not rely on it.)
         let mut listens = archive();
         for day in 1..=9 {
             listens.push(listen(
@@ -646,7 +665,7 @@ mod tests {
         let report = stats::compute(&[], StatsQuery::default());
         let data = card_data(&report, &[]);
         let svg = render(&data, CardSize::story());
-        assert!(svg.contains("henüz dinleme yok"), "{svg}");
+        assert!(svg.contains("no listens yet"), "{svg}");
         assert!(svg.contains("</svg>"), "{svg}");
     }
 
@@ -665,11 +684,12 @@ mod tests {
         }
     }
 
-    /// SVG'deki bütün `y` koordinatlarının en büyüğü — taşma ölçüsü.
+    /// The largest of all the `y` coordinates in the SVG — the overflow measure.
     fn lowest_drawn_y(svg: &str) -> f64 {
         let mut lowest = 0.0f64;
         for line in svg.lines() {
-            // <text y="..."> tabandır; <rect y="..."> + height alt kenardır.
+            // <text y="..."> is the baseline; <rect y="..."> + height is the bottom
+            // edge.
             let y = line
                 .split("y=\"")
                 .nth(1)
@@ -694,14 +714,15 @@ mod tests {
 
     #[test]
     fn content_never_spills_past_the_card() {
-        // Kart taşarsa "açıklamasız paylaşılabilir" ölçütü düşer: bar bölümü
-        // alt bilginin üstüne biniyordu. Sığdırma döngüsü bunu engelliyor.
+        // If the card overflows, the "shareable without explanation" criterion
+        // fails: the bar section was riding over the footer. The fitting loop
+        // prevents this.
         for size in [CardSize::square(), CardSize::story()] {
             let svg = render(&full_data(), size);
             let lowest = lowest_drawn_y(&svg);
             assert!(
                 lowest <= f64::from(size.height),
-                "{}×{} kartında içerik {lowest:.0}px'e kadar taşıyor",
+                "on the {}×{} card the content overflows down to {lowest:.0}px",
                 size.width,
                 size.height
             );
@@ -710,7 +731,7 @@ mod tests {
 
     #[test]
     fn a_long_archive_still_fits_the_square_card() {
-        // En sıkışık durum: çok yıl + çok keşif + kare kart.
+        // The tightest case: many years + many discoveries + a square card.
         let mut listens = Vec::new();
         for year in 2008..=2026 {
             for index in 0..3 {
@@ -727,23 +748,26 @@ mod tests {
         let svg = render(&data, CardSize::square());
         assert!(
             lowest_drawn_y(&svg) <= 1080.0,
-            "19 yıllık arşiv kare karta sığmalı:\n{svg}"
+            "a 19-year archive must fit on a square card:\n{svg}"
         );
     }
 
     #[test]
-    fn thousands_separator_is_a_dot() {
+    fn thousands_separator_is_a_comma() {
         assert_eq!(fmt_thousands(0), "0");
         assert_eq!(fmt_thousands(999), "999");
-        assert_eq!(fmt_thousands(1_000), "1.000");
-        assert_eq!(fmt_thousands(1_234_567), "1.234.567");
+        assert_eq!(fmt_thousands(1_000), "1,000");
+        assert_eq!(fmt_thousands(1_234_567), "1,234,567");
     }
 
     #[test]
     fn hero_value_switches_to_minutes_below_an_hour() {
-        assert_eq!(hero_value(0), ("0".to_owned(), "dakika dinleme"));
-        assert_eq!(hero_value(59 * 60_000), ("59".to_owned(), "dakika dinleme"));
-        assert_eq!(hero_value(3_600_000), ("1".to_owned(), "saat dinleme"));
+        assert_eq!(hero_value(0), ("0".to_owned(), "minutes listened"));
+        assert_eq!(
+            hero_value(59 * 60_000),
+            ("59".to_owned(), "minutes listened")
+        );
+        assert_eq!(hero_value(3_600_000), ("1".to_owned(), "hours listened"));
     }
 
     #[test]

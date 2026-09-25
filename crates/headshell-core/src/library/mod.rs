@@ -1,7 +1,7 @@
-//! Yerel kütüphane: SQLite + FTS5.
+//! The local library: SQLite + FTS5.
 //!
-//! Depoya erişim [`ListenStore`] trait'i arkasında; testler sahte depo
-//! kullanabilir, çekirdeğin geri kalanı SQLite'ı hiç görmez.
+//! Access to the store is behind the [`ListenStore`] trait; tests can use a
+//! fake store, and the rest of the core never sees SQLite.
 
 mod schema;
 
@@ -16,24 +16,24 @@ use crate::identity::{Resolution, ResolveMethod};
 use crate::ids::{CanonicalId, Isrc, ProviderId, ProviderTrackId};
 use crate::model::{ExportKind, Listen, ListenSource, PlayRule, TrackRef};
 
-/// Dinlemeleri yazma sonucunun özeti.
+/// A summary of writing listens.
 ///
-/// Aynı export'u iki kez içe aktarmak sayıları şişirmemeli; kaçının zaten
-/// var olduğu burada görünür.
+/// Importing the same export twice must not inflate the numbers; how many
+/// already existed shows up here.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WriteSummary {
-    /// Yazılmak üzere verilen kayıt sayısı.
+    /// The number of records offered for writing.
     pub offered: usize,
-    /// Yeni eklenen dinleme sayısı.
+    /// The number of newly added listens.
     pub inserted: usize,
-    /// Zaten var olduğu için atlanan (aynı parça + zaman + süre).
+    /// Skipped because they already existed (same track + time + duration).
     pub duplicates: usize,
-    /// Yeni oluşturulan parça satırı sayısı.
+    /// The number of newly created track rows.
     pub new_tracks: usize,
 }
 
 impl WriteSummary {
-    /// Sayaçları tanı kaydediciye aktarır.
+    /// Copies the counters into the diagnostics recorder.
     pub fn record_into(&self, recorder: &mut crate::diag::Recorder) {
         let n = |v: usize| i64::try_from(v).unwrap_or(i64::MAX);
         recorder.set("library.offered", n(self.offered));
@@ -43,149 +43,159 @@ impl WriteSummary {
     }
 }
 
-/// Aramadan dönen satır.
+/// A row returned by a search.
 ///
-/// Sayı alanı bilerek `play_count` adını taşıyor: [`PlayRule`]'u geçen
-/// çalmalar. Ham olay sayısı burada değil, [`SearchOutcome::listen_events`]
-/// içinde — kullanıcıya iki farklı "çalma" göstermemek için (D-008).
+/// The count field deliberately carries the name `play_count`: plays that
+/// pass [`PlayRule`]. The raw event count is not here but in
+/// [`SearchOutcome::listen_events`] — so the user is not shown two different
+/// "plays" (D-008).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SearchHit {
     pub artist: String,
     pub title: String,
     pub album: Option<String>,
     pub canonical_id: Option<CanonicalId>,
-    /// [`PlayRule`]'u geçen çalma sayısı — `stats` ile aynı hesap.
+    /// The number of plays that pass [`PlayRule`] — the same calculation as
+    /// `stats`.
     pub play_count: usize,
-    /// Yalnızca sayılan çalmaların toplam süresi.
+    /// The total duration of the counted plays only.
     pub ms_played: u64,
 }
 
-/// Bir aramanın tam sonucu.
+/// The full result of a search.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SearchOutcome {
     pub hits: Vec<SearchHit>,
-    /// Eşleşen parçaların **ham** dinleme olayı sayısı (eşik uygulanmadan).
+    /// The **raw** number of listen events of the matching tracks (no threshold
+    /// applied).
     ///
-    /// Kullanıcı yüzeyine çıkmaz; `diag` sayaçlarına yazılır. `play_count` ile
-    /// arasındaki fark "kaç çalma eşiğin altında kaldı" sorusunun cevabıdır.
+    /// It does not reach the user surface; it is written to the `diag` counters.
+    /// The difference from `play_count` is the answer to "how many plays fell
+    /// below the threshold".
     pub listen_events: usize,
 }
 
-/// Dinleme deposu. SQLite bunun tek gerçek uygulaması, testler sahte kullanır.
+/// The listen store. SQLite is its only real implementation; tests use a
+/// fake.
 pub trait ListenStore {
-    /// Dinlemeleri yazar; tekrarları atlar.
+    /// Writes listens; skips duplicates.
     ///
     /// # Errors
-    /// Veritabanı hatalarında.
+    /// On database errors.
     fn insert_listens(&mut self, listens: &[Listen]) -> Result<WriteSummary>;
 
-    /// Bütün dinlemeleri okur (zaman sırasına göre).
+    /// Reads all listens (in time order).
     ///
     /// # Errors
-    /// Veritabanı hatalarında.
+    /// On database errors.
     fn all_listens(&self) -> Result<Vec<Listen>>;
 
-    /// Tam metin arama.
+    /// Full-text search.
     ///
-    /// `rule` ile hangi dinlemelerin "çalma" sayıldığı belirlenir; `stats`
-    /// aynı kuralı kullanır (D-008).
+    /// `rule` decides which listens count as a "play"; `stats` uses the same rule
+    /// (D-008).
     ///
     /// # Errors
-    /// Sorgu geçersizse ya da veritabanı hatasında.
+    /// If the query is invalid, or on a database error.
     fn search(&self, query: &str, limit: usize, rule: PlayRule) -> Result<SearchOutcome>;
 
-    /// Bir parçanın çözümleme sonucunu kaydeder.
+    /// Records a track's resolution result.
     ///
     /// # Errors
-    /// Veritabanı hatalarında.
+    /// On database errors.
     fn set_resolution(&mut self, norm_key: &str, resolution: &Resolution) -> Result<()>;
 }
 
-/// Sağlayıcı kataloğundaki bir parça (kalıcı indeks satırı).
+/// A track in a provider's catalog (a persistent index row).
 ///
-/// [`SearchHit`]'ten farklı: o "ne dinledin", bu "ne çalabilirsin".
+/// Different from [`SearchHit`]: that one is "what you listened to", this one
+/// "what you can play".
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CatalogTrack {
     pub id: ProviderTrackId,
     pub track: TrackRef,
-    /// Üstveri etiketlerden mi geldi (yoksa dosya adından türetildi).
+    /// Whether the metadata came from the tags (or was derived from the file
+    /// name).
     pub from_tags: bool,
-    /// Dosyanın son değişme zamanı (ms) — değişmediyse yeniden okunmaz.
+    /// The file's last modification time (ms) — if unchanged, it is not read
+    /// again.
     pub mtime_ms: Option<i64>,
 }
 
-/// Kalıcı katalog yazımının özeti.
+/// A summary of a persistent catalog write.
 ///
-/// K9: kaç satır eklendi, kaçı güncellendi, kaçı **silindi** (dosya artık
-/// yok) ayrı ayrı görünür.
+/// K9: how many rows were added, how many updated and how many **removed**
+/// (the file no longer exists) are shown separately.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CatalogWriteSummary {
     pub inserted: usize,
     pub updated: usize,
-    /// Kaynakta artık bulunmayan, bu yüzden katalogdan düşen satırlar.
+    /// Rows dropped from the catalog because they no longer exist in the source.
     pub removed: usize,
     pub unchanged: usize,
 }
 
-/// Sağlayıcı kataloğunun kalıcı deposu.
+/// The persistent store of a provider's catalog.
 ///
-/// `ListenStore`'dan ayrı bir trait: dinleme geçmişi ile çalınabilir katalog
-/// farklı ömürlere sahip. Geçmiş asla silinmez; katalog kaynağı yansıtır.
+/// A trait separate from `ListenStore`: the listening history and the
+/// playable catalog have different lifetimes. History is never deleted; the
+/// catalog mirrors the source.
 pub trait CatalogStore {
-    /// Bir sağlayıcının kataloğunu **tamamen değiştirir**.
+    /// **Replaces** a provider's catalog entirely.
     ///
-    /// Verilen listede olmayan satırlar silinir — katalog kaynağın aynası
-    /// olmalı, yoksa silinmiş dosyalar aramada görünmeye devam eder.
+    /// Rows not in the given list are deleted — the catalog must be a mirror of
+    /// the source, otherwise deleted files keep showing up in searches.
     ///
     /// # Errors
-    /// Veritabanı hatalarında.
+    /// On database errors.
     fn replace_catalog(
         &mut self,
         provider: &ProviderId,
         tracks: &[CatalogTrack],
     ) -> Result<CatalogWriteSummary>;
 
-    /// Katalogda tam metin arama.
+    /// Full-text search in the catalog.
     ///
     /// # Errors
-    /// Veritabanı hatalarında.
+    /// On database errors.
     fn search_catalog(&self, query: &str, limit: usize) -> Result<Vec<CatalogTrack>>;
 
-    /// Bir sağlayıcının katalogdaki parça sayısı.
+    /// The number of tracks a provider has in the catalog.
     ///
     /// # Errors
-    /// Veritabanı hatalarında.
+    /// On database errors.
     fn catalog_len(&self, provider: &ProviderId) -> Result<usize>;
 
-    /// Bir sağlayıcı kimliğiyle tek bir katalog satırı.
+    /// A single catalog row, by provider id.
     ///
     /// # Errors
-    /// Veritabanı hatalarında.
+    /// On database errors.
     fn catalog_get(&self, id: &ProviderTrackId) -> Result<Option<CatalogTrack>>;
 
-    /// Bir sağlayıcının bilinen dosya damgaları: `provider_ref → mtime_ms`.
+    /// A provider's known file stamps: `provider_ref → mtime_ms`.
     ///
-    /// Tarama bunu okuyup değişmemiş dosyaların etiketlerini yeniden
-    /// okumaz — büyük kütüphanede taramanın pahalı kısmı budur.
+    /// The scan reads this and does not re-read the tags of unchanged files — in
+    /// a large library that is the expensive part of a scan.
     ///
     /// # Errors
-    /// Veritabanı hatalarında.
+    /// On database errors.
     fn catalog_stamps(
         &self,
         provider: &ProviderId,
     ) -> Result<std::collections::HashMap<String, i64>>;
 
-    /// Bu sağlayıcının kataloğunun **en son ne zaman** tarandığı (ms).
+    /// **When** this provider's catalog was last scanned (ms).
     ///
-    /// Hiç taranmamışsa `None` — sıfır değil: "hiç bakmadım" ile "1970'te
-    /// baktım" farklı şeyler ve ikincisi her şeyi bayat gösterirdi (D-025).
+    /// `None` if never scanned — not zero: "I never looked" and "I looked in
+    /// 1970" are different things, and the latter would make everything look
+    /// stale (D-025).
     ///
     /// # Errors
-    /// Sorgu başarısız olursa.
+    /// If the query fails.
     fn last_scanned_at_ms(&self, provider: &ProviderId) -> Result<Option<i64>>;
 }
 
-/// SQLite tabanlı kütüphane.
+/// An SQLite-backed library.
 pub struct SqliteLibrary {
     conn: rusqlite::Connection,
     path: PathBuf,
@@ -195,14 +205,14 @@ fn db_err(stage: Stage) -> impl Fn(rusqlite::Error) -> Error {
     move |source| Error::new(stage, ErrorKind::Database { source })
 }
 
-/// [`PlayRule`]'un SQLite karşılığı.
+/// The SQLite counterpart of [`PlayRule`].
 ///
-/// Kuralın **tanımı** [`PlayRule::counts`] içinde; burası onu tek bir yerde
-/// SQL'e çeviriyor — sorgunun içine elle eşik yazılmıyor. İkisinin ayrışması
-/// D-008'deki hatanın ta kendisiydi, bu yüzden eşlik
-/// `sql_play_rule_agrees_with_rust` testiyle kilitli.
+/// The rule's **definition** is in [`PlayRule::counts`]; this translates it
+/// into SQL in one single place — no threshold is written into queries by
+/// hand. The two drifting apart was exactly the bug in D-008, which is why
+/// their agreement is locked in by the `sql_play_rule_agrees_with_rust` test.
 ///
-/// Tablo takma adları sabit: `l` = `listens`, `t` = `tracks`.
+/// The table aliases are fixed: `l` = `listens`, `t` = `tracks`.
 fn play_predicate_sql(rule: PlayRule) -> String {
     format!(
         "(l.ms_played >= {min} \
@@ -213,10 +223,10 @@ fn play_predicate_sql(rule: PlayRule) -> String {
 }
 
 impl SqliteLibrary {
-    /// Veritabanını açar (yoksa oluşturur) ve şemayı günceller.
+    /// Opens the database (creating it if missing) and updates the schema.
     ///
     /// # Errors
-    /// Dosya açılamazsa ya da göç başarısız olursa.
+    /// If the file cannot be opened or a migration fails.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
         if let Some(parent) = path.parent() {
@@ -232,10 +242,10 @@ impl SqliteLibrary {
         Ok(library)
     }
 
-    /// Bellekte geçici kütüphane — testler ve `--dry-run` için.
+    /// A temporary in-memory library — for tests and `--dry-run`.
     ///
     /// # Errors
-    /// Şema kurulamazsa.
+    /// If the schema cannot be set up.
     pub fn open_in_memory() -> Result<Self> {
         let conn = rusqlite::Connection::open_in_memory().map_err(db_err(Stage::LibraryOpen))?;
         let mut library = Self {
@@ -247,7 +257,7 @@ impl SqliteLibrary {
         Ok(library)
     }
 
-    /// Veritabanı dosyasının yolu.
+    /// The path of the database file.
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
@@ -272,7 +282,7 @@ impl SqliteLibrary {
 
         for (index, migration) in schema::MIGRATIONS.iter().enumerate().skip(current) {
             let version = index + 1;
-            tracing::info!(version, "şema göçü uygulanıyor");
+            tracing::info!(version, "applying schema migration");
             self.conn
                 .execute_batch(migration)
                 .map_err(db_err(Stage::LibraryOpen))?;
@@ -283,10 +293,10 @@ impl SqliteLibrary {
         Ok(())
     }
 
-    /// Parça satırını bulur ya da oluşturur; `(id, yeni_mi)` döndürür.
+    /// Finds or creates the track row; returns `(id, is_new)`.
     fn upsert_track(tx: &rusqlite::Transaction<'_>, track: &TrackRef) -> Result<(i64, bool)> {
         let key = track_key(&track.artist, &track.title);
-        // SQLite tam sayıları işaretli; süreyi i64'e daraltıyoruz.
+        // SQLite integers are signed; we narrow the duration to i64.
         let duration_ms = track.duration_ms.and_then(|ms| i64::try_from(ms).ok());
         let existing: Option<i64> = tx
             .query_row("SELECT id FROM tracks WHERE norm_key = ?1", [&key], |row| {
@@ -295,7 +305,8 @@ impl SqliteLibrary {
             .optional_row()?;
 
         if let Some(id) = existing {
-            // Daha zengin üstveri geldiyse boş alanları doldur; var olanı ezme.
+            // If richer metadata arrived, fill in the empty fields; do not overwrite
+            // what is there.
             tx.execute(
                 "UPDATE tracks SET
                      album             = COALESCE(album, ?2),
@@ -343,7 +354,8 @@ impl SqliteLibrary {
     }
 }
 
-/// `query_row`'un "satır yok" hâlini hataya çevirmeden `Option`'a indirger.
+/// Reduces `query_row`'s "no row" case to an `Option` without turning it
+/// into an error.
 trait OptionalRow<T> {
     fn optional_row(self) -> Result<Option<T>>;
 }
@@ -406,7 +418,7 @@ impl ListenStore for SqliteLibrary {
         tracing::info!(
             inserted = summary.inserted,
             duplicates = summary.duplicates,
-            "kütüphaneye yazıldı"
+            "written to the library"
         );
         Ok(summary)
     }
@@ -475,7 +487,9 @@ impl ListenStore for SqliteLibrary {
                 Error::new(
                     Stage::LibraryQuery,
                     ErrorKind::InvalidInput {
-                        detail: format!("depodaki zaman damgası okunamadı ({played_at_ms}): {err}"),
+                        detail: format!(
+                            "could not read a timestamp from the store ({played_at_ms}): {err}"
+                        ),
                     },
                 )
             })?;
@@ -506,16 +520,16 @@ impl ListenStore for SqliteLibrary {
             return Err(Error::new(
                 Stage::LibraryQuery,
                 ErrorKind::InvalidInput {
-                    detail: "arama sorgusu boş".to_owned(),
+                    detail: "the search query is empty".to_owned(),
                 },
             ));
         }
 
         let counted = play_predicate_sql(rule);
         let sql = format!(
-            // bm25() toplama (GROUP BY) bağlamında çağrılamaz. MATERIALIZED
-            // olmadan SQLite alt sorguyu dış sorguya düzleştirip aynı hatayı
-            // veriyor, bu yüzden eşleşmeler önce ayrıca hesaplanıyor.
+            // bm25() cannot be called in an aggregate (GROUP BY) context. Without
+            // MATERIALIZED, SQLite flattens the subquery into the outer query and gives
+            // the same error, so the matches are computed separately first.
             "WITH matches AS MATERIALIZED (
                  SELECT rowid AS track_id, bm25(tracks_fts) AS score
                  FROM tracks_fts WHERE tracks_fts MATCH ?1
@@ -604,11 +618,11 @@ fn decode_source(kind: &str, reference: Option<&str>) -> ListenSource {
     }
 }
 
-/// Kullanıcı sorgusunu FTS5'in anlayacağı bir örüntüye çevirir.
+/// Turns the user's query into a pattern FTS5 understands.
 ///
-/// FTS5 sözdizimi operatör içerir (`AND`, `"`, `*`); ham kullanıcı girdisini
-/// doğrudan vermek hem hata hem güvenlik riski. Her kelime tırnaklanır ve
-/// önek araması için `*` eklenir.
+/// FTS5 syntax contains operators (`AND`, `"`, `*`); handing it raw user
+/// input directly is both an error and a security risk. Every word is quoted
+/// and `*` is added for prefix search.
 fn fts_pattern(query: &str) -> String {
     query
         .split_whitespace()
@@ -633,7 +647,7 @@ impl CatalogStore for SqliteLibrary {
             .map_err(db_err(Stage::LibraryWrite))?;
         let mut summary = CatalogWriteSummary::default();
 
-        // Bu turda görülen referanslar; kalanlar silinecek.
+        // References seen in this round; the rest will be deleted.
         let mut seen: std::collections::HashSet<&str> =
             std::collections::HashSet::with_capacity(tracks.len());
 
@@ -655,7 +669,8 @@ impl CatalogStore for SqliteLibrary {
                 .optional_row()?;
 
             match existing {
-                // Dosya değişmemiş: dokunma. Taramanın pahalı kısmını atlar.
+                // The file has not changed: leave it alone. Skips the expensive part of the
+                // scan.
                 Some((_, mtime)) if mtime.is_some() && mtime == entry.mtime_ms => {
                     summary.unchanged += 1;
                 }
@@ -708,8 +723,9 @@ impl CatalogStore for SqliteLibrary {
             }
         }
 
-        // Kaynakta artık olmayanları düş: katalog kaynağın aynasıdır.
-        // Silinen dosyanın **geçmişi** silinmez; o `listens` tablosunda durur.
+        // Drop what no longer exists in the source: the catalog is the source's
+        // mirror. The **history** of a deleted file is not deleted; it stays in the
+        // `listens` table.
         let stale: Vec<(i64, String)> = {
             let mut stmt = tx
                 .prepare("SELECT id, provider_ref FROM provider_tracks WHERE provider = ?1")
@@ -729,7 +745,7 @@ impl CatalogStore for SqliteLibrary {
         for (id, reference) in stale {
             tx.execute("DELETE FROM provider_tracks WHERE id = ?1", [id])
                 .map_err(db_err(Stage::LibraryWrite))?;
-            tracing::debug!(referans = %reference, "katalogdan düştü");
+            tracing::debug!(reference = %reference, "dropped from the catalog");
             summary.removed += 1;
         }
 
@@ -819,8 +835,8 @@ impl CatalogStore for SqliteLibrary {
     }
 
     fn last_scanned_at_ms(&self, provider: &ProviderId) -> Result<Option<i64>> {
-        // `MIN` değil `MAX`: son taramanın zamanı aranıyor. Katalog boşsa
-        // toplam `NULL` döner ve bu "hiç taranmadı" demektir.
+        // `MAX`, not `MIN`: we want the time of the last scan. If the catalog is
+        // empty the aggregate returns `NULL`, and that means "never scanned".
         self.conn
             .query_row(
                 "SELECT MAX(scanned_at) FROM provider_tracks WHERE provider = ?1",
@@ -831,7 +847,7 @@ impl CatalogStore for SqliteLibrary {
     }
 }
 
-/// Katalog satırını okur. Sütun sırası sorgularla birebir aynı olmalı.
+/// Reads a catalog row. The column order must match the queries exactly.
 fn catalog_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CatalogTrack> {
     let provider: String = row.get(0)?;
     let reference: String = row.get(1)?;
@@ -854,7 +870,7 @@ fn catalog_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CatalogTrack> {
     })
 }
 
-/// `ResolveMethod`'u metinden geri okur — rapor katmanı için.
+/// Reads a `ResolveMethod` back from text — for the reporting layer.
 #[must_use]
 pub fn parse_resolve_method(raw: &str) -> Option<ResolveMethod> {
     match raw {
@@ -875,7 +891,7 @@ mod tests {
     fn listen(artist: &str, title: &str, ts: &str, ms: u64) -> Listen {
         Listen {
             track: TrackRef::new(artist, title).with_album(Some("Pablo Honey".to_owned())),
-            played_at: ts.parse().expect("test zaman damgası"),
+            played_at: ts.parse().expect("test timestamp"),
             ms_played: ms,
             source: ListenSource::Import {
                 export: ExportKind::SpotifyExtended,
@@ -886,11 +902,11 @@ mod tests {
 
     #[test]
     fn schema_applies_and_fts5_is_available() {
-        let library = SqliteLibrary::open_in_memory().expect("bellek içi kütüphane açılmalı");
+        let library = SqliteLibrary::open_in_memory().expect("the in-memory library must open");
         let version: i64 = library
             .conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
-            .expect("sürüm okunmalı");
+            .expect("the version must be readable");
         assert_eq!(usize::try_from(version).unwrap(), schema::MIGRATIONS.len());
     }
 
@@ -946,7 +962,7 @@ mod tests {
         assert_eq!(
             found.hits.len(),
             1,
-            "önek araması Radiohead'i bulmalı: {found:?}"
+            "prefix search must find Radiohead: {found:?}"
         );
         assert_eq!(found.hits[0].play_count, 2);
         assert_eq!(found.hits[0].ms_played, 400_000);
@@ -955,7 +971,7 @@ mod tests {
         assert_eq!(library.search("creep", 10, rule).unwrap().hits.len(), 1);
         assert!(
             library
-                .search("bulunmayanparça", 10, rule)
+                .search("nonexistenttrack", 10, rule)
                 .unwrap()
                 .hits
                 .is_empty()
@@ -964,13 +980,13 @@ mod tests {
 
     #[test]
     fn search_counts_the_same_plays_as_stats() {
-        // D-008: `search` ham olayları, `stats` eşikli çalmaları sayıyordu;
-        // aynı veri iki farklı "çalma" sayısı veriyordu. Artık tek kural.
+        // D-008: `search` counted raw events and `stats` thresholded plays; the
+        // same data gave two different "play" counts. Now there is one rule.
         let mut library = SqliteLibrary::open_in_memory().unwrap();
         let batch = [
             listen("Radiohead", "Creep", "2023-01-01T00:00:00Z", 200_000),
             listen("Radiohead", "Creep", "2023-01-02T00:00:00Z", 200_000),
-            // Eşiğin altında: iki yüzeyde de "çalma" sayılmamalı.
+            // Below the threshold: must not count as a "play" on either surface.
             listen("Radiohead", "Creep", "2023-01-03T00:00:00Z", 4_000),
         ];
         library.insert_listens(&batch).unwrap();
@@ -986,15 +1002,15 @@ mod tests {
         assert_eq!(found.hits[0].ms_played, stats.total_ms_played);
         assert_eq!(
             found.listen_events, stats.listens_in_scope,
-            "ham olay sayısı da örtüşmeli"
+            "the raw event count must match too"
         );
         assert_eq!(found.listen_events - found.hits[0].play_count, 1);
     }
 
     #[test]
     fn sql_play_rule_agrees_with_rust() {
-        // `play_predicate_sql` ile `PlayRule::counts` ayrışırsa D-008 geri döner.
-        // Kenar durumlar tek tek, gerçek SQLite üzerinden karşılaştırılıyor.
+        // If `play_predicate_sql` and `PlayRule::counts` drift apart, D-008 comes
+        // back. The edge cases are compared one by one, through real SQLite.
         let rule = PlayRule::default();
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         let sql = format!(
@@ -1047,11 +1063,11 @@ mod tests {
             )])
             .unwrap();
 
-        // Ham girdideki tırnak ve FTS5 operatörleri sözdizimi hatası vermemeli.
+        // Quotes and FTS5 operators in raw input must not cause a syntax error.
         for raw in ["\"AC OR DC", "back*", "NOT black", "(", "a\"b"] {
             library
                 .search(raw, 10, PlayRule::default())
-                .unwrap_or_else(|err| panic!("{raw:?} sorgusu patladı: {}", err.chain_text()));
+                .unwrap_or_else(|err| panic!("the {raw:?} query blew up: {}", err.chain_text()));
         }
 
         let rule = PlayRule::default();
@@ -1096,7 +1112,7 @@ mod tests {
         assert_eq!(loaded[0].canonical_id, Some(resolution.canonical_id));
     }
 
-    // — Kalıcı katalog (Faz 1.2) —
+    // — The persistent catalog (Phase 1.2) —
 
     fn local_id(reference: &str) -> ProviderTrackId {
         ProviderTrackId::new(ProviderId::new("local"), reference)
@@ -1105,7 +1121,7 @@ mod tests {
     fn catalog_entry(reference: &str, artist: &str, title: &str, mtime: i64) -> CatalogTrack {
         CatalogTrack {
             id: local_id(reference),
-            track: TrackRef::new(artist, title).with_album(Some("Albüm".to_owned())),
+            track: TrackRef::new(artist, title).with_album(Some("Album".to_owned())),
             from_tags: true,
             mtime_ms: Some(mtime),
         }
@@ -1113,7 +1129,7 @@ mod tests {
 
     #[test]
     fn catalog_survives_reopening_the_database() {
-        // Asıl amaç buydu: indeks bellekte değil diskte.
+        // This was the whole point: the index is on disk, not in memory.
         let dir = crate::test_support::TempDir::new("catalog");
         let db = dir.join("library.db");
         let provider = ProviderId::new("local");
@@ -1128,7 +1144,7 @@ mod tests {
                 .unwrap();
         }
 
-        // Yeni süreç gibi: veritabanını baştan aç.
+        // Like a new process: open the database from scratch.
         let library = SqliteLibrary::open(&db).unwrap();
         assert_eq!(library.catalog_len(&provider).unwrap(), 1);
         let hits = library.search_catalog("radiohead", 10).unwrap();
@@ -1152,7 +1168,7 @@ mod tests {
             .unwrap();
         assert_eq!(write.inserted, 2);
 
-        // İkinci dosya silinmiş: katalog kaynağın aynası olmalı.
+        // The second file was deleted: the catalog must be the source's mirror.
         let write = library
             .replace_catalog(
                 &provider,
@@ -1166,8 +1182,8 @@ mod tests {
 
     #[test]
     fn dropping_a_file_from_the_catalog_never_touches_its_history() {
-        // Diskten sildiğin dosyanın **geçmişi** silinmez. `tracks`/`listens`
-        // ile `provider_tracks` bilerek ayrı tablolar.
+        // The **history** of a file you deleted from disk is not deleted.
+        // `tracks`/`listens` and `provider_tracks` are separate tables on purpose.
         let mut library = SqliteLibrary::open_in_memory().unwrap();
         let provider = ProviderId::new("local");
 
@@ -1186,14 +1202,18 @@ mod tests {
             )
             .unwrap();
 
-        // Dosya diskten silindi → katalog boşaldı.
+        // The file was deleted from disk → the catalog is empty.
         library.replace_catalog(&provider, &[]).unwrap();
         assert_eq!(library.catalog_len(&provider).unwrap(), 0);
 
-        // Geçmiş yerinde.
+        // The history is still there.
         assert_eq!(library.all_listens().unwrap().len(), 1);
         let hits = library.search("creep", 10, PlayRule::default()).unwrap();
-        assert_eq!(hits.hits.len(), 1, "dinleme geçmişi aramada durmalı");
+        assert_eq!(
+            hits.hits.len(),
+            1,
+            "the listening history must stay searchable"
+        );
     }
 
     #[test]
@@ -1207,7 +1227,7 @@ mod tests {
             .unwrap();
         let write = library.replace_catalog(&provider, &[row]).unwrap();
 
-        assert_eq!(write.unchanged, 1, "aynı damga yeniden yazılmamalı");
+        assert_eq!(write.unchanged, 1, "the same stamp must not be rewritten");
         assert_eq!(write.updated, 0);
         assert_eq!(write.inserted, 0);
     }
@@ -1220,23 +1240,23 @@ mod tests {
         library
             .replace_catalog(
                 &provider,
-                &[catalog_entry("/m/a.flac", "Eski Ad", "Eski Başlık", 100)],
+                &[catalog_entry("/m/a.flac", "Old Name", "Old Title", 100)],
             )
             .unwrap();
-        // Dosya düzenlendi: damga değişti, etiketler de.
+        // The file was edited: the stamp changed, and so did the tags.
         let write = library
             .replace_catalog(
                 &provider,
-                &[catalog_entry("/m/a.flac", "Yeni Ad", "Yeni Başlık", 200)],
+                &[catalog_entry("/m/a.flac", "New Name", "New Title", 200)],
             )
             .unwrap();
 
         assert_eq!(write.updated, 1);
-        let hits = library.search_catalog("yeni", 10).unwrap();
+        let hits = library.search_catalog("new", 10).unwrap();
         assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].track.artist, "Yeni Ad");
-        // Eski üstveri FTS'te kalmamalı.
-        assert!(library.search_catalog("eski", 10).unwrap().is_empty());
+        assert_eq!(hits[0].track.artist, "New Name");
+        // The old metadata must not stay in FTS.
+        assert!(library.search_catalog("old", 10).unwrap().is_empty());
     }
 
     #[test]
@@ -1279,7 +1299,7 @@ mod tests {
             )
             .unwrap();
 
-        // Uzak sağlayıcıyı yazmak yereli düşürmemeli.
+        // Writing a remote provider must not drop the local one.
         assert_eq!(library.catalog_len(&local).unwrap(), 1);
         assert_eq!(library.catalog_len(&remote).unwrap(), 1);
     }
@@ -1297,7 +1317,10 @@ mod tests {
 
         let found = library.catalog_get(&local_id("/m/a.flac")).unwrap();
         assert_eq!(found.map(|row| row.track.title), Some("Creep".to_owned()));
-        assert_eq!(library.catalog_get(&local_id("/m/yok.flac")).unwrap(), None);
+        assert_eq!(
+            library.catalog_get(&local_id("/m/missing.flac")).unwrap(),
+            None
+        );
     }
 
     #[test]
@@ -1309,12 +1332,12 @@ mod tests {
 
     #[test]
     fn migrating_a_v1_database_keeps_its_listens() {
-        // v2 göçü var olan kurulumları bozmamalı: kullanıcının import ettiği
-        // geçmiş, şema yükseldiğinde yerinde kalmalı.
+        // The v2 migration must not break existing installs: the history the user
+        // imported must stay in place when the schema is upgraded.
         let dir = crate::test_support::TempDir::new("migrate");
         let db = dir.join("library.db");
 
-        // v1 şemasını elle kur ve bir dinleme yaz.
+        // Set up the v1 schema by hand and write a listen.
         {
             let conn = rusqlite::Connection::open(&db).unwrap();
             conn.execute_batch(schema::MIGRATIONS[0]).unwrap();
@@ -1332,17 +1355,17 @@ mod tests {
             .unwrap();
         }
 
-        // Açmak göçü uygular.
+        // Opening applies the migration.
         let mut library = SqliteLibrary::open(&db).unwrap();
         let version: i64 = library
             .conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 2, "şema v2'ye yükselmeli");
+        assert_eq!(version, 2, "the schema must be upgraded to v2");
 
-        // Eski geçmiş yerinde.
+        // The old history is still there.
         assert_eq!(library.all_listens().unwrap().len(), 1);
-        // Yeni katalog kullanılabilir.
+        // The new catalog is usable.
         let provider = ProviderId::new("local");
         library
             .replace_catalog(

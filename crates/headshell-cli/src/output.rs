@@ -1,7 +1,7 @@
-//! İnsan okunur çıktı biçimleme.
+//! Human-readable output formatting.
 //!
-//! Burada **iş mantığı yok** — yalnızca çekirdeğin döndürdüğü raporları
-//! terminale yazmak. Her sayı çekirdekten geldiği gibi basılır.
+//! **No business logic here** — only writing the reports the core returns to
+//! the terminal. Every number is printed as it came from the core.
 
 use headshell_core::library::SearchHit;
 use headshell_core::plugin::catalog::UpdateOutcome;
@@ -14,27 +14,47 @@ use headshell_core::session::{
 };
 use headshell_core::stats::StatsReport;
 
-/// Milisaniyeyi `12s 3dk` gibi okunur süreye çevirir.
+/// Turns milliseconds into a readable duration like `12h 3m`.
 fn duration(ms: u64) -> String {
     let total_seconds = ms / 1000;
     let hours = total_seconds / 3600;
     let minutes = (total_seconds % 3600) / 60;
     if hours > 0 {
-        format!("{hours}sa {minutes}dk")
+        format!("{hours}h {minutes}m")
     } else {
-        format!("{minutes}dk")
+        format!("{minutes}m")
     }
 }
 
-/// İçe aktarma raporu.
+/// A count with its noun: `1 play`, `2 plays`.
+///
+/// English puts the noun in the plural after every count but one; the
+/// Turkish this output was first written in did not (D-073).
+fn count<N>(n: N, noun: &str) -> String
+where
+    N: std::fmt::Display + PartialEq + From<u8>,
+{
+    if n == N::from(1) {
+        format!("{n} {noun}")
+    } else {
+        format!("{n} {noun}s")
+    }
+}
+
+/// `play`/`plays` for a table column, padded so the columns stay aligned.
+fn plays(n: usize) -> &'static str {
+    if n == 1 { "play " } else { "plays" }
+}
+
+/// The import report.
 pub fn import(report: &ImportReport) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
     let i = &report.import;
-    let _ = writeln!(out, "içe aktarıldı: {} ({})", i.source, i.export);
-    let _ = writeln!(out, "  eşleşen dosya : {}", i.files_matched);
-    let _ = writeln!(out, "  ham kayıt     : {}", i.records_total);
-    let _ = writeln!(out, "  dinleme       : {}", i.listens);
+    let _ = writeln!(out, "imported: {} ({})", i.source, i.export);
+    let _ = writeln!(out, "  matched files : {}", i.files_matched);
+    let _ = writeln!(out, "  raw records   : {}", i.records_total);
+    let _ = writeln!(out, "  listens       : {}", i.listens);
     if i.skipped_total() > 0 {
         let detail = i
             .skipped
@@ -42,14 +62,14 @@ pub fn import(report: &ImportReport) -> String {
             .map(|(reason, count)| format!("{reason} {count}"))
             .collect::<Vec<_>>()
             .join(", ");
-        let _ = writeln!(out, "  atlanan       : {} ({detail})", i.skipped_total());
+        let _ = writeln!(out, "  skipped       : {} ({detail})", i.skipped_total());
     }
-    let _ = writeln!(out, "  ISRC'li       : {}", i.with_isrc);
+    let _ = writeln!(out, "  with ISRC     : {}", i.with_isrc);
 
     let d = &report.identity;
     let _ = writeln!(
         out,
-        "\nkimlik: isrc {} · mbid {} · bulanık {} · parmak izi {} · yerel {} (otoriteli %{:.1})",
+        "\nidentity: isrc {} · mbid {} · fuzzy {} · fingerprint {} · local {} (authoritative {:.1}%)",
         d.by_isrc,
         d.by_mbid,
         d.by_fuzzy,
@@ -61,13 +81,13 @@ pub fn import(report: &ImportReport) -> String {
     let w = &report.write;
     let _ = writeln!(
         out,
-        "kütüphane: yeni {} · tekrar {} · yeni parça {}",
+        "library: new {} · duplicate {} · new tracks {}",
         w.inserted, w.duplicates, w.new_tracks
     );
     out
 }
 
-/// İstatistik raporu.
+/// The statistics report.
 pub fn stats(response: &StatsResponse) -> String {
     use std::fmt::Write as _;
     let r: &StatsReport = &response.report;
@@ -76,72 +96,79 @@ pub fn stats(response: &StatsResponse) -> String {
     let scope = r
         .query
         .year
-        .map_or_else(|| "tüm zamanlar".to_owned(), |y| y.to_string());
-    let _ = writeln!(out, "dönem: {scope}");
+        .map_or_else(|| "all time".to_owned(), |y| y.to_string());
+    let _ = writeln!(out, "period: {scope}");
     let _ = writeln!(
         out,
-        "{} çalma · {:.1} saat · {} parça · {} sanatçı",
-        r.plays,
+        "{} · {:.1} hours · {} · {}",
+        count(r.plays, "play"),
         r.total_hours(),
-        r.unique_tracks,
-        r.unique_artists
+        count(r.unique_tracks, "track"),
+        count(r.unique_artists, "artist")
     );
     let _ = writeln!(
         out,
-        "kapsamda {} kayıt, {} kısa çalma atlandı, {} kayıt kapsam dışı, {} kayıt kimliksiz",
-        r.listens_in_scope, r.skipped_short, r.out_of_scope, r.without_canonical_id
+        "{} in scope, {} skipped, {} out of scope, {} without an identity",
+        count(r.listens_in_scope, "record"),
+        count(r.skipped_short, "short play"),
+        count(r.out_of_scope, "record"),
+        count(r.without_canonical_id, "record")
     );
 
     if !r.top_artists.is_empty() {
-        let _ = writeln!(out, "\nen çok dinlenen sanatçılar");
+        let _ = writeln!(out, "\ntop artists");
         for (rank, artist) in r.top_artists.iter().enumerate() {
             let _ = writeln!(
                 out,
-                "  {:>2}. {:<32} {:>5} çalma  {:>8}  {} parça",
+                "  {:>2}. {:<32} {:>5} {}  {:>8}  {}",
                 rank + 1,
                 truncate(&artist.artist, 32),
                 artist.plays,
+                plays(artist.plays),
                 duration(artist.ms_played),
-                artist.unique_tracks
+                count(artist.unique_tracks, "track")
             );
         }
     }
 
     if !r.top_tracks.is_empty() {
-        let _ = writeln!(out, "\nen çok dinlenen parçalar");
+        let _ = writeln!(out, "\ntop tracks");
         for (rank, track) in r.top_tracks.iter().enumerate() {
             let _ = writeln!(
                 out,
-                "  {:>2}. {:<44} {:>5} çalma  {:>8}",
+                "  {:>2}. {:<44} {:>5} {}  {:>8}",
                 rank + 1,
                 truncate(&format!("{} - {}", track.artist, track.title), 44),
                 track.plays,
+                plays(track.plays),
                 duration(track.ms_played)
             );
         }
     }
 
     if !r.top_albums.is_empty() {
-        let _ = writeln!(out, "\nen çok dinlenen albümler");
+        let _ = writeln!(out, "\ntop albums");
         for (rank, album) in r.top_albums.iter().enumerate() {
             let _ = writeln!(
                 out,
-                "  {:>2}. {:<44} {:>5} çalma",
+                "  {:>2}. {:<44} {:>5} {}",
                 rank + 1,
                 truncate(&format!("{} - {}", album.artist, album.album), 44),
-                album.plays
+                album.plays,
+                plays(album.plays)
             );
         }
     }
 
     if r.by_year.len() > 1 {
-        let _ = writeln!(out, "\nyıllara göre");
+        let _ = writeln!(out, "\nby year");
         for year in &r.by_year {
             let _ = writeln!(
                 out,
-                "  {}  {:>6} çalma  {:>8}",
+                "  {}  {:>6} {}  {:>8}",
                 year.year,
                 year.plays,
+                plays(year.plays),
                 duration(year.ms_played)
             );
         }
@@ -149,49 +176,52 @@ pub fn stats(response: &StatsResponse) -> String {
     out
 }
 
-/// Tek parça çözümlemesi.
+/// A single-track resolution.
 pub fn resolve(report: &ResolveReport) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
     let res = &report.resolution;
-    let _ = writeln!(out, "sorgu   : {} - {}", report.artist, report.title);
-    let _ = writeln!(out, "kimlik  : {}", res.canonical_id);
+    let _ = writeln!(out, "query   : {} - {}", report.artist, report.title);
+    let _ = writeln!(out, "identity: {}", res.canonical_id);
     let _ = writeln!(
         out,
-        "yöntem  : {} (güven %{:.1})",
+        "method  : {} (confidence {:.1}%)",
         res.method,
         res.confidence * 100.0
     );
     if let Some(candidate) = &res.matched {
         let _ = writeln!(
             out,
-            "eşleşme : {} - {} [{}]",
+            "match   : {} - {} [{}]",
             candidate.artist, candidate.title, candidate.mbid
         );
         if let Some(note) = &candidate.disambiguation {
-            let _ = writeln!(out, "not     : {note}");
+            let _ = writeln!(out, "note    : {note}");
         }
     } else {
-        let _ = writeln!(out, "eşleşme : yok (üstveri kaynağı aday döndürmedi)");
+        let _ = writeln!(
+            out,
+            "match   : none (the metadata source returned no candidates)"
+        );
     }
-    // Beraberlik sessiz kalmamalı: seçim eşdeğerler arasından yapıldıysa
-    // kullanıcı bunu görmeli, yoksa keyfi bir seçimi kesin bir cevap sanır.
+    // A tie must not stay silent: if the choice was made among equals, the user
+    // must see it, otherwise they take an arbitrary choice for a definite answer.
     if res.tied_candidates > 1 {
         let _ = writeln!(
             out,
-            "belirsiz: {} aday aynı skoru aldı; seçim belirlenimci ama keyfi",
+            "tied    : {} candidates got the same score; the choice is deterministic but arbitrary",
             res.tied_candidates
         );
     }
     out
 }
 
-/// Arama sonuçları.
+/// Search results.
 pub fn search(report: &SearchReport) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
     if report.hits.is_empty() {
-        let _ = writeln!(out, "{:?} için sonuç yok", report.query);
+        let _ = writeln!(out, "no results for {:?}", report.query);
         return out;
     }
     for hit in &report.hits {
@@ -205,9 +235,10 @@ pub fn search(report: &SearchReport) -> String {
         } = hit;
         let _ = writeln!(
             out,
-            "{:<44} {:>4} çalma  {:>8}  {}",
+            "{:<44} {:>4} {}  {:>8}  {}",
             truncate(&format!("{artist} - {title}"), 44),
             play_count,
+            plays(*play_count),
             duration(*ms_played),
             album.as_deref().unwrap_or("")
         );
@@ -215,37 +246,46 @@ pub fn search(report: &SearchReport) -> String {
     out
 }
 
-/// Sleeve kartı çıktısı.
+/// The Sleeve card output.
 pub fn sleeve(response: &SleeveResponse) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
     let d = &response.data;
     let period = d
         .year
-        .map_or_else(|| "tüm zamanlar".to_owned(), |y| y.to_string());
-    let _ = writeln!(out, "dönem: {period}");
+        .map_or_else(|| "all time".to_owned(), |y| y.to_string());
+    let _ = writeln!(out, "period: {period}");
     let _ = writeln!(
         out,
-        "{} × {}  {} çalma  {} parça  {} sanatçı",
-        response.size.width, response.size.height, d.plays, d.unique_tracks, d.unique_artists
+        "{} × {}  {}  {}  {}",
+        response.size.width,
+        response.size.height,
+        count(d.plays, "play"),
+        count(d.unique_tracks, "track"),
+        count(d.unique_artists, "artist")
     );
     if d.plays > 0 {
         let (value, unit) = if d.total_ms_played >= 3_600_000 {
-            (d.total_ms_played / 3_600_000, "saat")
+            (d.total_ms_played / 3_600_000, "hour")
         } else {
-            (d.total_ms_played / 60_000, "dakika")
+            (d.total_ms_played / 60_000, "minute")
         };
-        let _ = writeln!(out, "{value} {unit} dinleme");
+        let _ = writeln!(out, "{} listened", count(value, unit));
         if let Some(artist) = &d.top_artist {
-            let _ = writeln!(out, "en çok: {} ({} çalma)", artist.artist, artist.plays);
+            let _ = writeln!(
+                out,
+                "top: {} ({})",
+                artist.artist,
+                count(artist.plays, "play")
+            );
         }
     } else {
-        let _ = writeln!(out, "henüz dinleme yok");
+        let _ = writeln!(out, "no listens yet");
     }
     if let Some(written) = &response.written {
         let _ = writeln!(
             out,
-            "yazıldı: {} ({} bayt, {})",
+            "written: {} ({} bytes, {})",
             written.path.display(),
             written.bytes,
             written.kind
@@ -254,12 +294,12 @@ pub fn sleeve(response: &SleeveResponse) -> String {
     out
 }
 
-/// Sağlayıcı listesi.
+/// The provider list.
 pub fn provider_list(report: &ProviderListReport) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
     if report.providers.is_empty() {
-        let _ = writeln!(out, "kayıtlı sağlayıcı yok");
+        let _ = writeln!(out, "no registered providers");
         return out;
     }
     for info in &report.providers {
@@ -274,12 +314,12 @@ pub fn provider_list(report: &ProviderListReport) -> String {
     out
 }
 
-/// Eklenti listesi.
+/// The plugin list.
 pub fn plugin_list(report: &PluginListReport) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
     if report.plugins.is_empty() {
-        let _ = writeln!(out, "kurulu eklenti yok");
+        let _ = writeln!(out, "no plugins installed");
         return out;
     }
     for entry in &report.plugins {
@@ -291,16 +331,16 @@ pub fn plugin_list(report: &PluginListReport) -> String {
             entry.status_text()
         );
         if !entry.permissions.is_empty() {
-            let _ = writeln!(out, "{:<14} istediği: {}", "", entry.permissions.describe());
+            let _ = writeln!(out, "{:<14} requests: {}", "", entry.permissions.describe());
         }
-        // Motorun kuracağı eserler **ayrı satırda** (D-055): indirmeyi
-        // eklenti değil motor yapıyor, o yüzden eklentinin izin listesine
-        // karışmıyor. Karışsaydı kullanıcı "bu eklenti şuraya bağlanıyor"
-        // diye okurdu, oysa bağlanan motor.
+        // The artifacts the engine will install go **on a separate line** (D-055):
+        // the engine does the downloading, not the plugin, so they do not mix with
+        // the plugin's permission list. If they did, the user would read "this
+        // plugin connects there", when it is the engine that connects.
         for requirement in &entry.requires {
             let _ = writeln!(
                 out,
-                "{:<14} motor    : {} {} ({}) — {}",
+                "{:<14} engine  : {} {} ({}) — {}",
                 "",
                 requirement.name,
                 requirement.version,
@@ -312,8 +352,8 @@ pub fn plugin_list(report: &PluginListReport) -> String {
     let s = &report.summary;
     let _ = writeln!(
         out,
-        "\n{} eklenti: {} hazır, {} kurulum bekliyor, {} onay bekliyor, {} kapalı, {} sürüm uyumsuz, {} bozuk",
-        s.discovered,
+        "\n{}: {} ready, {} awaiting install, {} awaiting consent, {} disabled, {} incompatible, {} broken",
+        count(s.discovered, "plugin"),
         s.ready,
         s.needs_install,
         s.awaiting_approval,
@@ -325,29 +365,30 @@ pub fn plugin_list(report: &PluginListReport) -> String {
     out
 }
 
-/// Onay komutu sonucu.
+/// The result of the consent command.
 pub fn plugin_consent(report: &PluginConsentReport) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
-    let _ = writeln!(out, "eklenti : {}", report.name);
-    let _ = writeln!(out, "komut   : {}", report.action);
-    let _ = writeln!(out, "izinler : {}", report.permissions.describe());
-    // Motorun indireceği eserler ayrı satırda (D-055): bunu eklenti değil
-    // motor indirir, o yüzden eklentinin izin listesine karışmıyor.
+    let _ = writeln!(out, "plugin     : {}", report.name);
+    let _ = writeln!(out, "command    : {}", report.action);
+    let _ = writeln!(out, "permissions: {}", report.permissions.describe());
+    // The artifacts the engine will download go on a separate line (D-055): the
+    // engine downloads them, not the plugin, so they do not mix with the
+    // plugin's permission list.
     for requirement in &report.requires {
         match requirement.asset_for(&report.platform) {
             Some(asset) => {
                 let _ = writeln!(
                     out,
-                    "motor   : {} {} ({}) ← {}",
+                    "engine     : {} {} ({}) ← {}",
                     requirement.name, requirement.version, report.platform, asset.url
                 );
-                let _ = writeln!(out, "{:<8}  sha256 {}", "", asset.sha256);
+                let _ = writeln!(out, "{:<11}  sha256 {}", "", asset.sha256);
             }
             None => {
                 let _ = writeln!(
                     out,
-                    "motor   : {} {} — bu platform ({}) için yayın yok",
+                    "engine     : {} {} — no release for this platform ({})",
                     requirement.name, requirement.version, report.platform
                 );
             }
@@ -356,83 +397,88 @@ pub fn plugin_consent(report: &PluginConsentReport) -> String {
     if !report.requires.is_empty() {
         let _ = writeln!(
             out,
-            "{:<8}  kurmak için: `headshell plugin install {}`",
+            "{:<11}  to install: `headshell plugin install {}`",
             "", report.name
         );
     }
-    let _ = writeln!(out, "durum   : {}", report.status.describe());
+    let _ = writeln!(out, "status     : {}", report.status.describe());
     let _ = writeln!(out, "{}", enforcement_notice(report.permissions_enforced));
     out
 }
 
-/// Kurulum komutu sonucu (D-055, D-071).
+/// The result of the install command (D-055, D-071).
 pub fn plugin_install(report: &PluginInstallReport) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
     let name = &report.report.plugin;
-    let _ = writeln!(out, "eklenti : {name}");
+    let _ = writeln!(out, "plugin     : {name}");
     match &report.fetched {
         Some(fetched) => {
             let _ = writeln!(
                 out,
-                "katalog : {} indirildi ← {}",
+                "catalog    : {} downloaded ← {}",
                 fetched.version, fetched.index
             );
             for file in &fetched.files {
                 let _ = writeln!(
                     out,
-                    "{:<8}  {:<12} sha256 {} doğrulandı",
+                    "{:<11}  {:<12} sha256 {} verified",
                     "",
                     file.path,
                     short(&file.sha256)
                 );
             }
         }
-        // "Katalog okunmadı" ile "katalogda yoktu" ayrı cevaplar (K9).
+        // "The catalog was not read" and "it was not in the catalog" are separate
+        // answers (K9).
         None => {
-            let _ = writeln!(out, "katalog : okunmadı — eklenti zaten diskteydi");
+            let _ = writeln!(
+                out,
+                "catalog    : not read — the plugin was already on disk"
+            );
         }
     }
-    let _ = writeln!(out, "platform: {}", report.platform);
+    let _ = writeln!(out, "platform   : {}", report.platform);
 
     if report.declared == 0 {
-        // "Hiçbir şey istemiyor" ile "bakmadım" ayrı cevaplar (K9).
-        let _ = writeln!(out, "eser    : yok — bu eklenti hiçbir şey istemiyor");
+        // "It asks for nothing" and "I did not look" are separate answers (K9).
+        let _ = writeln!(out, "artifact   : none — this plugin asks for nothing");
     }
     for (name, outcome) in &report.report.outcomes {
-        let _ = writeln!(out, "eser    : {name} — {}", outcome.describe());
+        let _ = writeln!(out, "artifact   : {name} — {}", outcome.describe());
     }
-    let _ = writeln!(out, "izinler : {}", report.permissions.describe());
+    let _ = writeln!(out, "permissions: {}", report.permissions.describe());
     let _ = writeln!(
         out,
-        "onay    : {}",
-        report.consent.describe().replace("<ad>", name)
+        "consent    : {}",
+        report.consent.describe().replace("<name>", name)
     );
     let _ = writeln!(
         out,
-        "\ndurum   : {}",
+        "\nstatus     : {}",
         if !report.ready {
-            "eksik — eklenti bu hâliyle yüklenmez"
+            "incomplete — the plugin will not load like this"
         } else if report.consent.is_approved() {
-            "hazır — eklenti çalıştırılabilir"
+            "ready — the plugin can run"
         } else {
-            "kuruldu — onaylanınca çalışır"
+            "installed — it runs once approved"
         }
     );
     out
 }
 
-/// Katalog: ne kurulabilir, ne kurulu, ne güncellenebilir (D-071).
+/// The catalog: what can be installed, what is installed, what can be updated
+/// (D-071).
 pub fn plugin_catalog(report: &PluginCatalogReport) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
-    let _ = writeln!(out, "katalog : {}\n", report.index);
+    let _ = writeln!(out, "catalog: {}\n", report.index);
     if report.plugins.is_empty() {
-        let _ = writeln!(out, "katalog boş");
+        let _ = writeln!(out, "the catalog is empty");
     }
     for plugin in &report.plugins {
         let state = match &plugin.problem {
-            Some(problem) => format!("KURULAMAZ — {problem}"),
+            Some(problem) => format!("CANNOT BE INSTALLED — {problem}"),
             None => plugin.installed.describe(),
         };
         let _ = writeln!(
@@ -449,11 +495,12 @@ pub fn plugin_catalog(report: &PluginCatalogReport) -> String {
         if plugin.problem.is_none() {
             let _ = writeln!(
                 out,
-                "{:<14} istediği: {}",
+                "{:<14} requests: {}",
                 "",
                 plugin.permissions.describe()
             );
-            // Motorun kuracağı araçlar ağ izninden ayrı satırda (D-055).
+            // The tools the engine will install go on a line separate from the network
+            // permission (D-055).
             for requirement in &plugin.requires {
                 let line = if requirement.asset_for(&report.platform).is_some() {
                     format!(
@@ -462,43 +509,47 @@ pub fn plugin_catalog(report: &PluginCatalogReport) -> String {
                     )
                 } else {
                     format!(
-                        "{} {} — bu platform ({}) için yayın yok",
+                        "{} {} — no release for this platform ({})",
                         requirement.name, requirement.version, report.platform
                     )
                 };
-                let _ = writeln!(out, "{:<14} motor   : {line}", "");
+                let _ = writeln!(out, "{:<14} engine  : {line}", "");
             }
         }
     }
     for name in &report.delisted {
         let _ = writeln!(
             out,
-            "\n{name}: katalogdan çekilmiş ama bu makinede kurulu — kaldırmak için \
+            "\n{name}: pulled from the catalog but installed on this machine — to remove it \
              `headshell plugin remove {name}`"
         );
     }
     let s = &report.summary;
     let _ = writeln!(
         out,
-        "\n{} eklenti: {} kurulabilir, {} kurulu, {} güncelleme var, {} kurulamaz",
-        s.listed, s.installable, s.installed, s.updates, s.problems
+        "\n{}: {} installable, {} installed, {} with updates, {} cannot be installed",
+        count(s.listed, "plugin"),
+        s.installable,
+        s.installed,
+        s.updates,
+        s.problems
     );
     let _ = writeln!(
         out,
-        "kurmak için `headshell plugin install <ad>` · güncellemek için `headshell plugin update`"
+        "to install `headshell plugin install <name>` · to update `headshell plugin update`"
     );
     out
 }
 
-/// Güncelleme sonucu (D-071).
+/// The update result (D-071).
 pub fn plugin_update(report: &PluginUpdateReport) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
-    let _ = writeln!(out, "katalog : {}\n", report.index);
+    let _ = writeln!(out, "catalog: {}\n", report.index);
     if report.plugins.is_empty() {
         let _ = writeln!(
             out,
-            "katalogdan kurulmuş eklenti yok — neler var: `headshell plugin catalog`"
+            "no plugins installed from the catalog — to see what there is: `headshell plugin catalog`"
         );
         return out;
     }
@@ -513,80 +564,84 @@ pub fn plugin_update(report: &PluginUpdateReport) -> String {
             if !permissions_added.is_empty() {
                 let _ = writeln!(
                     out,
-                    "{:<14} yeni izin istiyor: {} — `headshell plugin approve {}`",
+                    "{:<14} asks for new permissions: {} — `headshell plugin approve {}`",
                     "",
                     permissions_added.describe(),
                     plugin.name
                 );
             }
-            // Araç değişikliği onay istemez (D-071) ama söylenir: ayrı bir
-            // program sessizce değişmemeli.
+            // A tool change does not ask for consent (D-071) but it is said: a separate
+            // program must not change silently.
             for change in tools_changed {
                 let _ = writeln!(
                     out,
-                    "{:<14} araç değişti: {} (onay istenmez)",
+                    "{:<14} tool changed: {} (no consent asked)",
                     "",
                     change.describe()
                 );
             }
         }
         for (name, outcome) in &plugin.tools {
-            let _ = writeln!(out, "{:<14} eser: {name} — {}", "", outcome.describe());
+            let _ = writeln!(out, "{:<14} artifact: {name} — {}", "", outcome.describe());
         }
         if let Some(error) = &plugin.tools_error {
-            let _ = writeln!(out, "{:<14} ARAÇLAR KURULAMADI — {error}", "");
+            let _ = writeln!(out, "{:<14} COULD NOT INSTALL THE TOOLS — {error}", "");
         }
         if let Some(consent) = &plugin.consent
             && !consent.is_approved()
         {
             let _ = writeln!(
                 out,
-                "{:<14} onay: {}",
+                "{:<14} consent: {}",
                 "",
-                consent.describe().replace("<ad>", &plugin.name)
+                consent.describe().replace("<name>", &plugin.name)
             );
         }
     }
     let s = &report.summary;
     let _ = writeln!(
         out,
-        "\n{} eklenti: {} güncellendi, {} güncel, {} atlandı, {} başarısız",
-        s.checked, s.updated, s.current, s.skipped, s.failed
+        "\n{}: {} updated, {} up to date, {} skipped, {} failed",
+        count(s.checked, "plugin"),
+        s.updated,
+        s.current,
+        s.skipped,
+        s.failed
     );
     out
 }
 
-/// Kaldırma sonucu (D-071).
+/// The removal result (D-071).
 pub fn plugin_remove(report: &PluginRemoveReport) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "kaldırıldı: {} ({})",
+        "removed   : {} ({})",
         report.name,
         report.removed.path.display()
     );
     if let Some(target) = &report.removed.link_target {
         let _ = writeln!(
             out,
-            "            bir bağlantıydı; hedefine dokunulmadı: {}",
+            "            it was a link; its target was not touched: {}",
             target.display()
         );
     }
     let _ = writeln!(
         out,
-        "onay      : {}",
+        "consent   : {}",
         if report.consent_forgotten {
-            "unutuldu — yeniden kurulursa baştan sorulur"
+            "forgotten — if reinstalled it is asked from scratch"
         } else {
-            "kaydı yoktu"
+            "there was no record"
         }
     );
     if !report.kept_secrets.is_empty() {
         let _ = writeln!(
             out,
-            "sırlar    : plugin:{} içinde kaldı: {} — silmek için `headshell secret remove \
-             plugin:{} <anahtar>`",
+            "secrets   : left in plugin:{}: {} — to delete them `headshell secret remove \
+             plugin:{} <key>`",
             report.name,
             report.kept_secrets.join(", "),
             report.name
@@ -594,28 +649,28 @@ pub fn plugin_remove(report: &PluginRemoveReport) -> String {
     }
     let _ = writeln!(
         out,
-        "not       : motorun kurduğu araçlar eklentiler arasında paylaşılır, silinmedi"
+        "note      : the tools the engine installed are shared between plugins; not deleted"
     );
     out
 }
 
-/// İndeks üretimi (katalog bakımı, D-071).
+/// Producing the index (catalog maintenance, D-071).
 pub fn plugin_index(report: &PluginIndexReport) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "indeks : {} — {}",
+        "index   : {} — {}",
         report.path.display(),
         if report.written {
-            "yazıldı"
+            "written"
         } else if report.up_to_date {
-            "zaten güncel"
+            "already up to date"
         } else {
-            "yazılmadı"
+            "not written"
         }
     );
-    let _ = writeln!(out, "şablon : {}", report.url_template);
+    let _ = writeln!(out, "template: {}", report.url_template);
     for plugin in &report.plugins {
         let _ = writeln!(out, "\n{} {}", plugin.name, plugin.version);
         for file in &plugin.files {
@@ -628,182 +683,187 @@ pub fn plugin_index(report: &PluginIndexReport) -> String {
             );
         }
     }
-    let _ = writeln!(out, "\n{} eklenti", report.plugins.len());
+    let _ = writeln!(out, "\n{}", count(report.plugins.len(), "plugin"));
     out
 }
 
-/// Karmanın ilk 12 hanesi — terminalde 64 hane okunmaz.
+/// The first 12 digits of a hash — 64 digits are unreadable in a terminal.
 fn short(hash: &str) -> &str {
     hash.get(..12).unwrap_or(hash)
 }
 
-/// İzinlerin ne kadarının zorlandığını söyleyen not (D-040 → D-069).
+/// A note saying how much of the permissions is enforced (D-040 → D-069).
 ///
-/// Her liste ve onay çıktısında görünüyor: kullanıcı olmayan bir korumaya
-/// güvenmemeli, var olanın sınırını da bilmeli. api 2'de eklentinin kendisi
-/// hapsediliyor; motorun kurduğu araçlar (yt-dlp) hapsedilmiyor.
+/// It shows up in every list and consent output: the user must not trust a
+/// protection that does not exist, and must know the limits of the one that
+/// does. In api 2 the plugin itself is confined; the tools the engine installs
+/// (yt-dlp) are not.
 fn enforcement_notice(enforced: bool) -> &'static str {
     if enforced {
-        "not: izinler zorlanıyor — eklenti yalnızca beyan ettiği ana bilgisayarlara bağlanabilir \
-         ve dosya sistemine erişemez.\n\
-         motorun kurduğu araçlar (yt-dlp gibi) ayrı programlardır ve bu sınırın dışındadır."
+        "note: permissions are enforced — the plugin can only connect to the hosts it declares \
+         and cannot access the file system.\n\
+         the tools the engine installs (like yt-dlp) are separate programs and are outside this boundary."
     } else {
-        "not: izinler zorlanmıyor — beyan bir sözleşmedir, güvenlik duvarı değil.\n\
-         eklenti sizin bütün yetkinizle çalışır."
+        "note: permissions are not enforced — the declaration is a contract, not a firewall.\n\
+         the plugin runs with all of your privileges."
     }
 }
 
-/// Sır deposundaki anahtar adları.
+/// The key names in the secret store.
 pub fn secret_list(report: &SecretListReport) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
     if report.namespaces.is_empty() {
-        let _ = writeln!(out, "kayıtlı sır yok");
+        let _ = writeln!(out, "no secrets stored");
         return out;
     }
     for (namespace, keys) in &report.namespaces {
         let _ = writeln!(out, "{namespace}: {}", keys.join(", "));
     }
-    let _ = writeln!(out, "\ndeğerler gösterilmez; yalnızca anahtar adları.");
+    let _ = writeln!(out, "\nvalues are not shown; only key names.");
     out
 }
 
-/// Sır yazma/silme sonucu.
+/// The result of writing/removing a secret.
 pub fn secret_write(report: &SecretWriteReport) -> String {
     let verb = if report.action == "remove" {
-        "silindi"
+        "removed"
     } else {
-        "yazıldı"
+        "written"
     };
     format!("{} / {} {verb}\n", report.namespace, report.key)
 }
 
-/// Sağlayıcı sınaması.
+/// A provider test.
 pub fn provider_test(report: &ProviderTestReport) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
-    let _ = writeln!(out, "sağlayıcı : {}", report.info.id);
-    let _ = writeln!(out, "ad        : {}", report.info.display_name);
-    let _ = writeln!(out, "yetenek   : {}", report.info.capabilities);
-    // "ERİŞİLEMİYOR" demiyoruz: `reachable == false`'ın iki sebebi var ve
-    // biri "sunucu ayakta ama kimliği reddetti". Başlık ikisini de kapsayan
-    // kelimeyi seçiyor, hangisi olduğunu alttaki `not` söylüyor (D-023).
+    let _ = writeln!(out, "provider  : {}", report.info.id);
+    let _ = writeln!(out, "name      : {}", report.info.display_name);
+    let _ = writeln!(out, "capability: {}", report.info.capabilities);
+    // We do not say "UNREACHABLE": `reachable == false` has two causes, and
+    // one is "the server is up but refused the credentials". The heading picks
+    // the word that covers both; the `note` below says which one (D-023).
     let _ = writeln!(
         out,
-        "durum     : {}",
+        "state     : {}",
         if report.health.reachable {
-            "kullanılabilir"
+            "available"
         } else {
-            "KULLANILAMIYOR"
+            "UNAVAILABLE"
         }
     );
     if let Some(count) = report.health.track_count {
-        let _ = writeln!(out, "parça     : {count}");
+        let _ = writeln!(out, "tracks    : {count}");
     }
     if let Some(detail) = &report.health.detail {
-        let _ = writeln!(out, "not       : {detail}");
+        let _ = writeln!(out, "note      : {detail}");
     }
     out
 }
 
-/// Tarama özeti.
+/// The scan summary.
 pub fn scan(report: &ScanReport) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
     if report.dirs.is_empty() {
         let _ = writeln!(
             out,
-            "müzik dizini bulunamadı — HEADSHELL_MUSIC_DIRS ayarlayın\n\
-             (örnek: HEADSHELL_MUSIC_DIRS=~/Müzik headshell provider scan)"
+            "no music directory found — set HEADSHELL_MUSIC_DIRS\n\
+             (example: HEADSHELL_MUSIC_DIRS=~/Music headshell provider scan)"
         );
         return out;
     }
     if !report.scanned {
-        // Atlandığını **söylüyoruz**: sessizce hiçbir şey yapmamak,
-        // kullanıcıya taradığımızı düşündürürdü.
-        let _ = writeln!(out, "tarama atlandı ({})", report.reason);
+        // We **say** it was skipped: silently doing nothing would make the
+        // user think we scanned.
+        let _ = writeln!(out, "scan skipped ({})", report.reason);
         return out;
     }
     for dir in &report.dirs {
-        let _ = writeln!(out, "tarandı: {}", dir.display());
+        let _ = writeln!(out, "scanned: {}", dir.display());
     }
     let s = &report.summary;
-    let _ = writeln!(out, "  görülen dosya : {}", s.files_seen);
-    let _ = writeln!(out, "  ses dosyası   : {}", s.audio_files);
-    let _ = writeln!(out, "  indekslenen   : {}", s.indexed);
+    let _ = writeln!(out, "  files seen    : {}", s.files_seen);
+    let _ = writeln!(out, "  audio files   : {}", s.audio_files);
+    let _ = writeln!(out, "  indexed       : {}", s.indexed);
     if s.unchanged > 0 {
-        let _ = writeln!(out, "  değişmemiş    : {} (yeniden okunmadı)", s.unchanged);
+        let _ = writeln!(out, "  unchanged     : {} (not read again)", s.unchanged);
     }
     if s.tag_fallback > 0 {
-        let _ = writeln!(out, "  etiketsiz     : {} (dosya adından)", s.tag_fallback);
+        let _ = writeln!(
+            out,
+            "  untagged      : {} (from the file name)",
+            s.tag_fallback
+        );
     }
     if s.failed > 0 {
-        let _ = writeln!(out, "  okunamayan    : {}", s.failed);
+        let _ = writeln!(out, "  unreadable    : {}", s.failed);
     }
     if s.unreadable_dirs > 0 {
-        let _ = writeln!(out, "  atlanan dizin : {}", s.unreadable_dirs);
+        let _ = writeln!(out, "  skipped dirs  : {}", s.unreadable_dirs);
     }
 
     let w = &report.write;
     let _ = writeln!(
         out,
-        "katalog: yeni {} · güncellenen {} · düşen {}",
+        "catalog: new {} · updated {} · dropped {}",
         w.inserted, w.updated, w.removed
     );
     out
 }
 
-/// Sunucu kaydı sonucu.
+/// The result of registering a server.
 ///
-/// Token ya da anahtar **basılmaz**: çekirdeğin verdiği özet zaten onları
-/// taşımıyor, burada da yeniden okunacak bir yer yok.
+/// The token or key **is not printed**: the summary the core gives does not
+/// carry them anyway, and there is nowhere here to read them back from.
 pub fn server_add(report: &ServerAddReport) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
     let s = &report.server;
-    let _ = writeln!(out, "kaydedildi: {} ({})", s.id, s.kind);
-    let _ = writeln!(out, "adres     : {}", s.url);
-    let _ = writeln!(out, "kullanıcı : {}", s.username);
-    let _ = writeln!(out, "kimlik    : {}", s.auth);
+    let _ = writeln!(out, "registered: {} ({})", s.id, s.kind);
+    let _ = writeln!(out, "address   : {}", s.url);
+    let _ = writeln!(out, "user      : {}", s.username);
+    let _ = writeln!(out, "auth      : {}", s.auth);
     let _ = writeln!(
         out,
-        "doğrulama : {}",
+        "verified  : {}",
         if report.verified {
-            "sunucuya bağlanıldı"
+            "connected to the server"
         } else {
-            "atlandı (--no-verify)"
+            "skipped (--no-verify)"
         }
     );
-    // Gözlemler yutulmuyor: zayıf entropi ya da öğrenilemeyen alan
-    // kullanıcının görmesi gereken şeyler (K9).
+    // Observations are not swallowed: weak entropy or a field that could not
+    // be learned are things the user needs to see (K9).
     for note in &report.notes {
-        let _ = writeln!(out, "not       : {note}");
+        let _ = writeln!(out, "note      : {note}");
     }
-    let _ = writeln!(out, "\nsına: headshell provider test {}", s.id);
+    let _ = writeln!(out, "\ntest it: headshell provider test {}", s.id);
     out
 }
 
-/// Sunucu kaydının silinmesi.
+/// Deleting a server record.
 pub fn server_remove(report: &ServerRemoveReport) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "silindi: {} (kalan kayıt: {})",
+        "removed: {} (records left: {})",
         report.id, report.remaining
     );
     out
 }
 
-/// Kayıtlı uzak sunucular.
+/// The registered remote servers.
 pub fn server_list(report: &ServerListReport) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
     if report.servers.is_empty() {
         let _ = writeln!(
             out,
-            "kayıtlı uzak sunucu yok\n\
-             (örnek: headshell provider add subsonic --url https://muzik.ev --user adin)"
+            "no registered remote servers\n\
+             (example: headshell provider add subsonic --url https://music.home --user you)"
         );
         return out;
     }
@@ -818,21 +878,21 @@ pub fn server_list(report: &ServerListReport) -> String {
             server.auth
         );
     }
-    // "Nereye yazıldı?" sorusu tanıya ait; kullanıcı dosyayı yedeklerken
-    // ya da elle düzeltirken buna bakıyor.
-    let _ = writeln!(out, "\nkayıt dosyası: {}", report.path.display());
+    // "Where was it written?" is a diagnostic question; the user looks at it
+    // while backing up the file or fixing it by hand.
+    let _ = writeln!(out, "\nrecord file: {}", report.path.display());
     out
 }
 
-/// Çalma sonucu.
+/// The play result.
 pub fn play(report: &PlayReport) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "{} parça kuyruğa alındı{}",
-        report.queued.len(),
-        if report.played { "" } else { " (çalınmadı)" }
+        "{} queued{}",
+        count(report.queued.len(), "track"),
+        if report.played { "" } else { " (not played)" }
     );
     for (index, item) in report.queued.iter().enumerate().take(10) {
         let _ = writeln!(
@@ -843,15 +903,19 @@ pub fn play(report: &PlayReport) -> String {
         );
     }
     if report.queued.len() > 10 {
-        let _ = writeln!(out, "  … ve {} parça daha", report.queued.len() - 10);
+        let _ = writeln!(
+            out,
+            "  … and {} more",
+            count(report.queued.len() - 10, "track")
+        );
     }
     if report.played {
-        let _ = writeln!(out, "kaydedilen dinleme: {}", report.listens_recorded);
+        let _ = writeln!(out, "listens recorded: {}", report.listens_recorded);
     }
     out
 }
 
-/// Metni belirtilen genişliğe kırpar (Unicode karakter sayısına göre).
+/// Cuts text to the given width (by Unicode character count).
 fn truncate(input: &str, width: usize) -> String {
     if input.chars().count() <= width {
         return input.to_owned();
@@ -865,10 +929,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn counts_take_the_singular_only_for_one() {
+        assert_eq!(count(0_usize, "play"), "0 plays");
+        assert_eq!(count(1_usize, "play"), "1 play");
+        assert_eq!(count(2_u64, "hour"), "2 hours");
+        assert_eq!(
+            plays(1).len(),
+            plays(2).len(),
+            "the column must stay aligned"
+        );
+    }
+
+    #[test]
     fn duration_switches_to_hours() {
-        assert_eq!(duration(90_000), "1dk");
-        assert_eq!(duration(3_600_000), "1sa 0dk");
-        assert_eq!(duration(5_400_000), "1sa 30dk");
+        assert_eq!(duration(90_000), "1m");
+        assert_eq!(duration(3_600_000), "1h 0m");
+        assert_eq!(duration(5_400_000), "1h 30m");
     }
 
     #[test]

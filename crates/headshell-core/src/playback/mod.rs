@@ -1,25 +1,28 @@
-//! Oynatma (Faz 1).
+//! Playback (Phase 1).
 //!
-//! ## Katmanlar
+//! ## Layers
 //!
-//! - [`anchor`] — durumun tek gösterimi: [`PlaybackAnchor`] (D-015).
-//!   Tüketici pozisyonu çapadan kendisi hesaplar; çekirdek bildirim yağdırmaz.
-//! - [`queue`] — kuyruk, tekrar, karıştırma. Saf veri yapısı.
-//! - `engine` — symphonia (çözme) + cpal (çıkış). **`audio` feature'ı
-//!   arkasında** (D-016): kapalıyken kuyruk ve çapa yine derlenir, yalnızca
-//!   gerçek ses çıkışı düşer. Sunucu ve mobil derlemeleri ALSA'ya bağlanmasın.
+//! - [`anchor`] — the single representation of state: [`PlaybackAnchor`]
+//!   (D-015). The consumer computes the position from the anchor itself; the
+//!   core does not shower it with notifications.
+//! - [`queue`] — the queue, repeat, shuffle. A pure data structure.
+//! - `engine` — symphonia (decoding) + cpal (output). **Behind the `audio`
+//!   feature** (D-016): with it off the queue and the anchor still compile,
+//!   only the real audio output drops out. Server and mobile builds should
+//!   not be tied to ALSA.
 //!
-//! ## Neden çapa
+//! ## Why an anchor
 //!
-//! Faz 4'ün oda senkron primitifi birebir [`PlaybackAnchor`]. Bugün yerel
-//! oynatma için yazılıyor, yarın ağdan yayınlanacak — iki ayrı durum modeli
-//! tutmamak için baştan aynı tip.
+//! Phase 4's room sync primitive is exactly [`PlaybackAnchor`]. Today it is
+//! written for local playback, tomorrow it will be broadcast over the network
+//! — it is the same type from the start so we do not keep two separate state
+//! models.
 
 pub mod anchor;
 #[cfg(feature = "audio")]
 pub mod engine;
-/// Uzak akışı symphonia'ya bağlayan ilerlemeli okuyucu (§1.3).
-/// Hem ses hattı hem HTTP istemcisi açıkken derlenir.
+/// A progressive reader connecting a remote stream to symphonia (§1.3).
+/// Compiled when both the audio pipeline and the HTTP client are on.
 #[cfg(all(feature = "audio", feature = "http-client"))]
 pub mod http_source;
 pub mod live;

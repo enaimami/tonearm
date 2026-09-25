@@ -1,19 +1,19 @@
-//! Tel katmanı: satır bazlı JSON-RPC 2.0 (protokol §tel biçimi).
+//! The wire layer: line-based JSON-RPC 2.0 (the protocol's §wire format).
 //!
-//! stdout **yalnızca** protokol satırlarıdır. Her günlük kaydı ya `log`
-//! bildirimi olarak buradan, ya da stderr'den gider — çekirdek stderr'i
-//! `tracing`'e aktarıyor, yani ikisi de kaybolmuyor.
+//! stdout is **only** protocol lines. Every log record goes either from here as
+//! a `log` notification or through stderr — the core forwards stderr into
+//! `tracing`, so neither is lost.
 
 use std::io::Write;
 
 use serde::Deserialize;
 
-/// JSON-RPC'nin "metot yok" kodu. Opsiyonel metotların cevabı budur.
+/// JSON-RPC's "method not found" code. It is the answer for optional methods.
 pub const CODE_METHOD_NOT_FOUND: i64 = -32601;
-/// Uygulama hatası aralığı: süreç sağ, çağrı reddedildi.
+/// The application error range: the process is alive, the call was refused.
 pub const CODE_PLUGIN_ERROR: i64 = -32000;
 
-/// Çekirdekten gelen satır.
+/// A line coming from the core.
 #[derive(Debug, Deserialize)]
 pub struct Incoming {
     #[serde(default)]
@@ -24,8 +24,9 @@ pub struct Incoming {
     pub params: Option<serde_json::Value>,
 }
 
-/// Çağrıyı düşüren ama süreci öldürmeyen hata (K5: eklenti çökerse çekirdek
-/// düşmez — biz de çökmemeyi tercih ediyoruz, hata döndürmek yeterli).
+/// An error that drops the call but does not kill the process (K5: if the
+/// plugin crashes the core does not fall over — we still prefer not to crash;
+/// returning an error is enough).
 #[derive(Debug)]
 pub struct PluginError(String);
 
@@ -45,13 +46,14 @@ impl std::error::Error for PluginError {}
 
 pub type Result<T> = std::result::Result<T, PluginError>;
 
-/// `Err(PluginError)` kısayolu. Metinler Türkçe (D-036).
+/// A shortcut for `Err(PluginError)`. The texts are in English (D-036, D-073).
 pub fn err<T>(message: impl Into<String>) -> Result<T> {
     Err(PluginError::new(message))
 }
 
-/// Bir `anyhow`/`std` hatasını mesaja çevirir, **sebep zincirini koruyarak.**
-/// Yalnızca en dıştaki cümleyi göstermek, tanının yarısını atmak demektir (K9).
+/// Turns an `anyhow`/`std` error into a message, **keeping the chain of
+/// causes.** Showing only the outermost sentence throws away half of the
+/// diagnosis (K9).
 pub fn chain_text(error: &anyhow::Error) -> String {
     let mut parts = Vec::new();
     for cause in error.chain() {
@@ -70,22 +72,22 @@ fn send(value: &serde_json::Value) {
         .and_then(|()| out.write_all(b"\n"))
         .and_then(|()| out.flush());
     if let Err(error) = written {
-        // Protokol borusu kapandıysa yapacak bir şey yok ama sessiz kalmıyoruz:
-        // stderr çekirdeğin `tracing`'ine akıyor.
-        eprintln!("protokol satırı yazılamadı: {error}");
+        // If the protocol pipe is closed there is nothing to do, but we do not
+        // stay silent: stderr flows into the core's `tracing`.
+        eprintln!("could not write a protocol line: {error}");
     }
 }
 
-/// Başarılı cevap. `id` yoksa (bildirim) cevap gönderilmez.
+/// A successful answer. Without an `id` (a notification) no answer is sent.
 pub fn reply(id: Option<u64>, result: serde_json::Value) {
     let Some(id) = id else { return };
     send(&serde_json::json!({"jsonrpc": "2.0", "id": id, "result": result}));
 }
 
-/// Hata cevabı.
+/// An error answer.
 pub fn fail(id: Option<u64>, code: i64, message: &str) {
     let Some(id) = id else {
-        eprintln!("kimliksiz isteğe hata döndürülemez: {message}");
+        eprintln!("cannot return an error to a request without an id: {message}");
         return;
     };
     send(&serde_json::json!({
@@ -95,7 +97,7 @@ pub fn fail(id: Option<u64>, code: i64, message: &str) {
     }));
 }
 
-/// `log` bildirimi: çekirdeğin kullanıcıya gösterdiği kanal.
+/// A `log` notification: the channel the core shows the user.
 pub fn log(level: &str, message: impl AsRef<str>) {
     send(&serde_json::json!({
         "jsonrpc": "2.0",
@@ -110,18 +112,18 @@ mod tests {
 
     #[test]
     fn a_cause_chain_becomes_one_line_without_repeating_itself() {
-        let error = anyhow::anyhow!("kök sebep")
-            .context("orta katman")
-            .context("dış katman");
+        let error = anyhow::anyhow!("root cause")
+            .context("middle layer")
+            .context("outer layer");
         let text = chain_text(&error);
-        assert!(text.contains("dış katman"), "{text}");
-        assert!(text.contains("kök sebep"), "{text}");
-        assert!(!text.contains('\n'), "tel biçimi satır bazlı: {text}");
+        assert!(text.contains("outer layer"), "{text}");
+        assert!(text.contains("root cause"), "{text}");
+        assert!(!text.contains('\n'), "the wire format is line-based: {text}");
     }
 
     #[test]
     fn a_repeated_cause_is_not_printed_twice() {
-        let error = anyhow::anyhow!("aynı").context("aynı");
-        assert_eq!(chain_text(&error), "aynı");
+        let error = anyhow::anyhow!("same").context("same");
+        assert_eq!(chain_text(&error), "same");
     }
 }

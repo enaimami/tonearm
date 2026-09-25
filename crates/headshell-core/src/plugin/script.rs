@@ -1,37 +1,38 @@
-//! Eklenti motoru: gömülü QuickJS (D-069).
+//! The plugin engine: embedded QuickJS (D-069).
 //!
-//! Her eklenti **kendi iş parçacığında, kendi QuickJS çalışma zamanında**
-//! koşar. İş parçacığı ilk çağrıda açılır (tembel, api 1'deki süreç gibi),
-//! betiği ES modülü olarak değerlendirir ve sonra iş bekler: çağıran bir
-//! kanal üzerinden fonksiyon adı + argüman gönderir, cevabı zaman aşımıyla
-//! bekler.
+//! Every plugin runs **on its own thread, in its own QuickJS runtime**. The
+//! thread is started on the first call (lazily, like the process in api 1),
+//! evaluates the script as an ES module, and then waits for work: the
+//! caller sends a function name + arguments over a channel and waits for
+//! the answer with a timeout.
 //!
-//! ## Neden ayrı bir iş parçacığı
+//! ## Why a separate thread
 //!
-//! 1. **Zaman aşımı.** JS döngüde takılırsa QuickJS'in kesme kancası onu
-//!    süre dolunca durdurur — `try/catch` bile bunu yakalayamaz (ölçüldü).
-//!    Ama JS bir motor çağrısında (HTTP, araç) beklerken kanca çalışamaz;
-//!    o durumda çağıranı kurtaran şey cevabı kanaldan **süreyle**
-//!    beklemesidir. Aynı iş parçacığında olsaydık bekleyen bir HTTP
-//!    isteği çekirdeği de bekletirdi.
-//! 2. **`Send`.** QuickJS çalışma zamanı iş parçacıkları arasında
-//!    taşınamaz; `Provider` ise `Send + Sync` olmak zorunda. Çalışma
-//!    zamanını kendi iş parçacığında doğurup orada öldürmek, `rquickjs`'in
-//!    `parallel` feature'ına gerek bırakmıyor.
+//! 1. **Timeouts.** If the JS gets stuck in a loop, QuickJS's interrupt hook
+//!    stops it when the time is up — not even `try/catch` can catch that
+//!    (measured). But while the JS waits inside an engine call (HTTP, a
+//!    tool) the hook cannot run; in that case what saves the caller is
+//!    waiting for the answer on the channel **with a time limit**. On the
+//!    same thread, a pending HTTP request would make the core wait too.
+//! 2. **`Send`.** A QuickJS runtime cannot move between threads; a
+//!    `Provider` has to be `Send + Sync`. Creating the runtime on its own
+//!    thread and letting it die there removes the need for `rquickjs`'s
+//!    `parallel` feature.
 //!
-//! ## Neyi tutar, neyi tutmaz
+//! ## What it holds and what it doesn't
 //!
-//! Tutar: zaman (kesme + bekleme süresi), bellek (çalışma zamanı başına
-//! tavan), yığın (derin özyineleme istisnaya döner), ağ ve dosya (eklenti
-//! dış dünyaya yalnızca `host`'un kapılarından çıkar, bkz. [`super::host`]).
-//! JS'in fırlattığı her şey — bellek taşması dahil — bir istisnadır ve
-//! çekirdeği düşürmez.
+//! It holds: time (interrupt + wait limit), memory (a cap per runtime), the
+//! stack (deep recursion turns into an exception), the network and files
+//! (the plugin reaches the outside world only through `host`'s gates, see
+//! [`super::host`]). Anything the JS throws — including running out of
+//! memory — is an exception and does not bring the core down.
 //!
-//! Tutmaz: QuickJS'in **kendi** C kodundaki bir çökme. api 1'de eklenti ayrı
-//! süreçti ve süreç ölürse çekirdek yaşardı; api 2'de eklenti çekirdeğin
-//! adres uzayında. Bu takas D-069'da bilerek yapıldı: karşılığında
-//! eklentiler kurulum istemiyor, izinler zorlanıyor ve motor mobile
-//! gidebiliyor (iOS alt süreç açtırmıyor).
+//! It does not hold: a crash in QuickJS's **own** C code. In api 1 the
+//! plugin was a separate process and the core survived if it died; in api 2
+//! the plugin lives in the core's address space. This trade was made on
+//! purpose in D-069: in return, plugins need no install, permissions are
+//! enforced, and the engine can go to mobile (iOS does not allow spawning
+//! subprocesses).
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -49,37 +50,38 @@ use super::ScriptSpec;
 use super::host::{self, HostState};
 use super::protocol::export;
 
-/// Bir eklentinin çalışma zamanının bellek tavanı.
+/// The memory cap of a plugin's runtime.
 ///
-/// InnerTube'un arama cevabı ~1-2 MB JSON ve QuickJS'te ayrıştırılmış hâli
-/// bunun birkaç katı. Tavan aşılırsa JS "out of memory" istisnası alır —
-/// çekirdek değil, o çağrı düşer.
+/// InnerTube's search response is ~1-2 MB of JSON, and its parsed form in
+/// QuickJS is a few times that. If the cap is exceeded the JS gets an "out
+/// of memory" exception — that call fails, not the core.
 const MEMORY_LIMIT: usize = 128 * 1024 * 1024;
 
-/// JS yığınının tavanı. İş parçacığı yığınından ([`THREAD_STACK`]) küçük
-/// olmalı: QuickJS kendi sınırını denetler, işletim sisteminin sınırına
-/// çarpmadan önce "Maximum call stack size exceeded" fırlatır.
+/// The JS stack cap. It must be smaller than the thread's stack
+/// ([`THREAD_STACK`]): QuickJS checks its own limit and throws "Maximum call
+/// stack size exceeded" before hitting the operating system's.
 const JS_STACK_LIMIT: usize = 1024 * 1024;
 
-/// Eklenti iş parçacığının yığını.
+/// The plugin thread's stack.
 const THREAD_STACK: usize = 8 * 1024 * 1024;
 
-/// Süre dolduktan sonra cevabı beklemeye devam edilen pay.
+/// How much longer the answer is waited for after the time is up.
 ///
-/// Kesme kancası JS'i süre dolunca durdurur ama cevabın kanaldan gelmesi
-/// birkaç milisaniye sürer; bu pay o yarışı kapatıyor. Pay da dolarsa
-/// eklenti bir motor çağrısında takılı demektir ve bırakılır.
+/// The interrupt hook stops the JS when the time is up, but the answer takes
+/// a few milliseconds to arrive on the channel; this margin closes that
+/// race. If the margin runs out too, the plugin is stuck in an engine call
+/// and is dropped.
 const GRACE: Duration = Duration::from_secs(2);
 
-/// Kapatırken iş parçacığının bitmesini bekleme süresi — sır dosyalarını
-/// silmesine vakit kalsın diye.
+/// How long shutdown waits for the thread to finish — so it has time to
+/// delete the secret files.
 const SHUTDOWN_WAIT: Duration = Duration::from_secs(2);
 
-/// Motorun eklentiye her şeyden önce verdiği küçük katman: `console` ve
-/// `host`'un dondurulması.
+/// The small layer the engine gives the plugin before anything else:
+/// `console`, and freezing `host`.
 ///
-/// `console` ECMAScript'in değil tarayıcıların nesnesi; QuickJS'te yok. Ama
-/// eklenti yazarının eli ona gidiyor — `host.log`'a bağlanıyor.
+/// `console` is a browser object, not an ECMAScript one; QuickJS does not
+/// have it. But plugin authors reach for it — it is wired to `host.log`.
 const PRELUDE: &str = r#"
 "use strict";
 (() => {
@@ -110,19 +112,19 @@ const PRELUDE: &str = r#"
 })();
 "#;
 
-/// Bir çağrının sonucu, iş parçacığından çağırana.
+/// The result of a call, from the thread to the caller.
 #[derive(Debug)]
 enum Outcome {
     Value(serde_json::Value),
-    /// JS bir hata fırlattı.
+    /// The JS threw an error.
     Threw {
         message: String,
         location: String,
     },
-    /// Kesme kancası süreyi doldurdu.
+    /// The interrupt hook ran out the time.
     Interrupted,
-    /// Eklenti sözleşmeye uymadı (fonksiyon yok, dönüş JSON'a çevrilemiyor,
-    /// söz hiç çözülmüyor).
+    /// The plugin broke the contract (no such function, the return value cannot
+    /// be turned into JSON, a promise that never resolves).
     Contract(String),
 }
 
@@ -133,7 +135,7 @@ struct Job {
     reply: mpsc::SyncSender<Outcome>,
 }
 
-/// Bir eklentinin iş parçacığıyla konuşan uç.
+/// The end that talks to a plugin's thread.
 pub(crate) struct ScriptWorker {
     plugin: String,
     jobs: Option<mpsc::Sender<Job>>,
@@ -149,12 +151,12 @@ impl std::fmt::Debug for ScriptWorker {
 }
 
 impl ScriptWorker {
-    /// İş parçacığını açar, betiği değerlendirir, dışa aktarımları denetler.
+    /// Starts the thread, evaluates the script, checks the exports.
     ///
     /// # Errors
-    /// Betik okunamazsa, değerlendirme hata fırlatırsa, süre dolarsa ya da
-    /// beyan edilen bir yeteneğin fonksiyonu dışa aktarılmamışsa — hepsi
-    /// [`Stage::PluginStart`]'ta.
+    /// If the script cannot be read, evaluation throws, the time runs out, or
+    /// the function for a declared capability is not exported — all at
+    /// [`Stage::PluginStart`].
     pub(crate) fn start(spec: ScriptSpec, timeout: Duration) -> Result<Self> {
         let plugin = spec.plugin.clone();
         let (job_tx, job_rx) = mpsc::channel::<Job>();
@@ -162,13 +164,13 @@ impl ScriptWorker {
         let (done_tx, done_rx) = mpsc::sync_channel::<()>(1);
 
         std::thread::Builder::new()
-            .name(format!("eklenti:{plugin}"))
+            .name(format!("plugin:{plugin}"))
             .stack_size(THREAD_STACK)
             .spawn(move || {
                 worker_main(spec, timeout, &job_rx, &ready_tx);
                 let _ = done_tx.send(());
             })
-            .map_err(|err| crashed(&plugin, format!("iş parçacığı açılamadı: {err}")))?;
+            .map_err(|err| crashed(&plugin, format!("could not start the thread: {err}")))?;
 
         match ready_rx.recv_timeout(timeout + GRACE) {
             Ok(Ok(())) => Ok(Self {
@@ -177,21 +179,22 @@ impl ScriptWorker {
                 done: done_rx,
             }),
             Ok(Err(err)) => Err(err),
-            // Kanal düşürülünce iş parçacığı yüklemeyi bitirdiği an çıkar.
-            Err(RecvTimeoutError::Timeout) => Err(timed_out(&plugin, "yükleme", timeout)),
+            // Once the channel is dropped, the thread exits as soon as it finishes
+            // loading.
+            Err(RecvTimeoutError::Timeout) => Err(timed_out(&plugin, "load", timeout)),
             Err(RecvTimeoutError::Disconnected) => Err(crashed(
                 &plugin,
-                "iş parçacığı yükleme sırasında düştü".to_owned(),
+                "the thread fell over while loading".to_owned(),
             )),
         }
     }
 
-    /// Dışa aktarılmış bir fonksiyonu çağırır; dönüşü JSON olarak verir.
+    /// Calls an exported function; returns its value as JSON.
     ///
     /// # Errors
-    /// Zaman aşımı ([`ErrorKind::PluginTimeout`]), JS hatası
-    /// ([`ErrorKind::PluginThrew`]), sözleşme ihlali
-    /// ([`ErrorKind::PluginContract`]) ya da düşmüş iş parçacığı
+    /// A timeout ([`ErrorKind::PluginTimeout`]), a JS error
+    /// ([`ErrorKind::PluginThrew`]), a contract violation
+    /// ([`ErrorKind::PluginContract`]) or a dead thread
     /// ([`ErrorKind::PluginCrashed`]).
     pub(crate) fn call(
         &mut self,
@@ -200,7 +203,10 @@ impl ScriptWorker {
         timeout: Duration,
     ) -> Result<serde_json::Value> {
         let Some(jobs) = &self.jobs else {
-            return Err(crashed(&self.plugin, "motor kapatılmıştı".to_owned()));
+            return Err(crashed(
+                &self.plugin,
+                "the engine had been shut down".to_owned(),
+            ));
         };
         let (reply_tx, reply_rx) = mpsc::sync_channel(1);
         jobs.send(Job {
@@ -209,7 +215,7 @@ impl ScriptWorker {
             timeout,
             reply: reply_tx,
         })
-        .map_err(|_| crashed(&self.plugin, "iş parçacığı artık yok".to_owned()))?;
+        .map_err(|_| crashed(&self.plugin, "the thread no longer exists".to_owned()))?;
 
         match reply_rx.recv_timeout(timeout + GRACE) {
             Ok(Outcome::Value(value)) => Ok(value),
@@ -228,16 +234,16 @@ impl ScriptWorker {
             Ok(Outcome::Contract(detail)) => Err(contract(&self.plugin, function, detail)),
             Err(RecvTimeoutError::Disconnected) => Err(crashed(
                 &self.plugin,
-                format!("{function} çağrısı sırasında iş parçacığı düştü"),
+                format!("the thread fell over during the {function} call"),
             )),
         }
     }
 
-    /// İş parçacığını durdurur ve kısa bir süre bitmesini bekler.
+    /// Stops the thread and waits a short while for it to finish.
     ///
-    /// Beklemenin sebebi temizlik: iş parçacığı çıkarken eklentiye verilen
-    /// sır dosyalarını siliyor ([`super::host`]). Bir çağrıda takılı kalmış
-    /// bir iş parçacığı beklenmez; o, takıldığı çağrı bitince kendi çıkar.
+    /// The wait is for cleanup: as it exits, the thread deletes the secret files
+    /// given to the plugin ([`super::host`]). A thread stuck in a call is not
+    /// waited for; it exits on its own when the call it is stuck in ends.
     pub(crate) fn shutdown(&mut self) {
         if self.jobs.take().is_some() {
             let _ = self.done.recv_timeout(SHUTDOWN_WAIT);
@@ -262,7 +268,7 @@ fn crashed(plugin: &str, detail: String) -> Error {
 }
 
 fn timed_out(plugin: &str, method: &str, timeout: Duration) -> Error {
-    let stage = if method == "yükleme" {
+    let stage = if method == "load" {
         Stage::PluginStart
     } else {
         Stage::ProviderCall
@@ -288,7 +294,7 @@ fn contract(plugin: &str, method: &str, detail: String) -> Error {
     )
 }
 
-/// İş parçacığının gövdesi: kur, yükle, hazır de, iş bekle.
+/// The thread's body: set up, load, report ready, wait for work.
 fn worker_main(
     spec: ScriptSpec,
     load_timeout: Duration,
@@ -309,15 +315,18 @@ fn worker_main(
     let runtime = match Runtime::new() {
         Ok(runtime) => runtime,
         Err(err) => {
-            let _ = ready.send(Err(crashed(&plugin, format!("QuickJS kurulamadı: {err}"))));
+            let _ = ready.send(Err(crashed(
+                &plugin,
+                format!("could not set up QuickJS: {err}"),
+            )));
             return;
         }
     };
     runtime.set_memory_limit(MEMORY_LIMIT);
     runtime.set_max_stack_size(JS_STACK_LIMIT);
 
-    // Kesme kancası ve motor çağrıları aynı süreyi görür: kanca JS'i,
-    // motor çağrıları kendilerini (HTTP'ye çıkmadan önce) durdurur.
+    // The interrupt hook and the engine calls see the same deadline: the hook
+    // stops the JS, and engine calls stop themselves (before going to HTTP).
     let deadline: Rc<Cell<Option<Instant>>> = Rc::new(Cell::new(None));
     let fired = Rc::new(Cell::new(false));
     {
@@ -337,7 +346,7 @@ fn worker_main(
         Err(err) => {
             let _ = ready.send(Err(crashed(
                 &plugin,
-                format!("QuickJS bağlamı kurulamadı: {err}"),
+                format!("could not set up the QuickJS context: {err}"),
             )));
             return;
         }
@@ -357,33 +366,34 @@ fn worker_main(
                 Stage::PluginStart,
                 ErrorKind::PluginContract {
                     plugin: plugin.clone(),
-                    method: "yükleme".to_owned(),
+                    method: "load".to_owned(),
                     detail,
                 },
             )));
             return;
         }
         if ready.send(Ok(())).is_err() {
-            // Çağıran beklemekten vazgeçti (yükleme süresi doldu).
+            // The caller stopped waiting (the load time ran out).
             return;
         }
 
-        // Kanal kapanınca (`shutdown` ya da sağlayıcı düştü) döngü biter.
+        // When the channel closes (`shutdown`, or the provider was dropped) the
+        // loop ends.
         while let Ok(job) = jobs.recv() {
             fired.set(false);
             deadline.set(Some(Instant::now() + job.timeout));
             let outcome = invoke(&ctx, &module, job.function, job.args, &fired);
             deadline.set(None);
-            // Çağıran beklemekten vazgeçtiyse cevabın gidecek yeri yok.
+            // If the caller stopped waiting, the answer has nowhere to go.
             let _ = job.reply.send(outcome);
         }
     });
-    // `host` burada düşüyor: sır dosyaları siliniyor.
+    // `host` is dropped here: the secret files are deleted.
     drop(host);
 }
 
-/// Önce `host` + `console`, sonra betik. Değerlendirme süreyle sınırlı ve
-/// sırasında ağa çıkılamaz.
+/// `host` + `console` first, then the script. Evaluation is time-limited and
+/// cannot go online.
 fn load<'js>(
     ctx: &Ctx<'js>,
     host: &Rc<HostState>,
@@ -404,11 +414,11 @@ fn load<'js>(
     };
 
     host::install(ctx, Rc::clone(host))
-        .map_err(|err| start_err(format!("motor API'si kurulamadı: {err}")))?;
+        .map_err(|err| start_err(format!("could not set up the engine API: {err}")))?;
     let prelude: std::result::Result<(), _> = ctx.eval(PRELUDE);
     if let Err(err) = prelude {
         return Err(start_err(format!(
-            "başlangıç katmanı değerlendirilemedi: {}",
+            "could not evaluate the prelude: {}",
             caught_text(ctx, err)
         )));
     }
@@ -426,14 +436,14 @@ fn load<'js>(
 
     evaluated.map_err(|err: rquickjs::Error| {
         if fired.get() {
-            return timed_out(&plugin, "yükleme", timeout);
+            return timed_out(&plugin, "load", timeout);
         }
         let (message, location) = describe_caught(CaughtError::from_error(ctx, err));
         Error::new(
             Stage::PluginStart,
             ErrorKind::PluginThrew {
                 plugin: plugin.clone(),
-                method: "yükleme".to_owned(),
+                method: "load".to_owned(),
                 message,
                 location,
             },
@@ -441,17 +451,17 @@ fn load<'js>(
     })
 }
 
-/// Beyan edilen her yeteneğin fonksiyonu dışa aktarılmış mı.
+/// Is the function for every declared capability exported.
 fn check_exports(
     module: &Module<'_, rquickjs::module::Evaluated>,
     capabilities: Capabilities,
 ) -> std::result::Result<(), String> {
-    let mut wanted = vec![(export::HEALTH, "her eklenti")];
+    let mut wanted = vec![(export::HEALTH, "every plugin")];
     if capabilities.contains(Capabilities::SEARCH) {
-        wanted.push((export::SEARCH, "`search` yeteneği"));
+        wanted.push((export::SEARCH, "the `search` capability"));
     }
     if capabilities.contains(Capabilities::STREAM) {
-        wanted.push((export::RESOLVE_SOURCE, "`stream` yeteneği"));
+        wanted.push((export::RESOLVE_SOURCE, "the `stream` capability"));
     }
     let missing: Vec<String> = wanted
         .into_iter()
@@ -460,19 +470,19 @@ fn check_exports(
                 .get::<_, Value>(*name)
                 .is_ok_and(|value| value.is_function())
         })
-        .map(|(name, why)| format!("`{name}` ({why} için gerekli)"))
+        .map(|(name, why)| format!("`{name}` (required for {why})"))
         .collect();
     if missing.is_empty() {
         Ok(())
     } else {
         Err(format!(
-            "betik şu fonksiyonları dışa aktarmıyor: {} — `export function …` ile verilmeli",
+            "the script does not export these functions: {} — provide them with `export function …`",
             missing.join(", ")
         ))
     }
 }
 
-/// Bir fonksiyonu çağırır ve sonucu JSON'a çevirir.
+/// Calls a function and turns the result into JSON.
 fn invoke<'js>(
     ctx: &Ctx<'js>,
     module: &Module<'js, rquickjs::module::Evaluated>,
@@ -481,7 +491,7 @@ fn invoke<'js>(
     fired: &Rc<Cell<bool>>,
 ) -> Outcome {
     let Ok(callee) = module.get::<_, Function>(function) else {
-        return Outcome::Contract(format!("`{function}` dışa aktarılmamış"));
+        return Outcome::Contract(format!("`{function}` is not exported"));
     };
 
     let mut list = Args::new(ctx.clone(), args.len());
@@ -491,8 +501,10 @@ fn invoke<'js>(
             .and_then(|text| ctx.json_parse(text).map_err(|err| err.to_string()));
         match parsed.map(|value| list.push_arg(value)) {
             Ok(Ok(())) => {}
-            Ok(Err(err)) => return Outcome::Contract(format!("argüman verilemedi: {err}")),
-            Err(err) => return Outcome::Contract(format!("argüman verilemedi: {err}")),
+            Ok(Err(err)) => {
+                return Outcome::Contract(format!("could not pass the arguments: {err}"));
+            }
+            Err(err) => return Outcome::Contract(format!("could not pass the arguments: {err}")),
         }
     }
 
@@ -501,14 +513,15 @@ fn invoke<'js>(
         Ok(value) => value,
         Err(err) => return failure(ctx, err, fired),
     };
-    // `async function` bir söz döndürür; iş kuyruğu çözülene kadar yürütülür.
+    // An `async function` returns a promise; the job queue runs until it
+    // resolves.
     let value = match value.as_promise() {
         Some(promise) => match promise.finish::<Value>() {
             Ok(value) => value,
             Err(rquickjs::Error::WouldBlock) => {
                 return Outcome::Contract(format!(
-                    "`{function}` bir söz (Promise) döndürdü ve söz hiç çözülmedi — motorda \
-                     zamanlayıcı yok, beklenecek bir iş de kalmadı"
+                    "`{function}` returned a promise and the promise never resolved — the engine has \
+                     no timers, and there is no work left to wait for"
                 ));
             }
             Err(err) => return failure(ctx, err, fired),
@@ -520,16 +533,18 @@ fn invoke<'js>(
         Ok(Some(text)) => match text.to_string() {
             Ok(text) => match serde_json::from_str(&text) {
                 Ok(json) => Outcome::Value(json),
-                Err(err) => Outcome::Contract(format!("dönüş JSON'a çevrilemedi: {err}")),
+                Err(err) => {
+                    Outcome::Contract(format!("could not turn the return value into JSON: {err}"))
+                }
             },
-            Err(err) => Outcome::Contract(format!("dönüş okunamadı: {err}")),
+            Err(err) => Outcome::Contract(format!("could not read the return value: {err}")),
         },
-        // `undefined` ve fonksiyon JSON'da yok; "değer yok" sayılıyor.
+        // `undefined` and functions do not exist in JSON; they count as "no value".
         Ok(None) => Outcome::Value(serde_json::Value::Null),
         Err(err) => match failure(ctx, err, fired) {
-            Outcome::Threw { message, .. } => {
-                Outcome::Contract(format!("dönüş JSON'a çevrilemedi: {message}"))
-            }
+            Outcome::Threw { message, .. } => Outcome::Contract(format!(
+                "could not turn the return value into JSON: {message}"
+            )),
             other => other,
         },
     }
@@ -543,18 +558,18 @@ fn failure(ctx: &Ctx<'_>, err: rquickjs::Error, fired: &Rc<Cell<bool>>) -> Outco
     Outcome::Threw { message, location }
 }
 
-/// Yakalanan hatayı `(mesaj, konum)` ikilisine çevirir.
+/// Turns a caught error into a `(message, location)` pair.
 ///
-/// Konum yığının **ilk** satırı: `main.js:42:7`. Tamamı değil — tanı
-/// raporu tek satırlık olmalı, ve eklenti yazarının ihtiyacı olan şey
-/// hatanın çıktığı yer.
+/// The location is the **first** line of the stack: `main.js:42:7`. Not the
+/// whole stack — the diagnostics report must be one line, and what the
+/// plugin author needs is where the error came from.
 fn describe_caught(caught: CaughtError<'_>) -> (String, String) {
     match caught {
         CaughtError::Exception(exception) => {
             let message = exception
                 .message()
                 .filter(|message| !message.is_empty())
-                .unwrap_or_else(|| "(mesajsız hata)".to_owned());
+                .unwrap_or_else(|| "(error without a message)".to_owned());
             let location = exception
                 .stack()
                 .as_deref()
@@ -569,11 +584,11 @@ fn describe_caught(caught: CaughtError<'_>) -> (String, String) {
                 .and_then(|text| text.to_string().ok())
                 .unwrap_or_else(|| format!("{value:?}"));
             (
-                format!("hata nesnesi olmayan bir değer fırlattı: {text}"),
+                format!("threw a value that is not an error object: {text}"),
                 String::new(),
             )
         }
-        CaughtError::Error(err) => (format!("motor hatası: {err}"), String::new()),
+        CaughtError::Error(err) => (format!("engine error: {err}"), String::new()),
     }
 }
 
