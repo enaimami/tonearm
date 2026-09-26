@@ -214,7 +214,12 @@ impl UreqClient {
         for header in headers {
             builder = builder.header(&header.name, &header.value);
         }
-        let response = builder.call().map_err(|err| super::network_err(url, err))?;
+        // A stream address carries its key in the query string (Subsonic's
+        // token, a service's signature): errors name it without.
+        let shown = super::without_query(url);
+        let response = builder
+            .call()
+            .map_err(|err| super::network_err(shown, err.to_string().replace(url, shown)))?;
 
         let status = response.status().as_u16();
         if !(200..300).contains(&status) {
@@ -233,7 +238,7 @@ impl UreqClient {
             return Err(crate::Error::new(
                 super::stage_for_status(status),
                 crate::ErrorKind::HttpStatus {
-                    url: url.to_owned(),
+                    url: shown.to_owned(),
                     status,
                     detail,
                 },
@@ -355,6 +360,27 @@ mod tests {
         let mut bytes = Vec::new();
         body.read_to_end(&mut bytes).unwrap();
         assert_eq!(bytes.len(), 10 * 1024);
+    }
+
+    /// A stream refused: the error says where, not with which key.
+    #[test]
+    fn a_refused_stream_is_named_without_its_query_string() {
+        let url = serve_once(|mut stream| {
+            let _ = write!(
+                stream,
+                "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            );
+        });
+        let url = format!("{url}?u=enai&t=26719a1196d2a940&s=c19b2d&id=a1");
+        let Err(err) = UreqClient::for_streams().open_stream(&url, &[]) else {
+            panic!("a 401 must be an error");
+        };
+        let text = err.chain_text();
+        assert!(text.contains("401") && text.contains("/artifact"), "{text}");
+        assert!(
+            !text.contains("26719a") && !text.contains("c19b2d"),
+            "the key must not reach the error: {text}"
+        );
     }
 
     #[test]

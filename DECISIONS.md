@@ -556,6 +556,23 @@ reconsidered together with the plugin permission model in Phase 2.
   address based fallback is used, and that is **not silent** — it goes into the
   registration note.
 
+### Addendum — off the disk, but not out of error texts (2026-09-26)
+
+D-076 found it while writing Subsonic's cover call: every Subsonic request carries the
+`u/t/s` triple in its query string, and an error that named the address carried the
+triple with it — a server answering `500`, a server that can't be reached, a stream
+that won't open. That text goes to `headshell diag`, which is made to be pasted into a
+bug report, and to the interface's notices. The token isn't the password, but with
+the salt beside it, it makes requests as the user.
+
+Now such an address is named without its query string. Subsonic's calls name their
+endpoint (`https://server/rest/search3`), on the network path and the status path
+alike; a stream that fails to open — Subsonic's, or a plugin's, whose signatures
+travel the same way — is named by its host and path. They still say where it failed
+(K9); the key stays out. Only error texts changed: the requests carry what they
+carried. The Subsonic test fails when the fix is taken out; a second test refuses a
+stream from a local server and looks for the key in the error.
+
 ---
 
 ## D-022 — Phase 1.3's test path

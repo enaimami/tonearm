@@ -71,6 +71,8 @@ impl HttpMediaSource {
     pub fn open(url: &str, headers: &[HttpHeader]) -> Result<Self> {
         let client = UreqClient::for_streams();
         let (total, mut reader) = client.open_stream(url, headers)?;
+        // Named without its query string, which may carry a key.
+        let shown = crate::net::without_query(url);
 
         if let Some(len) = total
             && len > MAX_BUFFER_BYTES as u64
@@ -79,7 +81,7 @@ impl HttpMediaSource {
                 Stage::PlaybackDecode,
                 ErrorKind::Audio {
                     detail: format!(
-                        "{url} is {len} bytes; the cap for a single track is {MAX_BUFFER_BYTES} bytes"
+                        "{shown} is {len} bytes; the cap for a single track is {MAX_BUFFER_BYTES} bytes"
                     ),
                 },
             ));
@@ -97,7 +99,7 @@ impl HttpMediaSource {
         });
 
         let writer = Arc::clone(&shared);
-        let label = url.to_owned();
+        let label = shown.to_owned();
         std::thread::Builder::new()
             .name("headshell-http-stream".to_owned())
             .spawn(move || {

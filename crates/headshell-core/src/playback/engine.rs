@@ -750,7 +750,7 @@ fn open_source(source: &AudioSource) -> Result<PreparedTrack> {
             if let Some(ext) = extension_from_url(url) {
                 hint.with_extension(&ext);
             }
-            prepare(Box::new(stream), hint, url)
+            prepare(Box::new(stream), hint, crate::net::without_query(url))
         }
         #[cfg(not(feature = "http-client"))]
         AudioSource::HttpStream { .. } => Err(Error::new(

@@ -86,11 +86,20 @@ impl SubsonicProvider {
     }
 
     /// Calls the endpoint and validates the envelope.
+    ///
+    /// The credentials are in the query string (the `u/t/s` triple, D-021):
+    /// an error names the endpoint, not the address — its text ends up in
+    /// `headshell diag`, which is made to be pasted.
     async fn call(&self, name: &str, params: &[(&str, &str)]) -> Result<SubsonicBody> {
         let url = self.endpoint(name, params);
+        let shown = net::without_query(&url);
         let request = HttpRequest::get(&url);
-        let response = self.http.send(&request).await?;
-        response.error_for_status(&url)?;
+        let response = self
+            .http
+            .send(&request)
+            .await
+            .map_err(|err| without_credentials(err, &url, shown))?;
+        response.error_for_status(shown)?;
 
         let envelope: Envelope = net::parse_json(&response, &format!("subsonic {name}"))?;
         let body = envelope.response;
@@ -279,19 +288,17 @@ impl Provider for SubsonicProvider {
             }
             let size = size.to_string();
             let url = self.endpoint("getCoverArt", &[("id", &id.id), ("size", &size)]);
-            // The credentials are in the query string: an error names the
-            // endpoint, not the URL — its text ends up in `headshell diag`,
-            // which is made to be pasted.
-            let shown = format!("{}/rest/getCoverArt", self.server.url);
+            // An error names the endpoint, not the address (see `call`).
+            let shown = net::without_query(&url);
             let response = self
                 .http
                 .send(&HttpRequest::get(&url))
                 .await
-                .map_err(|err| without_credentials(err, &url, &shown))?;
+                .map_err(|err| without_credentials(err, &url, shown))?;
             if response.status == 404 {
                 return Ok(None);
             }
-            response.error_for_status(&shown)?;
+            response.error_for_status(shown)?;
             if let Some(image) = super::as_image(&response) {
                 return Ok(Some(image));
             }
@@ -556,6 +563,26 @@ mod tests {
         assert!(text.starts_with("STEP: PROVIDER_CALL"), "{text}");
         assert!(text.contains("Wrong username or password"), "{text}");
         assert!(text.contains("40"), "{text}");
+    }
+
+    /// The `u/t/s` triple is in every request's query string (D-021); an
+    /// error names the endpoint, not the address — on the network path and
+    /// on the status path alike.
+    #[tokio::test]
+    async fn the_credentials_do_not_reach_an_error_text() {
+        let unreachable = SubsonicProvider::new(server(), Arc::new(FakeHttp::new()));
+        let refused = SubsonicProvider::new(
+            server(),
+            Arc::new(FakeHttp::new().route_status("/rest/", 500, "broken")),
+        );
+        for provider in [unreachable, refused] {
+            let text = provider.search("Ezhel", 10).await.unwrap_err().chain_text();
+            assert!(text.contains("https://music.home/rest/search3"), "{text}");
+            assert!(
+                !text.contains("26719a") && !text.contains("c19b2d"),
+                "the credentials must not reach the error: {text}"
+            );
+        }
     }
 
     #[tokio::test]

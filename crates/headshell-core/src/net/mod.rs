@@ -409,12 +409,36 @@ pub(crate) fn encode_query(value: &str) -> String {
     out
 }
 
+/// An address without its query string and fragment, for an error text.
+///
+/// Some addresses carry their key there: a Subsonic request its token and
+/// salt, a stream its signature. An error text ends up in `headshell diag`,
+/// which is made to be pasted into a bug report; the host and the path say
+/// where it failed without handing anyone the key.
+#[must_use]
+pub(crate) fn without_query(url: &str) -> &str {
+    url.split(['?', '#']).next().unwrap_or(url)
+}
+
 #[cfg(test)]
 pub(crate) mod fake;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_address_in_an_error_keeps_its_host_and_path_but_not_its_query() {
+        assert_eq!(
+            without_query("https://music.home/rest/stream?u=enai&t=26719a&s=c19b2d&id=a1"),
+            "https://music.home/rest/stream"
+        );
+        assert_eq!(
+            without_query("https://cf-media.sndcdn.com/x.mp3#t=1"),
+            "https://cf-media.sndcdn.com/x.mp3"
+        );
+        assert_eq!(without_query("http://ev/rest/ping"), "http://ev/rest/ping");
+    }
 
     #[test]
     fn query_encoding_survives_spaces_and_turkish() {
