@@ -3189,6 +3189,20 @@ the artifact couldn't be installed or because YouTube blocks CI addresses — th
 distinction will only be seen in the run after this fix. Under D-043 the second is
 a legitimate red and needs a separate decision.
 
+### Addendum — the clock was no tiebreaker on macOS (2026-09-26)
+
+D-075's CI run went red on macOS, in this decision's own regression test, with the
+error this decision fixed: `rename` got ENOENT. The run-specific name was
+`<pid>-<nanoseconds>`; the eight threads share the pid, and the nanoseconds were to
+tell them apart. macOS reads the wall clock in microseconds, so two threads that
+started in the same microsecond got the same name, and the first `rename` took the
+second's file. D-075 did not touch this code; the macOS runs before it were green by
+timing. A process-wide counter joins the name: `<pid>-<nanoseconds>-<n>`.
+
+"Measured deterministically" above was true on Linux, whose clock counts nanoseconds;
+the measurement didn't see another system's clock. D-076 found the same kind of
+per-process name in its own cover cache before it shipped.
+
 ## D-061 — YouTube's bot wall: cookies go through the secret store; a run without cookies skips
 **Date:** 2026-09-21 · **Status:** APPLIED (2026-09-21)
 

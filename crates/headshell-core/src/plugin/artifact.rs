@@ -479,8 +479,15 @@ impl ArtifactStore {
 
         std::fs::create_dir_all(&self.runtime_dir)
             .map_err(|err| io_err(Stage::PluginRuntime, &self.runtime_dir, err))?;
+        // The name is this run's own. The process id is shared by the threads
+        // of one process, and the clock is no tiebreaker: macOS reads it in
+        // microseconds, and two threads read the same one — the parallel
+        // install test lost a file to the other thread's rename that way on
+        // macOS CI. A counter settles it.
+        static RUNS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let run = RUNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let temp = self.runtime_dir.join(format!(
-            "{}.{}-{}.downloading",
+            "{}.{}-{}-{run}.downloading",
             requirement.file_name(&self.platform),
             std::process::id(),
             jiff::Timestamp::now().as_nanosecond()
