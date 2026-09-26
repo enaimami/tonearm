@@ -62,6 +62,7 @@ only a reminder index; read the text there before applying a rule.
 | **K8** | No `unwrap()` / `expect()` / `panic!()` in `headshell-core` |
 | **K9** | Every failure says which stage it happened in |
 | **K10** | Phase boundaries are not crossed |
+| **K11** | Everything in the repositories is written in English |
 
 If you need to break a rule, **stop and ask** — PLAN.md §0.1.
 
@@ -69,6 +70,11 @@ If you need to break a rule, **stop and ask** — PLAN.md §0.1.
 > and closure parameters*. `Arc<dyn Trait>` and `async fn` are **allowed**
 > (the D-006 correction). The rule's first wording, which said "no trait
 > objects", is void.
+
+> A common mistake about K11: following the conversation's language. A
+> session held in Turkish still writes English code, comments, messages and
+> commit messages. Real names (artists, the `Müzik` folder) stay as they are;
+> the full list of what stays is in PLAN.md §2.
 
 ---
 
@@ -222,15 +228,9 @@ did not match.
 
 ## Code conventions
 
-- **Language (D-073): everything is English.** Identifiers (functions, types,
-  variables, CSS classes, HTML ids, JSON keys, fixture file names, theme
-  tokens) and text (comments, documentation, CLI help, interface text, `STEP:`
-  output) alike. D-036 had split them — identifiers English, text Turkish;
-  D-073 replaced its text-language half. Turkish snapshots of the documents
-  sit next to them as `*.tr.md` (as of 2026-09-25) and are not kept up to
-  date; the English text is canonical. Real data stays as it is: artist and
-  track names in fixtures, the `Müzik` folder the music directory search
-  looks for.
+- **Language: everything is English — invariant rule K11** (PLAN.md §2;
+  D-073, D-074). Identifiers and text alike; the full scope and what stays as
+  it is (real names, the `*.tr.md` snapshots) are there, not here.
 - `headshell-core` errors are typed with `thiserror`; `headshell-cli` may use
   `anyhow`.
 - `async` in the public API — let the caller choose the runtime; the core does

@@ -139,7 +139,7 @@ Not open for debate. If you think you need to break one, don't write code —
 open an issue and explain why it's needed.
 
 The full text and reasoning are in **[`PLAN.md` §2](PLAN.md)**, numbered
-K1–K10. What follows is only an index; they are not repeated here because they
+K1–K11. What follows is only an index; they are not repeated here because they
 were once written in three files at once, and the copies drifted far enough to
 contradict each other.
 
@@ -155,6 +155,7 @@ contradict each other.
 | **K8** | No `unwrap()` / `expect()` / `panic!()` in `headshell-core` |
 | **K9** | Every failure says which stage it happened in |
 | **K10** | Phase boundaries are not crossed |
+| **K11** | Everything in the repositories is written in English |
 
 The **NEVER DO** list (DRM, audio relaying, deleting raw `listen`
 records…) is at the end of PLAN.md.
@@ -162,9 +163,10 @@ records…) is at the end of PLAN.md.
 ## Code conventions
 
 Owned solely by [`CLAUDE.md`](CLAUDE.md), under "Code conventions" — error
-types, the `async` contract, newtype IDs, the dependency policy and the naming
-language (D-073: identifiers and text are both English; it replaced D-036's
-"text in Turkish" rule).
+types, the `async` contract, newtype IDs and the dependency policy. The
+language is not a convention but a rule: K11, everything in the repositories
+is English — identifiers, comments, messages, documents, commit messages
+(D-073, D-074).
 
 The workspace tree and the commands are there too.
 

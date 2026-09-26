@@ -2399,6 +2399,11 @@ None of it was done in this round; all of it is §2.8's scope:
 
 ## D-051 — Document ownership: every fact lives in one file
 **Date:** 2026-09-09
+
+> **D-074 (2026-09-26):** The rules are K1–K11 now. The language moved from the
+> code conventions (CLAUDE.md) to the invariant rules (PLAN.md, K11); the rest of
+> the table below stands.
+
 **Question:** Measured at the start of the cleanup: the invariant rules were
 written **three times**, in `CLAUDE.md`, `PLAN.md §2` and `CONTRIBUTING.md`; the
 workspace tree, the code conventions and the commands twice each. The copies had
@@ -4491,6 +4496,10 @@ doesn't know `color-mix` exist only in the code.
 
 **Date:** 2026-09-25 · **Status:** APPLIED (2026-09-25)
 
+> **D-074 (2026-09-26):** This decision became invariant rule K11 (PLAN.md §2).
+> Its text moved there from CLAUDE.md's code conventions; the consequence below
+> that calls CLAUDE.md the owner no longer holds.
+
 **Question:** While the organisation's profile README was being written, the user
 said: *"make the language English, guaranteed. English for every repo, please. In
 fact, sit down now and rewrite everything written in Turkish in English."* And on
@@ -4583,3 +4592,49 @@ publishing: *"when it's done, push all of it, and also save the Turkish ones as
 - Nothing in the core's behaviour changed apart from the text it prints: the
   diagnostics report's JSON keys, the IPC contract, the theme tokens and class names
   stayed exactly as they were (they were English already).
+
+## D-074 — The language became an invariant rule: K11, everything in English
+
+**Date:** 2026-09-26 · **Status:** APPLIED (2026-09-26)
+
+**Question:** The user asked: *"add a rule to the main rules saying everything is
+written in English, or check whether there is one. Every part added to the code
+will be in English."* There was one — D-073 — but as the first bullet of
+CLAUDE.md's code conventions, not among the invariant rules: PLAN.md §2 ended at
+K10.
+
+**Decision:**
+
+1. **K11 — Everything in the repositories is written in English.** D-073's text
+   moved from CLAUDE.md's code conventions into PLAN.md §2, which owns the rules
+   (D-051). CLAUDE.md and CONTRIBUTING carry it in their rule index and point to
+   it; PLAN §3 and §3.3 point to it; NEVER DO got its line.
+2. **The language of the conversation doesn't change it.** Written into the rule
+   itself, and into CLAUDE.md as "a common mistake about K11".
+3. **What stays as it is didn't change;** the rule lists it: real names, Turkish
+   characters that are a test's input, the entries a platform format localises
+   itself, the `*.tr.*` snapshots and the link to them, and the commit messages
+   from before D-073.
+4. **The Turkish snapshots weren't patched.** `PLAN.tr.md`, `CLAUDE.tr.md` and
+   `CONTRIBUTING.tr.md` still end at K10: they stand as of 2026-09-25, and a
+   snapshot is translated again, not patched (D-073).
+
+**Reasoning:**
+- The user asked for it among the main rules, not among the conventions, and the
+  difference is real: a broken convention is a note in review; a broken invariant
+  rule means stopping and asking before writing (§0.1).
+- The pull toward breaking it doesn't stop: the conversations this code is
+  written in are held in Turkish. That is why the rule says outright that the
+  conversation's language doesn't carry over.
+- The text moved rather than being copied. A rule's owner is PLAN.md, and a rule
+  written in two files drifts — the reason D-051 exists.
+
+**Checked, not assumed:** no commit came after D-073, so the tree is the one
+D-073's two scans cleared. A new scan for Turkish letters outside the `*.tr.*`
+files found them only in what K11 keeps as it is: artist, track and album names
+in tests and fixtures, the normaliser's character table and its tests, the
+encoding and multi-byte tests, the `Müzik` folder, the `Comment[tr]=` entry, the
+`Türkçe` language links, and the Turkish quoted in this log.
+
+**Consequence:** nothing in the code changed. The rules are K1–K11; D-051 and
+D-073 carry a note.

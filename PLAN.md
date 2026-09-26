@@ -187,6 +187,34 @@ in, how many succeeded, how many by which route, how many failed.
 Don't write the next phase's code "so that it's ready". No server code before
 Phase 4 arrives.
 
+### K11 — Everything in the repositories is written in English
+Identifiers and text alike: code, comments and doc comments, CLI help and
+output, interface text, error and diagnostic messages (`STEP:`), test names
+and test data, fixtures, workflows, packaging, documents, commit messages and
+release notes. Both repositories: `headshell/headshell` and
+`headshell/plugins`.
+
+**The language of the conversation doesn't change it.** A session held in
+Turkish still writes English into the repository — code, comments, messages,
+commit messages.
+
+What stays as it is — it is data, not text we write:
+- real names: artists, tracks and albums (Şebnem Ferah, Ezhel's
+  `Müptezhel`), and the `Müzik` folder the music directory search looks for;
+- Turkish characters where they are a test's input: the normaliser, URL
+  encoding, a multi-byte boundary;
+- the entries a platform format localises itself (`Comment[tr]=` in the
+  `.desktop` file);
+- the documents' `*.tr.*` snapshots and the `Türkçe` link that leads to them.
+  They stand as of 2026-09-25 and are not kept up to date; the English text is
+  canonical, and a snapshot is translated again, not patched;
+- the commit messages from before D-073: rewriting history would change every
+  hash the release tags point at.
+
+> Until D-074 this was a code convention in CLAUDE.md (D-073, which had itself
+> replaced D-036's "text in Turkish" half). It became a rule so that breaking
+> it means stopping and asking (§0.1), not a note in review.
+
 ---
 
 # 3. CONVENTIONS, WORKSPACE, COMMANDS — in `CLAUDE.md`
@@ -196,8 +224,9 @@ repeated here. The reason is drift: while the same tree stood in two files, one
 went stale and listed a nonexistent `sync/` directory for months, while never
 showing the `net/` and `sleeve/` that did exist.
 
-- **Code conventions** (error types, `async`, newtype IDs, the naming language,
-  D-073) → CLAUDE.md, "Code conventions"
+- **Code conventions** (error types, `async`, newtype IDs, dependencies) →
+  CLAUDE.md, "Code conventions". The language is not among them: it is K11,
+  above (D-074)
 - **The workspace tree** → CLAUDE.md, "Workspace"
 - **Commands** → CLAUDE.md, "Commands"
 - **Diagnostics practice and test layout** → CLAUDE.md, "Diagnostics culture" /
@@ -1590,9 +1619,9 @@ not the theme.
 **Language closed (D-036):** token names — and all identifiers in general — are
 English. The theme set is this project's most outward-facing surface; the one
 consuming it is a theme author we don't know. Comments and interface text
-stayed Turkish — until D-073 made them English too. While this decision was
-applied, `crates/headshell`, the shared accuracy set and the audio fixtures
-were translated as well.
+stayed Turkish — until D-073 made them English too (K11 since D-074). While
+this decision was applied, `crates/headshell`, the shared accuracy set and the
+audio fixtures were translated as well.
 
 > DECISION POINT: Present the token set before writing it. Once it is
 > published, a backward-compatibility debt is born.
@@ -2170,6 +2199,8 @@ identity from.** The product was the second — CLAUDE.md's first sentence.
 - Don't add a dependency without permission
 - Don't silence a broken test
 - Don't assume a format/API shape you don't know — ask or verify
+- Don't write code, comments, messages or commits in any language but English
+  — not even when the conversation is in Turkish (K11)
 
 ---
 
