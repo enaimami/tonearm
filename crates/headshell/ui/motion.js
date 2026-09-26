@@ -175,13 +175,13 @@ export function watchMotionPreference() {
 
 // ————————————————————————————————————— element springs
 //
-// Each element's on-screen values are kept here (`x`, `y`, `scaleX`,
-// `scaleY`, `opacity`), and a single `requestAnimationFrame` loop advances
-// all the running springs. A new target **takes over** the spring on the same
-// property (rule 2).
+// Each element's on-screen values are kept here (`x`, `y`, `rotate` in
+// degrees, `scaleX`, `scaleY`, `opacity`), and a single
+// `requestAnimationFrame` loop advances all the running springs. A new target
+// **takes over** the spring on the same property (rule 2).
 
-const RESTING = { x: 0, y: 0, scaleX: 1, scaleY: 1, opacity: 1 };
-const PRECISION = { x: 0.1, y: 0.1, scaleX: 0.0005, scaleY: 0.0005, opacity: 0.002 };
+const RESTING = { x: 0, y: 0, rotate: 0, scaleX: 1, scaleY: 1, opacity: 1 };
+const PRECISION = { x: 0.1, y: 0.1, rotate: 0.02, scaleX: 0.0005, scaleY: 0.0005, opacity: 0.002 };
 
 const bodies = new WeakMap();
 const active = new Set();
@@ -194,7 +194,7 @@ function bodyOf(el) {
     body = {
       el,
       values: { ...RESTING },
-      velocities: { x: 0, y: 0, scaleX: 0, scaleY: 0, opacity: 0 },
+      velocities: { x: 0, y: 0, rotate: 0, scaleX: 0, scaleY: 0, opacity: 0 },
       springs: new Map(),
     };
     bodies.set(el, body);
@@ -217,17 +217,17 @@ function expand(values) {
 }
 
 function write(body) {
-  const { x, y, scaleX, scaleY, opacity } = body.values;
+  const { x, y, rotate, scaleX, scaleY, opacity } = body.values;
   // An element at rest carries no transform: a permanent layer blurs text in
   // some engines. That is why an element driven by springs **must not have a
   // `transform` of its own in the stylesheet** — an element settling on the
   // identity transform drops its inline value and falls back to the
   // stylesheet's (a bar reaching full width went back to `scaleX(0)` and
   // disappeared). The starting state is given with `from`.
-  const still = x === 0 && y === 0 && scaleX === 1 && scaleY === 1;
+  const still = x === 0 && y === 0 && rotate === 0 && scaleX === 1 && scaleY === 1;
   body.el.style.transform = still
     ? ""
-    : `translate3d(${x}px, ${y}px, 0) scale(${scaleX}, ${scaleY})`;
+    : `translate3d(${x}px, ${y}px, 0) rotate(${rotate}deg) scale(${scaleX}, ${scaleY})`;
   body.el.style.opacity = opacity === 1 ? "" : String(Math.min(1, Math.max(0, opacity)));
 }
 
@@ -378,7 +378,19 @@ export function flip(elements, mutate) {
 ///
 /// `onStart()` returns the element's on-screen `x`: an element caught in the
 /// middle of a motion carries on from where it is.
-export function horizontalDrag(el, { threshold = 8, ignore, onStart, onMove, onEnd }) {
+export function horizontalDrag(el, options) {
+  axisDrag(el, "x", options);
+}
+
+/// The same, on the vertical axis: `onStart()` returns the on-screen `y`, and
+/// a gesture that goes sideways first is left to the page.
+export function verticalDrag(el, options) {
+  axisDrag(el, "y", options);
+}
+
+function axisDrag(el, axis, { threshold = 8, ignore, onStart, onMove, onEnd }) {
+  const along = axis === "x" ? (event) => event.clientX : (event) => event.clientY;
+  const across = axis === "x" ? (event) => event.clientY : (event) => event.clientX;
   let pointer = null;
 
   el.addEventListener("pointerdown", (event) => {
@@ -386,42 +398,70 @@ export function horizontalDrag(el, { threshold = 8, ignore, onStart, onMove, onE
     if (ignore && event.target.closest(ignore)) return;
     pointer = {
       id: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
+      start: along(event),
+      startAcross: across(event),
       origin: 0,
       dragging: false,
       tracker: createVelocityTracker(),
     };
-    pointer.tracker.add(event.timeStamp, event.clientX);
+    pointer.tracker.add(event.timeStamp, along(event));
   });
 
   el.addEventListener("pointermove", (event) => {
     if (!pointer || event.pointerId !== pointer.id) return;
-    const dx = event.clientX - pointer.startX;
-    const dy = event.clientY - pointer.startY;
+    const moved = along(event) - pointer.start;
+    const sideways = across(event) - pointer.startAcross;
     if (!pointer.dragging) {
-      if (Math.abs(dy) > threshold && Math.abs(dy) > Math.abs(dx)) {
+      if (Math.abs(sideways) > threshold && Math.abs(sideways) > Math.abs(moved)) {
         pointer = null;
         return;
       }
-      if (Math.abs(dx) < threshold) return;
+      if (Math.abs(moved) < threshold) return;
       pointer.dragging = true;
       el.setPointerCapture(event.pointerId);
+      // The movement before the threshold may have begun a text selection;
+      // a drag is never one.
+      globalThis.getSelection?.()?.removeAllRanges();
       pointer.origin = onStart?.() ?? 0;
-      // The measurement starts here the moment the threshold is passed: the
-      // element does not jump by the threshold.
-      pointer.startX = event.clientX;
+      // The measurement starts where the threshold was passed: the element
+      // does not jump by the threshold, and it does not lose the distance
+      // beyond it either. The first move delivered can be far past the
+      // threshold — the engine merges moves that arrive within a frame — and
+      // starting from that move put the element behind the pointer for the
+      // whole drag.
+      pointer.start += Math.sign(moved) * threshold;
     }
-    pointer.tracker.add(event.timeStamp, event.clientX);
-    onMove?.(pointer.origin + (event.clientX - pointer.startX));
+    pointer.tracker.add(event.timeStamp, along(event));
+    onMove?.(pointer.origin + (along(event) - pointer.start));
   });
 
   const finish = (event) => {
     if (!pointer || event.pointerId !== pointer.id) return;
     const ended = pointer;
     pointer = null;
-    if (ended.dragging) onEnd?.(ended.tracker.velocity());
+    if (ended.dragging) {
+      // The release is a sample too. A pointer held still sends no moves, so
+      // without it the velocity would be the last move's: a careful drop,
+      // after a pause, would be thrown.
+      if (event.type === "pointerup") ended.tracker.add(event.timeStamp, along(event));
+      swallowNextClick();
+      onEnd?.(ended.tracker.velocity());
+    }
   };
   el.addEventListener("pointerup", finish);
   el.addEventListener("pointercancel", finish);
+}
+
+/// The release that ends a drag is followed by a `click` on what was pressed:
+/// a sheet dragged by its handle and put back would then close on its own.
+/// The click that closes a drag is not a click. The trap only lives until the
+/// current input event is over — if no click comes (the release was outside),
+/// it must not eat the next real one.
+function swallowNextClick() {
+  const swallow = (event) => {
+    event.stopPropagation();
+    event.preventDefault();
+  };
+  globalThis.addEventListener("click", swallow, { capture: true, once: true });
+  setTimeout(() => globalThis.removeEventListener("click", swallow, { capture: true }), 0);
 }

@@ -92,6 +92,13 @@ instead of a glyph (its colour still changes with
 it stayed at `api` 1 — but an extended theme that assumes positions may feel
 it.
 
+D-075 changed it once more: "now playing" is no longer a section inside
+`.content` but a sheet over it that rises out of `.player`. `.main` became a
+two-row grid (`.topbar`, then a row that `.content`, a scrim and the sheet
+share), and `#panel-now` still carries `.panel` but sits outside `.content`.
+The sheet's position is written by the springs as an inline `transform`; a
+theme that gives it one of its own breaks it.
+
 ## Animation: `transform` and `opacity` only
 
 This isn't a matter of style; it's a measurement. In WebKitGTK (the default

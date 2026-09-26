@@ -24,6 +24,7 @@
 import { positionAt, clock } from "./anchor.js";
 import {
   animate,
+  currentMotion,
   flip,
   horizontalDrag,
   invalidateMotion,
@@ -31,6 +32,7 @@ import {
   presentation,
   project,
   rubberband,
+  verticalDrag,
   watchMotionPreference,
 } from "./motion.js";
 
@@ -315,36 +317,57 @@ const ON_OPEN = {
   diag: refreshDiag,
 };
 
+// "Now playing" is not one of the sections in the content column but a sheet
+// over them (D-075). So "where am I" has two answers: the section below, and
+// whether the sheet is up — the sidebar shows whichever is in front.
+let basePanel = null;
+let nowOpen = false;
 let currentPanel = "now";
 const scrollByPanel = new Map();
 const content = $("content");
+const nowSheet = $("panel-now");
 
 function openPanel(name, { instant = false } = {}) {
   if (!PANELS.includes(name)) return;
-  const previous = currentPanel;
-  currentPanel = name;
-
-  for (const button of document.querySelectorAll(".nav")) {
-    button.setAttribute("aria-current", String(button.dataset.panel === name));
+  if (name === "now") {
+    setNowOpen(true, { instant });
+    return;
   }
-  movePill(instant);
+  // Chosen while the sheet is up: the section is switched under it, out of
+  // sight, and the sheet going down reveals it — one thing moves, not two.
+  showBase(name, { instant: instant || nowOpen });
+  setNowOpen(false, { instant });
+  ON_OPEN[name]?.();
+}
 
-  if (previous !== name) {
-    scrollByPanel.set(previous, content.scrollTop);
-    for (const section of document.querySelectorAll(".panel")) {
-      section.hidden = section.id !== `panel-${name}`;
-    }
-    content.scrollTop = scrollByPanel.get(name) ?? 0;
-    updateScrollEdge();
-    // A section lower in the list comes from below: the motion should say where
-    // we are going.
+/// The section in the content column, under the sheet.
+function showBase(name, { instant }) {
+  const previous = basePanel;
+  basePanel = name;
+  if (previous === name) return;
+  if (previous) scrollByPanel.set(previous, content.scrollTop);
+  for (const section of content.querySelectorAll(".panel")) {
+    section.hidden = section.id !== `panel-${name}`;
+  }
+  content.scrollTop = scrollByPanel.get(name) ?? 0;
+  updateScrollEdge();
+  // A section lower in the list comes from below: the motion should say where
+  // we are going.
+  if (!instant && previous) {
     const section = document.getElementById(`panel-${name}`);
     const direction = PANELS.indexOf(name) > PANELS.indexOf(previous) ? 1 : -1;
-    if (!instant) {
-      animate(section, { y: 0, opacity: 1 }, { from: { y: 10 * direction, opacity: 0 }, responseScale: 0.7 });
-    }
+    animate(section, { y: 0, opacity: 1 }, { from: { y: 10 * direction, opacity: 0 }, responseScale: 0.7 });
   }
-  ON_OPEN[name]?.();
+}
+
+/// The sidebar follows what is in front: the sheet if it is up, the section
+/// under it if not.
+function markNav(instant) {
+  currentPanel = nowOpen ? "now" : basePanel;
+  for (const button of document.querySelectorAll(".nav")) {
+    button.setAttribute("aria-current", String(button.dataset.panel === currentPanel));
+  }
+  movePill(instant);
 }
 
 /// Moves the selection indicator under the selected tab. On quick successive
@@ -387,9 +410,10 @@ for (const button of document.querySelectorAll(".go")) {
   });
 }
 
-// The scroll edge: a shadow appears when content slides under the top bar.
+// The scroll edge: a shadow appears when content slides under the top bar —
+// not while the sheet covers that content.
 function updateScrollEdge() {
-  $("mainColumn").classList.toggle("scrolled", content.scrollTop > 2);
+  $("mainColumn").classList.toggle("scrolled", !nowOpen && content.scrollTop > 2);
 }
 content.addEventListener("scroll", updateScrollEdge, { passive: true });
 
@@ -472,10 +496,10 @@ function renderQueue(view) {
 
   $("queue").replaceChildren(...view.items.map((item, index) => queueRow(item, index, index === view.position)));
   const empty = view.items.length === 0;
-  $("queueBlock").hidden = empty;
-  // While the queue is empty the "getting started" card takes its place: an
+  // While the queue is empty the "getting started" card takes the sheet: an
   // empty list does not tell the user what to do.
-  $("onboarding").hidden = !empty;
+  $("nowView").hidden = empty;
+  $("nowEmpty").hidden = !empty;
   $("queueCount").textContent = empty ? "" : `· ${countOf(view.items.length, "track")}`;
 
   const shuffle = $("btnShuffle");
@@ -490,6 +514,7 @@ function renderQueue(view) {
   repeat.title = `repeat: ${REPEAT_LABELS[view.repeat] ?? view.repeat}`;
 
   renderNow();
+  revealCurrentRow();
 }
 
 function queueRow(item, index, current) {
@@ -510,7 +535,11 @@ function queueRow(item, index, current) {
           renderAnchor(await call("anchor"));
         },
       },
-      h("span", { class: "index", text: String(index + 1) }),
+      // The playing row shows bars instead of its number (they move while
+      // playing, `.queue[data-state]`).
+      current
+        ? h("span", { class: "index eq", "aria-hidden": "true" }, h("i"), h("i"), h("i"), h("i"))
+        : h("span", { class: "index", text: String(index + 1) }),
       h(
         "span",
         { class: "q-main" },
@@ -523,7 +552,7 @@ function queueRow(item, index, current) {
   );
 }
 
-/// The playing track: the player bar and the "now playing" section's card.
+/// The playing track: the player bar and the "now playing" sheet's card.
 /// The track comes from the queue, the state from the anchor.
 function renderNow() {
   const current = queue.items[queue.position];
@@ -532,6 +561,8 @@ function renderNow() {
 
   $("nowTitle").textContent = track ? track.title : "—";
   $("nowArtist").textContent = track ? track.artist : "";
+  $("queue").dataset.state = state;
+  moveArm();
 
   const card = $("nowCard");
   card.hidden = !current;
@@ -573,6 +604,8 @@ function draw() {
   const position = positionAt(anchor, Date.now());
   const duration = anchor.duration_ms ?? 0;
   const ratio = duration > 0 ? Math.min(position / duration, 1) : 0;
+  playedRatio = ratio;
+  moveArm();
   if (Math.abs(ratio - drawnRatio) > 0.0004) {
     barFill.style.transform = `scaleX(${ratio})`;
     drawnRatio = ratio;
@@ -592,6 +625,39 @@ function drawFrame() {
 
 function startDrawing() {
   if (!drawing) drawing = requestAnimationFrame(drawFrame);
+}
+
+// The tonearm on the sheet's turntable reads the record the way the progress
+// bar reads the anchor: from the outer groove to the inner one, and back to
+// its rest when stopped. The angles (degrees, clockwise) come from the
+// drawing (`index.html`, `style.css`): the arm turns on its pivot at 84/16,
+// and its stylus — the tip of a headshell turned towards the spindle — is at
+// 80.9/79.5 at rest. The record's centre is 44/52; the stylus meets the
+// lead-in groove (radius 35) at 11.8° and the run-out (radius 19) at 29.2°.
+const ARM_REST = 0;
+const ARM_LEAD_IN = 11.8;
+const ARM_RUN_OUT = 29.2;
+const nowArm = $("nowArm");
+let playedRatio = 0;
+let armAngle = null;
+let armSwinging = false;
+
+function moveArm() {
+  const onRecord = (anchor?.state ?? "stopped") !== "stopped" && queue.items.length > 0;
+  const angle = onRecord ? ARM_LEAD_IN + (ARM_RUN_OUT - ARM_LEAD_IN) * playedRatio : ARM_REST;
+  if (armAngle !== null && Math.abs(angle - armAngle) < 0.05) return;
+  const jump = armAngle === null ? 0 : Math.abs(angle - armAngle);
+  armAngle = angle;
+  // Out of sight there is nothing to watch; the groove-by-groove creep while
+  // playing is written straight. A swing — a new track, a start, a stop —
+  // goes on a spring, and a swing already under way is taken over, not cut.
+  if (nowSheet.hidden || (!armSwinging && jump < 1)) {
+    armSwinging = false;
+    place(nowArm, { rotate: angle });
+  } else {
+    armSwinging = true;
+    animate(nowArm, { rotate: angle }, { responseScale: 1.6, onRest: () => (armSwinging = false) });
+  }
 }
 
 async function togglePause() {
@@ -627,6 +693,180 @@ $("btnRepeat").addEventListener("click", async () => {
   const nextMode = { off: "all", all: "one", one: "off" }[queue.repeat] ?? "off";
   renderQueue(await call("set_repeat", { mode: nextMode }));
 });
+
+// ————————————————————————————————————— now playing sheet (D-075)
+//
+// It rises out of the player bar and goes back into it (spatial continuity).
+// It opens from a click anywhere on the bar outside its buttons, the chevron,
+// the sidebar row, Ctrl+1, starting a track — and from a drag: upwards on the
+// bar, downwards on the sheet. A drag follows the pointer 1:1; on release the
+// momentum decides where it goes, not the release point, and the velocity is
+// handed to the spring. Caught halfway, it carries on from where it is.
+//
+// The sheet, the scrim under it and the chevron on the bar move as one: all
+// three are written from the sheet's position, and on a spring they get the
+// same parameters and proportional velocities. A spring is linear, so they
+// stay in step without a per-frame hook (`motion_js.rs` locks that down).
+
+const player = $("player");
+const nowScrim = $("nowScrim");
+const nowToggle = $("btnNowToggle");
+const nowToggleIcon = $("nowToggleIcon");
+
+/// How far the sheet travels: the height of the row it covers.
+function sheetTravel() {
+  return content.offsetHeight || window.innerHeight;
+}
+
+/// The two that follow the sheet's position `y` (0 open, `travel` closed):
+/// the scrim darkens as the sheet rises, the chevron turns over. Each with its
+/// change per pixel, for handing over a velocity.
+function followers(y, travel) {
+  return [
+    [nowScrim, "opacity", 1 - y / travel, -1 / travel],
+    [nowToggleIcon, "scaleY", (2 * y) / travel - 1, 2 / travel],
+  ];
+}
+
+function placeSheet(y) {
+  place(nowSheet, { y });
+  for (const [el, prop, value] of followers(y, sheetTravel())) place(el, { [prop]: value });
+}
+
+/// Without a `velocity` the springs keep the one they have: a sheet turned
+/// around by a click carries on smoothly instead of stopping dead.
+function springSheet(target, velocity, onRest) {
+  const handed = velocity !== undefined;
+  animate(nowSheet, { y: target }, { velocity: handed ? { y: velocity } : undefined, onRest });
+  for (const [el, prop, value, perPixel] of followers(target, sheetTravel())) {
+    animate(el, { [prop]: value }, { velocity: handed ? { [prop]: velocity * perPixel } : undefined });
+  }
+}
+
+/// Puts the sheet into the layout where it hides: below its row — or in its
+/// place but transparent, when motion is reduced and it is going to fade in.
+function unfoldSheet({ fade = false } = {}) {
+  if (!nowSheet.hidden) return;
+  nowSheet.hidden = false;
+  nowScrim.hidden = false;
+  content.classList.add("covered");
+  if (fade) {
+    place(nowSheet, { y: 0, opacity: 0 });
+    place(nowScrim, { opacity: 0 });
+  } else {
+    place(nowSheet, { opacity: 1 });
+    placeSheet(sheetTravel());
+  }
+}
+
+function setNowOpen(open, { instant = false, velocity } = {}) {
+  nowOpen = open;
+  markNav(instant);
+  updateScrollEdge();
+  nowToggle.setAttribute("aria-expanded", String(open));
+  nowToggle.title = open ? "close now playing (Esc)" : "now playing (Ctrl+1)";
+  // What the sheet covers is out of reach while it is up, for the pointer and
+  // the keyboard alike; it is back the moment the sheet starts down.
+  content.inert = open;
+
+  if (!open && nowSheet.hidden) return;
+  // A focused element leaving with the sheet would take the focus with it.
+  if (!open && nowSheet.contains(document.activeElement)) nowToggle.focus();
+
+  const target = open ? 0 : sheetTravel();
+  const done = open
+    ? undefined
+    : () => {
+        nowSheet.hidden = true;
+        nowScrim.hidden = true;
+        content.classList.remove("covered");
+      };
+  // Reduced motion: no slide but a fade in place — unless a drag has already
+  // moved the sheet out of place; then it just lands.
+  const spatial = currentMotion().spatial;
+  const fade = !instant && !spatial && (nowSheet.hidden || presentation(nowSheet, "y") === 0);
+  unfoldSheet({ fade });
+  if (fade) {
+    place(nowToggleIcon, { scaleY: open ? -1 : 1 });
+    animate(nowSheet, { opacity: open ? 1 : 0 }, { onRest: done });
+    animate(nowScrim, { opacity: open ? 1 : 0 });
+  } else if (instant || !spatial) {
+    placeSheet(target);
+    done?.();
+  } else {
+    springSheet(target, velocity, done);
+  }
+  if (open) revealCurrentRow();
+}
+
+/// Keeps the playing row in sight in the queue. Not `scrollIntoView`: it would
+/// also scroll the clipped column the sheet lives in.
+function revealCurrentRow() {
+  if (nowSheet.hidden) return;
+  const list = $("queue");
+  const row = list.querySelector("li.current");
+  if (!row) return;
+  const top = row.offsetTop;
+  const bottom = top + row.offsetHeight;
+  if (top < list.scrollTop) list.scrollTop = top - 8;
+  else if (bottom > list.scrollTop + list.clientHeight) list.scrollTop = bottom - list.clientHeight + 8;
+}
+
+/// Where the sheet goes when let go: where its momentum carries it, not where
+/// it was released — a short flick is enough.
+function releaseSheet(velocity) {
+  const landing = presentation(nowSheet, "y") + project(velocity);
+  setNowOpen(landing < sheetTravel() / 2, { velocity });
+}
+
+/// Past the open position the sheet resists — there is nothing more above;
+/// past the closed one it resists the same way, out of sight.
+function dragSheetTo(y) {
+  const travel = sheetTravel();
+  if (y < 0) placeSheet(rubberband(y, travel));
+  else if (y > travel) placeSheet(travel + rubberband(y - travel, travel));
+  else placeSheet(y);
+}
+
+verticalDrag(nowSheet, {
+  // The handle, the turntable and the empty space pull the sheet; the text,
+  // the queue and the other buttons keep their own gestures.
+  ignore: "button:not(.grabber), a, input, select, summary, .now-meta, .now-side, .onboarding",
+  onStart: () => presentation(nowSheet, "y"),
+  onMove: dragSheetTo,
+  onEnd: releaseSheet,
+});
+
+verticalDrag(player, {
+  ignore: "button",
+  onStart: () => {
+    player.classList.remove("pressed");
+    unfoldSheet();
+    return presentation(nowSheet, "y");
+  },
+  onMove: dragSheetTo,
+  onEnd: releaseSheet,
+});
+
+// The tap rule: the press shows on the way down, the sheet moves on the way
+// up. A drag that follows swallows the click (`motion.js`).
+player.addEventListener("pointerdown", (event) => {
+  if (event.button === 0 && !event.target.closest("button")) player.classList.add("pressed");
+});
+// A drag up from the bar crosses the sheet's text. The bar's own text cannot
+// be selected, but the press would still begin a selection that the gesture
+// carries into the page — it was seen selecting the whole sheet.
+player.addEventListener("mousedown", (event) => {
+  if (!event.target.closest("button")) event.preventDefault();
+});
+for (const type of ["pointerup", "pointercancel", "pointerleave"]) {
+  player.addEventListener(type, () => player.classList.remove("pressed"));
+}
+player.addEventListener("click", (event) => {
+  if (!event.target.closest("button")) setNowOpen(!nowOpen);
+});
+nowToggle.addEventListener("click", () => setNowOpen(!nowOpen));
+$("btnNowGrabber").addEventListener("click", () => setNowOpen(false));
 
 // ————————————————————————————————————— play
 
@@ -687,7 +927,9 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (event.key === "Escape") {
-    dismissAllToasts();
+    // The topmost goes first: the notices lie over the sheet.
+    if (toastTimers.size > 0) dismissAllToasts();
+    else if (nowOpen) setNowOpen(false);
     return;
   }
   // Ctrl+1…9: sections. It works in a text box too — pressing a number key
@@ -1938,6 +2180,7 @@ listen("headshell://busy", (event) => {
   // jumping to the theme would flash on every start.
   applyTheme(await call("theme_active"));
   watchMotionPreference();
+  showBase("library", { instant: true });
   openPanel("now", { instant: true });
 
   environment = (await call("environment")) ?? null;

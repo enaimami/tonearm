@@ -4347,6 +4347,9 @@ affected; the player keeps its own copy of the registry.
 
 **Date:** 2026-09-25 · **Status:** APPLIED (2026-09-25)
 
+> **D-075 (2026-09-26):** "Now playing" became a sheet that rises out of the player
+> bar; the sidebar row opens it. The "playing" state, not seen here, was seen there.
+
 **Question:** The user: *"redesign the interface to fit the recent changes and the
 coming ones"* (with Apple's fluid interface principles). Three things were asked:
 the skeleton, how far to touch the Rust side, the way to verify.
@@ -4638,3 +4641,88 @@ encoding and multi-byte tests, the `Müzik` folder, the `Comment[tr]=` entry, th
 
 **Consequence:** nothing in the code changed. The rules are K1–K11; D-051 and
 D-073 carry a note.
+
+## D-075 — Now playing became a sheet that rises out of the player bar
+
+**Date:** 2026-09-26 · **Status:** APPLIED (2026-09-26)
+
+**Question:** The user, with two screenshots of YouTube Music: *"I'm going to ask you
+for an interface that opens up — I took a little inspiration from YouTube Music,
+because every modern player has this: why shouldn't we? Look, wherever I touched the
+bottom part, a detailed area like this opened. It also comes up when any song starts
+playing. We definitely need this — please do it together with /apple-design."*
+
+**Decision:**
+
+1. **"Now playing" is a sheet over the content row, not a section inside it.** It
+   rises out of the player bar and goes back into it; the section under it keeps its
+   place and its scroll; the sidebar and the top bar stay usable, as in the
+   reference. It opens from a click anywhere on the bar outside its buttons, the
+   chevron at the bar's end, the sidebar row, `Ctrl`+`1`, starting a track (the play
+   box, the library, "queue all") and a drag up on the bar. It closes from the same
+   click and chevron, `Esc`, its handle, any other sidebar row and a drag down. A
+   track that starts on its own — the queue moving on — does not open it: the sheet
+   comes when the user starts something; it does not take the screen back unasked.
+2. **The old "now playing" section was not kept beside it.** The sheet *is* that
+   section — the same card, the same queue, the same "getting started". Two places
+   showing one queue would have been D-051's drift inside the interface. D-072's
+   skeleton stays: the row is where it was, `PANELS` and the shortcuts are unchanged.
+3. **The core has no cover art, so a turntable stands in for it** — the app's own
+   picture (the brand mark is a record and a tonearm). The record turns while
+   playing (33⅓: 1.8 s a turn, fifteen times the theme duration) and stops where it
+   is when paused. The tonearm reads the record the way the progress bar reads the
+   anchor, from the lead-in groove to the run-out, and goes back to its rest when
+   stopped; its angles were computed from the drawing's geometry, not guessed.
+4. **The motion is `motion.js`'s.** A critically damped spring that starts from the
+   on-screen value; a drag follows the pointer 1:1, the release hands its velocity to
+   the spring, and where the momentum carries the sheet decides open or closed. The
+   scrim under the sheet darkens with its height and the chevron on the bar turns
+   over with it: three springs with proportional starts, which stay in step only
+   because the spring is linear — a test holds that. Reduced motion: a fade in
+   place. A theme duration of `0ms` (High Contrast): no motion.
+
+**Not done, and why:**
+- **Cover art** is a new capability for the core (local tags, Subsonic
+  `getCoverArt`, Jellyfin images, plugins), and by D-033 it needs a CLI subcommand
+  first. The turntable holds its place until then.
+- **Lyrics, related tracks, comments** — the reference's other tabs: the core has
+  none of them. The sheet has one list, the queue.
+- **Seeking and volume** are still missing, for D-072's reason.
+- **No translucent material** (D-072): the sheet is flat; the depth is the scrim and
+  the shadow.
+
+**Found while verifying: two faults in the drag the notices use too.**
+- **The first move delivered can be far past the threshold.** WebKitGTK merges the
+  moves that arrive within a frame, and the drag started measuring from that move: the
+  sheet trailed the pointer by 86 px for the whole drag. It now measures from where
+  the threshold was passed.
+- **A release after a pause was thrown.** A pointer held still sends no moves, so the
+  velocity at release was the last move's, and a careful drop on the open side closed
+  the sheet. The release is now a sample too.
+- Both are locked down in `motion_js.rs` with a fake element, and it was measured that
+  the tests are not empty: putting either fault back fails the drag test, and a
+  non-linear term in the spring fails the linearity test.
+
+**Found while verifying: two WebKit specifics.**
+- `user-select` only works in WebKit with its prefix; a drag up from the bar selected
+  the whole sheet. The bar and the turntable carry `-webkit-user-select`, and a press
+  on the bar outside its buttons no longer begins a selection.
+- WebKitGTK paints overlay scrollbars above everything: the covered section's bar
+  showed through the sheet. While the sheet is out, the content under it does not
+  scroll; its position is kept.
+
+**Verification:** D-072's Debian 13 container with the host's WebKitGTK (2.52.6), but
+with a PulseAudio null sink instead of ALSA's null device. It is paced in real time
+(20 s of audio in 20.4 s), so this time the "playing" state was seen — D-072 couldn't.
+Seen: opening and closing by click, chevron and `Esc`; frames in mid-motion (the sheet
+rising from behind the bar, the scrim, the chevron flattening, the sidebar indicator
+moving); a drag held and let go (back open), a flick down (closed), a flick up on the
+bar (open); pause (the arm stays on the record), stop (the arm goes to its rest), a
+track change (the arm swings back to the lead-in); the three themes; a 900×600
+window; the reduced-motion fade — forced in `motion.js` for the check and put back,
+since WebKitGTK didn't take the GTK setting in the container.
+
+**The contract didn't change:** no token was added or changed, no class left
+`CONTRACT_CLASSES` — `api` 1. The layout changed: `.main` is a two-row grid whose
+second row `.content`, the scrim and the sheet share, and `#panel-now` is no longer
+inside `.content`. It is written into the theme guide.

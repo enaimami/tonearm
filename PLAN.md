@@ -2028,8 +2028,42 @@ put into the spring formula was caught by three of them), `ui_contract.rs` +3
 flaws showed only in screenshots and were fixed (D-072).
 
 **Still open:** the "playing" state itself wasn't seen (the null device doesn't
-wait in real time); the Windows and macOS webviews weren't tried; seeking and
-volume aren't there because the core has no command for them (D-033).
+wait in real time — seen in §3.9); the Windows and macOS webviews weren't
+tried; seeking and volume aren't there because the core has no command for them
+(D-033).
+
+### 3.9 Now playing as a sheet — DONE (D-075)
+
+**The problem:** "now playing" was one section among nine, reached from the
+sidebar, and the player bar — where the playing track is — led nowhere. A
+modern player opens a detailed view from its bar (the user's reference: YouTube
+Music).
+
+**Done:**
+
+1. **The bar opens a sheet over the content row** — a click outside its
+   buttons, the chevron at its end, a drag upwards — and so do the sidebar row,
+   `Ctrl`+`1` and starting a track. The section under it keeps its place;
+   `Esc`, the handle, a drag down or another section close it. A track the
+   queue moves on to does not open it.
+2. **The sheet is the "now playing" section**, not a copy of it: a turntable in
+   place of the missing cover art (the record turns while playing, the arm
+   follows the position from groove to groove), the track, and the queue with
+   its own scroll. An empty queue shows "getting started" there.
+3. **The motion layer** got a vertical drag and `rotate`, and two faults in its
+   drag were fixed: the distance past the threshold was lost, and a release
+   after a pause was thrown.
+
+**Not done:** cover art (a core capability — by D-033 a CLI subcommand first),
+lyrics and related tracks (no data in the core), seeking and volume (§3.8).
+
+**Testing:** `motion_js.rs` +2 — the spring's linearity (the sheet, its scrim
+and the chevron move on proportional springs) and the drag's two faults; both
+fail when the fault is put back.
+
+**Verification:** the §3.8 container with a PulseAudio null sink instead of
+ALSA's null device: it is paced in real time, so the "playing" state was seen
+this time — the three themes, a 900×600 window, drags, flicks, pause and stop.
 
 ---
 

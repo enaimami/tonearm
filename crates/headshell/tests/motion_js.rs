@@ -50,6 +50,7 @@ fn with_module<R>(check: impl for<'js> FnOnce(&Ctx<'js>, Object<'js>) -> R) -> R
             "parseDuration",
             "motionSettings",
             "createVelocityTracker",
+            "verticalDrag",
         ] {
             let function: Function = module
                 .get(name)
@@ -163,6 +164,96 @@ fn a_big_frame_does_not_throw_the_spring_off() {
             (once[0] - x).abs() < 1e-6,
             "a single step {} ≠ small steps {x}",
             once[0]
+        );
+    });
+}
+
+#[test]
+fn a_scaled_spring_stays_in_step_with_the_original() {
+    // The now-playing sheet (D-075) moves three elements at once — the sheet,
+    // the scrim under it and the chevron on the player bar — on three springs
+    // whose start and velocity are the sheet's, scaled. They stay in step
+    // without a per-frame hook only because the spring is linear: scaling the
+    // offset and the velocity must scale the whole motion, at every damping.
+    with_module(|_, exports| {
+        let step: Function = exports.get("springStep").unwrap();
+        for damping in [0.8_f64, 1.0, 1.4] {
+            for t in [1.0 / 60.0, 0.1, 0.25, 0.6] {
+                let sheet: Vec<f64> = step.call((-480.0, -1900.0, t, damping, 0.36)).unwrap();
+                for scale in [-2.0 / 480.0, 1.0 / 480.0] {
+                    let other: Vec<f64> = step
+                        .call((-480.0 * scale, -1900.0 * scale, t, damping, 0.36))
+                        .unwrap();
+                    for (i, what) in [(0, "position"), (1, "velocity")] {
+                        let expected = sheet[i] * scale;
+                        assert!(
+                            (other[i] - expected).abs() <= 1e-9 * (1.0 + expected.abs()),
+                            "damping {damping}, t {t}: the scaled {what} {} ≠ {expected} — the elements would drift apart",
+                            other[i]
+                        );
+                    }
+                }
+            }
+        }
+    });
+}
+
+#[test]
+fn a_drag_keeps_the_distance_past_the_threshold_and_a_still_release_is_not_a_throw() {
+    // Two faults the now-playing sheet's screenshots showed (D-075), in the
+    // drag every sheet and notice uses. A fake element stands in for the DOM:
+    // the drag only needs `addEventListener` and `setPointerCapture`.
+    //
+    // 1. The engine merges the moves that arrive within a frame, so the first
+    //    move delivered can be far past the threshold. The drag used to start
+    //    measuring from that move and trailed the pointer by the distance for
+    //    the whole drag.
+    // 2. A pointer held still sends no moves. Without the release as a sample
+    //    the velocity was the last move's, and a careful drop was thrown.
+    with_module(|ctx, exports| {
+        let drag: Function = exports.get("verticalDrag").unwrap();
+        let script: Function = ctx
+            .eval(
+                r#"(verticalDrag) => {
+                    globalThis.addEventListener = () => {};
+                    globalThis.removeEventListener = () => {};
+                    globalThis.setTimeout = () => 0;
+                    const listeners = {};
+                    const el = {
+                        addEventListener: (type, handler) => { listeners[type] = handler; },
+                        setPointerCapture: () => {},
+                    };
+                    const moves = [];
+                    let velocity = null;
+                    verticalDrag(el, {
+                        onStart: () => 0,
+                        onMove: (y) => moves.push(y),
+                        onEnd: (v) => { velocity = v; },
+                    });
+                    const event = (type, y, time) => ({
+                        type, button: 0, pointerId: 1, clientX: 700, clientY: y,
+                        timeStamp: time, target: { closest: () => null },
+                    });
+                    listeners.pointerdown(event("pointerdown", 74, 0));
+                    listeners.pointermove(event("pointermove", 160, 48));
+                    listeners.pointermove(event("pointermove", 280, 96));
+                    listeners.pointerup(event("pointerup", 280, 600));
+                    return { moves, velocity };
+                }"#,
+            )
+            .unwrap();
+        let result: Object = script.call((drag,)).unwrap();
+        let moves: Vec<f64> = result.get("moves").unwrap();
+        let velocity: f64 = result.get("velocity").unwrap();
+        // Pressed at 74, threshold 8: the element follows from 82 on.
+        assert_eq!(
+            moves,
+            vec![78.0, 198.0],
+            "the drag lost the distance the first merged move carried past the threshold"
+        );
+        assert!(
+            velocity.abs() < 1.0,
+            "released after half a second held still, yet thrown at {velocity} px/s"
         );
     });
 }

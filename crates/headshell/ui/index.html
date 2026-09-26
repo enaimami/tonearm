@@ -91,6 +91,9 @@
       <symbol id="i-close" viewBox="0 0 24 24">
         <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />
       </symbol>
+      <symbol id="i-chevron" viewBox="0 0 24 24">
+        <path d="M6 14.5l6-6 6 6" />
+      </symbol>
       <symbol id="i-copy" viewBox="0 0 24 24">
         <rect x="8.5" y="8.5" width="11" height="11" rx="2" />
         <path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2" />
@@ -104,11 +107,6 @@
       <symbol id="i-archive" viewBox="0 0 24 24">
         <rect x="3.5" y="4.5" width="17" height="4" rx="1" />
         <path d="M5 8.5v9.5A1.5 1.5 0 0 0 6.5 19.5h11A1.5 1.5 0 0 0 19 18V8.5M10 12.5h4" />
-      </symbol>
-      <symbol id="i-disc" viewBox="0 0 24 24">
-        <circle cx="12" cy="12" r="9" />
-        <circle cx="12" cy="12" r="5.6" />
-        <circle fill="currentColor" stroke="none" cx="12" cy="12" r="1.5" />
       </symbol>
     </svg>
 
@@ -207,81 +205,6 @@
       </header>
 
       <main id="content" class="content">
-        <!-- ————————————————— now playing -->
-        <section id="panel-now" class="panel" aria-labelledby="titleNow">
-          <header class="panel-head">
-            <h1 id="titleNow" class="panel-title">now playing</h1>
-          </header>
-
-          <div id="nowCard" class="now-card" hidden>
-            <div class="art" aria-hidden="true">
-              <svg class="art-mark"><use href="#i-disc" /></svg>
-              <span id="nowEq" class="eq"><i></i><i></i><i></i><i></i></span>
-            </div>
-            <div class="now-meta">
-              <p id="nowCardState" class="kicker"></p>
-              <h2 id="nowCardTitle" class="now-card-title">—</h2>
-              <p id="nowCardArtist" class="now-card-artist"></p>
-              <p class="facts">
-                <span id="nowCardSource" class="chip"></span>
-                <span id="nowCardDuration"></span>
-              </p>
-            </div>
-          </div>
-
-          <div id="queueBlock" hidden>
-            <h2 class="section-title">up next <span id="queueCount" class="count"></span></h2>
-            <ol id="queue" class="queue"></ol>
-          </div>
-
-          <!-- An empty queue is not an error but a beginning. Saying what the user
-               should do, and in which order, is this place's job. -->
-          <div id="onboarding" class="onboarding" hidden>
-            <h2 class="onboarding-title">getting started</h2>
-            <ol class="steps">
-              <li class="step">
-                <span class="step-no" aria-hidden="true">1</span>
-                <span class="step-text">
-                  <b>Set up a music source.</b>
-                  Local directories are set with <code>HEADSHELL_MUSIC_DIRS</code> and a remote
-                  library (Subsonic, Jellyfin) is added under providers; for SoundCloud or
-                  YouTube Music, install a plugin from the catalog.
-                </span>
-                <span class="step-actions">
-                  <button class="go" type="button" data-go="providers">providers</button>
-                  <button class="go" type="button" data-go="plugins">catalog</button>
-                </span>
-              </li>
-              <li class="step">
-                <span class="step-no" aria-hidden="true">2</span>
-                <span class="step-text">
-                  <b>Import your history.</b>
-                  An export archive fills the statistics and the sleeve card. Today
-                  Spotify's export can be read.
-                </span>
-                <span class="step-actions">
-                  <button class="go" type="button" data-go="import">import</button>
-                </span>
-              </li>
-              <li class="step">
-                <span class="step-no" aria-hidden="true">3</span>
-                <span class="step-text">
-                  <b>Play.</b>
-                  Type an artist or a track in the box above and press Enter; to queue every
-                  matching track, press Shift+Enter.
-                </span>
-                <span class="step-actions">
-                  <button class="go" type="button" data-go="focus-play">play box</button>
-                </span>
-              </li>
-            </ol>
-            <p class="hint">
-              If there is no sound or nothing can be found, <b>diagnostics</b> shows at which
-              stage the last run stopped.
-            </p>
-          </div>
-        </section>
-
         <!-- ————————————————— library -->
         <section id="panel-library" class="panel" aria-labelledby="titleLibrary" hidden>
           <header class="panel-head">
@@ -681,6 +604,126 @@
           </div>
         </section>
       </main>
+
+      <!-- ————————————————— now playing (D-075)
+           Not a section of the scrolling content but a sheet over it: it rises
+           out of the player bar and goes back into it, so the section under
+           it keeps its place and its scroll. A click on the player bar, a drag
+           on the bar or on the sheet, the sidebar row and Ctrl+1 all move the
+           same sheet. -->
+      <div id="nowScrim" class="now-scrim" aria-hidden="true" hidden></div>
+      <section id="panel-now" class="panel now-sheet" aria-labelledby="titleNow" hidden>
+        <div class="now-sheet-head">
+          <h1 id="titleNow" class="visually-hidden">now playing</h1>
+          <button id="btnNowGrabber" class="grabber" type="button" title="close (Esc)" aria-label="close now playing"></button>
+        </div>
+
+        <div id="nowView" class="now-view" hidden>
+          <div class="now-hero">
+            <div id="nowCard" class="now-card" hidden>
+              <!-- The core has no cover art; a turntable stands in for it. The
+                   record turns while playing, and the arm follows the position
+                   from the outer groove to the inner one — the same estimate
+                   as the progress bar. -->
+              <div class="turntable" aria-hidden="true">
+                <span class="platter"></span>
+                <span class="record">
+                  <svg viewBox="0 0 100 100">
+                    <circle class="record-vinyl" cx="50" cy="50" r="49.5" />
+                    <circle class="record-groove" cx="50" cy="50" r="45" />
+                    <circle class="record-groove" cx="50" cy="50" r="40" />
+                    <circle class="record-groove faint" cx="50" cy="50" r="35.5" />
+                    <circle class="record-groove" cx="50" cy="50" r="31" />
+                    <circle class="record-groove faint" cx="50" cy="50" r="26.5" />
+                    <circle class="record-label" cx="50" cy="50" r="17" />
+                    <path class="record-label-shade" d="M50 33a17 17 0 0 1 0 34z" />
+                    <circle class="record-hole" cx="50" cy="50" r="1.5" />
+                  </svg>
+                </span>
+                <span class="record-sheen"></span>
+                <span id="nowArm" class="tonearm">
+                  <svg viewBox="0 0 100 100">
+                    <rect class="arm-weight" x="80.6" y="2.6" width="6.8" height="8" rx="1.4" />
+                    <circle class="arm-base" cx="84" cy="16" r="6.4" />
+                    <path class="arm-rod" d="M84 10.6V70" />
+                    <!-- The headshell, turned towards the spindle; the stylus is
+                         at its tip (80.9/79.5 once turned). -->
+                    <g transform="rotate(18 84 70)">
+                      <path class="arm-head" d="M82.3 68.8h3.4l1.1 10.4a1.2 1.2 0 0 1-1.2 1.3h-3.2a1.2 1.2 0 0 1-1.2-1.3z" />
+                      <path class="arm-lift" d="M86.2 71.4l4-1.4" />
+                      <rect class="arm-cartridge" x="82.9" y="76.4" width="2.2" height="3.4" rx="0.5" />
+                    </g>
+                    <circle class="arm-pivot" cx="84" cy="16" r="2.4" />
+                  </svg>
+                </span>
+              </div>
+              <div class="now-meta">
+                <p id="nowCardState" class="kicker"></p>
+                <h2 id="nowCardTitle" class="now-card-title">—</h2>
+                <p id="nowCardArtist" class="now-card-artist"></p>
+                <p class="facts">
+                  <span id="nowCardSource" class="chip"></span>
+                  <span id="nowCardDuration"></span>
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="now-side">
+            <h2 class="section-title">up next <span id="queueCount" class="count"></span></h2>
+            <ol id="queue" class="queue"></ol>
+          </div>
+        </div>
+
+        <!-- An empty queue is not an error but a beginning. Saying what the user
+             should do, and in which order, is this place's job. -->
+        <div id="nowEmpty" class="now-empty">
+          <div id="onboarding" class="onboarding">
+            <h2 class="onboarding-title">getting started</h2>
+            <ol class="steps">
+              <li class="step">
+                <span class="step-no" aria-hidden="true">1</span>
+                <span class="step-text">
+                  <b>Set up a music source.</b>
+                  Local directories are set with <code>HEADSHELL_MUSIC_DIRS</code> and a remote
+                  library (Subsonic, Jellyfin) is added under providers; for SoundCloud or
+                  YouTube Music, install a plugin from the catalog.
+                </span>
+                <span class="step-actions">
+                  <button class="go" type="button" data-go="providers">providers</button>
+                  <button class="go" type="button" data-go="plugins">catalog</button>
+                </span>
+              </li>
+              <li class="step">
+                <span class="step-no" aria-hidden="true">2</span>
+                <span class="step-text">
+                  <b>Import your history.</b>
+                  An export archive fills the statistics and the sleeve card. Today
+                  Spotify's export can be read.
+                </span>
+                <span class="step-actions">
+                  <button class="go" type="button" data-go="import">import</button>
+                </span>
+              </li>
+              <li class="step">
+                <span class="step-no" aria-hidden="true">3</span>
+                <span class="step-text">
+                  <b>Play.</b>
+                  Type an artist or a track in the box above and press Enter; to queue every
+                  matching track, press Shift+Enter.
+                </span>
+                <span class="step-actions">
+                  <button class="go" type="button" data-go="focus-play">play box</button>
+                </span>
+              </li>
+            </ol>
+            <p class="hint">
+              If there is no sound or nothing can be found, <b>diagnostics</b> shows at which
+              stage the last run stopped.
+            </p>
+          </div>
+        </div>
+      </section>
     </div>
 
     <!-- ————————————————— player bar -->
@@ -715,6 +758,9 @@
         <button id="btnRepeat" class="icon-button" type="button" title="repeat: off" aria-label="repeat mode" aria-pressed="false">
           <svg class="icon" aria-hidden="true"><use id="repeatIcon" href="#i-repeat" /></svg>
         </button>
+        <button id="btnNowToggle" class="icon-button" type="button" title="now playing (Ctrl+1)" aria-label="now playing" aria-expanded="false" aria-controls="panel-now">
+          <svg id="nowToggleIcon" class="icon" aria-hidden="true"><use href="#i-chevron" /></svg>
+        </button>
       </div>
     </footer>
 
@@ -729,10 +775,14 @@
           <li><span><kbd>Enter</kbd></span> play the first match</li>
           <li><span><kbd>Shift</kbd>+<kbd>Enter</kbd></span> queue every matching track</li>
           <li><span><kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>9</kbd></span> sections, in the sidebar's order</li>
-          <li><span><kbd>Esc</kbd></span> close this sheet and the notices</li>
+          <li><span><kbd>Esc</kbd></span> close the topmost: this list, the notices, now playing</li>
           <li><span><kbd>?</kbd></span> this list</li>
         </ul>
-        <p class="hint">In a text box, keys go to the box, not to the shortcuts. Notices also close when dragged to the right.</p>
+        <p class="hint">
+          In a text box, keys go to the box, not to the shortcuts. Notices also close when
+          dragged to the right. Now playing opens from the player bar — a click or a drag
+          upwards — and closes the same way, or when dragged down.
+        </p>
         <button id="btnHelpClose" type="button">close</button>
       </div>
     </div>
