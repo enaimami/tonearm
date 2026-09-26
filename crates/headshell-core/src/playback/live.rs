@@ -13,10 +13,14 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::artwork::{
+    ArtworkKey, ArtworkPicture, ArtworkReport, ArtworkVariant, ArtworkWorker, Links, Online,
+};
+use crate::ids::ProviderTrackId;
 use crate::library::WriteSummary;
 use crate::model::Listen;
 use crate::playback::{PlayState, PlaybackAnchor, Player};
-use crate::session::Session;
+use crate::session::{LookupMode, Session};
 use crate::{Error, Result};
 
 /// What happened in a `tick`.
@@ -51,6 +55,11 @@ pub struct TickReport {
     pub store_error: Option<String>,
     /// The queue ran out and the audio stopped.
     pub finished: bool,
+    /// The covers whose answer arrived this round (D-076), found or not —
+    /// only their keys: the interface asks for the statuses and the images
+    /// it shows. Empty when no cover worker runs (the TUI).
+    #[serde(default)]
+    pub artwork_ready: Vec<ArtworkKey>,
 }
 
 /// The playing session.
@@ -65,6 +74,10 @@ pub struct LiveSession {
     /// pulls them out of the player, **if they are not kept here they are lost**
     /// when the write fails.
     pending: Vec<Listen>,
+    /// The cover worker, if the shell started one (D-076).
+    artwork: Option<ArtworkWorker>,
+    /// The queue last handed to it: play order and position.
+    artwork_seen: Option<(Vec<ProviderTrackId>, usize)>,
 }
 
 impl LiveSession {
@@ -75,7 +88,86 @@ impl LiveSession {
             session,
             player,
             pending: Vec::new(),
+            artwork: None,
+            artwork_seen: None,
         }
+    }
+
+    /// Starts the cover worker (D-076). From then on every queue the player
+    /// plays is handed to it — at the next `tick` or report — and the answers
+    /// that arrive are announced in [`TickReport::artwork_ready`].
+    ///
+    /// `mode` is the `--online` choice: `Offline` looks only where the tracks
+    /// live (their tags, their folders, their provider); `Online` asks
+    /// MusicBrainz and the Cover Art Archive too.
+    ///
+    /// # Errors
+    /// If the cache directory cannot be opened, or online was asked for in a
+    /// build without an HTTP client.
+    pub fn start_artwork(&mut self, mode: LookupMode) -> Result<()> {
+        let online = match mode {
+            LookupMode::Offline => None,
+            LookupMode::Online => Some(Online::from_build()?),
+        };
+        let links = Links {
+            registry: self.player.providers().clone(),
+            online,
+        };
+        self.artwork = Some(ArtworkWorker::spawn(
+            &self.session.config().artwork_dir(),
+            links,
+        )?);
+        self.artwork_seen = None;
+        Ok(())
+    }
+
+    /// Hands the queue to the cover worker if it changed since the last time.
+    fn sync_artwork(&mut self) {
+        let Some(worker) = &self.artwork else {
+            return;
+        };
+        let view = self.player.queue().view();
+        let stamp = (
+            view.items.iter().map(|item| item.id.clone()).collect(),
+            view.position,
+        );
+        if self.artwork_seen.as_ref() != Some(&stamp) {
+            worker.submit(&view.items, view.position, self.player.providers().clone());
+            self.artwork_seen = Some(stamp);
+        }
+    }
+
+    /// The queue's covers as they stand (D-076).
+    ///
+    /// # Errors
+    /// If no cover worker runs — "not started" is not "no covers" (K9) — or
+    /// its lock is poisoned.
+    pub fn artwork_report(&mut self) -> Result<ArtworkReport> {
+        self.sync_artwork();
+        self.worker()?.report()
+    }
+
+    /// One size of the covers of `keys` as `data:` URIs, for the interface.
+    ///
+    /// # Errors
+    /// If no cover worker runs, or the cache cannot be read.
+    pub fn artwork_images(
+        &self,
+        keys: &[ArtworkKey],
+        variant: ArtworkVariant,
+    ) -> Result<Vec<ArtworkPicture>> {
+        self.worker()?.images(keys, variant)
+    }
+
+    fn worker(&self) -> Result<&ArtworkWorker> {
+        self.artwork.as_ref().ok_or_else(|| {
+            Error::new(
+                crate::diag::Stage::ArtworkStore,
+                crate::ErrorKind::Artwork {
+                    detail: "no cover worker runs in this session".to_owned(),
+                },
+            )
+        })
     }
 
     #[must_use]
@@ -115,6 +207,9 @@ impl LiveSession {
         self.player.stop();
         self.pending.extend(self.player.take_listens());
         self.player = player;
+        // The new player may carry a newer registry (a server was added):
+        // the same queue is handed to the cover worker again with it.
+        self.artwork_seen = None;
     }
 
     /// One round: advance the player, write the accumulated listens
@@ -161,6 +256,12 @@ impl LiveSession {
 
         tick_result?;
 
+        self.sync_artwork();
+        let artwork_ready = match &self.artwork {
+            Some(worker) => worker.drain_ready(),
+            None => Vec::new(),
+        };
+
         Ok(TickReport {
             anchor,
             track_changed: before != after,
@@ -168,6 +269,7 @@ impl LiveSession {
             listens_pending: self.pending.len(),
             store_error,
             finished,
+            artwork_ready,
         })
     }
 

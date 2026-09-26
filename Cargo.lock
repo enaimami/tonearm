@@ -1854,6 +1854,7 @@ version = "0.0.2-beta"
 dependencies = [
  "cpal",
  "jiff",
+ "png 0.18.1",
  "resvg",
  "rquickjs",
  "rusqlite",
@@ -1868,6 +1869,7 @@ dependencies = [
  "tracing",
  "ureq",
  "zip",
+ "zune-jpeg",
 ]
 
 [[package]]

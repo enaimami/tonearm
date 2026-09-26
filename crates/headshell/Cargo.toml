@@ -29,7 +29,7 @@ tokio = { version = "1.53.1", features = ["rt", "time", "sync", "macros"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 # D-030: the dependency goes one way — this package does not see `headshell-cli`.
-headshell-core = { workspace = true, features = ["render-png", "audio", "http-client", "plugin-engine"] }
+headshell-core = { workspace = true, features = ["render-png", "artwork-resize", "audio", "http-client", "plugin-engine"] }
 # The native file dialog: for picking the export archive and where to save the
 # card. A shell dependency — it does not enter `headshell-core`'s tree and does
 # not affect the mobile binary size. Its permission in `capabilities/default.json`

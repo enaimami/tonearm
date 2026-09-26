@@ -99,6 +99,15 @@ share), and `#panel-now` still carries `.panel` but sits outside `.content`.
 The sheet's position is written by the springs as an inline `transform`; a
 theme that gives it one of its own breaks it.
 
+D-076 added covers. When the playing track has one, it is the record's label:
+`.record-cover`, inside the record's drawing so it turns with it, faded in by
+the springs as an inline `opacity` — a theme that gives it an `opacity` of its
+own breaks the fade. Every queue row got a square slot, `.q-cover`, whose
+background (a small record) stands in until a cover arrives or when there is
+none, and `.cover-note` under the queue's title says what could not be looked
+up. They are new classes, not in `CONTRACT_CLASSES`: styling them is
+extending.
+
 ## Animation: `transform` and `opacity` only
 
 This isn't a matter of style; it's a measurement. In WebKitGTK (the default

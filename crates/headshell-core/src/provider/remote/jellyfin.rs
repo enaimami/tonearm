@@ -24,8 +24,8 @@ use crate::ids::{ProviderId, ProviderTrackId};
 use crate::model::TrackRef;
 use crate::net::{self, HttpClient, HttpHeader, HttpRequest};
 use crate::provider::{
-    AudioSource, Capabilities, Provider, ProviderFuture, ProviderHealth, ProviderInfo,
-    ProviderTrack,
+    ArtworkImage, AudioSource, Capabilities, Provider, ProviderFuture, ProviderHealth,
+    ProviderInfo, ProviderTrack,
 };
 
 use super::{RemoteServer, ServerKind, StoredAuth};
@@ -111,6 +111,19 @@ impl JellyfinProvider {
         net::parse_json(&response, what)
     }
 
+    /// The album a track belongs to, if the server says.
+    async fn album_of(&self, item_id: &str) -> Result<Option<String>> {
+        let user = self.user_id().await?;
+        let url = format!(
+            "{}/Users/{}/Items/{}",
+            self.server.url,
+            net::encode_query(&user),
+            net::encode_query(item_id)
+        );
+        let item: Item = self.get_json(&url, "jellyfin item").await?;
+        Ok(item.album_id.filter(|album| !album.is_empty()))
+    }
+
     /// A track's stream URL. The credentials go **in a header**.
     #[must_use]
     pub fn stream_url(&self, item_id: &str) -> String {
@@ -127,7 +140,11 @@ impl Provider for JellyfinProvider {
         ProviderInfo {
             id: self.server.id.clone(),
             display_name: self.server.display_name(),
-            capabilities: Capabilities::SEARCH | Capabilities::BROWSE | Capabilities::STREAM,
+            // ARTWORK: the item's `Primary` image, or its album's (D-076).
+            capabilities: Capabilities::SEARCH
+                | Capabilities::BROWSE
+                | Capabilities::STREAM
+                | Capabilities::ARTWORK,
         }
     }
 
@@ -263,6 +280,60 @@ impl Provider for JellyfinProvider {
                 // address ends up in the log or on screen, the key must not leak.
                 headers: self.auth_headers()?,
             }))
+        })
+    }
+
+    /// The item's `Primary` image at the width asked for; an audio item often
+    /// has none of its own and shows its album's, so that is asked next
+    /// (D-076). `Ok(None)`: neither has one.
+    fn artwork<'a>(
+        &'a self,
+        id: &'a ProviderTrackId,
+        size: u32,
+    ) -> ProviderFuture<'a, Option<ArtworkImage>> {
+        Box::pin(async move {
+            if id.provider != self.server.id {
+                return Err(Error::new(
+                    Stage::ArtworkRead,
+                    ErrorKind::InvalidInput {
+                        detail: format!(
+                            "{id} does not belong to this provider ({})",
+                            self.server.id
+                        ),
+                    },
+                ));
+            }
+            let headers = self.auth_headers()?;
+            let mut item = id.id.clone();
+            for asking_the_album in [false, true] {
+                if asking_the_album {
+                    match self.album_of(&id.id).await? {
+                        Some(album) => item = album,
+                        None => return Ok(None),
+                    }
+                }
+                let url = format!(
+                    "{}/Items/{}/Images/Primary?maxWidth={size}",
+                    self.server.url,
+                    net::encode_query(&item)
+                );
+                let request = HttpRequest::get(&url).with_headers(headers.clone());
+                let response = self.http.send(&request).await?;
+                if response.status == 404 {
+                    continue;
+                }
+                response.error_for_status(&url)?;
+                return match super::as_image(&response) {
+                    Some(image) => Ok(Some(image)),
+                    None => Err(Error::new(
+                        Stage::ArtworkRead,
+                        ErrorKind::Artwork {
+                            detail: format!("{url} answered with something that is not an image"),
+                        },
+                    )),
+                };
+            }
+            Ok(None)
         })
     }
 }
@@ -402,6 +473,10 @@ struct Item {
     #[serde(default)]
     artists: Vec<String>,
     run_time_ticks: Option<u64>,
+    /// The album the item belongs to — where its cover is when it has none
+    /// of its own (D-076).
+    #[serde(default)]
+    album_id: Option<String>,
 }
 
 impl Item {
@@ -445,6 +520,47 @@ mod tests {
          "Artists":["Ezhel"],"RunTimeTicks":2150000000},
         {"Id":"i2","Name":"Felaket","Artists":["Ezhel"]},
         {"Name":"no-id"}],"TotalRecordCount":3}"#;
+
+    #[tokio::test]
+    async fn a_track_without_its_own_image_shows_its_albums() {
+        let png = crate::artwork::image::tests_support::png_2x2();
+        let http = Arc::new(
+            FakeHttp::new()
+                .route_status("/Items/i1/Images/Primary", 404, "")
+                .route("/Users/u1/Items/i1", r#"{"Id":"i1","AlbumId":"al1"}"#)
+                .route_bytes("/Items/al1/Images/Primary", "image/png", &png),
+        );
+        let provider = JellyfinProvider::new(server(), Arc::clone(&http) as Arc<dyn HttpClient>);
+        let id = ProviderTrackId::new(ProviderId::new("jf"), "i1");
+        let image = provider.artwork(&id, 500).await.unwrap().unwrap();
+        assert_eq!(image.bytes, png);
+        let asked: Vec<String> = http.requests().iter().map(|r| r.url.clone()).collect();
+        assert!(
+            asked[0].ends_with("/Items/i1/Images/Primary?maxWidth=500"),
+            "{asked:?}"
+        );
+        assert!(
+            asked.last().unwrap().contains("/Items/al1/Images/Primary"),
+            "{asked:?}"
+        );
+        assert!(
+            http.requests()
+                .iter()
+                .all(|r| !r.url.contains("secret-key"))
+        );
+
+        let bare = Arc::new(
+            FakeHttp::new()
+                .route_status("/Items/i1/Images/Primary", 404, "")
+                .route("/Users/u1/Items/i1", r#"{"Id":"i1"}"#),
+        );
+        let provider = JellyfinProvider::new(server(), bare as Arc<dyn HttpClient>);
+        assert_eq!(
+            provider.artwork(&id, 500).await.unwrap(),
+            None,
+            "no album, no image"
+        );
+    }
 
     #[tokio::test]
     async fn search_maps_items_and_converts_ticks_to_ms() {

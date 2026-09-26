@@ -19,8 +19,8 @@ use crate::ids::ProviderTrackId;
 use crate::model::TrackRef;
 use crate::net::{self, HttpClient, HttpRequest};
 use crate::provider::{
-    AudioSource, Capabilities, Provider, ProviderFuture, ProviderHealth, ProviderInfo,
-    ProviderTrack,
+    ArtworkImage, AudioSource, Capabilities, Provider, ProviderFuture, ProviderHealth,
+    ProviderInfo, ProviderTrack,
 };
 
 use super::{RemoteServer, StoredAuth};
@@ -127,8 +127,11 @@ impl Provider for SubsonicProvider {
             id: self.server.id.clone(),
             display_name: self.server.display_name(),
             // No CONTROL: Subsonic does not control a remote player,
-            // it gives us the audio bytes.
-            capabilities: Capabilities::SEARCH | Capabilities::BROWSE | Capabilities::STREAM,
+            // it gives us the audio bytes. ARTWORK: `getCoverArt` (D-076).
+            capabilities: Capabilities::SEARCH
+                | Capabilities::BROWSE
+                | Capabilities::STREAM
+                | Capabilities::ARTWORK,
         }
     }
 
@@ -251,6 +254,75 @@ impl Provider for SubsonicProvider {
         })
     }
 
+    /// `getCoverArt`, at the size asked for (D-076). The Subsonic API takes
+    /// "the ID of a song, album or artist" there: the song's own id is enough,
+    /// no `getSong` round trip first.
+    ///
+    /// `Ok(None)`: the server has no cover for it — a `404`, or error `70`
+    /// ("the requested data was not found").
+    fn artwork<'a>(
+        &'a self,
+        id: &'a ProviderTrackId,
+        size: u32,
+    ) -> ProviderFuture<'a, Option<ArtworkImage>> {
+        Box::pin(async move {
+            if id.provider != self.server.id {
+                return Err(Error::new(
+                    Stage::ArtworkRead,
+                    ErrorKind::InvalidInput {
+                        detail: format!(
+                            "{id} does not belong to this provider ({})",
+                            self.server.id
+                        ),
+                    },
+                ));
+            }
+            let size = size.to_string();
+            let url = self.endpoint("getCoverArt", &[("id", &id.id), ("size", &size)]);
+            // The credentials are in the query string: an error names the
+            // endpoint, not the URL — its text ends up in `headshell diag`,
+            // which is made to be pasted.
+            let shown = format!("{}/rest/getCoverArt", self.server.url);
+            let response = self
+                .http
+                .send(&HttpRequest::get(&url))
+                .await
+                .map_err(|err| without_credentials(err, &url, &shown))?;
+            if response.status == 404 {
+                return Ok(None);
+            }
+            response.error_for_status(&shown)?;
+            if let Some(image) = super::as_image(&response) {
+                return Ok(Some(image));
+            }
+            // Not an image: the error envelope (`f=json`).
+            let envelope: Envelope = net::parse_json(&response, "subsonic getCoverArt")?;
+            match envelope.response.error {
+                Some(error) if error.code == 70 => Ok(None),
+                Some(error) => Err(Error::new(
+                    Stage::ArtworkRead,
+                    ErrorKind::RemoteApi {
+                        server: self.server.id.to_string(),
+                        endpoint: "getCoverArt".to_owned(),
+                        code: error.code,
+                        message: error
+                            .message
+                            .unwrap_or_else(|| "the server gave no message".to_owned()),
+                    },
+                )),
+                None => Err(Error::new(
+                    Stage::ArtworkRead,
+                    ErrorKind::Artwork {
+                        detail: format!(
+                            "{} answered getCoverArt with neither an image nor an error",
+                            self.server.id
+                        ),
+                    },
+                )),
+            }
+        })
+    }
+
     // `scan_catalog` is not implemented (the default `None`): Subsonic has no
     // endpoint that dumps the whole catalog cheaply — it would take hundreds of
     // requests, artist → album → track. Remote search goes straight to the
@@ -334,6 +406,21 @@ impl Song {
     }
 }
 
+/// A request error with the address swapped for the endpoint's: the query
+/// string carries the token and the salt (or the API key).
+fn without_credentials(err: Error, url: &str, shown: &str) -> Error {
+    match err.kind() {
+        ErrorKind::Network { detail, .. } => Error::new(
+            err.stage(),
+            ErrorKind::Network {
+                url: shown.to_owned(),
+                detail: detail.replace(url, shown),
+            },
+        ),
+        _ => err,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -360,6 +447,63 @@ mod tests {
          "isrc":["TRA123456789"]},
         {"id":"a2","title":"Felaket","artist":"Ezhel","duration":180},
         {"title":"no-id"}]}}}"#;
+
+    #[tokio::test]
+    async fn a_songs_cover_comes_from_get_cover_art_and_its_absence_is_none() {
+        let png = crate::artwork::image::tests_support::png_2x2();
+        let http = Arc::new(FakeHttp::new().route_bytes("/rest/getCoverArt", "image/png", &png));
+        let provider = SubsonicProvider::new(server(), http.clone());
+        let id = ProviderTrackId::new(ProviderId::new("ev"), "a1");
+        let image = provider.artwork(&id, 500).await.unwrap().unwrap();
+        assert_eq!(image.bytes, png);
+        assert_eq!(image.mime.as_deref(), Some("image/png"));
+        let url = http.last_url();
+        assert!(url.contains("id=a1") && url.contains("size=500"), "{url}");
+
+        let none = SubsonicProvider::new(
+            server(),
+            Arc::new(FakeHttp::new().route(
+                "/rest/getCoverArt",
+                r#"{"subsonic-response":{"status":"failed","error":{"code":70,"message":"Cover not found"}}}"#,
+            )),
+        );
+        assert_eq!(
+            none.artwork(&id, 500).await.unwrap(),
+            None,
+            "error 70 is \"no cover\""
+        );
+
+        let refused = SubsonicProvider::new(
+            server(),
+            Arc::new(FakeHttp::new().route(
+                "/rest/getCoverArt",
+                r#"{"subsonic-response":{"status":"failed","error":{"code":50,"message":"not authorized"}}}"#,
+            )),
+        );
+        let err = refused.artwork(&id, 500).await.unwrap_err();
+        let text = err.chain_text();
+        assert!(
+            text.contains("code 50") && text.starts_with("STEP: ARTWORK_READ"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("26719a"),
+            "the token must not reach the error: {text}"
+        );
+
+        // Unreachable: the network error names the endpoint, not the URL.
+        let unreachable = SubsonicProvider::new(server(), Arc::new(FakeHttp::new()));
+        let text = unreachable
+            .artwork(&id, 500)
+            .await
+            .unwrap_err()
+            .chain_text();
+        assert!(text.contains("/rest/getCoverArt"), "{text}");
+        assert!(
+            !text.contains("26719a") && !text.contains("c19b2d"),
+            "the credentials must not reach a network error: {text}"
+        );
+    }
 
     #[test]
     fn the_url_carries_credentials_and_encodes_the_query() {

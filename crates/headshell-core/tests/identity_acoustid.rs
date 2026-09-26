@@ -56,7 +56,7 @@ fn lookup_or_skip(test: &str) -> Option<AcoustIdLookup> {
     let http = headshell_core::net::default_http_client().ok()?;
     let lookup = AcoustIdLookup::new(http)
         .with_api_key(key)
-        .with_user_agent("headshell-tests/0.0.1 ( https://github.com/enaimami/headshell )");
+        .with_user_agent("headshell-tests/0.0.1 ( https://github.com/headshell/headshell )");
 
     // Whether the key exists is read from the `Debug` output: the value is
     // written nowhere (D-042).
@@ -342,7 +342,7 @@ async fn a_rejected_key_is_an_error_not_an_empty_result() {
     };
     let lookup = AcoustIdLookup::new(Arc::clone(&http))
         .with_api_key("invalid-key-test")
-        .with_user_agent("headshell-tests/0.0.1 ( https://github.com/enaimami/headshell )");
+        .with_user_agent("headshell-tests/0.0.1 ( https://github.com/headshell/headshell )");
     let print = fingerprint_file(&sample()).expect("the fixture must yield a fingerprint");
 
     let err = lookup

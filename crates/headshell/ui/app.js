@@ -515,6 +515,9 @@ function renderQueue(view) {
 
   renderNow();
   revealCurrentRow();
+  // What is already known is painted at once; the core is asked for the rest.
+  paintCovers();
+  refreshCovers();
 }
 
 function queueRow(item, index, current) {
@@ -540,6 +543,8 @@ function queueRow(item, index, current) {
       current
         ? h("span", { class: "index eq", "aria-hidden": "true" }, h("i"), h("i"), h("i"), h("i"))
         : h("span", { class: "index", text: String(index + 1) }),
+      // The cover arrives later (`paintCovers`); until then, a small record.
+      h("span", { class: "q-cover", "aria-hidden": "true" }),
       h(
         "span",
         { class: "q-main" },
@@ -563,6 +568,7 @@ function renderNow() {
   $("nowArtist").textContent = track ? track.artist : "";
   $("queue").dataset.state = state;
   moveArm();
+  paintLabel();
 
   const card = $("nowCard");
   card.hidden = !current;
@@ -693,6 +699,185 @@ $("btnRepeat").addEventListener("click", async () => {
   const nextMode = { off: "all", all: "one", one: "off" }[queue.repeat] ?? "off";
   renderQueue(await call("set_repeat", { mode: nextMode }));
 });
+
+// ————————————————————————————————————— covers (D-076)
+//
+// The core's cover worker looks the queue up in the background, the playing
+// track first; playback never waits for it. The tick names the covers whose
+// answer arrived, the report says for every row what was found, where, or
+// why not, and the images come as `data:` URIs — the only images the page's
+// CSP allows. Nothing is decided here: the rows and the label only show the
+// report.
+//
+// A cover fades in the first time it appears; after that, a row drawn again
+// shows it at once.
+
+let coverReport = null;
+const coverThumbs = new Map();
+const coverLabels = new Map();
+const coversSeen = new Set();
+let coversBusy = false;
+let coversAgain = false;
+
+const COVER_SOURCES = {
+  embedded: "from the file's tags",
+  folder: "from an image in the file's folder",
+  provider: "from the provider",
+  cover_art_archive: "from the Cover Art Archive",
+};
+
+/// A row's cover as the user reads it. "Not looked up" and "not found" are
+/// different answers (K9); an unknown status is shown raw, not guessed.
+function coverText(item) {
+  switch (item.status) {
+    case "found":
+      return `cover ${COVER_SOURCES[item.source] ?? item.source}`;
+    case "not_found":
+      return `no cover found — ${item.detail}`;
+    case "not_checked_offline":
+      return "cover not looked up — offline (HEADSHELL_ONLINE=1 asks MusicBrainz)";
+    case "failed":
+      return `the cover failed — ${firstLine(item.chain)}`;
+    case "pending":
+      return "looking for the cover…";
+    default:
+      return `cover: ${item.status}`;
+  }
+}
+
+/// The report's row for a queue index — only if it is still the same track:
+/// a report from before the last queue change is not painted on new rows.
+function coverItemAt(index) {
+  const item = coverReport?.items[index];
+  const queued = queue.items[index];
+  if (!item || !queued) return null;
+  const same =
+    item.provider === queued.id.provider && item.title === queued.track.title && item.artist === queued.track.artist;
+  return same ? item : null;
+}
+
+/// Asks the core for the queue's covers and fetches the images that are new.
+/// One request at a time: a call that comes while one is under way asks
+/// again when it ends, so the last answer is always the newest.
+async function refreshCovers() {
+  if (coversBusy) {
+    coversAgain = true;
+    return;
+  }
+  coversBusy = true;
+  try {
+    do {
+      coversAgain = false;
+      const report = await call("artwork_queue");
+      if (!report) return;
+      coverReport = report;
+      const found = new Set(report.items.filter((item) => item.status === "found").map((item) => item.key));
+      // Only the queue's covers are kept: a long session must not hold every
+      // album it ever played.
+      for (const cache of [coverThumbs, coverLabels]) {
+        for (const key of cache.keys()) if (!found.has(key)) cache.delete(key);
+      }
+      await fetchCovers([...found].filter((key) => !coverThumbs.has(key)), "thumb", coverThumbs);
+      const current = coverItemAt(queue.position);
+      if (current?.status === "found" && !coverLabels.has(current.key)) {
+        await fetchCovers([current.key], "label", coverLabels);
+      }
+      paintCovers();
+    } while (coversAgain);
+  } finally {
+    coversBusy = false;
+  }
+}
+
+async function fetchCovers(keys, variant, into) {
+  if (keys.length === 0) return;
+  for (const picture of (await call("artwork_images", { keys, variant })) ?? []) {
+    into.set(picture.key, picture.uri);
+  }
+}
+
+function paintCovers() {
+  const rows = $("queue").children;
+  const appeared = [];
+  for (let index = 0; index < rows.length; index += 1) {
+    const slot = rows[index].querySelector(".q-cover");
+    if (!slot) continue;
+    const item = coverItemAt(index);
+    slot.title = item ? coverText(item) : "";
+    const uri = item?.status === "found" ? coverThumbs.get(item.key) : undefined;
+    const shown = slot.querySelector("img");
+    if (!uri) {
+      shown?.remove();
+      continue;
+    }
+    if (shown?.dataset.key === item.key) continue;
+    const img = h("img", { alt: "", src: uri, dataset: { key: item.key } });
+    if (shown) shown.replaceWith(img);
+    else slot.append(img);
+    if (!coversSeen.has(item.key)) {
+      animate(img, { opacity: 1 }, { from: { opacity: 0 } });
+      appeared.push(item.key);
+    }
+  }
+  for (const key of appeared) coversSeen.add(key);
+  paintLabel();
+  paintCoverNote();
+}
+
+// The playing track's cover on the record's label. Without one the plain
+// label stays — the look the turntable had before covers.
+const nowCover = $("nowCover");
+const nowCoverImage = $("nowCoverImage");
+let labelKey = null;
+
+function paintLabel() {
+  const item = coverItemAt(queue.position);
+  const uri = item?.status === "found" ? coverLabels.get(item.key) : undefined;
+  const key = uri ? item.key : null;
+  if (key === labelKey) return;
+  labelKey = key;
+  // `hidden` is an HTML property; on an SVG element only the attribute works.
+  nowCover.toggleAttribute("hidden", !uri);
+  if (!uri) return;
+  nowCoverImage.setAttribute("href", uri);
+  animate(nowCover, { opacity: 1 }, { from: { opacity: 0 } });
+}
+
+/// What the covers could not do, under the queue's title — only when there
+/// is something the user can act on. The full count is in its tooltip.
+function paintCoverNote() {
+  const note = $("coverNote");
+  const s = coverReport?.summary;
+  const parts = [];
+  if (s?.not_checked_offline > 0) {
+    parts.push(
+      `Offline — no cover looked up for ${countOf(s.not_checked_offline, "track")}. ` +
+        "HEADSHELL_ONLINE=1 at startup asks MusicBrainz and the Cover Art Archive.",
+    );
+  }
+  if (s?.failed > 0) {
+    parts.push(`The cover of ${countOf(s.failed, "track")} failed — the row's tooltip says why.`);
+  }
+  note.hidden = parts.length === 0;
+  note.textContent = parts.join(" ");
+  note.title = s ? coverSummaryText(s) : "";
+}
+
+function coverSummaryText(s) {
+  const parts = [
+    [s.embedded, "embedded"],
+    [s.folder, "folder"],
+    [s.provider, "provider"],
+    [s.cover_art_archive, "Cover Art Archive"],
+    [s.not_found, "not found"],
+    [s.not_checked_offline, "not looked up (offline)"],
+    [s.failed, "failed"],
+    [s.pending, "pending"],
+  ]
+    .filter(([n]) => n > 0)
+    .map(([n, label]) => `${fmt(n)} ${label}`);
+  return `covers of ${countOf(s.tracks, "track")}: ${parts.join(" · ") || "none"}`;
+}
 
 // ————————————————————————————————————— now playing sheet (D-075)
 //
@@ -2146,6 +2331,9 @@ listen("headshell://tick", async (event) => {
   renderAnchor(report.anchor);
   if (report.track_changed || report.finished) {
     renderQueue(await call("queue"));
+  } else if (report.artwork_ready?.length > 0) {
+    // A cover's answer arrived: the rows and the label are painted again.
+    refreshCovers();
   }
   if (report.listens_recorded > 0) {
     // The history grew: the statistics and the card are recomputed the next time
@@ -2191,6 +2379,7 @@ listen("headshell://busy", (event) => {
       `data dir    : ${environment.data_dir}`,
       `database    : ${environment.database}`,
       `music       : ${environment.music_dirs.length > 0 ? environment.music_dirs.join(", ") : "not set (HEADSHELL_MUSIC_DIRS)"}`,
+      `online      : ${environment.lookup === "online" ? "yes (HEADSHELL_ONLINE=1)" : "no — HEADSHELL_ONLINE=1 turns it on"}`,
     ].join("\n");
   }
   renderQueue(await call("queue"));

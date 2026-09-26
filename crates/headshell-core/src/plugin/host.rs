@@ -6,7 +6,7 @@
 //!
 //! | JS | What it does | Check |
 //! |---|---|---|
-//! | `host.http.request/get/post` | HTTP request | `permissions.net` on every request and every redirect; time limit; forbidden while loading |
+//! | `host.http.request/get/post` | HTTP request; `binary: true` returns the body as base64 (api 3) | `permissions.net` on every request and every redirect; time limit; forbidden while loading |
 //! | `host.secrets.get(k)` | the plugin's **own** secret | namespace (D-042) |
 //! | `host.secrets.file(k)` | writes the secret to a `0600` temporary file, returns its path | only its own secret; deleted when the engine shuts down |
 //! | `host.storage.get/set/remove` | persistent key-value store private to the plugin | the plugin's state directory; 1 MB cap |
@@ -215,12 +215,21 @@ impl HostState {
                 };
                 response_headers.insert(name, serde_json::Value::String(value));
             }
+            // Binary (api 3, D-076): an image read as text is destroyed — every
+            // byte that is not UTF-8 becomes U+FFFD. The body goes as base64,
+            // and the response says which it is.
+            let (body, encoding) = if options.binary {
+                (crate::encoding::base64_standard(&response.body), "base64")
+            } else {
+                (response.text_lossy(), "text")
+            };
             return Ok(serde_json::json!({
                 "status": response.status,
                 "ok": response.is_success(),
                 "url": url,
                 "headers": response_headers,
-                "body": response.text_lossy(),
+                "body": body,
+                "encoding": encoding,
             }));
         }
         Err("redirect loop".to_owned())
@@ -478,6 +487,9 @@ struct HttpOptions {
     headers: BTreeMap<String, String>,
     #[serde(default)]
     body: Option<String>,
+    /// The response body as base64 instead of text (api 3, D-076).
+    #[serde(default)]
+    binary: bool,
 }
 
 /// The options of `host.tools.run`.
@@ -748,6 +760,7 @@ pub(crate) fn install<'js>(ctx: &Ctx<'js>, state: Rc<HostState>) -> rquickjs::Re
                             method: None,
                             headers,
                             body: None,
+                            binary: false,
                         })
                         .map_err(|err| throw(&ctx, &err))?;
                     to_js(&ctx, &response)
@@ -778,6 +791,7 @@ pub(crate) fn install<'js>(ctx: &Ctx<'js>, state: Rc<HostState>) -> rquickjs::Re
                             method: Some("POST".to_owned()),
                             headers,
                             body: Some(body.0),
+                            binary: false,
                         })
                         .map_err(|err| throw(&ctx, &err))?;
                     to_js(&ctx, &response)

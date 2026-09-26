@@ -27,7 +27,8 @@
   "permissions_enforced": true,
   "plugins": [
     {
-      "api": 2,
+      "api": 3,
+      "artwork": true,
       "consent": {
         "state": "not_asked"
       },

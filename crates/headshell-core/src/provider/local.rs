@@ -22,8 +22,8 @@ use crate::ids::{ProviderId, ProviderTrackId};
 use crate::model::TrackRef;
 
 use super::{
-    AudioSource, Capabilities, Provider, ProviderFuture, ProviderHealth, ProviderInfo,
-    ProviderTrack,
+    ArtworkImage, AudioSource, Capabilities, Provider, ProviderFuture, ProviderHealth,
+    ProviderInfo, ProviderTrack,
 };
 
 /// The recognised audio file extensions.
@@ -590,8 +590,12 @@ impl Provider for LocalProvider {
         ProviderInfo {
             id: self.id.clone(),
             display_name: "Local files".to_owned(),
-            // No CONTROL: the local disk is not remote-controlled.
-            capabilities: Capabilities::SEARCH | Capabilities::BROWSE | Capabilities::STREAM,
+            // No CONTROL: the local disk is not remote-controlled. ARTWORK: the
+            // picture in a file's tags, or an image in its folder (D-076).
+            capabilities: Capabilities::SEARCH
+                | Capabilities::BROWSE
+                | Capabilities::STREAM
+                | Capabilities::ARTWORK,
         }
     }
 
@@ -707,6 +711,29 @@ impl Provider for LocalProvider {
                 ));
             }
             Ok(Some(AudioSource::LocalFile { path }))
+        })
+    }
+
+    /// The picture in the file's tags, then an image in its folder (D-076).
+    /// `size` is ignored: a file has the size it has, the core resizes.
+    ///
+    /// The same guard as `resolve_source`: only a file under the scanned roots
+    /// — this is not a surface for reading arbitrary files.
+    fn artwork<'a>(
+        &'a self,
+        id: &'a ProviderTrackId,
+        size: u32,
+    ) -> ProviderFuture<'a, Option<ArtworkImage>> {
+        let _ = size;
+        Box::pin(async move {
+            if id.provider != self.id {
+                return Ok(None);
+            }
+            let path = PathBuf::from(&id.id);
+            if !self.is_within_roots(&path) {
+                return Ok(None);
+            }
+            crate::artwork::file_cover(&path)
         })
     }
 }

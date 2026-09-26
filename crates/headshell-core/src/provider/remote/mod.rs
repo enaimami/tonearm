@@ -26,7 +26,26 @@ use crate::error::{Error, ErrorKind, Result};
 use crate::ids::ProviderId;
 use crate::net::HttpClient;
 
-use super::Provider;
+use super::{ArtworkImage, Provider};
+
+/// A server's answer as a cover, if it is one (D-076): an `image/*` type,
+/// or bytes that read as an image. Servers put their errors in the same
+/// place — a Subsonic error envelope, a Jellyfin HTML page — and those are
+/// not handed on as pictures.
+pub(crate) fn as_image(response: &crate::net::HttpResponse) -> Option<ArtworkImage> {
+    let typed = response
+        .header("content-type")
+        .map(str::to_ascii_lowercase)
+        .filter(|kind| kind.starts_with("image/"));
+    if typed.is_none() && crate::artwork::image::probe(&response.body).is_err() {
+        return None;
+    }
+    Some(ArtworkImage {
+        bytes: response.body.clone(),
+        mime: typed,
+        source: crate::artwork::ArtworkSource::Provider,
+    })
+}
 
 /// The format version of the record file. If the shape changes this goes up
 /// and a migration is written.

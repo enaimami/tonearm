@@ -45,6 +45,22 @@ impl FakeHttp {
         self
     }
 
+    /// Returns 200 with a binary `body` and its `Content-Type` — an image
+    /// (D-076).
+    ///
+    /// Only the cover tests call it; it is not called in a build without
+    /// the features they need.
+    #[allow(dead_code)]
+    pub(crate) fn route_bytes(mut self, pattern: &str, content_type: &str, body: &[u8]) -> Self {
+        self.routes.push(Route {
+            pattern: pattern.to_owned(),
+            status: 200,
+            headers: vec![super::HttpHeader::new("Content-Type", content_type)],
+            body: body.to_vec(),
+        });
+        self
+    }
+
     /// A response with the given status code.
     pub(crate) fn route_status(mut self, pattern: &str, status: u16, body: &str) -> Self {
         self.routes.push(Route {

@@ -100,6 +100,11 @@ pub enum ErrorKind {
     #[error("could not produce the card: {detail}")]
     CardRender { detail: String },
 
+    /// A cover image that cannot be used: not an image, a format we do not
+    /// read, too large, or it did not decode (D-076). Its `detail` says which.
+    #[error("unusable cover image: {detail}")]
+    Artwork { detail: String },
+
     /// The provider does not have this capability.
     ///
     /// "I can't" and "no results" are different things; the latter is an empty

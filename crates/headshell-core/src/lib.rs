@@ -6,8 +6,10 @@
 // CLAUDE.md: no `unwrap`/`expect`/`panic!` in the core — **except in tests**.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
+pub mod artwork;
 pub mod config;
 pub mod diag;
+mod encoding;
 pub mod error;
 pub mod identity;
 pub mod ids;

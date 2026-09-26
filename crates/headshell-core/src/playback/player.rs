@@ -94,6 +94,13 @@ impl Player {
         self
     }
 
+    /// The providers this player plays from — the cover worker asks the same
+    /// ones (D-076).
+    #[must_use]
+    pub fn providers(&self) -> &ProviderRegistry {
+        &self.providers
+    }
+
     /// The queue (read).
     #[must_use]
     pub fn queue(&self) -> &Queue {

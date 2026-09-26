@@ -58,6 +58,8 @@ impl Capabilities {
     pub const STREAM: Self = Self(1 << 2);
     /// Can control a remote player (like Spotify Connect).
     pub const CONTROL: Self = Self(1 << 3);
+    /// Can hand over a track's cover art (D-076).
+    pub const ARTWORK: Self = Self(1 << 4);
 
     /// No capability at all.
     pub const NONE: Self = Self(0);
@@ -92,6 +94,7 @@ impl Capabilities {
             (Self::BROWSE, "BROWSE"),
             (Self::STREAM, "STREAM"),
             (Self::CONTROL, "CONTROL"),
+            (Self::ARTWORK, "ARTWORK"),
         ];
         let names: Vec<&str> = all
             .iter()
@@ -154,6 +157,19 @@ pub use crate::net::HttpHeader;
 pub struct ProviderTrack {
     pub id: ProviderTrackId,
     pub track: TrackRef,
+}
+
+/// A cover as a provider hands it over: the image bytes, before the core
+/// checks and resizes them (D-076).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtworkImage {
+    pub bytes: Vec<u8>,
+    /// What the source says the bytes are (`image/jpeg`). Only a hint: the
+    /// core reads the bytes themselves to decide.
+    pub mime: Option<String>,
+    /// Where the provider found it. The summary counts a picture in the
+    /// file's tags apart from one in its folder and one a server sent (K9).
+    pub source: crate::artwork::ArtworkSource,
 }
 
 /// A provider's identity and capabilities.
@@ -236,6 +252,33 @@ pub trait Provider: Send + Sync {
     fn catalog_changed_since(&self, since_ms: i64) -> ProviderFuture<'_, Option<bool>> {
         let _ = since_ms;
         Box::pin(std::future::ready(Ok(None)))
+    }
+
+    /// The provider's own cover for a track (D-076). Needs the `ARTWORK` flag.
+    ///
+    /// `size` is the edge, in pixels, the caller would like. A server that can
+    /// resize (Subsonic `size`, Jellyfin `maxWidth`) is asked for it; the rest
+    /// ignore it — the core resizes anyway.
+    ///
+    /// `Ok(None)`: this provider has no cover for the track — "I looked, there
+    /// is none". Without the flag the default returns `Unsupported`, because "I
+    /// can't" is a different answer (K9). Again a trait method instead of a
+    /// downcast: plugins answer it in their own way (api 3).
+    fn artwork<'a>(
+        &'a self,
+        id: &'a ProviderTrackId,
+        size: u32,
+    ) -> ProviderFuture<'a, Option<ArtworkImage>> {
+        let _ = (id, size);
+        let info = self.info();
+        Box::pin(std::future::ready(Err(crate::Error::new(
+            crate::diag::Stage::ArtworkRead,
+            crate::error::ErrorKind::Unsupported {
+                provider: info.id.as_str().to_owned(),
+                what: "cover art".to_owned(),
+                capabilities: info.capabilities.describe(),
+            },
+        ))))
     }
 }
 

@@ -109,6 +109,23 @@ enum Command {
         #[command(subcommand)]
         command: LibraryCommand,
     },
+    /// Find the covers of the tracks a play query finds (D-076): where each
+    /// track lives first — its tags, its folder, its provider — then, with
+    /// `--online`, MusicBrainz and the Cover Art Archive.
+    Artwork {
+        /// The play query: the tracks it finds, in play order.
+        #[arg(required_unless_present = "file", conflicts_with = "file")]
+        query: Option<String>,
+        /// Every matching track instead of the first.
+        #[arg(long)]
+        all: bool,
+        /// An audio file instead of a query.
+        #[arg(long, value_name = "PATH")]
+        file: Option<PathBuf>,
+        /// Write the covers to this directory, one image per album.
+        #[arg(long, value_name = "DIR")]
+        out: Option<PathBuf>,
+    },
     /// Produce a shareable listening card (Sleeve).
     Sleeve {
         /// Only this year (UTC).
@@ -426,6 +443,26 @@ async fn run(cli: &Cli, succeeded: &mut bool) -> headshell_core::Result<String> 
                 }
             };
             render(cli.json, &report, || output::resolve(&report))
+        }
+        Command::Artwork {
+            query,
+            all,
+            file,
+            out,
+        } => {
+            let registry = provider::default_registry(session.config())?;
+            let request = session::ArtworkRequest {
+                query: query.clone(),
+                all: *all,
+                file: file.clone(),
+                out: out.clone(),
+            };
+            let report = session.artwork(&registry, request, lookup_mode).await?;
+            // Not found is an answer; a link that failed is a partial failure.
+            if report.summary.failed > 0 {
+                *succeeded = false;
+            }
+            render(cli.json, &report, || output::artwork(&report))
         }
         Command::Library { command } => match command {
             LibraryCommand::Search {

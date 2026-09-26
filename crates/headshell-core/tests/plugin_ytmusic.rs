@@ -287,6 +287,42 @@ async fn the_best_match_comes_first_not_somewhere_in_the_list() {
     );
 }
 
+/// A song's cover is its album's square art, and it crosses `host.http` in
+/// binary mode intact (api 3, D-076). Measured when it was written: InnerTube's
+/// `next` gives it up to 544 px on `yt3.googleusercontent.com`.
+#[tokio::test]
+async fn a_song_gives_its_album_art_as_a_real_image() {
+    if !prerequisites_met("cover") {
+        return;
+    }
+    let config = temp_config("artwork");
+    let Some(provider) = install(&config, "cover").await else {
+        return;
+    };
+    assert!(provider.info().capabilities.contains(Capabilities::ARTWORK));
+
+    let hits = provider.search("portishead sour times", 3).await.unwrap();
+    assert!(!hits.is_empty(), "the live search came back empty");
+    let image = match provider.artwork(&hits[0].id, 500).await {
+        Ok(Some(image)) => image,
+        Ok(None) => panic!(
+            "no cover for {} ({} - {}) — the `next` answer may have changed",
+            hits[0].id, hits[0].track.artist, hits[0].track.title
+        ),
+        Err(err) => panic!("the cover failed:\n{}", err.chain_text()),
+    };
+    assert!(
+        image.bytes.starts_with(&[0xFF, 0xD8, 0xFF]) || image.bytes.starts_with(b"\x89PNG"),
+        "not a JPEG or a PNG: {:02x?}",
+        &image.bytes[..image.bytes.len().min(8)]
+    );
+    assert!(
+        image.bytes.len() > 10_000,
+        "a 544 px cover in {} bytes — the small one came, or it was cut",
+        image.bytes.len()
+    );
+}
+
 /// The resolved source must carry the `Range` header that **lifts the
 /// throttling**.
 ///

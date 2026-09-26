@@ -13,7 +13,7 @@
 //! layer but an address: it says where the work is done.
 //!
 //! **Long commands** (`import`, `resolve`, `provider_scan`, `provider_test`,
-//! `server_add`, `play`) hold the queue, and the playback controls wait
+//! `server_add`, `play`, `artwork`) hold the queue, and the playback controls wait
 //! meanwhile. So this does not stay invisible, they send [`BUSY_EVENT`]: the
 //! interface writes which job is running (K9).
 
@@ -22,16 +22,18 @@ use std::future::Future;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
+use headshell_core::artwork::{ArtworkKey, ArtworkPicture, ArtworkReport, ArtworkVariant};
+use headshell_core::diag::Stage;
 use headshell_core::ids::ProviderId;
 use headshell_core::model::PlayRule;
 use headshell_core::playback::{PlaybackAnchor, QueueView, RepeatMode};
 use headshell_core::provider::remote::{self, NewServer, ServerKind};
 use headshell_core::session::{
-    self, ImportReport, PlayOptions, PluginCatalogReport, PluginConsentReport, PluginInstallReport,
-    PluginListReport, PluginRemoveReport, PluginUpdateReport, ProviderListReport,
-    ProviderTestReport, ResolveReport, ScanReport, SearchReport, SecretListReport,
-    SecretWriteReport, ServerAddReport, ServerListReport, ServerRemoveReport, SleeveResponse,
-    StatsResponse,
+    self, ArtworkRequest, ImportReport, LookupMode, PlayOptions, PluginCatalogReport,
+    PluginConsentReport, PluginInstallReport, PluginListReport, PluginRemoveReport,
+    PluginUpdateReport, ProviderListReport, ProviderTestReport, ResolveReport, ScanReport,
+    SearchReport, SecretListReport, SecretWriteReport, ServerAddReport, ServerListReport,
+    ServerRemoveReport, SleeveResponse, StatsResponse,
 };
 use headshell_core::sleeve::CardPreset;
 use headshell_core::stats::StatsQuery;
@@ -178,12 +180,11 @@ pub async fn import(
         .run_on_core(move |core| {
             Box::pin(async move {
                 let path = std::path::PathBuf::from(path);
+                let lookup = session::lookup_for(core.lookup)?;
                 busy(
                     &app,
                     "importing",
-                    core.live
-                        .session_mut()
-                        .import_archive(&path, session::default_lookup()),
+                    core.live.session_mut().import_archive(&path, lookup),
                 )
                 .await
             })
@@ -200,12 +201,11 @@ pub async fn resolve(
     state
         .run_on_core(move |core| {
             Box::pin(async move {
+                let lookup = session::lookup_for(core.lookup)?;
                 busy(
                     &app,
                     "resolving the identity",
-                    core.live
-                        .session_mut()
-                        .resolve_track(&query, session::default_lookup()),
+                    core.live.session_mut().resolve_track(&query, lookup),
                 )
                 .await
             })
@@ -465,6 +465,74 @@ pub async fn set_repeat(state: State<'_, AppState>, mode: RepeatMode) -> Command
                 Ok(core.live.player().queue().view())
             })
         })
+        .await
+}
+
+// ————————————————————————————————————— Covers (D-076)
+//
+// `artwork` is `headshell artwork`, waiting for every cover. The other two are
+// the playing queue's side: the core's cover worker looks the queue up in the
+// background, the tick carries the keys that arrived, and the interface asks
+// for their images here — `data:` URIs, since the page's CSP allows nothing
+// else.
+
+#[tauri::command]
+pub async fn artwork(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    query: Option<String>,
+    all: bool,
+    file: Option<String>,
+    out: Option<String>,
+) -> CommandResult<ArtworkReport> {
+    state
+        .run_on_core(move |core| {
+            Box::pin(async move {
+                let request = ArtworkRequest {
+                    query,
+                    all,
+                    file: file.map(std::path::PathBuf::from),
+                    out: out.map(std::path::PathBuf::from),
+                };
+                let lookup = core.lookup;
+                let task = core
+                    .live
+                    .session_mut()
+                    .artwork(&core.registry, request, lookup);
+                busy(&app, "looking up covers", task).await
+            })
+        })
+        .await
+}
+
+/// The playing queue's covers as they stand: which are found, which are not,
+/// and why.
+#[tauri::command]
+pub async fn artwork_queue(state: State<'_, AppState>) -> CommandResult<ArtworkReport> {
+    state
+        .run_on_core(move |core| Box::pin(async move { core.live.artwork_report() }))
+        .await
+}
+
+/// One size — the label or the thumbnail — of the given cover keys. A key
+/// the core never gave is the interface's mistake, and it is said, not
+/// skipped (K9).
+#[tauri::command]
+pub async fn artwork_images(
+    state: State<'_, AppState>,
+    keys: Vec<String>,
+    variant: ArtworkVariant,
+) -> CommandResult<Vec<ArtworkPicture>> {
+    let keys = keys
+        .iter()
+        .map(|raw| {
+            ArtworkKey::parse(raw).ok_or_else(|| {
+                CommandError::new(Stage::ArtworkStore, &format!("not a cover key: `{raw}`"))
+            })
+        })
+        .collect::<CommandResult<Vec<_>>>()?;
+    state
+        .run_on_core(move |core| Box::pin(async move { core.live.artwork_images(&keys, variant) }))
         .await
 }
 
@@ -791,6 +859,8 @@ pub struct Environment {
     pub database: std::path::PathBuf,
     pub music_dirs: Vec<std::path::PathBuf>,
     pub version: String,
+    /// `HEADSHELL_ONLINE`, as read at startup (D-076).
+    pub lookup: LookupMode,
 }
 
 #[tauri::command]
@@ -804,6 +874,7 @@ pub async fn environment(state: State<'_, AppState>) -> CommandResult<Environmen
                     database: config.database_path(),
                     music_dirs: config.music_dirs(),
                     version: env!("CARGO_PKG_VERSION").to_owned(),
+                    lookup: core.lookup,
                 })
             })
         })

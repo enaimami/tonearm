@@ -16,8 +16,8 @@
 //! position from the anchor** (D-015), so a "still playing" message carries
 //! zero information. Only what the estimate cannot know is sent — the track
 //! changed, a listen was written, the store gave an error, the queue ended,
-//! **or the part of the anchor that feeds the estimate changed** (state,
-//! rate, duration, track identity).
+//! a cover arrived (D-076), **or the part of the anchor that feeds the
+//! estimate changed** (state, rate, duration, track identity).
 //!
 //! The last item was not on D-033's first list, and it silently froze the
 //! interface: audio starts as `Buffering` and moves to `Playing`, and since
@@ -157,6 +157,7 @@ fn worth_sending(last: &Notable, report: &TickReport) -> bool {
         || report.listens_recorded > 0
         || report.store_error.is_some()
         || report.finished
+        || !report.artwork_ready.is_empty()
         || Notable::of(&report.anchor) != *last
 }
 
@@ -206,6 +207,7 @@ mod tests {
             listens_pending: 0,
             store_error: None,
             finished: false,
+            artwork_ready: Vec::new(),
         }
     }
 
@@ -258,6 +260,19 @@ mod tests {
         let mut next = report(anchor(PlayState::Playing, 1_000, Some(240_000)));
         next.store_error = Some("STEP: LIBRARY_WRITE\n  disk full".to_owned());
 
+        assert!(worth_sending(&last, &next));
+    }
+
+    /// A cover's answer is news the estimate cannot know (D-076): without the
+    /// event a row keeps its placeholder, and its reason, until the next
+    /// track.
+    #[test]
+    fn an_arrived_cover_is_worth_sending() {
+        let last = Notable::of(&anchor(PlayState::Playing, 0, Some(240_000)));
+        let mut next = report(anchor(PlayState::Playing, 1_000, Some(240_000)));
+        assert!(!worth_sending(&last, &next));
+        next.artwork_ready =
+            vec![headshell_core::artwork::ArtworkKey::parse("album:0123456789abcdef").unwrap()];
         assert!(worth_sending(&last, &next));
     }
 }

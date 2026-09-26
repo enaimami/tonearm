@@ -52,36 +52,10 @@ impl Fingerprint {
         use rusty_chromaprint::{Configuration, FingerprintCompressor};
         let config = Configuration::preset_test2();
         let compressed = FingerprintCompressor::from(&config).compress(&self.raw);
-        base64_url_nopad(&compressed)
+        // URL-safe and unpadded: AcoustID expects it in the query string,
+        // where `+`, `/` and `=` would need escaping.
+        crate::encoding::base64_url_nopad(&compressed)
     }
-}
-
-/// URL-safe base64, **unpadded**.
-///
-/// AcoustID expects the fingerprint in the query string: the standard
-/// alphabet's `+` and `/` characters would have to be escaped there, and the
-/// `=` padding gets trimmed by some intermediaries. We write it ourselves —
-/// adding an encoding crate for a single use would add one more crate to a
-/// tree that has already grown by 39.
-#[cfg(feature = "fingerprint")]
-fn base64_url_nopad(data: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
-    for chunk in data.chunks(3) {
-        let b0 = u32::from(chunk[0]);
-        let b1 = chunk.get(1).map_or(0, |b| u32::from(*b));
-        let b2 = chunk.get(2).map_or(0, |b| u32::from(*b));
-        let triple = (b0 << 16) | (b1 << 8) | b2;
-        // As many 6-bit digits are written as the input has bytes: 1 byte → 2
-        // digits, 2 bytes → 3 digits, 3 bytes → 4 digits.
-        let digits = chunk.len() + 1;
-        for i in 0..digits {
-            let shift = 18 - 6 * i;
-            let index = ((triple >> shift) & 0x3f) as usize;
-            out.push(ALPHABET[index] as char);
-        }
-    }
-    out
 }
 
 /// Extracts an audio file's fingerprint.
@@ -307,19 +281,5 @@ mod tests {
             !encoded.contains(['+', '/', '=']),
             "a character outside the URL-safe alphabet: {encoded}"
         );
-    }
-
-    /// Is the encoder right on known vectors (RFC 4648 §10, URL alphabet).
-    #[test]
-    fn base64_matches_known_vectors() {
-        assert_eq!(base64_url_nopad(b""), "");
-        assert_eq!(base64_url_nopad(b"f"), "Zg");
-        assert_eq!(base64_url_nopad(b"fo"), "Zm8");
-        assert_eq!(base64_url_nopad(b"foo"), "Zm9v");
-        assert_eq!(base64_url_nopad(b"foob"), "Zm9vYg");
-        assert_eq!(base64_url_nopad(b"fooba"), "Zm9vYmE");
-        assert_eq!(base64_url_nopad(b"foobar"), "Zm9vYmFy");
-        // Bytes that produce `+` and `/` must be `-` and `_` in the URL alphabet.
-        assert_eq!(base64_url_nopad(&[0xfb, 0xff]), "-_8");
     }
 }

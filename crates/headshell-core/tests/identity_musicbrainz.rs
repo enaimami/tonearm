@@ -71,8 +71,9 @@ fn shared_lookup() -> Option<Arc<dyn MetadataLookup>> {
     LOOKUP
         .get_or_init(|| {
             let http = headshell_core::net::default_http_client().ok()?;
-            let lookup = MusicBrainzLookup::new(http)
-                .with_user_agent("headshell-tests/0.0.1 ( https://github.com/enaimami/headshell )");
+            let lookup = MusicBrainzLookup::new(http).with_user_agent(
+                "headshell-tests/0.0.1 ( https://github.com/headshell/headshell )",
+            );
             Some(Arc::new(lookup) as Arc<dyn MetadataLookup>)
         })
         .clone()

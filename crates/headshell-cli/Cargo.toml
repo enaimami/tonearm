@@ -32,6 +32,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 #   carry it.
 headshell-core = { workspace = true, features = [
     "render-png",
+    "artwork-resize",
     "audio",
     "http-client",
     "fingerprint",

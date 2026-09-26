@@ -27,7 +27,7 @@ fn temp_config(label: &str) -> TestConfig {
 
 fn manifest_json(name: &str, version: &str, net: &[&str]) -> String {
     format!(
-        r#"{{"name":"{name}","display_name":"{name} plugin","version":"{version}","api":2,"main":"main.js","capabilities":["search"],"permissions":{{"net":{}}}}}"#,
+        r#"{{"name":"{name}","display_name":"{name} plugin","version":"{version}","api":3,"artwork":false,"main":"main.js","capabilities":["search"],"permissions":{{"net":{}}}}}"#,
         serde_json::to_string(net).unwrap()
     )
 }
@@ -197,7 +197,7 @@ fn build_index_refuses_every_invalid_plugin_at_once() {
     std::fs::create_dir_all(&unversioned).unwrap();
     std::fs::write(
         unversioned.join("plugin.json"),
-        r#"{"name":"unversioned","display_name":"S","api":2,"main":"main.js"}"#,
+        r#"{"name":"unversioned","display_name":"S","api":3,"artwork":false,"main":"main.js"}"#,
     )
     .unwrap();
     std::fs::write(unversioned.join("main.js"), "").unwrap();
@@ -331,7 +331,7 @@ fn a_bad_entry_is_reported_without_hiding_the_others() {
 
     let mut newer = good.clone();
     newer["manifest"]["name"] = "new".into();
-    newer["manifest"]["api"] = 3.into();
+    newer["manifest"]["api"] = 4.into();
 
     let mut escaping = good.clone();
     escaping["manifest"]["name"] = "escaping".into();

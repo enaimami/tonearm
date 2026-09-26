@@ -60,15 +60,15 @@ use crate::error::{Error, ErrorKind, Result, io_err};
 use crate::ids::{ProviderId, ProviderTrackId};
 use crate::net::HttpClient;
 use crate::provider::{
-    AudioSource, Capabilities, Provider, ProviderFuture, ProviderHealth, ProviderInfo,
-    ProviderTrack,
+    ArtworkImage, AudioSource, Capabilities, Provider, ProviderFuture, ProviderHealth,
+    ProviderInfo, ProviderTrack,
 };
 use crate::secrets::{Secrets, plugin_namespace};
 
 use artifact::ArtifactStore;
 use consent::{ConsentStatus, ConsentStore};
 use manifest::{MANIFEST_FILE, Permissions, PluginManifest, Requirement};
-use protocol::{HealthResult, PLUGIN_API, SourceResult, WireTrack, export};
+use protocol::{HealthResult, PLUGIN_API, SourceResult, WireArtwork, WireTrack, export};
 
 #[cfg(feature = "plugin-engine")]
 use script::ScriptWorker;
@@ -115,6 +115,10 @@ pub struct PluginEntry {
     /// disk, does its hash match.
     #[serde(default)]
     pub requires: Vec<artifact::RequirementStatus>,
+    /// Does it give covers (api 3, D-076) — what its manifest declares. `None`
+    /// when the manifest could not be read.
+    #[serde(default)]
+    pub artwork: Option<bool>,
     /// Why it cannot load, if it cannot — one line, copyable.
     pub problem: Option<String>,
 }
@@ -325,6 +329,7 @@ fn describe_plugin(dir: &Path, consents: &ConsentStore, store: &ArtifactStore) -
                 permissions: Permissions::default(),
                 consent: None,
                 requires: Vec::new(),
+                artwork: None,
                 problem: Some(problem),
             };
         }
@@ -347,6 +352,7 @@ fn describe_plugin(dir: &Path, consents: &ConsentStore, store: &ArtifactStore) -
         consent: Some(consents.status(&name, &manifest.permissions)),
         permissions: manifest.permissions,
         requires,
+        artwork: Some(manifest.artwork),
         problem,
     }
 }
@@ -497,9 +503,16 @@ impl PluginProvider {
         if unmapped {
             tracing::warn!(
                 plugin = %manifest.name,
-                "`browse`/`control` do not map to a function in api 2; the declaration only shows in the list"
+                "`browse`/`control` do not map to a function in api 3; the declaration only shows in the list"
             );
         }
+        // Covers are not a capability name but a required yes-or-no (api 3,
+        // D-076).
+        let capabilities = if manifest.artwork {
+            capabilities | Capabilities::ARTWORK
+        } else {
+            capabilities
+        };
 
         let spec = ScriptSpec {
             plugin: manifest.name.clone(),
@@ -734,6 +747,46 @@ impl PluginProvider {
         }
         Ok(source)
     }
+
+    /// The plugin's cover (api 3, D-076): it fetched the image itself,
+    /// through `host.http` in binary mode, and hands it over as base64. The
+    /// core does not fetch an address the plugin names (K5).
+    fn artwork_now(&self, id: &ProviderTrackId, size: u32) -> Result<Option<ArtworkImage>> {
+        if !self.capabilities.contains(Capabilities::ARTWORK) {
+            return Err(self.unsupported("cover art"));
+        }
+        if id.provider != self.id {
+            return Err(Error::new(
+                Stage::ArtworkRead,
+                ErrorKind::InvalidInput {
+                    detail: format!(
+                        "a {} id cannot be asked of the {} plugin",
+                        id.provider, self.id
+                    ),
+                },
+            ));
+        }
+        let value = self.call(
+            export::ARTWORK,
+            vec![serde_json::json!(id.id), serde_json::json!(size)],
+        )?;
+        let wire: Option<WireArtwork> = serde_json::from_value(value).map_err(|err| {
+            self.contract(
+                export::ARTWORK,
+                format!("expected `{{ mime?, data }}` with `data` in base64, or `null`: {err}"),
+            )
+        })?;
+        let Some(wire) = wire else {
+            return Ok(None);
+        };
+        let bytes = crate::encoding::base64_decode(&wire.data)
+            .ok_or_else(|| self.contract(export::ARTWORK, "`data` is not base64".to_owned()))?;
+        Ok(Some(ArtworkImage {
+            bytes,
+            mime: wire.mime,
+            source: crate::artwork::ArtworkSource::Provider,
+        }))
+    }
 }
 
 impl Provider for PluginProvider {
@@ -778,6 +831,14 @@ impl Provider for PluginProvider {
     ) -> ProviderFuture<'a, Option<AudioSource>> {
         Box::pin(std::future::ready(self.resolve_now(id)))
     }
+
+    fn artwork<'a>(
+        &'a self,
+        id: &'a ProviderTrackId,
+        size: u32,
+    ) -> ProviderFuture<'a, Option<ArtworkImage>> {
+        Box::pin(std::future::ready(self.artwork_now(id, size)))
+    }
 }
 
 impl Drop for PluginProvider {
@@ -790,9 +851,9 @@ impl Drop for PluginProvider {
 /// Runs a future to completion on the calling thread.
 ///
 /// The core does not set up a runtime (convention: the caller chooses the
-/// runtime), but two places in the engine are synchronous: `host.http` on
-/// the plugin's thread and the install command. `HttpClient::send` is
-/// `async`. The gap between them closes here.
+/// runtime), but some places are synchronous: `host.http` on the plugin's
+/// thread, the install command, and the cover chain on its worker's thread
+/// (D-076). `HttpClient::send` is `async`. The gap between them closes here.
 ///
 /// The wait is **not busy**: if the future is not ready the thread sleeps
 /// and the waker wakes it. The `ureq` client is ready on the first poll

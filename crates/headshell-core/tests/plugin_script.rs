@@ -110,6 +110,22 @@ async fn a_script_plugin_answers_health_search_and_resolve() {
         provider.resolve_source(&missing).await.unwrap().is_none(),
         "`null` is an answer, not an error"
     );
+
+    // api 3 (D-076): the manifest says `"artwork": true`; the cover crosses as
+    // base64 and arrives as the PNG the script holds.
+    assert!(provider.info().capabilities.contains(Capabilities::ARTWORK));
+    let cover = provider.artwork(&id, 500).await.unwrap().unwrap();
+    assert!(
+        cover.bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+        "{:?}",
+        &cover.bytes[..8]
+    );
+    assert_eq!(cover.mime.as_deref(), Some("image/png"));
+    let other = ProviderTrackId::new(ProviderId::new("echo"), "track-2");
+    assert!(
+        provider.artwork(&other, 500).await.unwrap().is_none(),
+        "no cover is an answer: the chain goes on"
+    );
 }
 
 /// api 1's Python plugin is refused **without crashing** and the user is told
@@ -224,7 +240,8 @@ async fn a_hanging_plugin_times_out_instead_of_freezing_the_core() {
         dir.join("main.js"),
         "export function health() { for (;;) {} }\n\
          export function search() { return []; }\n\
-         export function resolve_source() { return null; }\n",
+         export function resolve_source() { return null; }\n\
+         export function artwork() { return null; }\n",
     )
     .unwrap();
 

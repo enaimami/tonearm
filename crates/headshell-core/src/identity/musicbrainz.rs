@@ -16,9 +16,11 @@
 //! - **One request per second.** That is the average rate for anonymous
 //!   clients; exceed it and a `503` comes back. The limiter is in
 //!   [`crate::net::RateLimiter`] and **sleeps between calls**; the reasoning
-//!   is written there.
+//!   is written there. There is **one** limiter for the public server per
+//!   process: the identity chain and the cover lookup (D-076) each hold a
+//!   client, and two limiters would let two requests a second through.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -59,8 +61,14 @@ pub struct MusicBrainzLookup {
     http: Arc<dyn HttpClient>,
     base_url: String,
     user_agent: String,
-    limiter: RateLimiter,
+    limiter: Arc<RateLimiter>,
     search_limit: usize,
+}
+
+/// The limiter every client of the public server shares.
+fn shared_limiter() -> Arc<RateLimiter> {
+    static LIMITER: OnceLock<Arc<RateLimiter>> = OnceLock::new();
+    Arc::clone(LIMITER.get_or_init(|| Arc::new(RateLimiter::new(MIN_INTERVAL))))
 }
 
 impl std::fmt::Debug for MusicBrainzLookup {
@@ -81,7 +89,7 @@ impl MusicBrainzLookup {
             http,
             base_url: DEFAULT_BASE_URL.to_owned(),
             user_agent: default_user_agent(),
-            limiter: RateLimiter::new(MIN_INTERVAL),
+            limiter: shared_limiter(),
             search_limit: SEARCH_LIMIT,
         }
     }
@@ -108,13 +116,14 @@ impl MusicBrainzLookup {
         self
     }
 
-    /// The shortest time between requests.
+    /// The shortest time between requests — on a limiter of this client's
+    /// own, no longer the shared one.
     ///
     /// Only for those connecting to their own copy, and for tests; going below
     /// the default on the public server breaks the quota.
     #[must_use]
     pub fn with_min_interval(mut self, interval: Duration) -> Self {
-        self.limiter = RateLimiter::new(interval);
+        self.limiter = Arc::new(RateLimiter::new(interval));
         self
     }
 
@@ -163,15 +172,121 @@ impl MusicBrainzLookup {
             return parse_json::<T>(&response, what).map(Some);
         }
     }
+
+    /// The releases a recording appears on (D-076), with their release
+    /// groups. `Ok(None)`: MusicBrainz does not know the recording.
+    ///
+    /// The identity chain's queries do not ask for releases (`inc` has
+    /// `artist-credits` and `isrcs`); the cover lookup needs them, so it asks
+    /// separately — one request per album, since covers are kept per album.
+    ///
+    /// # Errors
+    /// If the request fails or the answer does not parse.
+    pub(crate) async fn releases_of(&self, recording: &Mbid) -> Result<Option<Vec<Release>>> {
+        let url = format!(
+            "{}/recording/{}?inc=releases+release-groups&fmt=json",
+            self.base_url,
+            encode_query(recording.as_str())
+        );
+        let Some(payload) = self
+            .get_json::<RecordingReleases>(&url, "musicbrainz recording releases")
+            .await?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(collect_releases(payload.releases, recording.as_str())))
+    }
+
+    /// The releases titled like `album` by `artist` (D-076): the cover
+    /// chain's way in when the recording it matched is not on the album —
+    /// a well-known song has dozens of namesake recordings on compilations
+    /// and live records, and the one the identity chain picks can be any.
+    ///
+    /// # Errors
+    /// If the request fails or the answer does not parse.
+    pub(crate) async fn search_releases(&self, artist: &str, album: &str) -> Result<Vec<Release>> {
+        let query = build_release_query(artist, album);
+        if query.is_empty() {
+            return Ok(Vec::new());
+        }
+        let url = format!(
+            "{}/release?query={}&fmt=json&limit={}",
+            self.base_url,
+            encode_query(&query),
+            self.search_limit
+        );
+        let Some(payload) = self
+            .get_json::<ReleaseSearch>(&url, "musicbrainz release search")
+            .await?
+        else {
+            return Ok(Vec::new());
+        };
+        Ok(collect_releases(payload.releases, &query))
+    }
 }
 
-/// This build's default `User-Agent`.
-///
-/// The address is a placeholder (as in the `README`); a real distribution
-/// should change it with [`MusicBrainzLookup::with_user_agent`].
-fn default_user_agent() -> String {
+/// Turns raw releases into [`Release`]s; the ones with a broken MBID are
+/// counted and reported, not dropped silently.
+fn collect_releases(raw: Vec<MbRelease>, asked: &str) -> Vec<Release> {
+    let mut releases = Vec::with_capacity(raw.len());
+    let mut skipped = 0usize;
+    for release in raw {
+        let Some(id) = Mbid::parse(&release.id) else {
+            skipped += 1;
+            continue;
+        };
+        let (group, primary_type, secondary_types) = match release.release_group {
+            Some(group) => (
+                Mbid::parse(&group.id),
+                group.primary_type,
+                group.secondary_types,
+            ),
+            None => (None, None, Vec::new()),
+        };
+        releases.push(Release {
+            id,
+            title: release.title,
+            official: release.status.as_deref() == Some("Official"),
+            date: release.date.filter(|date| !date.is_empty()),
+            group,
+            primary_type,
+            secondary_types,
+        });
+    }
+    if skipped > 0 {
+        tracing::warn!(
+            asked,
+            skipped,
+            "skipped releases with an invalid MBID in the MusicBrainz response"
+        );
+    }
+    releases
+}
+
+/// A release a recording appears on (D-076).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Release {
+    pub(crate) id: Mbid,
+    pub(crate) title: String,
+    /// `status: Official` — not a bootleg or a promo.
+    pub(crate) official: bool,
+    /// `YYYY`, `YYYY-MM` or `YYYY-MM-DD`: sorts as text.
+    pub(crate) date: Option<String>,
+    pub(crate) group: Option<Mbid>,
+    /// The release group's `primary-type`: `Album`, `Single`, `EP`, …
+    pub(crate) primary_type: Option<String>,
+    /// Its `secondary-types`: `Compilation`, `Live`, `Soundtrack`, … — empty
+    /// for an artist's own studio release.
+    pub(crate) secondary_types: Vec<String>,
+}
+
+/// This build's default `User-Agent`: the application, its version and
+/// where to reach the project. The Cover Art Archive gets the same one
+/// (D-076). A distribution with its own contact address sets it with
+/// [`MusicBrainzLookup::with_user_agent`].
+pub(crate) fn default_user_agent() -> String {
     format!(
-        "headshell/{} ( https://github.com/enaimami/headshell )",
+        "headshell/{} ( https://github.com/headshell/headshell )",
         env!("CARGO_PKG_VERSION")
     )
 }
@@ -288,6 +403,21 @@ fn build_query(artist: &str, title: &str) -> String {
     parts.join(" AND ")
 }
 
+/// Builds a release search: `release:"..." AND artist:"..."`. Without an
+/// album there is nothing to search for: the query comes back empty.
+fn build_release_query(artist: &str, album: &str) -> String {
+    let album = escape_lucene(album);
+    if album.is_empty() {
+        return String::new();
+    }
+    let artist = escape_lucene(artist);
+    if artist.is_empty() {
+        format!("release:\"{album}\"")
+    } else {
+        format!("release:\"{album}\" AND artist:\"{artist}\"")
+    }
+}
+
 /// Escapes Lucene's special characters.
 ///
 /// Without escaping, names like `AC/DC` or `Where Is My Mind?` break the
@@ -362,6 +492,40 @@ impl MbRecording {
         }
         out.trim().to_owned()
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct RecordingReleases {
+    #[serde(default)]
+    releases: Vec<MbRelease>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReleaseSearch {
+    #[serde(default)]
+    releases: Vec<MbRelease>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MbRelease {
+    id: String,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    date: Option<String>,
+    #[serde(rename = "release-group", default)]
+    release_group: Option<MbReleaseGroup>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MbReleaseGroup {
+    id: String,
+    #[serde(rename = "primary-type", default)]
+    primary_type: Option<String>,
+    #[serde(rename = "secondary-types", default)]
+    secondary_types: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -584,6 +748,102 @@ mod tests {
             http.requests().len(),
             (RATE_LIMIT_RETRIES + 1) as usize,
             "first attempt + {RATE_LIMIT_RETRIES} retries"
+        );
+    }
+
+    /// The identity chain and the cover lookup (D-076) each build a client;
+    /// together they must stay under the public server's one request a
+    /// second — one limiter, not two.
+    #[test]
+    fn every_client_of_the_public_server_shares_one_limiter() {
+        let a = MusicBrainzLookup::new(Arc::new(FakeHttp::new()));
+        let b = MusicBrainzLookup::new(Arc::new(FakeHttp::new()));
+        assert!(Arc::ptr_eq(&a.limiter, &b.limiter));
+        let own =
+            MusicBrainzLookup::new(Arc::new(FakeHttp::new())).with_min_interval(Duration::ZERO);
+        assert!(
+            !Arc::ptr_eq(&a.limiter, &own.limiter),
+            "a custom interval is a limiter of its own"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_recordings_releases_are_read_with_their_groups() {
+        let http = Arc::new(FakeHttp::new().route(
+            "/recording/b1a9c0e9-d987-4042-ae91-78d6a3267d69?inc=releases+release-groups",
+            r#"{"id":"b1a9c0e9-d987-4042-ae91-78d6a3267d69","releases":[
+                {"id":"6c8c3d3a-5e2b-4b8e-8f39-f0c7f41d4a01","title":"Pablo Honey","status":"Official",
+                 "date":"1993-02-22","release-group":{"id":"0b2e8f0e-3a2c-3d8c-9a5e-5e7a4b2d7f11",
+                 "primary-type":"Album","secondary-types":[]}},
+                {"id":"not-an-mbid","title":"Broken"},
+                {"id":"77c2f5d4-1b1f-4b4a-9c3e-2a1e5d6f7a8b","title":"Creep (live)","status":"Bootleg","date":""}
+            ]}"#,
+        ));
+        let mb = MusicBrainzLookup::new(http.clone())
+            .with_base_url("http://mb.test/ws/2")
+            .with_min_interval(Duration::ZERO);
+        let recording = Mbid::parse("b1a9c0e9-d987-4042-ae91-78d6a3267d69").unwrap();
+        let releases = mb.releases_of(&recording).await.unwrap().unwrap();
+        assert_eq!(releases.len(), 2, "the broken MBID is skipped (and logged)");
+        assert_eq!(releases[0].title, "Pablo Honey");
+        assert!(releases[0].official);
+        assert_eq!(releases[0].date.as_deref(), Some("1993-02-22"));
+        assert!(releases[0].group.is_some());
+        assert_eq!(releases[0].primary_type.as_deref(), Some("Album"));
+        assert!(releases[0].secondary_types.is_empty());
+        assert!(!releases[1].official);
+        assert_eq!(releases[1].date, None, "an empty date is no date");
+        let url = &http.requests()[0].url;
+        assert!(url.contains("inc=releases+release-groups"), "{url}");
+
+        let unknown = MusicBrainzLookup::new(Arc::new(FakeHttp::new().route_status(
+            "/recording/",
+            404,
+            "",
+        )))
+        .with_base_url("http://mb.test/ws/2")
+        .with_min_interval(Duration::ZERO);
+        assert_eq!(
+            unknown.releases_of(&recording).await.unwrap(),
+            None,
+            "a 404 is `None`"
+        );
+    }
+
+    #[tokio::test]
+    async fn releases_are_searched_by_album_and_artist() {
+        let http = Arc::new(FakeHttp::new().route(
+            "/release?query=",
+            r#"{"releases":[
+                {"id":"4b4b9c42-2c3e-4d0f-8d11-2d8a0f5c9a01","score":100,"title":"Dummy","status":"Official",
+                 "date":"1994-08-22","release-group":{"id":"76df3287-6cda-33eb-8e9a-044b5e15ffdd",
+                 "primary-type":"Album"}},
+                {"id":"not-an-mbid","title":"Dummy"}
+            ]}"#,
+        ));
+        let mb = MusicBrainzLookup::new(http.clone())
+            .with_base_url("http://mb.test/ws/2")
+            .with_min_interval(Duration::ZERO);
+        let releases = mb.search_releases("Portishead", "Dummy").await.unwrap();
+        assert_eq!(releases.len(), 1, "the broken MBID is skipped (and logged)");
+        assert_eq!(releases[0].title, "Dummy");
+        assert_eq!(releases[0].primary_type.as_deref(), Some("Album"));
+        assert!(releases[0].secondary_types.is_empty(), "absent is none");
+        let url = &http.requests()[0].url;
+        assert!(url.contains("/release?query="), "{url}");
+        assert!(url.contains("Dummy") && url.contains("Portishead"), "{url}");
+
+        assert!(
+            mb.search_releases("Portishead", "  ")
+                .await
+                .unwrap()
+                .is_empty(),
+            "no album, no request"
+        );
+        assert_eq!(http.requests().len(), 1);
+        assert_eq!(
+            build_release_query("AC/DC", "Back in Black"),
+            r#"release:"Back in Black" AND artist:"AC\/DC""#
         );
     }
 }

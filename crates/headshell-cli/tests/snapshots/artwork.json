@@ -1,0 +1,59 @@
+{
+  "diag": {
+    "command": "<variable>",
+    "counters": {
+      "artwork.failed": 0,
+      "artwork.found": 2,
+      "artwork.not_checked_offline": 0,
+      "artwork.not_found": 0,
+      "artwork.tracks": 2,
+      "artwork.written": 0
+    },
+    "env": {
+      "arch": "<variable>",
+      "data_dir": "<variable>",
+      "headshell_version": "<variable>",
+      "os": "<variable>"
+    },
+    "error_chain": [],
+    "failed_at": null,
+    "finished_at": "<variable>",
+    "notes": [],
+    "started_at": "<variable>"
+  },
+  "items": [
+    {
+      "album": "Covered",
+      "artist": "Cover Artist",
+      "index": 0,
+      "key": "album:c9654114d7b4c07c",
+      "provider": "local",
+      "source": "<variable>",
+      "status": "found",
+      "title": "Flac Front"
+    },
+    {
+      "album": "Covered Too",
+      "artist": "Cover Artist",
+      "index": 1,
+      "key": "album:5ee4bf20a5a63396",
+      "provider": "local",
+      "source": "<variable>",
+      "status": "found",
+      "title": "Mp3 Front"
+    }
+  ],
+  "online": false,
+  "subject": "<variable>",
+  "summary": {
+    "cover_art_archive": 0,
+    "embedded": 2,
+    "failed": 0,
+    "folder": 0,
+    "not_checked_offline": 0,
+    "not_found": 0,
+    "pending": 0,
+    "provider": 0,
+    "tracks": 2
+  }
+}

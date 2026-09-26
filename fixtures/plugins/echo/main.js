@@ -1,5 +1,5 @@
 // The test plugin: the smallest example that implements the plugin contract
-// (api 2) **in full**. It never goes online and answers from a fixed catalog.
+// (api 3) **in full**. It never goes online and answers from a fixed catalog.
 //
 // There is no misbehaving-plugin act here — the timeout, throwing, unpermitted
 // network and missing export tests write their own small scripts. This file
@@ -55,4 +55,18 @@ export function resolve_source(id) {
     url: `https://example.invalid/${id}.mp3`,
     headers: [{ name: "authorization", value: host.secrets.get("token") ?? "" }],
   };
+}
+
+// api 3: the manifest says `"artwork": true`, so this export is required. A
+// real plugin fetches the image with `host.http.request({ url, binary: true })`
+// and returns the base64 body; this one never goes online, so its cover is a
+// 4×4 amber PNG written into the file. `null` means "no cover" — the core then
+// asks MusicBrainz and the Cover Art Archive.
+const COVER = "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAEUlEQVR42mP4vyUEjhiI4wAAVnEgcX64o8EAAAAASUVORK5CYII=";
+
+export function artwork(id, size) {
+  if (id !== "track-1") {
+    return null;
+  }
+  return { mime: "image/png", data: COVER };
 }

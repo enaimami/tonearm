@@ -127,6 +127,51 @@ async fn a_plugin_with_no_secret_discovers_a_client_id_and_searches() {
     }
 }
 
+/// A track's cover crosses `host.http` in binary mode intact (api 3, D-076):
+/// what arrives is an image, not text read into U+FFFD — the failure the
+/// binary mode exists for, and a unit test with a fake server cannot see
+/// what the real one sends.
+#[tokio::test]
+async fn a_search_hit_gives_its_cover_as_a_real_image() {
+    if !prerequisites_met("cover") {
+        return;
+    }
+    let config = temp_config("artwork");
+    let Some(provider) = install(&config, "cover").await else {
+        return;
+    };
+    assert!(provider.info().capabilities.contains(Capabilities::ARTWORK));
+
+    let hits = provider.search("nujabes", 10).await.unwrap();
+    assert!(!hits.is_empty(), "the live search came back empty");
+
+    // Not every upload has artwork, and "none" is an answer: the first one
+    // that has a cover is enough. An error is not an answer — it fails.
+    let mut found = None;
+    let mut none = Vec::new();
+    for hit in &hits {
+        match provider.artwork(&hit.id, 500).await {
+            Ok(Some(image)) => {
+                found = Some(image);
+                break;
+            }
+            Ok(None) => none.push(hit.id.to_string()),
+            Err(err) => panic!("the cover of {} failed:\n{}", hit.id, err.chain_text()),
+        }
+    }
+    let image = found.unwrap_or_else(|| panic!("none of them has a cover: {none:?}"));
+    assert!(
+        image.bytes.starts_with(&[0xFF, 0xD8, 0xFF]) || image.bytes.starts_with(b"\x89PNG"),
+        "not a JPEG or a PNG: {:02x?}",
+        &image.bytes[..image.bytes.len().min(8)]
+    );
+    assert!(
+        image.bytes.len() > 5_000,
+        "a 500 px cover in {} bytes — the small one came, or it was cut",
+        image.bytes.len()
+    );
+}
+
 /// The health answer must say which source the client_id came from.
 ///
 /// D-043 allows three sources (secret → cache → discovery); if which one was

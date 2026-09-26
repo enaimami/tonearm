@@ -127,6 +127,62 @@ impl fmt::Display for ProviderId {
     }
 }
 
+/// The key a cover is cached and asked for under (D-076): the album it
+/// belongs to, or the track itself when it has no album.
+///
+/// Built only by the core ([`crate::artwork::key_for`]) from the normalised
+/// artist and album, so the same album is one cover — looked up once — even
+/// when it reaches the queue from two providers. The shells treat it as
+/// opaque: `album:` or `track:` and sixteen hex digits.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ArtworkKey(String);
+
+impl ArtworkKey {
+    /// The key of an album: its normalised artist and title.
+    #[must_use]
+    pub(crate) fn album(artist: &str, album: &str) -> Self {
+        Self(format!(
+            "album:{}",
+            fnv1a64_hex(&format!("{artist}\u{1}{album}"))
+        ))
+    }
+
+    /// The key of a track without an album: its normalised artist and title.
+    #[must_use]
+    pub(crate) fn track(artist: &str, title: &str) -> Self {
+        Self(format!(
+            "track:{}",
+            fnv1a64_hex(&format!("{artist}\u{1}{title}"))
+        ))
+    }
+
+    /// Reads a key a shell sends back. Only the shape is checked: a key that
+    /// was never made here finds nothing in the cache, it does not reach the
+    /// disk.
+    #[must_use]
+    pub fn parse(raw: &str) -> Option<Self> {
+        let (kind, hash) = raw.split_once(':')?;
+        let shaped = matches!(kind, "album" | "track")
+            && hash.len() == 16
+            && hash
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+        shaped.then(|| Self(raw.to_owned()))
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for ArtworkKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// ISRC — 12 characters: 2 country + 3 registrant + 2 year + 5 designation.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -237,6 +293,27 @@ mod tests {
             Isrc::parse("USRC1170000X").is_none(),
             "the last 7 characters must be digits"
         );
+    }
+
+    #[test]
+    fn an_artwork_key_is_one_per_album_and_only_its_shape_is_read_back() {
+        let a = ArtworkKey::album("radiohead", "pablo honey");
+        assert_eq!(a, ArtworkKey::album("radiohead", "pablo honey"));
+        assert_ne!(a, ArtworkKey::album("radiohead", "the bends"));
+        assert_ne!(
+            ArtworkKey::album("a", "b"),
+            ArtworkKey::track("a", "b"),
+            "an album and a track of the same name are different covers"
+        );
+        assert_eq!(ArtworkKey::parse(a.as_str()), Some(a.clone()));
+        assert!(a.as_str().starts_with("album:"));
+        assert_eq!(ArtworkKey::parse("album:../../etc/passwd"), None);
+        assert_eq!(
+            ArtworkKey::parse("album:0123456789ABCDEF"),
+            None,
+            "upper-case hex is not ours"
+        );
+        assert_eq!(ArtworkKey::parse("cover:0123456789abcdef"), None);
     }
 
     #[test]

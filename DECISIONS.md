@@ -4726,3 +4726,138 @@ since WebKitGTK didn't take the GTK setting in the container.
 `CONTRACT_CLASSES` — `api` 1. The layout changed: `.main` is a two-row grid whose
 second row `.content`, the scrim and the sheet share, and `#panel-now` is no longer
 inside `.content`. It is written into the theme guide.
+
+## D-076 — Covers: a chain in the core, online only by choice; plugin api 3
+
+**Date:** 2026-09-26 · **Status:** APPLIED (2026-09-26)
+
+**Question:** The user: *"Bring album and single covers to the record on the 'now
+playing' page and to every track in the queue."* With a source rule — the provider's
+own cover first (Subsonic `getCoverArt`, Jellyfin's `Primary` image, a plugin's);
+then the Cover Art Archive through the recording's MusicBrainz release, the official
+release matching the track's album preferred; for a local file its embedded picture
+first, then an image in its folder — and with rules: every step that goes online
+behind `--online`, off by default, and "I didn't look because I'm offline" kept
+apart from "I looked and found none" (K9); no Spotify (K4) and no service that wants
+an API key without asking; a plugin's cover through `host`, the core never fetching
+an address a plugin gives (K5); the queue looked up in the background, the playing
+track first, playback never waiting; a cache in the data directory, "not found"
+included, an album asked once, MusicBrainz at most once a second with a meaningful
+`User-Agent`; a summary of what came from where; a round cover turning with the
+record, square thumbnails in the queue, `data:` URIs only, motion only in
+`transform` and `opacity`. Ten questions were asked first (§0.2); the answers are the
+decisions below.
+
+**Decision:**
+
+1. **A trait method and a capability.** `Provider::artwork(id, size)`, whose default
+   says "cannot" (with the stage `ARTWORK_READ`), and `Capabilities::ARTWORK`. The
+   local provider, Subsonic, Jellyfin and plugins answer it.
+2. **The cache is files and a JSON index**, not the library: the listening history
+   is irreplaceable, a cover is not. `<data>/artwork/` holds images named by the
+   sha256 of their bytes and an `index.json` with one answer per album (artist and
+   album normalised as the identity chain does; a track without an album is its own
+   key). "Not found" is believed for 30 days. A torn write (temporary name, then
+   rename), two writers (the index is read again and merged before every write) and
+   orphans (removed after an hour's grace) are handled, not hoped away.
+3. **No new crate; PNG out.** `zune-jpeg` and `png` were already in the tree through
+   `resvg`; they sit behind the new `artwork-resize` feature. The label is 320 px, the
+   thumbnail 96, downscaled by area averaging — every source pixel counts, where a
+   bicubic filter samples and aliases at ten to one. A JPEG that already fits the
+   label is kept as it came. Without the feature a cover up to 2 MB passes as it is
+   and a larger one is refused with the reason. The limits are 16 MB and 8000 px, and
+   the format (JPEG, PNG, GIF, WebP) is read from the bytes, not the name.
+4. **Plugin api 3.** The manifest **must** say `"artwork": true` or `false` — a
+   missing field is rejected, so "gives none" is a statement, never a guess. A plugin
+   with `true` exports `artwork(id, size)` and returns `{ mime?, data }`, the image in
+   base64, which it fetched itself with `host.http.request({ …, binary: true })` — the
+   new binary mode; read as text, an image is destroyed. A plugin's `null` or error
+   hands the track to the rest of the chain. api 2 manifests no longer load: a
+   required field changes what a manifest means, it doesn't add to it (the guide's
+   §7).
+5. **Phase 3, §3.10.**
+6. **The desktop's `--online` is `HEADSHELL_ONLINE=1`,** read by the core as
+   `HEADSHELL_MUSIC_DIRS` is. It takes `1` or `0`; anything else stops startup with
+   the reason — a `true` that went unrecognised would leave the user offline without
+   a word. It means what `--online` means in the CLI: covers, but `resolve` and
+   `import` go online with it too (an online import is slow — one request a second —
+   as it is in the CLI). The environment block shows it.
+7. **Where the track lives is not gated:** its tags, its folder, its server and a
+   plugin's own service are asked offline too — the track already plays from there.
+   MusicBrainz and the Cover Art Archive only online.
+8. **Online, the identity chain runs** to find the recording; nothing is written back
+   into the history.
+9. **The tick carries keys; the interface pulls images.** `TickReport::artwork_ready`
+   lists the covers whose answer arrived — found or not, so a row can show why it has
+   none — and `artwork_images` gives one size at a time: a queue of thirty albums
+   needs thirty thumbnails but one label.
+
+**The flow.** One background thread per session (`headshell-artwork`). The core hands
+it the queue when the queue changes; it walks the playing track, then the ones after
+it, then the ones already played; what the cache knows is settled at once; an album is
+asked once and its other rows get the same answer. The thread may block on the network
+and on the MusicBrainz limiter — one request every 1.1 s, shared with the identity
+chain — and the core thread never does.
+
+**The CLI and the IPC (D-033).** `headshell artwork "<query>" [--all] | --file <audio>
+[--out <dir>]`, with `--json` and a snapshot. The report gives every track's answer —
+`found` and its source, `not_found` and what was looked at, `not_checked_offline`,
+`failed` and the chain — and a summary: tracks, embedded, folder, provider, Cover Art
+Archive, not found, not looked up offline, failed. A failed link makes the run a
+partial failure; "not found" doesn't. The desktop mirrors it as `artwork`;
+`artwork_queue` and `artwork_images` are the playing queue's side, as `queue` and
+`anchor` are.
+
+**Checked in the code before writing, as asked:**
+- symphonia 0.6 gives embedded pictures as `Visual`s in the metadata log: ID3v2 `APIC`,
+  FLAC `PICTURE`, MP4 `covr` and Vorbis `METADATA_BLOCK_PICTURE`. An MP3's ID3 tag is
+  a revision of its own, before the container's, so every revision is read. No reader
+  applies `limit_visual_bytes`; the size limit is ours.
+- The MusicBrainz search the identity chain uses brings no releases. `releases_of`
+  (the recording with `inc=releases+release-groups`) was added.
+
+**Found while verifying:**
+- **A namesake recording lent its compilation's cover.** Portishead's "Sour Times",
+  album *Dummy*: MusicBrainz has 77 recordings of that name. Given the file's length,
+  the identity chain matched one whose only release was a compilation, and *its*
+  cover came back for *Dummy* — a wrong answer that looks right. "The release
+  matching the album, preferred" became **required**: with an album, only a release
+  titled like it is taken (edition suffixes aside), and when the matched recording is
+  on none, the album itself is searched by its title and artist. Among the candidates:
+  an official one, the artist's own (no secondary type such as compilation or live),
+  an album before an EP before a single, the earliest. A unit test on canned answers
+  holds the trap — it fails when the rule is taken out — and a live test asks the real
+  services.
+- **The default `User-Agent` named a stale address** (`github.com/enaimami/headshell`);
+  it names `github.com/headshell/headshell` now, and so do the tests'.
+- **A Turkish placeholder**, `kapak`, in `fixtures/audio/cover.jpg` — K11's leftover.
+- **The cover cache's temporary name was per process.** The worker and an `artwork`
+  command are two threads of one process: every write has its own name now. The same
+  kind of fault turned D-075's macOS CI red in the artifact installer (the D-060
+  addendum).
+- **Subsonic's credentials travel in the query string,** and an error that names the
+  address carries them into `headshell diag`, which is made to be pasted. The cover
+  call names the endpoint instead, on both the status and the network path. The other
+  Subsonic calls still name the address — **a separate fix, not made here**: it
+  changes existing error texts, and it is asked about first.
+- MusicBrainz answered `503` once during a run; the existing retry took it.
+
+**The release order.** The catalog's plugins speak api 2 until `headshell/plugins`
+publishes `soundcloud` 0.3.0 and `ytmusic` 0.5.0 (api 3). Until then this repository's
+live plugin tests fail — they install from the published catalog, and this core
+refuses api 2. Once they are published, the released app (0.0.2-beta, api 2) lists them
+as incompatible: its installed copies keep working, updates wait for the next release.
+Listing both versions under one name is not a way out: the released app refuses a name
+listed twice. The catalog can't go first either: its CI builds headshell from this
+repository's `master`, and an api 2 core rejects api 3 manifests. The order is this
+change, then the catalog, then a release — and between the first two, this
+repository's live plugin tests are red for as long as the catalog takes.
+
+**Verification:** the §3.9 container (Debian 13, the host's WebKitGTK, Xvfb, a
+PulseAudio null sink) with a library of seven tracks: covers in FLAC and MP3 tags, a
+folder cover, a made-up band without one and a real recording without one. Offline:
+the three kinds of cover on the label and in the rows, the two without in placeholders
+and the note saying why, the plain label back on the coverless track. With
+`HEADSHELL_ONLINE=1`: the real recording's album cover from the Cover Art Archive, the
+made-up band "not found", the environment block saying so. The live plugin tests passed
+against a local mirror of the catalog carrying the api 3 plugins.

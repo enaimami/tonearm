@@ -77,6 +77,19 @@ pub enum Stage {
     PlaybackDecode,
     /// Audio output (cpal): opening the device, setting up the stream.
     PlaybackOutput,
+    /// Reading a cover from where it lives: the audio file's tags, an image
+    /// in its folder, the provider or the plugin — and decoding it (D-076).
+    ArtworkRead,
+    /// Looking a cover up with third parties: the recording's releases at
+    /// MusicBrainz and the Cover Art Archive (D-076).
+    ///
+    /// Separate from `ArtworkRead`: "the file's picture is broken" and "the
+    /// archive has none" are different diagnoses (K9). Not reaching the network
+    /// at all stays in `NetworkRequest`.
+    ArtworkLookup,
+    /// The cover cache: the image files and their index in the data directory
+    /// (D-076).
+    ArtworkStore,
 }
 
 impl Stage {
@@ -103,6 +116,9 @@ impl Stage {
             Self::PlaybackResolve => "PLAYBACK_RESOLVE",
             Self::PlaybackDecode => "PLAYBACK_DECODE",
             Self::PlaybackOutput => "PLAYBACK_OUTPUT",
+            Self::ArtworkRead => "ARTWORK_READ",
+            Self::ArtworkLookup => "ARTWORK_LOOKUP",
+            Self::ArtworkStore => "ARTWORK_STORE",
         }
     }
 }

@@ -2054,8 +2054,9 @@ Music).
    drag were fixed: the distance past the threshold was lost, and a release
    after a pause was thrown.
 
-**Not done:** cover art (a core capability — by D-033 a CLI subcommand first),
-lyrics and related tracks (no data in the core), seeking and volume (§3.8).
+**Not done:** cover art (a core capability — by D-033 a CLI subcommand first;
+done in §3.10), lyrics and related tracks (no data in the core), seeking and
+volume (§3.8).
 
 **Testing:** `motion_js.rs` +2 — the spring's linearity (the sheet, its scrim
 and the chevron move on proportional springs) and the drag's two faults; both
@@ -2064,6 +2065,60 @@ fail when the fault is put back.
 **Verification:** the §3.8 container with a PulseAudio null sink instead of
 ALSA's null device: it is paced in real time, so the "playing" state was seen
 this time — the three themes, a 900×600 window, drags, flicks, pause and stop.
+
+### 3.10 Covers — DONE (D-076)
+
+**The problem:** the "now playing" record had a plain label and the queue plain
+rows: the core had no covers (§3.9's "not done").
+
+**Done:**
+
+1. **The chain is in the core** (`artwork/`). First where the track lives, not
+   gated: a local file's tags (ID3 `APIC`, FLAC `PICTURE`, MP4 `covr`, Vorbis
+   `METADATA_BLOCK_PICTURE` — symphonia gives all four) and then its folder
+   (`cover`/`folder`/`front`), Subsonic's `getCoverArt`, Jellyfin's item and
+   album `Primary` image, a plugin's `artwork(id, size)`. Then, **only online**:
+   the identity chain's recording at MusicBrainz, its release titled like the
+   track's album — and when the recording is on no such release, a search for
+   the album itself — and the Cover Art Archive's front for it or its release
+   group. No Spotify (K4), no service that wants a key.
+2. **Online is a choice:** the CLI's `--online`, the desktop's
+   `HEADSHELL_ONLINE=1`. Offline, a cover that was not looked up says so —
+   "not looked up" and "not found" are different answers (K9). MusicBrainz is
+   asked at most once every 1.1 s by identity and covers together.
+3. **The cache** is `<data>/artwork/`: images named by their content and an
+   `index.json`; one answer per album, "not found" believed for 30 days.
+4. **`headshell artwork`** walks a query's tracks or a file through the chain
+   and reports every track's answer and a summary; `--out` writes the covers.
+   The desktop's `artwork` mirrors it; `artwork_queue` and `artwork_images` are
+   the playing queue's side.
+5. **The queue is looked up in the background**, the playing track first;
+   playback never waits. The tick names the covers whose answer arrived, and
+   the interface asks for their images as `data:` URIs (the CSP allows no
+   other). The label becomes the cover — round, larger, turning with the
+   record — and every queue row gets a square thumbnail or a small record in
+   its place; a note under the queue says what could not be looked up.
+6. **Plugins, api 3:** the manifest must say `"artwork": true|false`; a plugin
+   that gives covers exports `artwork(id, size)` and fetches the image itself
+   through `host.http`'s new binary mode (K5: the core fetches no address a
+   plugin gives). A plugin's failed or missing cover falls back to the chain.
+   The catalog's `soundcloud` 0.3.0 and `ytmusic` 0.5.0 give covers.
+
+**Not done:** covers in the player bar and anywhere else (not asked); an
+in-app switch for online (by D-033 a CLI command first — the variable stands in
+for it); an MP4 fixture (symphonia's `covr` path is read by the same code, but
+no fixture holds it).
+
+**Testing:** the chain on canned answers (the namesake-recording trap among
+them: it fails when the album guard is taken out), the cache, the image
+checks and resizing, the worker, Subsonic/Jellyfin/plugin covers on a fake
+server, the embedded-cover FLAC and MP3 fixtures; `headshell artwork --json`
+has a snapshot; live: MusicBrainz + the Cover Art Archive, and each catalog
+plugin's cover (they skip without a network, D-043).
+
+**Verification:** the container of §3.9: a local library with covers in FLAC
+and MP3 tags, a folder cover, a coverless made-up band and a coverless real
+recording, offline and with `HEADSHELL_ONLINE=1`.
 
 ---
 

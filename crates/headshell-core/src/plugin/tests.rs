@@ -49,7 +49,7 @@ fn discovery_reports_each_plugins_reason_without_stopping() {
     write_plugin(
         &config,
         "good",
-        r#"{"name":"good","display_name":"Good","api":2,"main":"main.js",
+        r#"{"name":"good","display_name":"Good","api":3,"artwork":false,"main":"main.js",
             "permissions":{"net":["a.example"]}}"#,
     );
     write_plugin(
@@ -97,7 +97,7 @@ fn an_approved_plugin_becomes_loadable_and_load_starts_no_engine() {
     write_plugin(
         &config,
         "good",
-        r#"{"name":"good","display_name":"Good","api":2,"main":"main.js",
+        r#"{"name":"good","display_name":"Good","api":3,"artwork":false,"main":"main.js",
             "capabilities":["search"],"permissions":{"net":["a.example"]}}"#,
     );
     approve(&config, "good", &["a.example"]);
@@ -125,7 +125,7 @@ fn a_plugin_that_grew_its_permissions_is_not_loaded_until_reapproved() {
     write_plugin(
         &config,
         "good",
-        r#"{"name":"good","display_name":"Good","api":2,"main":"main.js",
+        r#"{"name":"good","display_name":"Good","api":3,"artwork":false,"main":"main.js",
             "permissions":{"net":["a.example","new.example"]}}"#,
     );
     approve(&config, "good", &["a.example"]);
@@ -156,7 +156,7 @@ fn a_tool_without_an_asset_for_this_platform_blocks_loading_without_a_false_hint
         &config,
         "tool",
         &format!(
-            r#"{{"name":"tool","display_name":"Tool","api":2,"main":"main.js",
+            r#"{{"name":"tool","display_name":"Tool","api":3,"artwork":false,"main":"main.js",
                 "requires":[{{"name":"yt-dlp","version":"1","assets":{{"{other}":
                 {{"url":"https://example.invalid/x","sha256":"{}"}}}}}}]}}"#,
             "a".repeat(64)
@@ -178,7 +178,7 @@ fn a_plugin_only_sees_its_own_secrets() {
     let dir = write_plugin(
         &config,
         "good",
-        r#"{"name":"good","display_name":"Good","api":2,"main":"main.js","capabilities":["search"]}"#,
+        r#"{"name":"good","display_name":"Good","api":3,"artwork":false,"main":"main.js","capabilities":["search"]}"#,
     );
     let mut secrets = Secrets::default();
     secrets.set("plugin:good", "client_id", "mine");
@@ -198,7 +198,7 @@ fn offline_provider(config: &Config, name: &str, capabilities: &str) -> PluginPr
         config,
         name,
         &format!(
-            r#"{{"name":"{name}","display_name":"X","api":2,"main":"main.js",
+            r#"{{"name":"{name}","display_name":"X","api":3,"artwork":false,"main":"main.js",
                 "capabilities":{capabilities}}}"#
         ),
     );
@@ -294,7 +294,7 @@ mod engine {
         fn simple(name: &str, script: &str) -> Self {
             Self::new(
                 name,
-                r#"{"name":"demo","display_name":"Demo","api":2,"main":"main.js",
+                r#"{"name":"demo","display_name":"Demo","api":3,"artwork":false,"main":"main.js",
                     "capabilities":["search","stream"],
                     "permissions":{"net":["allowed.example","*.cdn.example"]}}"#,
                 script,
@@ -335,6 +335,91 @@ mod engine {
             return { kind: "http_stream", url: `https://a.cdn.example/${id}.mp3`, headers: [] };
         }
     "#;
+
+    /// api 3 (D-076): the plugin fetches its cover itself, through
+    /// `host.http` in binary mode, and hands it over as base64. Read as text
+    /// the image would be destroyed — every byte that is not UTF-8 becomes
+    /// U+FFFD — so the bytes the core gets must be the bytes the server sent.
+    #[tokio::test]
+    async fn a_plugins_cover_crosses_host_http_in_binary_mode_intact() {
+        let rig = Rig::new(
+            "plugin-artwork",
+            r#"{"name":"demo","display_name":"Demo","api":3,"artwork":true,"main":"main.js",
+                "capabilities":["search"],
+                "permissions":{"net":["*.cdn.example"]}}"#,
+            r#"
+            export function health() { return { reachable: true }; }
+            export function search() { return []; }
+            export function artwork(id, size) {
+                if (id === "none") return null;
+                const response = host.http.request({
+                    url: `https://img.cdn.example/${id}.png?w=${size}`,
+                    binary: true,
+                });
+                if (!response.ok || response.encoding !== "base64") return null;
+                return { mime: response.headers["content-type"], data: response.body };
+            }
+            "#,
+        );
+        let png = crate::artwork::image::tests_support::png_2x2();
+        let http =
+            Arc::new(FakeHttp::new().route_bytes("img.cdn.example/42.png", "image/png", &png));
+        let provider = rig.provider_with(http.clone(), &Secrets::default());
+        assert!(provider.info().capabilities.contains(Capabilities::ARTWORK));
+
+        let image = provider
+            .artwork(&track_id("42"), 500)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(image.bytes, png, "the image arrived damaged");
+        assert_eq!(image.mime.as_deref(), Some("image/png"));
+        assert_eq!(image.source, crate::artwork::ArtworkSource::Provider);
+        assert!(
+            http.last_url().ends_with("42.png?w=500"),
+            "{}",
+            http.last_url()
+        );
+        assert_eq!(
+            provider.artwork(&track_id("none"), 500).await.unwrap(),
+            None
+        );
+    }
+
+    /// `"artwork": true` without the export does not start — the same rule as a
+    /// declared capability without its function.
+    #[tokio::test]
+    async fn declaring_covers_without_the_export_does_not_start() {
+        let rig = Rig::new(
+            "plugin-artwork-missing",
+            r#"{"name":"demo","display_name":"Demo","api":3,"artwork":true,"main":"main.js"}"#,
+            "export function health() { return { reachable: true }; }",
+        );
+        let err = rig
+            .provider()
+            .artwork(&track_id("1"), 500)
+            .await
+            .unwrap_err();
+        assert!(
+            err.chain_text().contains("`artwork`"),
+            "{}",
+            err.chain_text()
+        );
+    }
+
+    /// With `"artwork": false` the plugin is not asked: the chain goes on to
+    /// MusicBrainz and the archive.
+    #[tokio::test]
+    async fn a_plugin_that_gives_no_covers_says_it_cannot() {
+        let rig = Rig::simple("plugin-no-artwork", BASIC);
+        let provider = rig.provider();
+        assert!(!provider.info().capabilities.contains(Capabilities::ARTWORK));
+        let err = provider.artwork(&track_id("42"), 500).await.unwrap_err();
+        assert!(
+            matches!(err.kind(), ErrorKind::Unsupported { .. }),
+            "{err:?}"
+        );
+    }
 
     #[tokio::test]
     async fn a_script_answers_health_search_and_resolve() {
@@ -878,7 +963,7 @@ mod engine {
         fn manifest(tool_sha: &str, slow_sha: &str) -> String {
             let platform = artifact::current_platform();
             format!(
-                r#"{{"name":"demo","display_name":"Demo","api":2,"main":"main.js",
+                r#"{{"name":"demo","display_name":"Demo","api":3,"artwork":false,"main":"main.js",
                     "capabilities":["search"],
                     "requires":[
                       {{"name":"tool","version":"1","assets":{{"{platform}":
@@ -1020,7 +1105,7 @@ mod engine {
             let rig = Rig::new(
                 name,
                 &format!(
-                    r#"{{"name":"demo","display_name":"Demo","api":2,"main":"main.js",
+                    r#"{{"name":"demo","display_name":"Demo","api":3,"artwork":false,"main":"main.js",
                         "capabilities":["search"],
                         "requires":[
                           {{"name":"tool","version":"1","assets":{{"{platform}":

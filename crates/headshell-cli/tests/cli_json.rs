@@ -27,6 +27,8 @@ const VOLATILE_KEYS: &[&str] = &[
     // The platform the tool state was measured for: depends on the running
     // machine (D-071).
     "platform",
+    // What `artwork` looked at: a file's path depends on the checkout (D-076).
+    "subject",
 ];
 
 fn fixtures() -> PathBuf {
@@ -279,6 +281,87 @@ fn json_output_is_stable_across_subcommands() {
 
 /// Phase 0.5's done criterion: `headshell sleeve --out card.png` must
 /// produce a real PNG.
+/// D-076: the covers of the tracks a query finds. Offline, only where the
+/// tracks live is asked — here, the pictures in their tags — and a track
+/// with no cover there is "not looked up", not "not found" (K9).
+#[test]
+fn artwork_reads_embedded_covers_and_says_what_it_did_not_look_up() {
+    let dir = temp_dir("artwork");
+    let music = fixtures().join("artwork");
+    let (_, stderr, ok) = run_with_music(&dir, Some(&music), &["provider", "scan"]);
+    assert!(ok, "scan failed: {stderr}");
+
+    let (stdout, stderr, ok) = run_with_music(
+        &dir,
+        Some(&music),
+        &["--json", "artwork", "cover artist", "--all"],
+    );
+    assert!(ok, "artwork failed: {stderr}");
+    assert_snapshot("artwork", &stdout);
+    // `source` is pinned by the snapshot's normaliser (it is the import
+    // report's path there); the sources are checked here instead.
+    let report = json(&stdout);
+    let sources: Vec<&str> = report["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["source"].as_str().unwrap_or("-"))
+        .collect();
+    assert_eq!(sources, ["embedded", "embedded"], "{report}");
+    assert_eq!(report["online"], false);
+
+    // `--out`: one image per album, named after it.
+    let out = dir.join("covers");
+    let (_, stderr, ok) = run_with_music(
+        &dir,
+        Some(&music),
+        &[
+            "artwork",
+            "cover artist",
+            "--all",
+            "--out",
+            out.to_str().unwrap(),
+        ],
+    );
+    assert!(ok, "artwork --out failed: {stderr}");
+    let mut written: Vec<String> = std::fs::read_dir(&out)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    written.sort();
+    assert_eq!(written.len(), 2, "{written:?}");
+    assert!(
+        written
+            .iter()
+            .any(|name| name.ends_with("Cover Artist - Covered.png")),
+        "{written:?}"
+    );
+    assert!(
+        written
+            .iter()
+            .any(|name| name.ends_with("Cover Artist - Covered Too.jpg")),
+        "{written:?}"
+    );
+
+    // A file without a cover anywhere, offline.
+    let bare = audio_fixtures().join("Dir Artist/Untitled.flac");
+    let (stdout, stderr, ok) = run(
+        &dir,
+        &["--json", "artwork", "--file", bare.to_str().unwrap()],
+    );
+    assert!(ok, "{stderr}");
+    let report = json(&stdout);
+    assert_eq!(
+        report["items"][0]["status"], "not_checked_offline",
+        "{report}"
+    );
+    assert_eq!(report["summary"]["not_checked_offline"], 1);
+    assert_eq!(
+        report["summary"]["not_found"], 0,
+        "not asked is not \"not found\""
+    );
+}
+
 #[test]
 fn sleeve_writes_a_real_png_and_svg() {
     let dir = temp_dir("sleeve");

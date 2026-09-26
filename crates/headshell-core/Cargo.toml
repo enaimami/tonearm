@@ -10,6 +10,10 @@ publish.workspace = true
 [dependencies]
 cpal = { version = "0.18", optional = true }
 jiff = { version = "0.2.35", features = ["serde"] }
+# D-076: decoding covers and writing the resized PNGs. Both were already in the
+# tree through `resvg` (the sleeve's PNG): **no new crate** for the CLI and the
+# desktop, and behind a feature, so mobile carries neither.
+png = { version = "0.18", optional = true }
 resvg = { version = "0.48", optional = true }
 # D-069: the plugin engine — embedded QuickJS-NG. The measured price is **+4 crates**
 # (51 → 55 unique; `hashbrown`/`foldhash`/`equivalent` were already in the tree) and
@@ -34,6 +38,7 @@ thiserror = "2.0.20"
 ureq = { version = "3.4", default-features = false, features = ["rustls"], optional = true }
 tracing = "0.1.44"
 zip = { version = "7.2.0", default-features = false, features = ["deflate"] }
+zune-jpeg = { version = "0.5", optional = true }
 
 # D-070 — the BSDs: UNTESTED (canary). `rquickjs-sys` carries no prebuilt bindings for
 # FreeBSD, NetBSD, OpenBSD and DragonFly; there the bindings are generated with libclang
@@ -61,6 +66,12 @@ required-features = ["plugin-engine", "http-client"]
 [[test]]
 name = "plugin_ytmusic"
 required-features = ["plugin-engine", "http-client"]
+
+# D-076: the cover chain against the real MusicBrainz and Cover Art Archive; the
+# fixture's tags are read with symphonia.
+[[test]]
+name = "artwork_online"
+required-features = ["http-client", "audio"]
 
 # A playback probe run by hand; needs an audio device, does not run in CI.
 [[example]]
@@ -103,6 +114,11 @@ fingerprint = ["dep:rusty-chromaprint", "audio"]
 # the desktop turn it on. It has a gate because the core is complete without plugins
 # too (local files, Subsonic, statistics, import).
 plugin-engine = ["dep:rquickjs"]
+
+# D-076: resizing covers to the label (320 px) and the queue row (96 px) as PNG.
+# With it off, a cover is passed on as it came — up to 2 MB; larger ones are
+# refused with the reason.
+artwork-resize = ["dep:png", "dep:zune-jpeg"]
 
 # D-020: the HTTP transport layer. The `net::HttpClient` trait always compiles; this
 # feature only brings the concrete client (ureq + rustls). With it off, the

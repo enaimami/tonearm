@@ -377,6 +377,20 @@ impl PlayOptions {
     }
 }
 
+/// What `headshell artwork` looks at (D-076).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtworkRequest {
+    /// A play query: the covers of the tracks it finds, in play order.
+    pub query: Option<String>,
+    /// Every match instead of the first (`--all`).
+    pub all: bool,
+    /// A file on disk instead of a query (`--file`): its tags and its folder,
+    /// then — online — the third parties.
+    pub file: Option<std::path::PathBuf>,
+    /// A directory to write the covers to (`--out`): one image per album.
+    pub out: Option<std::path::PathBuf>,
+}
+
 /// The result of a play command.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlayReport {
@@ -1337,6 +1351,162 @@ impl Session {
         Ok(player)
     }
 
+    /// The covers of the tracks a query finds — or of a file — walked through
+    /// the chain in play order, waiting for each (D-076). What the playing
+    /// session does in the background for its queue, as a command.
+    ///
+    /// An album is looked up once: its other tracks get the same answer. The
+    /// covers go into the cache the interface reads; `out` also writes one
+    /// image per album there.
+    ///
+    /// # Errors
+    /// If neither a query nor a file is given, nothing matches the query, the
+    /// file's tags cannot be read, the cache cannot be opened or written, or
+    /// online was asked for in a build without an HTTP client. A cover that
+    /// is not found, or a link that fails, is not an error: it is in the
+    /// report, with the reason (K9).
+    pub async fn artwork(
+        &mut self,
+        registry: &ProviderRegistry,
+        request: ArtworkRequest,
+        mode: LookupMode,
+    ) -> Result<crate::artwork::ArtworkReport> {
+        use crate::artwork::{
+            ArtworkItem, ArtworkReport, ArtworkSummary, Chain, Links, Online, Outcome, cache,
+            key_for,
+        };
+
+        let subject = match (&request.file, &request.query) {
+            (Some(path), _) => path.display().to_string(),
+            (None, Some(query)) => query.clone(),
+            (None, None) => {
+                return Err(Error::new(
+                    Stage::ArtworkRead,
+                    ErrorKind::InvalidInput {
+                        detail: "a query or --file must be given".to_owned(),
+                    },
+                ));
+            }
+        };
+        let mut rec = Recorder::start(
+            format!("artwork {subject:?}"),
+            Some(self.config.data_dir().to_path_buf()),
+        );
+
+        let result = async {
+            let online = match mode {
+                LookupMode::Offline => None,
+                LookupMode::Online => Some(Online::from_build()?),
+            };
+            let store = Arc::new(std::sync::Mutex::new(cache::ArtworkCache::open(
+                &self.config.artwork_dir(),
+            )?));
+            let chain = Chain::new(
+                Links {
+                    registry: registry.clone(),
+                    online,
+                },
+                Arc::clone(&store),
+            );
+
+            let item = |index: usize, provider: ProviderId, track: &TrackRef, outcome: Outcome| {
+                ArtworkItem {
+                    index,
+                    key: outcome.key,
+                    provider,
+                    artist: track.artist.clone(),
+                    title: track.title.clone(),
+                    album: track.album.clone(),
+                    status: outcome.status,
+                    notes: outcome.notes,
+                }
+            };
+            let mut items = Vec::new();
+            if let Some(path) = &request.file {
+                let (track, _) = crate::provider::local::read_track(path)?;
+                let outcome = chain.resolve_file(path, &track);
+                items.push(item(0, ProviderId::new("local"), &track, outcome));
+            } else if let Some(query) = &request.query {
+                let queue = self
+                    .queue_from_search(
+                        registry,
+                        query,
+                        request.all,
+                        PlayOptions::new(String::new()).limit,
+                    )
+                    .await?;
+                let mut asked: std::collections::HashMap<crate::artwork::ArtworkKey, Outcome> =
+                    std::collections::HashMap::new();
+                for (index, queued) in queue.iter().enumerate() {
+                    let key = key_for(&queued.track);
+                    let outcome = match asked.get(&key) {
+                        Some(outcome) => outcome.clone(),
+                        None => {
+                            let outcome = chain.resolve(&queued.id, &queued.track);
+                            asked.insert(key, outcome.clone());
+                            outcome
+                        }
+                    };
+                    items.push(item(
+                        index,
+                        queued.id.provider.clone(),
+                        &queued.track,
+                        outcome,
+                    ));
+                }
+            }
+
+            let written = match &request.out {
+                Some(dir) => {
+                    let store = store.lock().map_err(|_| {
+                        Error::new(
+                            Stage::ArtworkStore,
+                            ErrorKind::Artwork {
+                                detail: "the cover cache lock is poisoned".to_owned(),
+                            },
+                        )
+                    })?;
+                    crate::artwork::write_covers(&store, &items, dir)?
+                }
+                None => Vec::new(),
+            };
+            Ok((items, written, chain.online()))
+        }
+        .await;
+
+        if let Ok((items, written, _)) = &result {
+            let summary = ArtworkSummary::of(items);
+            let count = |n: usize| i64::try_from(n).unwrap_or(i64::MAX);
+            rec.set("artwork.tracks", count(summary.tracks));
+            rec.set("artwork.found", count(summary.found()));
+            rec.set("artwork.not_found", count(summary.not_found));
+            rec.set(
+                "artwork.not_checked_offline",
+                count(summary.not_checked_offline),
+            );
+            rec.set("artwork.failed", count(summary.failed));
+            rec.set("artwork.written", count(written.len()));
+            for failed in items.iter().filter(|item| !item.notes.is_empty()) {
+                rec.note(format!(
+                    "{} — {}: {}",
+                    failed.artist,
+                    failed.title,
+                    failed.notes.join("; ")
+                ));
+            }
+        }
+        self.finish(rec, result, move |(items, written, online), diag| {
+            ArtworkReport {
+                subject,
+                online,
+                summary: ArtworkSummary::of(&items),
+                items,
+                written,
+                diag: Some(diag),
+            }
+        })
+    }
+
     /// Writes the listen records of played tracks to the library (§1.6).
     ///
     /// They go into the **same table** as imported data: past and present
@@ -2133,4 +2303,56 @@ pub fn lookup_for(mode: LookupMode) -> Result<Arc<dyn MetadataLookup>> {
 #[must_use]
 pub fn default_lookup() -> Arc<dyn MetadataLookup> {
     Arc::new(OfflineLookup)
+}
+
+/// The variable that is the desktop's `--online` (D-076). It takes `1`
+/// (online) or `0` (offline); unset or empty is offline.
+pub const ONLINE_ENV: &str = "HEADSHELL_ONLINE";
+
+/// The lookup mode [`ONLINE_ENV`] asks for.
+///
+/// A shell without command-line flags (the desktop) reads its `--online`
+/// from here, as the local provider reads `HEADSHELL_MUSIC_DIRS`.
+///
+/// # Errors
+/// If the variable holds anything but `1` or `0`: a `true` or `yes` that went
+/// unrecognised would silently leave the user offline (K9).
+pub fn lookup_mode_from_env() -> Result<LookupMode> {
+    match std::env::var(ONLINE_ENV) {
+        Ok(raw) => lookup_mode_of(Some(&raw)),
+        Err(std::env::VarError::NotPresent) => lookup_mode_of(None),
+        Err(std::env::VarError::NotUnicode(raw)) => lookup_mode_of(Some(&raw.to_string_lossy())),
+    }
+}
+
+fn lookup_mode_of(raw: Option<&str>) -> Result<LookupMode> {
+    match raw.map(str::trim) {
+        None | Some("" | "0") => Ok(LookupMode::Offline),
+        Some("1") => Ok(LookupMode::Online),
+        Some(other) => Err(Error::new(
+            Stage::ConfigLoad,
+            ErrorKind::InvalidInput {
+                detail: format!("{ONLINE_ENV} is `{other}` — it takes 1 (online) or 0 (offline)"),
+            },
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_online_variable_takes_one_or_zero_and_says_what_else_it_got() {
+        assert_eq!(lookup_mode_of(None).unwrap(), LookupMode::Offline);
+        assert_eq!(lookup_mode_of(Some("")).unwrap(), LookupMode::Offline);
+        assert_eq!(lookup_mode_of(Some("0")).unwrap(), LookupMode::Offline);
+        assert_eq!(lookup_mode_of(Some(" 1 ")).unwrap(), LookupMode::Online);
+
+        let err = lookup_mode_of(Some("true")).unwrap_err();
+        assert_eq!(err.stage(), Stage::ConfigLoad);
+        let text = err.chain_text();
+        assert!(text.contains("HEADSHELL_ONLINE is `true`"), "{text}");
+        assert!(text.contains("1 (online) or 0 (offline)"), "{text}");
+    }
 }

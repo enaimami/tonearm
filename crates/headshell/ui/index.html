@@ -593,7 +593,8 @@
           </form>
           <p class="hint">
             Shows which link gave a track its canonical identity: ISRC → MBID →
-            fuzzy → fingerprint. It only goes online with <code>--online</code> turned on.
+            fuzzy → fingerprint. It only goes online when the app was started with
+            <code>HEADSHELL_ONLINE=1</code> — the CLI's <code>--online</code>.
           </p>
           <div id="resolveCard" class="card" hidden>
             <dl id="resolveFacts" class="facts-list"></dl>
@@ -621,14 +622,19 @@
         <div id="nowView" class="now-view" hidden>
           <div class="now-hero">
             <div id="nowCard" class="now-card" hidden>
-              <!-- The core has no cover art; a turntable stands in for it. The
-                   record turns while playing, and the arm follows the position
-                   from the outer groove to the inner one — the same estimate
-                   as the progress bar. -->
+              <!-- The record turns while playing, and the arm follows the
+                   position from the outer groove to the inner one — the same
+                   estimate as the progress bar. The album's cover, when there
+                   is one, is the record's label (D-076): a larger round label
+                   that turns with the record. Without one the plain label
+                   stays. -->
               <div class="turntable" aria-hidden="true">
                 <span class="platter"></span>
                 <span class="record">
                   <svg viewBox="0 0 100 100">
+                    <defs>
+                      <clipPath id="recordCoverClip"><circle cx="50" cy="50" r="23" /></clipPath>
+                    </defs>
                     <circle class="record-vinyl" cx="50" cy="50" r="49.5" />
                     <circle class="record-groove" cx="50" cy="50" r="45" />
                     <circle class="record-groove" cx="50" cy="50" r="40" />
@@ -637,6 +643,18 @@
                     <circle class="record-groove faint" cx="50" cy="50" r="26.5" />
                     <circle class="record-label" cx="50" cy="50" r="17" />
                     <path class="record-label-shade" d="M50 33a17 17 0 0 1 0 34z" />
+                    <g id="nowCover" class="record-cover" hidden>
+                      <image
+                        id="nowCoverImage"
+                        x="27"
+                        y="27"
+                        width="46"
+                        height="46"
+                        preserveAspectRatio="xMidYMid slice"
+                        clip-path="url(#recordCoverClip)"
+                      />
+                      <circle class="record-cover-edge" cx="50" cy="50" r="23" />
+                    </g>
                     <circle class="record-hole" cx="50" cy="50" r="1.5" />
                   </svg>
                 </span>
@@ -671,6 +689,9 @@
 
           <div class="now-side">
             <h2 class="section-title">up next <span id="queueCount" class="count"></span></h2>
+            <!-- What the covers could not do, and why (K9): "not looked up"
+                 and "not found" are different answers. -->
+            <p id="coverNote" class="cover-note" hidden></p>
             <ol id="queue" class="queue"></ol>
           </div>
         </div>

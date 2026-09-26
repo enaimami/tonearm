@@ -73,7 +73,8 @@ fn open_core() -> Result<(Core, ThemeStore), String> {
     // The theme store does not go to the core; it only knows the data directory
     // (§3.3).
     let themes = ThemeStore::new(config.data_dir());
-    let core = Core::open(config).map_err(|err| err.chain_text())?;
+    let lookup = headshell_core::session::lookup_mode_from_env().map_err(|err| err.chain_text())?;
+    let core = Core::open(config, lookup).map_err(|err| err.chain_text())?;
     Ok((core, themes))
 }
 
@@ -180,6 +181,10 @@ fn run(core: Core, themes: ThemeStore, context: tauri::Context) -> Result<(), St
             commands::jump_to,
             commands::set_shuffle,
             commands::set_repeat,
+            // Covers (D-076)
+            commands::artwork,
+            commands::artwork_queue,
+            commands::artwork_images,
             // Plugins and secrets (the Phase 2 surface)
             commands::plugins,
             commands::plugin_approve,

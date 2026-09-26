@@ -90,6 +90,7 @@ headshell/
 ├── crates/
 │   ├── headshell-core/              # ALL the logic is here
 │   │   ├── src/
+│   │   │   ├── artwork/        # covers: the chain, the cache, the background worker
 │   │   │   ├── import/         # export zip parsers
 │   │   │   ├── identity/       # canonical resolution (+ musicbrainz, acoustid, fuzzy)
 │   │   │   ├── stats/          # listening statistics
@@ -175,6 +176,7 @@ have a subcommand.
 headshell import <zip|dir>                       # import an export
 headshell stats [--year N] [--top N] [--min-ms MS]
 headshell resolve "<artist> - <title>" | --file <audio>
+headshell artwork "<query>" [--all] | --file <audio> [--out <dir>]
 headshell library search <query> [--limit N] [--min-ms MS]
 headshell sleeve [--year N] [--out <file>] [--format square|story]
 headshell provider list | test <name> | scan [--if-stale]
@@ -198,7 +200,9 @@ subcommand here. The human-readable output is a separate formatting layer
 
 `--online` is **off** by default: importing an export does not silently
 connect anyone to the network. Without the flag the identity chain runs only
-its local links. Where downloading **is the command itself** (`plugin
+its local links, and covers come only from where the tracks live (their tags,
+their folder, their provider). The desktop has no flags: its `--online` is
+`HEADSHELL_ONLINE=1` (D-076). Where downloading **is the command itself** (`plugin
 catalog`, `install`, `update`), the flag is not required; the catalog address
 changes with `HEADSHELL_PLUGIN_INDEX` (D-071).
 

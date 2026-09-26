@@ -463,6 +463,9 @@ fn check_exports(
     if capabilities.contains(Capabilities::STREAM) {
         wanted.push((export::RESOLVE_SOURCE, "the `stream` capability"));
     }
+    if capabilities.contains(Capabilities::ARTWORK) {
+        wanted.push((export::ARTWORK, "`\"artwork\": true` in the manifest"));
+    }
     let missing: Vec<String> = wanted
         .into_iter()
         .filter(|(name, _)| {

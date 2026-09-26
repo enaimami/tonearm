@@ -74,6 +74,10 @@ Building and the tests run with the same `cargo` commands. The differences:
   separate directory with `HEADSHELL_DATA_DIR` or the CLI's `--data-dir`.
 - The `HEADSHELL_MUSIC_DIRS` list is written like `PATH`: with `;` on Windows,
   with `:` elsewhere.
+- The desktop has no command line, so its `--online` is an environment
+  variable: `HEADSHELL_ONLINE=1` (D-076). It takes `1` or `0`; anything else
+  stops startup with the reason, so a `true` that went unrecognised doesn't
+  silently leave you offline.
 - The repository checks out with LF line endings on every platform
   (`.gitattributes`). Even with `core.autocrlf` on in Windows, the snapshots
   match byte for byte.

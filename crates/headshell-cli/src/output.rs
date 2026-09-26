@@ -3,6 +3,7 @@
 //! **No business logic here** — only writing the reports the core returns to
 //! the terminal. Every number is printed as it came from the core.
 
+use headshell_core::artwork::{ArtworkReport, ArtworkSource, ArtworkStatus};
 use headshell_core::library::SearchHit;
 use headshell_core::plugin::catalog::UpdateOutcome;
 use headshell_core::session::{
@@ -212,6 +213,80 @@ pub fn resolve(report: &ResolveReport) -> String {
             "tied    : {} candidates got the same score; the choice is deterministic but arbitrary",
             res.tied_candidates
         );
+    }
+    out
+}
+
+/// The covers of a query's tracks (D-076): one line per track, the counts
+/// last. "Not found" and "not looked up because offline" are different lines
+/// and different counts (K9).
+pub fn artwork(report: &ArtworkReport) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "covers · {} · {}",
+        report.subject,
+        if report.online {
+            "online: MusicBrainz and the Cover Art Archive were asked"
+        } else {
+            "offline: only where the tracks live (--online also asks MusicBrainz and the Cover Art Archive)"
+        }
+    );
+    for item in &report.items {
+        let (mark, label, detail) = match &item.status {
+            ArtworkStatus::Found { source } => (
+                "✓",
+                match source {
+                    ArtworkSource::Embedded => "embedded",
+                    ArtworkSource::Folder => "folder",
+                    ArtworkSource::Provider => "provider",
+                    ArtworkSource::CoverArtArchive => "archive",
+                },
+                None,
+            ),
+            ArtworkStatus::NotFound { detail } => ("–", "not found", Some(detail.as_str())),
+            ArtworkStatus::NotCheckedOffline => ("·", "offline", None),
+            ArtworkStatus::Failed { chain } => ("✗", "failed", Some(chain.as_str())),
+            ArtworkStatus::Pending => ("…", "pending", None),
+        };
+        let album = item
+            .album
+            .as_deref()
+            .map(|album| format!("  [{}]", truncate(album, 30)))
+            .unwrap_or_default();
+        let _ = writeln!(
+            out,
+            "  {mark} {label:<9} {:>2}. {} — {}{album}",
+            item.index + 1,
+            truncate(&item.artist, 28),
+            truncate(&item.title, 40),
+        );
+        if let Some(detail) = detail {
+            for line in detail.lines() {
+                let _ = writeln!(out, "                  {line}");
+            }
+        }
+        for note in &item.notes {
+            let _ = writeln!(out, "                  note: {note}");
+        }
+    }
+    let summary = &report.summary;
+    let _ = writeln!(
+        out,
+        "{} · {} found ({} embedded, {} folder, {} provider, {} archive) · {} not found · {} not looked up (offline) · {} failed",
+        count(summary.tracks, "track"),
+        summary.found(),
+        summary.embedded,
+        summary.folder,
+        summary.provider,
+        summary.cover_art_archive,
+        summary.not_found,
+        summary.not_checked_offline,
+        summary.failed,
+    );
+    for path in &report.written {
+        let _ = writeln!(out, "written: {}", path.display());
     }
     out
 }

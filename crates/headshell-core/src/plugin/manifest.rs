@@ -462,6 +462,14 @@ pub struct PluginManifest {
     /// nothing".
     #[serde(default)]
     pub requires: Vec<Requirement>,
+    /// Does the plugin give covers (api 3, D-076)? **Required**: whether it
+    /// does is said, not guessed. `true` makes the engine expect an `artwork`
+    /// export; with `false` its tracks go to the classic chain.
+    ///
+    /// The `default` only lets the struct parse: a manifest without the field
+    /// is refused before, with its own message ([`Self::parse`]).
+    #[serde(default)]
+    pub artwork: bool,
     /// An optional one-sentence description.
     #[serde(default)]
     pub description: Option<String>,
@@ -535,6 +543,7 @@ impl PluginManifest {
 
         let value: serde_json::Value = serde_json::from_str(raw).map_err(json_err)?;
         reject_api1_leftovers(&value, path)?;
+        require_artwork_declaration(&value, path)?;
 
         let manifest: Self = serde_json::from_value(value).map_err(json_err)?;
         manifest.validate(expected_name, path)?;
@@ -614,6 +623,25 @@ impl PluginManifest {
     pub fn main_path(&self, dir: &Path) -> PathBuf {
         dir.join(&self.main)
     }
+}
+
+/// api 3 (D-076): a manifest says whether its plugin gives covers — `true`
+/// or `false`, nothing else, and not left out.
+fn require_artwork_declaration(value: &serde_json::Value, path: &Path) -> Result<()> {
+    let detail = match value.get("artwork") {
+        Some(serde_json::Value::Bool(_)) => return Ok(()),
+        Some(other) => format!("`artwork` must be true or false, not {other}"),
+        None => "`artwork` is missing — an api 3 manifest says whether the plugin gives covers: \
+                 `\"artwork\": true` (it exports `artwork(id, size)`) or `\"artwork\": false`"
+            .to_owned(),
+    };
+    Err(Error::new(
+        Stage::PluginLoad,
+        ErrorKind::PluginManifest {
+            path: path.to_path_buf(),
+            detail,
+        },
+    ))
 }
 
 fn dir_name(dir: &Path) -> String {
@@ -809,7 +837,8 @@ mod tests {
                 "name": "soundcloud",
                 "display_name": "SoundCloud",
                 "version": "0.2.0",
-                "api": 2,
+                "api": 3,
+                "artwork": false,
                 "main": "main.js",
                 "capabilities": ["search", "stream"],
                 "permissions": {"net": ["api-v2.soundcloud.com", "*.sndcdn.com"]}
@@ -827,7 +856,7 @@ mod tests {
         let dir = temp_dir("soundcloud");
         write_manifest(
             &dir,
-            r#"{"name":"other","display_name":"X","api":2,"main":"main.js"}"#,
+            r#"{"name":"other","display_name":"X","api":3,"artwork":false,"main":"main.js"}"#,
         );
         let err = PluginManifest::load(&dir).unwrap_err();
         assert_eq!(err.stage(), Stage::PluginLoad);
@@ -865,11 +894,11 @@ mod tests {
     fn api1_fields_are_refused_not_silently_ignored() {
         for (manifest, expected) in [
             (
-                r#"{"name":"p","display_name":"P","api":2,"main":"main.js","exec":["x"]}"#,
+                r#"{"name":"p","display_name":"P","api":3,"artwork":false,"main":"main.js","exec":["x"]}"#,
                 "`exec` does not exist in api 2",
             ),
             (
-                r#"{"name":"p","display_name":"P","api":2,"main":"main.js",
+                r#"{"name":"p","display_name":"P","api":3,"artwork":false,"main":"main.js",
                     "permissions":{"net":[],"fs":["/home"]}}"#,
                 "`permissions.fs` does not exist in api 2",
             ),
@@ -893,7 +922,9 @@ mod tests {
             let dir = temp_dir("p");
             write_manifest(
                 &dir,
-                &format!(r#"{{"name":"p","display_name":"P","api":2,"main":"{main}"}}"#),
+                &format!(
+                    r#"{{"name":"p","display_name":"P","api":3,"artwork":false,"main":"{main}"}}"#
+                ),
             );
             let err = PluginManifest::load(&dir).unwrap_err();
             assert!(
@@ -906,7 +937,7 @@ mod tests {
         let dir = temp_dir("p");
         write_manifest(
             &dir,
-            r#"{"name":"p","display_name":"P","api":2,"main":"./src/main.js"}"#,
+            r#"{"name":"p","display_name":"P","api":3,"artwork":false,"main":"./src/main.js"}"#,
         );
         assert!(PluginManifest::load(&dir).is_ok());
     }
@@ -943,7 +974,7 @@ mod tests {
             write_manifest(
                 &dir,
                 &format!(
-                    r#"{{"name":"p","display_name":"P","api":2,"main":"main.js","requires":[{entry}]}}"#
+                    r#"{{"name":"p","display_name":"P","api":3,"artwork":false,"main":"main.js","requires":[{entry}]}}"#
                 ),
             );
             let err = PluginManifest::load(&dir).unwrap_err();
@@ -965,7 +996,7 @@ mod tests {
         write_manifest(
             &dir,
             &format!(
-                r#"{{"name":"p","display_name":"P","api":2,"main":"main.js","requires":[{one},{one}]}}"#
+                r#"{{"name":"p","display_name":"P","api":3,"artwork":false,"main":"main.js","requires":[{one},{one}]}}"#
             ),
         );
         let err = PluginManifest::load(&dir).unwrap_err();
@@ -1142,7 +1173,7 @@ mod tests {
     #[test]
     fn parse_applies_the_same_rules_as_load() {
         let origin = Path::new("https://catalog.example/index.json");
-        let raw = r#"{"name":"echo","display_name":"E","api":2,"main":"main.js"}"#;
+        let raw = r#"{"name":"echo","display_name":"E","api":3,"artwork":false,"main":"main.js"}"#;
         assert!(PluginManifest::parse(raw, "echo", origin).is_ok());
 
         let err = PluginManifest::parse(raw, "other", origin).unwrap_err();
@@ -1152,12 +1183,13 @@ mod tests {
             err.chain_text()
         );
 
-        let newer = r#"{"name":"echo","display_name":"E","api":3,"main":"main.js"}"#;
+        let newer =
+            r#"{"name":"echo","display_name":"E","api":4,"artwork":false,"main":"main.js"}"#;
         let err = PluginManifest::parse(newer, "echo", origin).unwrap_err();
         assert!(
             matches!(
                 err.kind(),
-                ErrorKind::PluginIncompatible { plugin_api: 3, .. }
+                ErrorKind::PluginIncompatible { plugin_api: 4, .. }
             ),
             "{err:?}"
         );
@@ -1167,7 +1199,9 @@ mod tests {
     fn main_file_drops_the_leading_dot_and_uses_slashes() {
         let origin = Path::new("plugin.json");
         for (main, expected) in [("main.js", "main.js"), ("./src/main.js", "src/main.js")] {
-            let raw = format!(r#"{{"name":"p","display_name":"P","api":2,"main":"{main}"}}"#);
+            let raw = format!(
+                r#"{{"name":"p","display_name":"P","api":3,"artwork":false,"main":"{main}"}}"#
+            );
             let manifest = PluginManifest::parse(&raw, "p", origin).unwrap();
             assert_eq!(manifest.main_file(), expected);
         }

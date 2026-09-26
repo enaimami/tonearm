@@ -34,7 +34,7 @@ use headshell_core::config::Config;
 use headshell_core::diag::Stage;
 use headshell_core::playback::{LiveSession, Player};
 use headshell_core::provider::ProviderRegistry;
-use headshell_core::session::Session;
+use headshell_core::session::{LookupMode, Session};
 
 use crate::theme::ThemeStore;
 
@@ -45,26 +45,34 @@ pub struct Core {
     /// when a server is added or removed: otherwise a new server would stay
     /// invisible until the app was closed.
     pub registry: ProviderRegistry,
+    /// The desktop's `--online`: `HEADSHELL_ONLINE`, read once at startup
+    /// (D-076). Every command that goes online in the CLI with the flag goes
+    /// online here with it.
+    pub lookup: LookupMode,
 }
 
 impl Core {
-    /// Opens the library, sets up the providers and starts with an **empty**
-    /// player.
+    /// Opens the library, sets up the providers, starts the cover worker and
+    /// starts with an **empty** player.
     ///
     /// The empty player is not a placeholder: a `LiveSession` should always
     /// exist so commands do not have to ask "is a session open". With nothing
     /// playing, `anchor` returns `Stopped` anyway.
     ///
     /// # Errors
-    /// If the data directory cannot be opened, the database cannot be set up or
-    /// the registered server file is corrupt.
-    pub fn open(config: Config) -> headshell_core::Result<Self> {
+    /// If the data directory cannot be opened, the database cannot be set up,
+    /// the registered server file is corrupt or the cover cache cannot be
+    /// opened.
+    pub fn open(config: Config, lookup: LookupMode) -> headshell_core::Result<Self> {
         let session = Session::open(config)?;
         let registry = headshell_core::provider::default_registry(session.config())?;
         let player = Player::new(registry.clone());
+        let mut live = LiveSession::new(session, player);
+        live.start_artwork(lookup)?;
         Ok(Self {
-            live: LiveSession::new(session, player),
+            live,
             registry,
+            lookup,
         })
     }
 

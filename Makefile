@@ -65,12 +65,12 @@ test: ## All the tests
 # that is ci.yml's second job.
 core-features: ## Check the core without the features merged
 	cargo clippy -p headshell-core --all-targets -- -D warnings
-	@for f in audio http-client fingerprint render-png plugin-engine; do \
+	@for f in audio http-client fingerprint render-png artwork-resize plugin-engine; do \
 	  echo "--- feature: $$f"; \
 	  cargo clippy -p headshell-core --all-targets --features "$$f" -- -D warnings || exit 1; \
 	done
 	cargo clippy -p headshell-core --all-targets \
-	  --features audio,http-client,fingerprint,render-png,plugin-engine -- -D warnings
+	  --features audio,http-client,fingerprint,render-png,artwork-resize,plugin-engine -- -D warnings
 
 # --- individual checks ------------------------------------------------------
 

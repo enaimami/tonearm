@@ -110,6 +110,14 @@ impl Config {
         self.data_dir.join("secrets.json")
     }
 
+    /// The cover cache (D-076): the image files, named by their content hash,
+    /// and `index.json`, which says what was found — or not found — for which
+    /// album. A cache: deleting it only costs fetching again.
+    #[must_use]
+    pub fn artwork_dir(&self) -> PathBuf {
+        self.data_dir.join("artwork")
+    }
+
     /// The directory plugins live in: `<data_dir>/plugins/<name>/plugin.json`.
     #[must_use]
     pub fn plugins_dir(&self) -> PathBuf {

@@ -31,7 +31,7 @@ async fn main() {
     };
     let lookup = std::sync::Arc::new(
         headshell_core::identity::musicbrainz::MusicBrainzLookup::new(http)
-            .with_user_agent("headshell-tests/0.0.1 ( https://github.com/enaimami/headshell )"),
+            .with_user_agent("headshell-tests/0.0.1 ( https://github.com/headshell/headshell )"),
     );
     let resolver = Resolver::new(lookup.clone());
     let track = TrackRef::new(&artist, &title).with_duration_ms(duration_ms);

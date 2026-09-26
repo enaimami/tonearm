@@ -1141,8 +1141,8 @@ kbd {
 
 /* ————— the turntable
  *
- * The core has no cover art; the turntable stands in for it, and it is the
- * app's own picture (a record and a tonearm, the brand mark). The drawing's
+ * The app's own picture (a record and a tonearm, the brand mark); the album's
+ * cover, when there is one, is the record's label (D-076). The drawing's
  * coordinates are percentages of the plinth: the record's centre is 44/52 and
  * its radius 38, the arm's pivot 84/16 — `app.js` computes the arm's angles
  * from these. */
@@ -1234,6 +1234,16 @@ kbd {
 
 .record-hole {
   fill: var(--headshell-surface-raised);
+}
+
+/* The cover as the label: in the record's own drawing, so it turns with it.
+ * It is larger than the plain label (radius 23 of the record's 50, against
+ * 17) and still clear of the run-out groove the arm stops at (25). It fades
+ * in (`motion.js`, opacity); a thin dark edge sets the paper off the vinyl. */
+.record-cover-edge {
+  fill: none;
+  stroke: rgb(0 0 0 / 30%);
+  stroke-width: 0.5;
 }
 
 /* The sheen is the room's light reflected: it does not turn with the record,
@@ -1374,6 +1384,15 @@ kbd {
   padding: 0 10px;
 }
 
+/* What the covers could not do, and why (D-076). */
+.cover-note {
+  flex: none;
+  margin: -2px 0 10px;
+  padding: 0 10px;
+  color: var(--headshell-text-dim);
+  font-size: 12.5px;
+}
+
 /* It scrolls on its own; the turntable stays. `position` makes the rows'
  * `offsetTop` relative to the list (`app.js` keeps the playing row in
  * sight). A row cut off at the bottom edge fades out instead — a scroll edge,
@@ -1411,8 +1430,8 @@ kbd {
 
 .q-row {
   display: grid;
-  grid-template-columns: 3ch minmax(0, 1fr) auto auto;
-  column-gap: 14px;
+  grid-template-columns: 3ch 36px minmax(0, 1fr) auto auto;
+  column-gap: 12px;
   align-items: center;
   width: 100%;
   height: auto;
@@ -1496,6 +1515,29 @@ kbd {
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+
+/* A row's cover (D-076). Until one arrives — or when there is none — a small
+ * record stands in: the same answer the turntable gives with its plain
+ * label. The reason is in the slot's tooltip. */
+.q-cover {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  overflow: hidden;
+  border-radius: 4px;
+  background:
+    radial-gradient(circle, var(--headshell-accent) 0 11%, var(--vinyl) 12% 40%, transparent 41%),
+    var(--headshell-surface-raised);
+}
+
+.q-cover img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .q-title,

@@ -1,4 +1,4 @@
-# Writing plugins (contract api 2)
+# Writing plugins (contract api 3)
 
 `headshell` plugins are written in **JavaScript** and run in the **QuickJS**
 engine embedded in `headshell` (D-069). No Python, Node or other runtime is
@@ -23,8 +23,16 @@ Three working examples:
   — a plugin that takes its metadata from a service and its audio from **a
   tool the engine installs** (yt-dlp).
 - [`fixtures/plugins/echo/main.js`](../fixtures/plugins/echo/main.js) — a test
-  plugin with a fixed catalog (~60 lines). For seeing the contract bare.
+  plugin with a fixed catalog and a cover (~70 lines). For seeing the contract
+  bare.
 
+> **If you're coming from api 2:** api 3 (D-076) adds covers. The manifest
+> **must** say whether the plugin gives them — `"artwork": true` or
+> `"artwork": false`; an api 2 manifest doesn't, so it no longer loads. With
+> `false`, raising `"api"` to `3` and adding that one line is the whole port.
+> With `true`, export `artwork(id, size)` (§3) and fetch the image with
+> `binary: true` (§4).
+>
 > **If you're coming from api 1:** api 1 was a subprocess + JSON-RPC protocol,
 > and plugins were written in Python. api 1 plugins **no longer load**;
 > `headshell plugin list` shows them as "protocol version mismatch: plugin
@@ -66,8 +74,9 @@ same as the directory name; if they don't match, the plugin is rejected.
 {
   "name": "soundcloud",
   "display_name": "SoundCloud",
-  "version": "0.2.1",
-  "api": 2,
+  "version": "0.3.0",
+  "api": 3,
+  "artwork": true,
   "main": "main.js",
   "capabilities": ["search", "stream"],
   "permissions": {
@@ -83,7 +92,8 @@ same as the directory name; if they don't match, the plugin is rejected.
 | `name` | yes | The same as the directory name. The provider ID. |
 | `display_name` | yes | The name shown to the user. |
 | `version` | yes in the catalog | The plugin's own version. Every plugin in the catalog is versioned: that is what catches an update, and the file addresses are pinned to it (§9). |
-| `api` | yes | The contract version it speaks: `2` today. |
+| `api` | yes | The contract version it speaks: `3` today. |
+| `artwork` | yes | Does the plugin give covers: `true` — it exports `artwork(id, size)` (§3) — or `false`. There is no default: a missing field is rejected, so "it gives none" is always a statement, never a guess. |
 | `main` | yes | The script's path relative to the plugin directory. It must be `.js` and can't leave the directory (`..` and absolute paths are rejected). |
 | `capabilities` | no | `search`, `stream`. The engine checks that the function of every declared capability is exported. |
 | `permissions.net` | no | The hosts to connect to. See §2. |
@@ -152,6 +162,7 @@ export function resolve_source(id) {
 | `health()` | yes | `{ reachable, detail?, track_count? }` |
 | `search(query, limit)` | if it has the `search` capability | an array of tracks |
 | `resolve_source(id)` | if it has the `stream` capability | a source, or `null` |
+| `artwork(id, size)` | if the manifest says `"artwork": true` | a cover, or `null` |
 
 The names are deliberately the same as api 1's method names and the core's
 `Provider` trait (`resolve_source`, not `resolveSource`). You can write an
@@ -197,6 +208,29 @@ system.
 **Audio is never relayed (K3):** the core fetches the address you return
 itself.
 
+### `artwork(id, size)`
+
+The cover of one of your tracks, for the "now playing" record and the queue
+(D-076). `size` is the edge the app wants, in pixels (`500` today); give the
+nearest size the service has.
+
+```js
+{ mime: "image/jpeg", data: "/9j/4AAQSkZJRg…" }   // data: the image's bytes, base64
+```
+
+**You fetch the image, not the core.** The core never downloads an address a
+plugin gives it (K5): fetch it yourself with
+`host.http.request({ url, binary: true })` — within your permissions (§2) — and
+return the body as it comes. `mime` is optional; the core looks at the bytes
+anyway. JPEG, PNG, GIF and WebP are accepted, up to 16 MB and 8000 px; the core
+resizes it for the label and the queue.
+
+`null` means "this track has no cover" — not "a portrait of the uploader" or a
+video frame: return `null` rather than something that isn't a cover. Either
+way, `null` or an error, the app goes on to its own chain: a local file's tags
+and folder, and — when the user runs it online — MusicBrainz and the Cover Art
+Archive. An error is shown with its reason, as it is for the other calls.
+
 ### Raising an error
 
 Throw an ordinary JS error:
@@ -226,7 +260,7 @@ engine has no event loop and no timers (no `setTimeout`).
 |---|---|
 | `host.http.get(url, headers?)` | GET. The headers are a plain object: `{ "User-Agent": "…" }`. |
 | `host.http.post(url, body, headers?)` | POST; the body is a string. |
-| `host.http.request({ url, method?, headers?, body? })` | The general form; `method` is `GET` or `POST`. |
+| `host.http.request({ url, method?, headers?, body?, binary? })` | The general form; `method` is `GET` or `POST`. `binary: true` returns the body as base64 (api 3). |
 | `host.secrets.get(key)` | A secret in your own namespace; `null` if there is none. |
 | `host.secrets.file(key)` | Writes the secret to a `0600` temporary file and returns its path (`null` if there is none). Deleted when the engine shuts down. For handing it to a tool as a file path. |
 | `host.storage.get(key)` / `.set(key, value)` / `.remove(key)` | A persistent key-value store private to the plugin; the values are strings. 1 MB in total. |
@@ -238,15 +272,16 @@ engine has no event loop and no timers (no `setTimeout`).
 **The HTTP response:**
 
 ```js
-{ status: 200, ok: true, url: "the final address", headers: { "content-type": "…" }, body: "…" }
+{ status: 200, ok: true, url: "the final address", headers: { "content-type": "…" }, body: "…", encoding: "text" }
 ```
 
 Status codes outside 2xx **aren't thrown**; they come back in `status` —
 telling a 404 from a 500 is your job. It throws if the network can't be
 reached, if there's no permission, or if the call's time ran out. The engine
 follows redirects (at most 5) and asks for permission again at every step. The
-body arrives as text (UTF-8, broken bytes replaced); it wasn't designed for
-binary content.
+body arrives as text (UTF-8, broken bytes replaced) — unless the request said
+`binary: true`: then it arrives as base64 and `encoding` says `"base64"`. An
+image read as text is destroyed; that is what the binary mode is for.
 
 **Tool output:**
 
@@ -338,7 +373,7 @@ after installation isn't run.
 - After three starts it gives up; endless restarts would hide a crash loop. On
   a contract violation (a missing export) it isn't retried at all.
 - **A known limit:** a crash in QuickJS's own C code brings the core down too —
-  in api 1 the plugin was a separate process, in api 2 it isn't (D-069's
+  in api 1 the plugin was a separate process; since api 2 it isn't (D-069's
   trade-off). Nothing JS can do (an infinite loop, a memory overflow, deep
   recursion) falls into this class.
 
@@ -353,7 +388,10 @@ after installation isn't run.
 
 Adding a new function to `host`, a new field to the manifest or a new platform
 to `PLATFORMS` doesn't raise `api`. The move from api 1 → 2 was of the second
-kind: where the plugin runs changed.
+kind: where the plugin runs changed. So was api 2 → 3 (D-076): the manifest
+gained a **required** field (`artwork`), and an api 2 manifest doesn't have
+it — an optional field would have left "gives no covers" and "was written
+before covers" looking the same.
 
 ---
 

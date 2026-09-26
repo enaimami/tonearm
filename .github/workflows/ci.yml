@@ -136,11 +136,11 @@ jobs:
 
       - name: Every feature on its own
         run: |
-          for f in audio http-client fingerprint render-png plugin-engine; do
+          for f in audio http-client fingerprint render-png artwork-resize plugin-engine; do
             echo "::group::$f"
             cargo clippy -p headshell-core --all-targets --features "$f" -- -D warnings
             echo "::endgroup::"
           done
 
       - name: All of them at once
-        run: cargo clippy -p headshell-core --all-targets --features audio,http-client,fingerprint,render-png,plugin-engine -- -D warnings
+        run: cargo clippy -p headshell-core --all-targets --features audio,http-client,fingerprint,render-png,artwork-resize,plugin-engine -- -D warnings
